@@ -313,7 +313,13 @@ pub fn parse(text: &str) -> Config {
             log::error(&format!("config.toml:{}: не разобрано значение «{val}»", n + 1));
             continue;
         };
-        match (section.as_str(), key, value) {
+        // Ключ верхнего уровня, дописанный под `[keys]`, принадлежит секции и молча терялся.
+        let misplaced = section == "keys" && matches!(key, "calendar_ics" | "weather_city");
+        if misplaced {
+            log::error(&format!("config.toml:{}: «{key}» стоит в секции [keys], перенесите выше неё", n + 1));
+        }
+        let sect = if misplaced { "" } else { section.as_str() };
+        match (sect, key, value) {
             ("", "accent", Value::Str(s)) => match theme::parse_hex(&s) {
                 Some(c) => cfg.accent = c,
                 None => log::error(&format!("config.toml:{}: неверный цвет «{s}»", n + 1)),
@@ -493,6 +499,15 @@ gmail = \"https://mail.google.com\"
         assert!(!c.live_media && !c.live_toasts);
         let t = parse(DEFAULT_TEMPLATE);
         assert!(t.live_media && t.live_toasts);
+    }
+
+    #[test]
+    fn top_level_keys_under_keys_section_still_apply() {
+        let c = parse("[keys]\nweather = \"x\"\n\ncalendar_ics = \"https://a.b/c.ics\"\nweather_city = \"Душанбе\"\n");
+        assert_eq!(c.calendar_ics, "https://a.b/c.ics");
+        assert_eq!(c.weather_city, "Душанбе");
+        assert_eq!(c.key("weather"), Some("x"));
+        assert_eq!(c.key("calendar_ics"), None);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 ; Установщик Island (Inno Setup 6). Сборка: powershell -File tools\package.ps1 (или ISCC installer\island.iss).
 ; Версию можно переопределить: ISCC /DAppVersion=1.2.3 installer\island.iss
 #ifndef AppVersion
-  #define AppVersion "0.1.1"
+  #define AppVersion "0.2.0"
 #endif
 
 #define AppName "Island"

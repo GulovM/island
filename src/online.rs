@@ -4,7 +4,7 @@
 //! будится `bg::notify`. В простое потоков нет.
 
 use std::ffi::c_void;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use windows::core::{w, PCWSTR};
@@ -36,6 +36,28 @@ pub struct Event {
     pub title: String,
 }
 
+/// Событие календаря как в файле: одно вхождение или правило повтора.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RawEvent {
+    /// Начало в местном времени: минуты от 1970-01-01.
+    pub start: i64,
+    /// Конец; у событий на весь день — начало следующего дня. 0 — не задан.
+    pub end: i64,
+    pub all_day: bool,
+    pub title: String,
+    rrule: Option<String>,
+    /// Исключённые повторы (минуты; для событий на весь день важен только день).
+    exdates: Vec<i64>,
+}
+
+/// Событие в списке выбранного дня.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DayEvent {
+    /// Минуты от полуночи; `None` — весь день (или продолжение многодневного события).
+    pub minute: Option<i64>,
+    pub title: String,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Speed {
     /// Мбит/с.
@@ -54,8 +76,13 @@ pub struct Online {
     pub weather: Option<Weather>,
     /// Почему погоды нет (не задан город, нет сети).
     pub weather_note: Option<String>,
-    pub event: Option<Event>,
+    /// Все события загруженного календаря.
+    pub cal: Arc<Vec<RawEvent>>,
+    /// Растёт при каждой смене `cal` (ключ кэша месячного вида).
+    pub cal_ver: u64,
     pub calendar_set: bool,
+    /// Последняя загрузка календаря не удалась.
+    pub calendar_failed: bool,
     pub speed: Speed,
 }
 
@@ -216,7 +243,7 @@ pub fn weather_text(code: i32) -> &'static str {
 
 // ---------- Календарь ----------
 
-/// Обновляет ближайшее событие из iCal-ссылки (раз в 15 минут).
+/// Обновляет события из iCal-ссылки (раз в 15 минут).
 pub fn refresh_calendar(url: &str) {
     let url = url.trim().to_string();
     let go = with(|s| {
@@ -224,8 +251,13 @@ pub fn refresh_calendar(url: &str) {
         if s.cal_busy || (s.cal_key == url && !stale(s.cal_at, CALENDAR_TTL)) {
             return false;
         }
+        if s.cal_key != url && !s.snap.cal.is_empty() {
+            // Ссылку сменили: чужие события не показываем, пока грузятся новые.
+            s.snap.cal = Arc::default();
+            s.snap.cal_ver += 1;
+        }
+        s.snap.calendar_failed = false;
         if url.is_empty() {
-            s.snap.event = None;
             s.cal_key.clear();
             s.cal_at = Some(Instant::now());
             return false;
@@ -237,17 +269,20 @@ pub fn refresh_calendar(url: &str) {
         return;
     }
     spawn("island-calendar", move || {
-        let r = get_text(&url).map(|ics| next_event(&ics, now_local_minutes(), utc_offset_minutes()));
+        let r = get_text(&url).map(|ics| parse_ics(&ics, utc_offset_minutes()));
         with(|s| {
             s.cal_busy = false;
             s.cal_key = url.clone();
             match r {
-                Ok(ev) => {
-                    s.snap.event = ev;
+                Ok(raws) => {
+                    s.snap.cal = Arc::new(raws);
+                    s.snap.cal_ver += 1;
+                    s.snap.calendar_failed = false;
                     s.cal_at = Some(Instant::now());
                 }
                 Err(e) => {
                     log::error(&format!("календарь: {e}"));
+                    s.snap.calendar_failed = true;
                     s.cal_at = Instant::now().checked_sub(CALENDAR_TTL - RETRY_AFTER);
                 }
             }
@@ -401,8 +436,21 @@ fn unescape_ics(s: &str) -> String {
     out
 }
 
-/// Ближайшее событие календаря в формате iCalendar.
-pub fn next_event(ics: &str, now: i64, offset: i64) -> Option<Event> {
+#[derive(Default)]
+struct Cur {
+    start: Option<(i64, bool)>,
+    end: Option<i64>,
+    title: String,
+    rrule: Option<String>,
+    exdates: Vec<i64>,
+    uid: String,
+    /// `RECURRENCE-ID`: это изменённое вхождение повтора, а не отдельное событие.
+    rid: Option<i64>,
+    cancelled: bool,
+}
+
+/// Все события календаря в формате iCalendar.
+pub fn parse_ics(ics: &str, offset: i64) -> Vec<RawEvent> {
     // Длинные строки iCal переносятся: продолжение начинается с пробела или табуляции.
     let mut lines: Vec<String> = Vec::new();
     for raw in ics.split('\n') {
@@ -412,19 +460,20 @@ pub fn next_event(ics: &str, now: i64, offset: i64) -> Option<Event> {
             _ => lines.push(l.to_string()),
         }
     }
-    let mut best: Option<Event> = None;
-    let mut cur: Option<(Option<(i64, bool)>, String, Option<String>)> = None;
+    let mut found: Vec<(String, Option<i64>, RawEvent)> = Vec::new();
+    let mut cur: Option<Cur> = None;
     for l in &lines {
         if l == "BEGIN:VEVENT" {
-            cur = Some((None, String::new(), None));
+            cur = Some(Cur::default());
             continue;
         }
         if l == "END:VEVENT" {
-            if let Some((Some((start, all_day)), title, rrule)) = cur.take() {
-                if let Some(t) = next_occurrence(start, all_day, rrule.as_deref(), now, offset) {
-                    if best.as_ref().is_none_or(|b| t < b.start) {
-                        best = Some(Event { start: t, all_day, title: unescape_ics(&title) });
-                    }
+            if let Some(c) = cur.take() {
+                if let (Some((start, all_day)), false) = (c.start, c.cancelled) {
+                    // Конец: у даты без времени `DTEND` — первый день после события.
+                    let end = c.end.filter(|&e| e > start).unwrap_or(0);
+                    let ev = RawEvent { start, end, all_day, title: unescape_ics(&c.title), rrule: c.rrule, exdates: c.exdates };
+                    found.push((c.uid, c.rid, ev));
                 }
             }
             continue;
@@ -432,13 +481,88 @@ pub fn next_event(ics: &str, now: i64, offset: i64) -> Option<Event> {
         let Some(c) = cur.as_mut() else { continue };
         let Some((name, value)) = l.split_once(':') else { continue };
         match name.split(';').next().unwrap_or("") {
-            "DTSTART" => c.0 = parse_dt(value, offset),
-            "SUMMARY" => c.1 = value.to_string(),
-            "RRULE" => c.2 = Some(value.to_string()),
+            "DTSTART" => c.start = parse_dt(value, offset),
+            "DTEND" => c.end = parse_dt(value, offset).map(|(t, _)| t),
+            "SUMMARY" => c.title = value.to_string(),
+            "RRULE" => c.rrule = Some(value.to_string()),
+            "EXDATE" => c.exdates.extend(value.split(',').filter_map(|v| parse_dt(v, offset)).map(|(t, _)| t)),
+            "UID" => c.uid = value.trim().to_string(),
+            "RECURRENCE-ID" => c.rid = parse_dt(value, offset).map(|(t, _)| t),
+            "STATUS" => c.cancelled = value.trim().eq_ignore_ascii_case("CANCELLED"),
             _ => {}
         }
     }
-    best
+    // Изменённое вхождение заменяет исходное: исходное в этот день пропускаем.
+    let moved: Vec<(String, i64)> = found.iter().filter_map(|(u, r, _)| r.map(|r| (u.clone(), r))).collect();
+    for (uid, rid) in moved {
+        if let Some((_, _, master)) = found.iter_mut().find(|(u, r, e)| *u == uid && r.is_none() && e.rrule.is_some()) {
+            master.exdates.push(rid);
+        }
+    }
+    found.into_iter().map(|(_, _, e)| e).collect()
+}
+
+/// Начало следующего вхождения `raw` не раньше `from` с учётом исключений.
+fn occurrence_from(raw: &RawEvent, from: i64, offset: i64) -> Option<i64> {
+    let mut from = from;
+    for _ in 0..64 {
+        let t = next_occurrence(raw.start, raw.all_day, raw.rrule.as_deref(), from, offset)?;
+        let skipped = raw.exdates.iter().any(|&x| if raw.all_day { x.div_euclid(1440) == t.div_euclid(1440) } else { x == t });
+        if !skipped {
+            return Some(t);
+        }
+        from = if raw.all_day { (t.div_euclid(1440) + 1) * 1440 } else { t + 1 };
+    }
+    None
+}
+
+/// Ближайшее событие не раньше `now`.
+pub fn next_of(raws: &[RawEvent], now: i64, offset: i64) -> Option<Event> {
+    raws.iter()
+        .filter_map(|r| occurrence_from(r, now, offset).map(|t| (t, r)))
+        .min_by_key(|(t, _)| *t)
+        .map(|(t, r)| Event { start: t, all_day: r.all_day, title: r.title.clone() })
+}
+
+/// Ближайшее событие календаря в формате iCalendar.
+#[cfg(test)]
+pub fn next_event(ics: &str, now: i64, offset: i64) -> Option<Event> {
+    next_of(&parse_ics(ics, offset), now, offset)
+}
+
+/// События по дням: `days` дней подряд, начиная с `first_day` (дни от 1970-01-01).
+/// В каждом дне сначала события на весь день, потом по времени.
+pub fn events_by_day(raws: &[RawEvent], first_day: i64, days: usize, offset: i64) -> Vec<Vec<DayEvent>> {
+    let (lo, hi) = (first_day, first_day + days as i64);
+    let mut out: Vec<Vec<DayEvent>> = vec![Vec::new(); days];
+    for raw in raws {
+        let dur = if raw.end > raw.start { raw.end - raw.start } else { 0 };
+        let mut add = |t: i64| {
+            let first = t.div_euclid(1440);
+            let last = if dur > 0 { (t + dur - 1).div_euclid(1440).max(first) } else { first };
+            for d in first.max(lo)..=last.min(hi - 1) {
+                let minute = (!raw.all_day && d == first).then_some(t.rem_euclid(1440));
+                out[(d - lo) as usize].push(DayEvent { minute, title: raw.title.clone() });
+            }
+        };
+        if raw.rrule.is_none() {
+            add(raw.start);
+            continue;
+        }
+        let mut from = lo * 1440;
+        for _ in 0..400 {
+            let Some(t) = occurrence_from(raw, from, offset) else { break };
+            if t >= hi * 1440 {
+                break;
+            }
+            add(t);
+            from = if raw.all_day { (t.div_euclid(1440) + 1) * 1440 } else { t + 1 };
+        }
+    }
+    for day in &mut out {
+        day.sort_by(|a, b| a.minute.cmp(&b.minute).then_with(|| a.title.cmp(&b.title)));
+    }
+    out
 }
 
 // ---------- Замер скорости ----------
@@ -709,6 +833,40 @@ mod tests {
         let ev = next_event(ics, now, 180).unwrap();
         assert_eq!(ev.title, "Встреча с командой");
         assert_eq!(ev.start, at(2026, 10, 15, 11, 0)); // 08:00 UTC + 3 ч
+    }
+
+    #[test]
+    fn events_are_laid_out_by_day() {
+        let ics = "BEGIN:VEVENT\nDTSTART:20261016T090000\nSUMMARY:A\nEND:VEVENT\n\
+                   BEGIN:VEVENT\nDTSTART;VALUE=DATE:20261016\nDTEND;VALUE=DATE:20261019\nSUMMARY:Trip\nEND:VEVENT\n\
+                   BEGIN:VEVENT\nDTSTART:20261001T100000\nRRULE:FREQ=WEEKLY;BYDAY=FR\nEXDATE:20261023T100000\nSUMMARY:Fri\nEND:VEVENT\n\
+                   BEGIN:VEVENT\nDTSTART:20261001T080000\nSUMMARY:Off\nSTATUS:CANCELLED\nEND:VEVENT\n";
+        let raws = parse_ics(ics, 0);
+        assert_eq!(raws.len(), 3, "отменённое событие пропускается");
+        let first = days_from_civil(2026, 10, 12);
+        let days = events_by_day(&raws, first, 28, 0);
+        let on = |d: u32| &days[(days_from_civil(2026, 10, d) - first) as usize];
+        // 16-го: поездка на весь день, затем 09:00 и пятничный повтор в 10:00.
+        let t16: Vec<_> = on(16).iter().map(|e| (e.minute, e.title.as_str())).collect();
+        assert_eq!(t16, vec![(None, "Trip"), (Some(540), "A"), (Some(600), "Fri")]);
+        // Поездка на весь день занимает 16–18-е, 19-е свободно.
+        assert!(on(17).iter().any(|e| e.title == "Trip") && on(18).iter().any(|e| e.title == "Trip"));
+        assert!(on(19).is_empty());
+        // 23-е исключено EXDATE, 30-е повторяется.
+        assert!(on(23).is_empty());
+        assert_eq!(on(30).len(), 1);
+    }
+
+    #[test]
+    fn moved_instance_replaces_the_original() {
+        let ics = "BEGIN:VEVENT\nUID:x\nDTSTART:20261001T100000\nRRULE:FREQ=DAILY\nSUMMARY:Daily\nEND:VEVENT\n\
+                   BEGIN:VEVENT\nUID:x\nRECURRENCE-ID:20261015T100000\nDTSTART:20261015T150000\nSUMMARY:Daily moved\nEND:VEVENT\n";
+        let raws = parse_ics(ics, 0);
+        let first = days_from_civil(2026, 10, 14);
+        let days = events_by_day(&raws, first, 3, 0);
+        assert_eq!(days[0].len(), 1);
+        let mid: Vec<_> = days[1].iter().map(|e| (e.minute, e.title.as_str())).collect();
+        assert_eq!(mid, vec![(Some(900), "Daily moved")]);
     }
 
     #[test]
