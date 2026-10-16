@@ -1,0 +1,19 @@
+# Сборка
+/target/
+/dist/
+
+# Кэши и локальные файлы
+.ruff_cache/
+*.pdb
+*.log
+*.tmp
+
+# Редакторы и ОС
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# Локальные скриншоты и черновики
+/scratch/
+/screenshots-local/
