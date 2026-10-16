@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -18,6 +19,7 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE};
 use windows::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2, MIB_IF_TABLE2};
 use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
+use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 use windows::Win32::System::Performance::*;
 use windows::Win32::System::Power::{CallNtPowerInformation, ProcessorInformation, PROCESSOR_POWER_INFORMATION};
 use windows::Win32::System::ProcessStatus::{EnumProcesses, GetPerformanceInfo, GetProcessMemoryInfo, PERFORMANCE_INFORMATION, PROCESS_MEMORY_COUNTERS};
@@ -30,7 +32,7 @@ use windows::Win32::System::Threading::{
 use crate::anim::Spring;
 use crate::online::{self, Online};
 use crate::ui::{icon, Canvas, Rect, Ui, BAR_GREEN, chip_bg, dim, GREEN, ink, txt, track, VIOLET};
-use crate::{bg, sys};
+use crate::{bg, icons, sys};
 
 use super::{ago, id, PAD, STATS, TOP};
 
@@ -60,6 +62,8 @@ struct Heavy {
     /// (имя, байты) и (имя, доля CPU 0..1), по убыванию, до 4 строк.
     top_ram: Vec<(String, f64)>,
     top_cpu: Vec<(String, f64)>,
+    /// Иконки программ из топов по названию (`icons::SIZE_PX`² BGRA premultiplied).
+    app_icons: HashMap<String, Arc<Vec<u8>>>,
 }
 
 static HEAVY: Mutex<Option<Heavy>> = Mutex::new(None);
@@ -313,10 +317,23 @@ impl Stats {
         let max = list.first().map(|x| x.1).unwrap_or(0.0).max(1e-9);
         for (k, (name, v)) in list.iter().take(4).enumerate() {
             let y = r.y + 22.0 + k as f32 * 15.0;
-            let tile = Rect::new(r.x + 9.0, y, 12.0, 13.0);
-            cv.rr(tile, 3.0, chip_bg());
-            let letter: String = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-            cv.text(&letter, tile, &f.caps_c, txt());
+            let tile = Rect::new(r.x + 9.0, y, 13.0, 13.0);
+            let bmp = self.heavy.app_icons.get(name).and_then(|px| {
+                let key = {
+                    use std::hash::{Hash, Hasher};
+                    let mut hs = std::collections::hash_map::DefaultHasher::new();
+                    name.hash(&mut hs);
+                    (0x42u64 << 56) | (hs.finish() >> 8)
+                };
+                ui.cache.get(&cv.g.dc, key, icons::SIZE_PX, icons::SIZE_PX, || px.to_vec())
+            });
+            if let Some(bmp) = bmp {
+                cv.bitmap(&bmp, tile, 1.0);
+            } else {
+                cv.rr(tile, 3.0, chip_bg());
+                let letter: String = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+                cv.text(&letter, tile, &f.caps_c, txt());
+            }
             let value = if self.top_by_cpu { format!("{:.0}%", v * 100.0) } else { fmt_bytes(*v) };
             cv.text(name, Rect::new(r.x + 27.0, y - 2.0, 100.0, 11.0), &f.caps_c, txt());
             cv.text(&value, Rect::new(r.right() - 58.0, y - 2.0, 50.0, 11.0), &f.small_r, dim());
@@ -539,6 +556,13 @@ unsafe fn best_adapter() -> Option<(String, f64, f64)> {
     best
 }
 
+#[derive(Default)]
+struct Procs {
+    top_ram: Vec<(String, f64)>,
+    top_cpu: Vec<(String, f64)>,
+    app_icons: HashMap<String, Arc<Vec<u8>>>,
+}
+
 /// Обход процессов: память и процессорное время, сгруппированные по имени программы.
 #[derive(Default)]
 struct ProcSampler {
@@ -548,20 +572,23 @@ struct ProcSampler {
     names: HashMap<String, String>,
     /// Процесс → (время создания, название): путь запрашивается один раз, а не на каждом проходе.
     /// Время создания отличает новый процесс, занявший тот же pid.
-    known: HashMap<u32, (u64, String)>,
+    known: HashMap<u32, (u64, String, String)>,
+    /// Иконка по пути к exe (None — не удалось получить, повторно не просим).
+    icons: HashMap<String, Option<Arc<Vec<u8>>>>,
 }
 
 impl ProcSampler {
-    unsafe fn sample(&mut self, ncpu: f64) -> (Vec<(String, f64)>, Vec<(String, f64)>) {
+    unsafe fn sample(&mut self, ncpu: f64) -> Procs {
         let mut pids = vec![0u32; 4096];
         let mut needed = 0u32;
         if EnumProcesses(pids.as_mut_ptr(), (pids.len() * 4) as u32, &mut needed).is_err() {
-            return (Vec::new(), Vec::new());
+            return Procs::default();
         }
         let now = Instant::now();
         let dt = self.at.map(|t| (now - t).as_secs_f64()).unwrap_or(0.0);
         let (mut ram, mut cpu): (HashMap<String, f64>, HashMap<String, f64>) = (HashMap::new(), HashMap::new());
         let mut next = HashMap::new();
+        let mut paths: HashMap<String, String> = HashMap::new();
         let mut known = HashMap::with_capacity(self.known.len());
         let own = std::process::id();
         for &pid in &pids[..(needed / 4) as usize] {
@@ -571,8 +598,8 @@ impl ProcSampler {
             let Ok(hp) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { continue };
             let (mut c, mut e, mut k, mut u) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
             let (created, t) = if GetProcessTimes(hp, &mut c, &mut e, &mut k, &mut u).is_ok() { (ft(c), ft(k) + ft(u)) } else { (0, 0) };
-            let name = match self.known.remove(&pid) {
-                Some((cr, name)) if cr == created => name,
+            let (name, path) = match self.known.remove(&pid) {
+                Some((cr, name, path)) if cr == created => (name, path),
                 _ => {
                     let mut buf = [0u16; 520];
                     let mut len = buf.len() as u32;
@@ -581,18 +608,20 @@ impl ProcSampler {
                         continue;
                     }
                     let path = String::from_utf16_lossy(&buf[..len as usize]);
-                    self.names.entry(path.clone()).or_insert_with(|| describe(&path)).clone()
+                    let name = self.names.entry(path.clone()).or_insert_with(|| describe(&path)).clone();
+                    (name, path)
                 }
             };
             let mut pmc = PROCESS_MEMORY_COUNTERS { cb: size_of::<PROCESS_MEMORY_COUNTERS>() as u32, ..Default::default() };
             let ws = if GetProcessMemoryInfo(hp, &mut pmc, pmc.cb).is_ok() { pmc.WorkingSetSize as f64 } else { 0.0 };
             let _ = CloseHandle(hp);
+            paths.entry(name.clone()).or_insert_with(|| path.clone());
             *ram.entry(name.clone()).or_default() += ws;
             if let (Some(&p), true) = (self.prev.get(&pid), dt > 0.0) {
                 *cpu.entry(name.clone()).or_default() += t.saturating_sub(p) as f64 / (dt * 1e7 * ncpu);
             }
             next.insert(pid, t);
-            known.insert(pid, (created, name));
+            known.insert(pid, (created, name, path));
         }
         self.prev = next;
         self.known = known;
@@ -603,7 +632,16 @@ impl ProcSampler {
             v.truncate(4);
             v
         };
-        (top(ram), top(cpu))
+        let (top_ram, top_cpu) = (top(ram), top(cpu));
+        let mut app_icons = HashMap::new();
+        for (name, _) in top_ram.iter().chain(&top_cpu) {
+            let Some(path) = paths.get(name) else { continue };
+            let icon = self.icons.entry(path.clone()).or_insert_with(|| icons::path_icon(path).map(Arc::new));
+            if let Some(px) = icon {
+                app_icons.insert(name.clone(), px.clone());
+            }
+        }
+        Procs { top_ram, top_cpu, app_icons }
     }
 }
 
@@ -637,6 +675,7 @@ unsafe fn describe(path: &str) -> String {
 }
 
 unsafe fn worker(gen: u32) {
+    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
     let gpu = GpuQuery::new();
     let adapter = best_adapter();
     let mut procs = ProcSampler::default();
@@ -661,11 +700,12 @@ unsafe fn worker(gen: u32) {
         }
         // Процессы обходим раз в 2 секунды; первая выборка только запоминает времена.
         if tick % 2 == 0 {
-            let (ram, cpu) = procs.sample(ncpu);
-            h.top_ram = ram;
+            let p = procs.sample(ncpu);
+            h.top_ram = p.top_ram;
             if tick > 0 {
-                h.top_cpu = cpu;
+                h.top_cpu = p.top_cpu;
             }
+            h.app_icons = p.app_icons;
         }
         if let Ok(mut g) = HEAVY.lock() {
             *g = Some(h);

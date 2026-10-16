@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-10-16
+
+### Изменено
+- Stats: в «Топ приложений» вместо первых букв названий показываются иконки программ.
+
 ## [0.1.0] — 2026-10-16
 
 Первый публичный выпуск.
@@ -17,5 +22,6 @@
 - Установщик (Inno Setup, установка без прав администратора) и portable-архив, `SHA256SUMS.txt`.
 - Лицензия MIT.
 
-[Unreleased]: https://github.com/GulovM/island/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/GulovM/island/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/GulovM/island/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/GulovM/island/releases/tag/v0.1.0

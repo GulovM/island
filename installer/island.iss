@@ -1,7 +1,7 @@
 ; Установщик Island (Inno Setup 6). Сборка: powershell -File tools\package.ps1 (или ISCC installer\island.iss).
 ; Версию можно переопределить: ISCC /DAppVersion=1.2.3 installer\island.iss
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.1.1"
 #endif
 
 #define AppName "Island"
@@ -51,7 +51,7 @@ english.AdditionalOptions=Options:
 english.RemoveData=Also delete Island settings and cache (%APPDATA%\island)?
 
 [Files]
-Source: "..\target\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\target\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -71,6 +71,17 @@ Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#AppExe} /F"; Flags: runhidden; RunOnceId: "KillIsland"
 
 [Code]
+// Запущенный остров держит island.exe открытым: гасим его до копирования файлов, иначе обновление
+// упирается в «файл уже существует / занят». Restart Manager (CloseApplications) справляется не всегда.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Code: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM {#AppExe} /F', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Sleep(500);
+  Result := '';
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
