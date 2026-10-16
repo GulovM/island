@@ -13,7 +13,7 @@ use windows::Win32::System::SystemInformation::GetLocalTime;
 
 use crate::ui::{icon, Canvas, Nav, Rect, Submit, Ui, card, dim, txt};
 
-use super::{escape, id, read_lines, unescape, write_lines, Action, CLIPBOARD, PAD, TOP};
+use super::{escape, id, read_lines_sealed, unescape, write_lines_sealed, Action, CLIPBOARD, PAD, TOP};
 
 const FILE: &str = "clipboard.txt";
 /// Сколько записей хранится (закреплённые не считаются).
@@ -33,6 +33,7 @@ pub fn clip_dir() -> PathBuf {
 /// Готовые к записи в историю изображения: (файл, ширина, высота).
 static DONE: Mutex<Vec<(String, u32, u32)>> = Mutex::new(Vec::new());
 /// Декодированное превью: (файл, ширина, высота, пиксели BGRA premultiplied).
+#[allow(clippy::type_complexity)]
 static PREVIEW: Mutex<Option<(String, u32, u32, Vec<u8>)>> = Mutex::new(None);
 static IMG_SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -106,7 +107,7 @@ pub struct Clip {
 
 impl Clip {
     pub fn load(&mut self) {
-        self.items = read_lines(FILE)
+        self.items = read_lines_sealed(FILE)
             .iter()
             .filter_map(|l| {
                 let mut p = l.splitn(3, '|');
@@ -116,6 +117,20 @@ impl Clip {
             })
             .take(MAX_ITEMS * 2)
             .collect();
+        // Файл старой версии (открытый текст) сразу переписываем зашифрованным.
+        let legacy = std::fs::read(sys::data_dir().join(FILE)).is_ok_and(|b| !b.is_empty() && !sys::is_sealed(&b));
+        if legacy && !self.items.is_empty() {
+            self.save();
+        }
+        // То же для PNG старых версий — в фоне, чтобы не задерживать запуск.
+        let _ = std::thread::Builder::new().name("island-clip-seal".into()).spawn(|| {
+            let Ok(rd) = std::fs::read_dir(clip_dir()) else { return };
+            for e in rd.flatten() {
+                if e.path().extension().is_some_and(|x| x == "png") {
+                    let _ = crate::img::seal_file(&e.path());
+                }
+            }
+        });
     }
 
     fn save(&self) {
@@ -124,7 +139,7 @@ impl Clip {
             .iter()
             .map(|i| format!("{}|{}|{}", if i.pinned { 1 } else { 0 }, i.ts, escape(&i.text)))
             .collect();
-        write_lines(FILE, &lines);
+        write_lines_sealed(FILE, &lines);
     }
 
     /// Новый текст из буфера обмена. `true` — история изменилась.
@@ -444,7 +459,7 @@ impl Clip {
         let mut x = PAD + 2.0;
         for (k, (key, label)) in keys.iter().enumerate() {
             let kid = id(CLIPBOARD, 10 + k as u32);
-            let wdt = key.chars().count() as f32 * 4.6 + 9.0 + 4.0 + label.chars().count() as f32 * 4.6 + 4.0;
+            let wdt = cv.text_w(key, &cv.g.fonts.small_c) + 9.0 + 4.0 + cv.text_w(label, &cv.g.fonts.small) + 4.0;
             let (_, clicked) = ui.click_area(kid, Rect::new(x - 2.0, cy - 8.0, wdt + 4.0, 16.0));
             let hv = ui.hover_of(kid);
             if hv > 0.01 {

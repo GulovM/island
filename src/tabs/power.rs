@@ -86,7 +86,11 @@ impl Power {
                 if self.armed.is_some_and(|(a, _)| a == idx) {
                     self.armed = None;
                     let flag = if idx == RESTART { "/r" } else { "/s" };
-                    if let Err(e) = std::process::Command::new("shutdown")
+                    // Полный путь: имя без пути ищется в текущем каталоге и PATH (подмена exe).
+                    let exe = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()))
+                        .join("System32")
+                        .join("shutdown.exe");
+                    if let Err(e) = std::process::Command::new(exe)
                         .args([flag, "/t", "0"])
                         .creation_flags(NO_WINDOW)
                         .spawn()

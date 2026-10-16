@@ -596,14 +596,22 @@ fn wifi_spawn(ssid: String, profile: Option<String>, join: Option<(String, Strin
     }
 }
 
-unsafe fn wifi_disconnect() {
+/// Отключение идёт в отдельном потоке: пауза ниже не должна задерживать громкость и медиа-команды
+/// на общем командном потоке.
+fn wifi_disconnect() {
     use windows::Win32::NetworkManagement::WiFi::WlanDisconnect;
-    let r = with_wlan(|h, guid| WlanDisconnect(h, guid, None));
-    if r != Some(0) {
-        log::error(&format!("WlanDisconnect вернул {r:?}"));
+    let spawned = std::thread::Builder::new().name("island-wifi-off".into()).spawn(|| unsafe {
+        let r = with_wlan(|h, guid| WlanDisconnect(h, guid, None));
+        if r != Some(0) {
+            log::error(&format!("WlanDisconnect вернул {r:?}"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        store_list(ListKind::Wifi, wifi_networks(false));
+        send(Cmd::Net);
+    });
+    if let Err(e) = spawned {
+        log::error(&format!("не удалось запустить поток отключения Wi-Fi: {e}"));
     }
-    std::thread::sleep(std::time::Duration::from_millis(600));
-    store_list(ListKind::Wifi, wifi_networks(false));
 }
 
 // ---------- Bluetooth-аудио: подключение через драйвер (IKsControl) ----------
@@ -699,7 +707,7 @@ unsafe fn paired_bt() -> Vec<Paired> {
     let Ok(sel) = BluetoothDevice::GetDeviceSelectorFromPairingState(true) else { return out };
     const CONTAINER: &str = "System.Devices.Aep.ContainerId";
     let props = windows_collections::IIterable::<HSTRING>::from(vec![HSTRING::from(CONTAINER)]);
-    let Ok(coll) = DeviceInformation::FindAllAsyncAqsFilterAndAdditionalProperties(&sel, &props).and_then(|op| op.get()) else {
+    let Ok(coll) = wait(DeviceInformation::FindAllAsyncAqsFilterAndAdditionalProperties(&sel, &props)) else {
         return out;
     };
     for info in coll {
@@ -828,8 +836,7 @@ unsafe fn bluetooth_devices() -> Vec<DevItem> {
     let mut out = Vec::new();
     for (id, name, container) in paired_bt() {
         let container = if audio.contains(&container) { container } else { String::new() };
-        let connected = BluetoothDevice::FromIdAsync(&windows::core::HSTRING::from(id.as_str()))
-            .and_then(|op| op.get())
+        let connected = wait(BluetoothDevice::FromIdAsync(&windows::core::HSTRING::from(id.as_str())))
             .and_then(|d| d.ConnectionStatus())
             .map(|s| s == BluetoothConnectionStatus::Connected)
             .unwrap_or(false);
@@ -978,14 +985,14 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool) {
 unsafe fn set_radio(kind: windows::Devices::Radios::RadioKind, on: bool, access: &mut bool) {
     use windows::Devices::Radios::{Radio, RadioState};
     if !*access {
-        let _ = Radio::RequestAccessAsync().and_then(|op| op.get());
+        let _ = wait(Radio::RequestAccessAsync());
         *access = true;
     }
-    let Ok(radios) = Radio::GetRadiosAsync().and_then(|op| op.get()) else { return };
+    let Ok(radios) = wait(Radio::GetRadiosAsync()) else { return };
     for r in radios {
         if r.Kind().ok() == Some(kind) {
             let state = if on { RadioState::On } else { RadioState::Off };
-            if let Err(e) = r.SetStateAsync(state).and_then(|op| op.get()) {
+            if let Err(e) = wait(r.SetStateAsync(state)) {
                 log::error(&format!("не удалось переключить радио: {e}"));
             }
         }
@@ -1008,7 +1015,7 @@ fn media_manager() -> Option<windows::Media::Control::GlobalSystemMediaTransport
     MEDIA_MGR.with(|m| {
         let mut m = m.borrow_mut();
         if m.is_none() {
-            let mgr = Mgr::RequestAsync().ok()?.get().ok()?;
+            let mgr = wait(Mgr::RequestAsync()).ok()?;
             // События самого менеджера: без них запущенная при свёрнутом острове музыка (сессии не
             // было, подписываться не на что) и смена трека другим плеером оставались незамеченными.
             let wake = || {
@@ -1135,9 +1142,9 @@ unsafe fn media_command(cmd: Cmd) {
     let Some(mgr) = media_manager() else { return };
     let Ok(s) = mgr.GetCurrentSession() else { return };
     let _ = match cmd {
-        Cmd::PlayPause => s.TryTogglePlayPauseAsync().and_then(|op| op.get()),
-        Cmd::Next => s.TrySkipNextAsync().and_then(|op| op.get()),
-        Cmd::Prev => s.TrySkipPreviousAsync().and_then(|op| op.get()),
+        Cmd::PlayPause => wait(s.TryTogglePlayPauseAsync()),
+        Cmd::Next => wait(s.TrySkipNextAsync()),
+        Cmd::Prev => wait(s.TrySkipPreviousAsync()),
         _ => return,
     };
 }
@@ -1147,7 +1154,7 @@ unsafe fn refresh(full: bool) {
     let mut snap = Snapshot::default();
 
     if full {
-        if let Ok(radios) = Radio::GetRadiosAsync().and_then(|op| op.get()) {
+        if let Ok(radios) = wait(Radio::GetRadiosAsync()) {
             for r in radios {
                 let on = r.State().ok() == Some(RadioState::On);
                 match r.Kind() {
@@ -1187,7 +1194,7 @@ unsafe fn read_media() -> Option<Media> {
     watch_media();
     let mgr = media_manager()?;
     let s = mgr.GetCurrentSession().ok()?;
-    let props = s.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
+    let props = wait(s.TryGetMediaPropertiesAsync()).ok()?;
     let title = props.Title().ok()?.to_string();
     let artist = props.Artist().map(|a| a.to_string()).unwrap_or_default();
     if title.is_empty() && artist.is_empty() {
@@ -1242,13 +1249,13 @@ unsafe fn read_cover(props: &windows::Media::Control::GlobalSystemMediaTransport
     use windows::Win32::Graphics::Imaging::*;
     use windows::Win32::System::Com::CLSCTX_INPROC_SERVER;
 
-    let stream = props.Thumbnail().ok()?.OpenReadAsync().ok()?.get().ok()?;
+    let stream = wait(props.Thumbnail().ok()?.OpenReadAsync()).ok()?;
     let size = stream.Size().ok()? as u32;
     if size == 0 || size > 16 << 20 {
         return None;
     }
     let reader = DataReader::CreateDataReader(&stream).ok()?;
-    reader.LoadAsync(size).ok()?.get().ok()?;
+    wait(reader.LoadAsync(size)).ok()?;
     let mut bytes = vec![0u8; size as usize];
     reader.ReadBytes(&mut bytes).ok()?;
 
@@ -1276,6 +1283,34 @@ unsafe fn read_cover(props: &windows::Media::Control::GlobalSystemMediaTransport
     Some(buf)
 }
 
+/// Ждёт асинхронную операцию WinRT не дольше `WAIT_MS`: зависший драйвер/плеер не должен
+/// вешать командный поток (иначе встают и переключатели, и громкость).
+fn wait<T: windows::core::RuntimeType + 'static>(
+    op: windows::core::Result<windows_future::IAsyncOperation<T>>,
+) -> windows::core::Result<T> {
+    use windows_future::{AsyncOperationCompletedHandler, IAsyncOperation};
+    const WAIT_MS: u64 = 5000;
+    let op = op?;
+    let (tx, rx) = channel::<Handoff<windows::core::Result<T>>>();
+    op.SetCompleted(&AsyncOperationCompletedHandler::new(move |op: windows::core::Ref<IAsyncOperation<T>>, _| {
+        if let Some(op) = op.as_ref() {
+            let _ = tx.send(Handoff(op.GetResults()));
+        }
+        Ok(())
+    }))?;
+    match rx.recv_timeout(std::time::Duration::from_millis(WAIT_MS)) {
+        Ok(r) => r.0,
+        Err(_) => {
+            log::error("WinRT: операция не завершилась за 5 с");
+            Err(windows::core::Error::from(windows::core::HRESULT::from_win32(1460)))
+        }
+    }
+}
+
+/// Результат WinRT-операции переходит из потока обратного вызова в командный поток. Все такие
+/// объекты — free-threaded (агильные), но windows-rs не помечает их `Send`.
+struct Handoff<T>(T);
+unsafe impl<T> Send for Handoff<T> {}
 #[cfg(test)]
 mod tests {
     use super::*;

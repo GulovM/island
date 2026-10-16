@@ -131,7 +131,7 @@ pub fn make_icon(hinst: HINSTANCE, accent: [f32; 3]) -> Option<HICON> {
             xor[i + 3] = 255;
         }
     }
-    let and = vec![0u8; N * N / 8];
+    let and = [0u8; N * N / 8];
     unsafe { CreateIcon(Some(hinst), N as i32, N as i32, 1, 32, and.as_ptr(), xor.as_ptr()).ok() }
 }
 
@@ -148,20 +148,36 @@ pub fn trim_working_set() {
 
 const CF_UNICODETEXT: u32 = 13;
 
+/// Открывает буфер обмена; менеджеры буфера держат его доли секунды, поэтому несколько коротких повторов.
+fn open_clipboard(owner: HWND) -> Option<()> {
+    use windows::Win32::System::DataExchange::OpenClipboard;
+    for attempt in 0..5 {
+        if unsafe { OpenClipboard(Some(owner)) }.is_ok() {
+            return Some(());
+        }
+        if attempt < 4 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    None
+}
+
 /// Текст из буфера обмена, если там есть Unicode-текст.
 pub fn clipboard_text(owner: HWND) -> Option<String> {
     use windows::Win32::Foundation::HGLOBAL;
-    use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
-    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+    use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData};
+    use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
     unsafe {
-        OpenClipboard(Some(owner)).ok()?;
+        open_clipboard(owner)?;
         let mut out = None;
         if let Ok(h) = GetClipboardData(CF_UNICODETEXT) {
             let hg = HGLOBAL(h.0);
             let p = GlobalLock(hg) as *const u16;
             if !p.is_null() {
+                // Читаем не дальше размера блока: строка без завершающего нуля не должна выводить за его границу.
+                let max = (GlobalSize(hg) / 2).min(1 << 20);
                 let mut n = 0;
-                while *p.add(n) != 0 && n < 1 << 20 {
+                while n < max && *p.add(n) != 0 {
                     n += 1;
                 }
                 out = Some(String::from_utf16_lossy(std::slice::from_raw_parts(p, n)));
@@ -176,7 +192,8 @@ pub fn clipboard_text(owner: HWND) -> Option<String> {
 /// Кладёт Unicode-текст в буфер обмена.
 pub fn set_clipboard_text(owner: HWND, text: &str) -> bool {
     use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
+    use windows::Win32::Foundation::GlobalFree;
+    use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, SetClipboardData};
     use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
     unsafe {
         let wide = wz(text);
@@ -184,16 +201,21 @@ pub fn set_clipboard_text(owner: HWND, text: &str) -> bool {
         let Ok(hg) = GlobalAlloc(GMEM_MOVEABLE, bytes) else { return false };
         let p = GlobalLock(hg) as *mut u16;
         if p.is_null() {
+            let _ = GlobalFree(Some(hg));
             return false;
         }
         std::ptr::copy_nonoverlapping(wide.as_ptr(), p, wide.len());
         let _ = GlobalUnlock(hg);
-        if OpenClipboard(Some(owner)).is_err() {
+        if open_clipboard(owner).is_none() {
+            let _ = GlobalFree(Some(hg));
             return false;
         }
         let _ = EmptyClipboard();
-        // После успешного SetClipboardData память принадлежит системе.
+        // После успешного SetClipboardData память принадлежит системе; при отказе освобождаем сами.
         let ok = SetClipboardData(CF_UNICODETEXT, Some(HANDLE(hg.0))).is_ok();
+        if !ok {
+            let _ = GlobalFree(Some(hg));
+        }
         let _ = CloseClipboard();
         ok
     }
@@ -461,6 +483,9 @@ fn night_parse(d: &[u8]) -> Option<(bool, u64, usize, usize)> {
         x if x == NIGHT_NEXT => false,
         _ => return None,
     };
+    if len < if on { 8 } else { 6 } {
+        return None;
+    }
     Some((on, ts, p, len))
 }
 
@@ -489,8 +514,12 @@ fn night_build(d: &[u8], on: bool, now: u64) -> Option<Vec<u8>> {
     payload.extend_from_slice(&d[p + skip..p + len]);
     let mut out = CB.to_vec();
     out.extend_from_slice(&NIGHT_HEAD);
-    out.extend(leb128(now.max(ts + 1)));
+    out.extend(leb128(now.max(ts.saturating_add(1))));
     out.extend_from_slice(&NIGHT_BODY);
+    // Длина — один байт без старшего бита (иначе это уже LEB128 из двух байт).
+    if payload.len() >= 0x80 {
+        return None;
+    }
     out.push(payload.len() as u8);
     out.extend(payload);
     out.extend_from_slice(&d[p + len..]);
@@ -751,5 +780,87 @@ mod dib_tests {
         d[8] = 1;
         d[14] = 8;
         assert!(parse_dib(&d).is_none());
+    }
+}
+
+/// Системный диск вида `C:\` (для статистики диска): `%SystemDrive%`, иначе `C:`.
+pub fn system_drive_root() -> Vec<u16> {
+    let drive = std::env::var("SystemDrive").ok().filter(|d| d.len() == 2 && d.ends_with(':')).unwrap_or_else(|| "C:".into());
+    wz(&format!("{drive}\\"))
+}
+
+/// Папка Windows (`%SystemRoot%`), с запасным вариантом.
+pub fn windows_dir() -> std::path::PathBuf {
+    std::env::var_os("SystemRoot").map(Into::into).unwrap_or_else(|| "C:\\Windows".into())
+}
+
+/// Папка «Изображения» пользователя (учитывает перенаправление в OneDrive и т. п.).
+pub fn pictures_dir() -> Option<std::path::PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_Pictures, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
+    unsafe {
+        let p = SHGetKnownFolderPath(&FOLDERID_Pictures, KF_FLAG_DEFAULT, None).ok()?;
+        let s = p.to_string().ok();
+        CoTaskMemFree(Some(p.0 as *const _));
+        s.map(Into::into)
+    }
+}
+
+/// Признак зашифрованного DPAPI файла: `ISL1` + blob `CryptProtectData`.
+pub const SEALED_MAGIC: &[u8; 4] = b"ISL1";
+
+/// Шифрует байты ключом текущего пользователя Windows (DPAPI): файл не читается с другой учётной
+/// записи или после копирования на другой компьютер. `None` — DPAPI отказал.
+pub fn seal(data: &[u8]) -> Option<Vec<u8>> {
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Cryptography::{CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB};
+    let input = CRYPT_INTEGER_BLOB { cbData: u32::try_from(data.len()).ok()?, pbData: data.as_ptr() as *mut u8 };
+    let mut out = CRYPT_INTEGER_BLOB::default();
+    unsafe {
+        CryptProtectData(&input, None, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out).ok()?;
+        let mut v = Vec::with_capacity(SEALED_MAGIC.len() + out.cbData as usize);
+        v.extend_from_slice(SEALED_MAGIC);
+        v.extend_from_slice(std::slice::from_raw_parts(out.pbData, out.cbData as usize));
+        let _ = LocalFree(Some(HLOCAL(out.pbData as *mut _)));
+        Some(v)
+    }
+}
+
+/// Обратное к [`seal`]. Данные без признака `ISL1` (файлы старых версий) возвращаются как есть;
+/// `None` — файл зашифрован, но расшифровать не удалось (чужая учётная запись, повреждение).
+pub fn unseal(data: &[u8]) -> Option<Vec<u8>> {
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB};
+    let Some(blob) = data.strip_prefix(SEALED_MAGIC) else { return Some(data.to_vec()) };
+    let input = CRYPT_INTEGER_BLOB { cbData: u32::try_from(blob.len()).ok()?, pbData: blob.as_ptr() as *mut u8 };
+    let mut out = CRYPT_INTEGER_BLOB::default();
+    unsafe {
+        CryptUnprotectData(&input, None, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out).ok()?;
+        let v = std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec();
+        let _ = LocalFree(Some(HLOCAL(out.pbData as *mut _)));
+        Some(v)
+    }
+}
+
+/// Файл (или его начало) записан через [`seal`].
+pub fn is_sealed(data: &[u8]) -> bool {
+    data.starts_with(SEALED_MAGIC)
+}
+
+#[cfg(test)]
+mod seal_tests {
+    use super::*;
+
+    #[test]
+    fn seal_roundtrip() {
+        let data = "секрет: пароль 123".as_bytes();
+        let sealed = seal(data).expect("DPAPI");
+        assert!(is_sealed(&sealed));
+        assert!(!sealed.windows(data.len()).any(|w| w == data));
+        assert_eq!(unseal(&sealed).unwrap(), data);
+        // Файл старой версии (без признака) читается как есть.
+        assert_eq!(unseal(b"plain text").unwrap(), b"plain text");
+        // Повреждённый blob не расшифровывается.
+        assert!(unseal(b"ISL1garbage").is_none());
     }
 }

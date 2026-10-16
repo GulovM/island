@@ -19,7 +19,7 @@ use windows::Win32::Graphics::Dxgi::Common::*;
 use windows_numerics::{Matrix3x2, Vector2};
 
 use crate::anim::Spring;
-use crate::Gfx;
+use crate::gfx::Gfx;
 
 // ---------- Цвета ----------
 
@@ -441,13 +441,25 @@ impl Canvas<'_> {
         self.g.dc.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r.d2d(), radiusX: rad, radiusY: rad }, &br);
     }
 
+    /// Ширина строки в логических пикселях по формату `f` (раскладка из кэша); при отказе DirectWrite —
+    /// грубая оценка по числу символов.
+    pub unsafe fn text_w(&self, s: &str, f: &IDWriteTextFormat) -> f32 {
+        if let Some(l) = self.g.fonts.layout(s, f, 10_000.0, 100.0) {
+            let mut m = DWRITE_TEXT_METRICS::default();
+            if l.GetMetrics(&mut m).is_ok() {
+                return m.widthIncludingTrailingWhitespace.ceil();
+            }
+        }
+        s.chars().count() as f32 * 4.6
+    }
+
     /// Плашка клавиши («Ctrl P») и подпись после неё. Возвращает общую ширину.
     pub unsafe fn keycap(&self, x: f32, cy: f32, key: &str, label: &str) -> f32 {
-        let kw = key.chars().count() as f32 * 4.6 + 9.0;
+        let kw = self.text_w(key, &self.g.fonts.small_c) + 9.0;
         let k = Rect::new(x, cy - 7.0, kw, 14.0);
         self.rr(k, 3.5, chip_bg());
         self.text(key, k, &self.g.fonts.small_c, txt());
-        let lw = label.chars().count() as f32 * 4.6 + 4.0;
+        let lw = self.text_w(label, &self.g.fonts.small) + 4.0;
         self.text(label, Rect::new(k.right() + 4.0, cy - 7.0, lw + 10.0, 14.0), &self.g.fonts.small, dim());
         kw + 4.0 + lw
     }
@@ -568,6 +580,7 @@ impl Canvas<'_> {
 
     /// Обводка дуги окружности: углы в градусах от верхней точки по часовой стрелке
     /// (как у `ring`), концы круглые. Дуга короче 360°.
+    #[allow(clippy::too_many_arguments)]
     pub unsafe fn stroke_arc(&self, cx: f32, cy: f32, radius: f32, from_deg: f32, to_deg: f32, thick: f32, c: D2D1_COLOR_F) {
         let at = |deg: f32| {
             let a = deg.to_radians();
@@ -607,7 +620,7 @@ impl Canvas<'_> {
 
 // ---------- Кэш битмапов ----------
 
-const CACHE_CAP: usize = 48;
+const CACHE_CAP: usize = 128;
 
 /// Кэш `ID2D1Bitmap1` для тяжёлых элементов (обложки, иконки, миниатюры). Привязан к устройству:
 /// при потере графики очищается вместе с `Gfx`. Вытесняет самый давно использованный.
@@ -633,7 +646,8 @@ impl BitmapCache {
             return Some(it.1.clone());
         }
         let pixels = make();
-        if pixels.len() < (w * h * 4) as usize {
+        let need = (w as usize).checked_mul(h as usize).and_then(|n| n.checked_mul(4));
+        if need.is_none_or(|n| w == 0 || h == 0 || pixels.len() < n) {
             return None;
         }
         let props = D2D1_BITMAP_PROPERTIES1 {
@@ -954,7 +968,7 @@ impl Ui {
     fn interact(&mut self, id: u32, r: Rect) -> (bool, bool) {
         let inside = self.interactive
             && r.contains(self.mouse)
-            && self.clip.map_or(true, |c| c.contains(self.mouse));
+            && self.clip.is_none_or(|c| c.contains(self.mouse));
         let hover = inside && (self.drag.is_none() || self.drag == Some(id));
         if hover && self.pressed {
             self.drag = Some(id);
@@ -1128,7 +1142,7 @@ impl Ui {
             cv.text(lead, tile, &cv.g.fonts.small_c, txt());
         }
         let tx = tile.right() + 8.0;
-        let rw = if right.is_empty() { 0.0 } else { right.chars().count() as f32 * 4.6 + 6.0 };
+        let rw = if right.is_empty() { 0.0 } else { cv.text_w(right, &cv.g.fonts.small_r) + 6.0 };
         let tw = (r.right() - tx - right_pad - rw - 8.0).max(10.0);
         let font = if centered { &cv.g.fonts.body_c } else { &cv.g.fonts.body };
         cv.text(title, Rect::new(tx, r.y, tw, r.h), font, txt());

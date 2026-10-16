@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-10-17
+
+### Добавлено
+- Поддержка Windows 10 (2004+, сборка 19041): манифест (Per-Monitor V2, длинные пути, UTF-8), запасные шрифты (Segoe UI, Segoe MDL2 Assets), запасной рендер WARP без GPU, статичная CRT (не нужен VC++ Redistributable).
+- Календарь: `COUNT` для еженедельных/ежемесячных/ежегодных повторов, переход на летнее время по дате события.
+- История буфера обмена (текст и картинки) шифруется DPAPI: файлы читаются только вашей учётной записью Windows. Старые открытые файлы переводятся автоматически.
+- `tools/package.ps1` и CI подписывают exe и установщик (Authenticode), если задан сертификат (`ISLAND_SIGN_PFX`/`ISLAND_SIGN_THUMBPRINT`, секреты `SIGN_PFX_BASE64`/`SIGN_PFX_PASSWORD`); без сертификата сборка не подписывается.
+
+### Исправлено
+- Ложные Ctrl+C/V/A при AltGr; потеря файлов истории при невалидном UTF-8; запись файлов теперь атомарна.
+- Зависание командного потока из-за WinRT-вызовов (Wi-Fi, Bluetooth, медиа): ожидание ограничено 5 с.
+- Отключение Wi-Fi больше не блокирует интерфейс; пути «Изображения», Windows и системный диск берутся из системы.
+- Сборка: `--locked`, clippy в CI, проверка версии тега; установщик закрывает остров сначала мягко.
+
+### Изменено
+- `main.rs` разделён на модули (`wnd`, `window`, `events`, `input`, `render`), `Gfx` вынесен в `src/gfx.rs`; ширина подписей считается по раскладке DirectWrite, а не по числу символов.
+
 ## [0.2.0] — 2026-10-16
 
 ### Добавлено
@@ -35,7 +52,8 @@
 - Установщик (Inno Setup, установка без прав администратора) и portable-архив, `SHA256SUMS.txt`.
 - Лицензия MIT.
 
-[Unreleased]: https://github.com/GulovM/island/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/GulovM/island/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/GulovM/island/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/GulovM/island/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/GulovM/island/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/GulovM/island/releases/tag/v0.1.0

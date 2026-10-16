@@ -1,7 +1,7 @@
 ; Установщик Island (Inno Setup 6). Сборка: powershell -File tools\package.ps1 (или ISCC installer\island.iss).
 ; Версию можно переопределить: ISCC /DAppVersion=1.2.3 installer\island.iss
 #ifndef AppVersion
-  #define AppVersion "0.2.0"
+  #define AppVersion "0.2.1"
 #endif
 
 #define AppName "Island"
@@ -22,7 +22,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-MinVersion=10.0.22000
+MinVersion=10.0.19041
 OutputDir=..\dist
 OutputBaseFilename=island-{#AppVersion}-setup
 SetupIconFile=..\assets\island.ico
@@ -39,7 +39,7 @@ Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "autostart"; Description: "{cm:AutoStart}"; GroupDescription: "{cm:AdditionalOptions}"
+Name: "autostart"; Description: "{cm:AutoStart}"; GroupDescription: "{cm:AdditionalOptions}"; Flags: checkedonce
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [CustomMessages]
@@ -65,7 +65,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Island"; ValueData: """{app}\{#AppExe}"""; Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#AppExe} /F"; Flags: runhidden; RunOnceId: "KillIsland"
@@ -77,8 +77,11 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code: Integer;
 begin
+  // Сначала вежливо (WM_CLOSE), и только если остров не закрылся — принудительно.
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM {#AppExe}', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Sleep(1500);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM {#AppExe} /F', '', SW_HIDE, ewWaitUntilTerminated, Code);
-  Sleep(500);
+  Sleep(300);
   Result := '';
 end;
 

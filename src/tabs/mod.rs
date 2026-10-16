@@ -59,19 +59,17 @@ fn data_path(name: &str) -> PathBuf {
 }
 
 pub fn read_lines(name: &str) -> Vec<String> {
-    std::fs::read_to_string(data_path(name))
-        .map(|t| t.lines().map(str::to_string).collect())
+    // Байты читаем «как есть»: одна битая последовательность не должна обнулять весь файл.
+    std::fs::read(data_path(name))
+        .map(|b| String::from_utf8_lossy(&b).lines().map(str::to_string).collect())
         .unwrap_or_default()
 }
 
+/// Пишет через временный файл и переименование: сбой посреди записи не оставит обрезанный файл.
 pub fn write_lines(name: &str, lines: &[String]) {
-    let dir = crate::sys::data_dir();
-    let _ = std::fs::create_dir_all(&dir);
     let mut text = lines.join("\n");
     text.push('\n');
-    if let Err(e) = std::fs::write(dir.join(name), text) {
-        crate::log::error(&format!("не удалось записать {name}: {e}"));
-    }
+    write_bytes(name, text.as_bytes());
 }
 
 /// Экранирует перевод строки и обратную косую для хранения в одной строке файла.
@@ -258,5 +256,42 @@ impl Tabs {
     /// В буфере обмена появилось изображение (PNG сохраняется в фоне, запись добавится в `on_bg`).
     pub fn on_clipboard_image(&mut self, w: u32, h: u32, px: Vec<u8>) {
         self.clip.capture_image(w, h, px);
+    }
+}
+
+/// Как [`read_lines`], но файл зашифрован DPAPI. Старый открытый файл читается как есть и при
+/// следующей записи становится зашифрованным. Не удалось расшифровать — пустая история.
+pub fn read_lines_sealed(name: &str) -> Vec<String> {
+    let Ok(bytes) = std::fs::read(data_path(name)) else { return Vec::new() };
+    match crate::sys::unseal(&bytes) {
+        Some(plain) => String::from_utf8_lossy(&plain).lines().map(str::to_string).collect(),
+        None => {
+            crate::log::error(&format!("не удалось расшифровать {name}: файл создан другой учётной записью?"));
+            Vec::new()
+        }
+    }
+}
+
+/// Как [`write_lines`], но с шифрованием DPAPI. Если шифрование недоступно — на диск ничего не
+/// пишется (открытым текстом приватные данные не сохраняем).
+pub fn write_lines_sealed(name: &str, lines: &[String]) {
+    let mut text = lines.join("\n");
+    text.push('\n');
+    let Some(sealed) = crate::sys::seal(text.as_bytes()) else {
+        crate::log::error(&format!("DPAPI недоступен, {name} не сохранён"));
+        return;
+    };
+    write_bytes(name, &sealed);
+}
+
+/// Атомарная запись байтов в папку данных (временный файл + переименование).
+pub fn write_bytes(name: &str, bytes: &[u8]) {
+    let dir = crate::sys::data_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let tmp = dir.join(format!("{name}.tmp"));
+    let res = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, dir.join(name)));
+    if let Err(e) = res {
+        let _ = std::fs::remove_file(&tmp);
+        crate::log::error(&format!("не удалось записать {name}: {e}"));
     }
 }

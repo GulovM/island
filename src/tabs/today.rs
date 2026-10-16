@@ -55,6 +55,9 @@ fn event_when(ev: &Event, now: i64) -> String {
     }
 }
 
+/// События показанного месяца: (месяц, версия календаря, дни сетки).
+type MonthCache = ((i32, u32), u64, Vec<Vec<DayEvent>>);
+
 pub struct Today {
     /// Выбранный пресет (индекс в `PRESETS`); `None` — время задано вручную.
     preset: Option<usize>,
@@ -83,7 +86,7 @@ pub struct Today {
     view: (i32, u32),
     sel: i64,
     /// События месяца: (месяц, версия календаря, 42 дня сетки).
-    cache: Option<((i32, u32), u64, Vec<Vec<DayEvent>>)>,
+    cache: Option<MonthCache>,
     /// Индекс редактируемой задачи: её текст лежит в поле внизу списка.
     edit: Option<usize>,
 }
@@ -416,6 +419,7 @@ impl Today {
         }
         let gy = r.y + 42.0;
         let mut pick = None;
+        #[allow(clippy::needless_range_loop)]
         for idx in 0..rows * 7 {
             let day = start + idx as i64;
             let (_, mm, dd) = civil_from_days(day);

@@ -211,7 +211,7 @@ impl Stats {
 
     unsafe fn sample_disk(&mut self) {
         let (mut free, mut total) = (0u64, 0u64);
-        if GetDiskFreeSpaceExW(w!("C:\\"), None, Some(&mut total), Some(&mut free)).is_ok() {
+        if GetDiskFreeSpaceExW(PCWSTR(crate::sys::system_drive_root().as_ptr()), None, Some(&mut total), Some(&mut free)).is_ok() {
             self.cur.disk_total = total as f32;
             self.cur.disk_used = total.saturating_sub(free) as f32;
         }
@@ -386,7 +386,7 @@ impl Stats {
 
 /// Ряд маленьких плашек по центру (частота, «N ГБ своб.»).
 unsafe fn chips_row(cv: &Canvas, cx: f32, y: f32, labels: &[String]) {
-    let widths: Vec<f32> = labels.iter().map(|l| l.chars().count() as f32 * 4.6 + 12.0).collect();
+    let widths: Vec<f32> = labels.iter().map(|l| cv.text_w(l, &cv.g.fonts.small_c) + 12.0).collect();
     let total = widths.iter().sum::<f32>() + 5.0 * labels.len().saturating_sub(1) as f32;
     let mut x = cx - total / 2.0;
     for (l, w) in labels.iter().zip(widths) {

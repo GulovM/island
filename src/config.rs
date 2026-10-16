@@ -153,11 +153,9 @@ impl Config {
                 }
             }
         }
-        for i in 0..N {
-            if !used[i] {
-                out[n] = i;
-                n += 1;
-            }
+        for (i, _) in used.iter().enumerate().filter(|(_, u)| !**u) {
+            out[n] = i;
+            n += 1;
         }
         out
     }
@@ -199,7 +197,16 @@ pub fn save_str(key: &str, value: &str) {
 
 fn write_updates(updates: &[(&str, String)]) {
     let path = path();
-    let text = std::fs::read_to_string(&path).unwrap_or_else(|_| DEFAULT_TEMPLATE.to_string());
+    // Шаблон подставляем только если файла нет; любая другая ошибка чтения (файл открыт в редакторе,
+    // антивирус) не должна приводить к перезаписи пользовательского конфига шаблоном.
+    let text = match std::fs::read(&path) {
+        Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DEFAULT_TEMPLATE.to_string(),
+        Err(e) => {
+            log::error(&format!("не удалось прочитать {} для сохранения: {e}", path.display()));
+            return;
+        }
+    };
     let out = set_keys(&text, updates);
     if out == text {
         return;
@@ -207,7 +214,10 @@ fn write_updates(updates: &[(&str, String)]) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if let Err(e) = std::fs::write(&path, out) {
+    // Через временный файл: обрыв записи не оставит пустой config.toml.
+    let tmp = path.with_extension("toml.tmp");
+    if let Err(e) = std::fs::write(&tmp, out).and_then(|()| std::fs::rename(&tmp, &path)) {
+        let _ = std::fs::remove_file(&tmp);
         log::error(&format!("не удалось записать {}: {e}", path.display()));
     }
 }
@@ -396,7 +406,7 @@ fn parse_value(s: &str) -> Option<Value> {
         "false" => return Some(Value::Num(0.0)),
         _ => {}
     }
-    s.parse::<f64>().ok().map(Value::Num)
+    s.parse::<f64>().ok().filter(|v| v.is_finite()).map(Value::Num)
 }
 
 /// Разбирает `"строку"` в начале `s`, возвращает её и остаток.

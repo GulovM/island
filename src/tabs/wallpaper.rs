@@ -18,8 +18,6 @@ use super::{id, read_lines, write_lines, PAD, TOP, WALLPAPER};
 const FILE: &str = "wallpapers.txt";
 const MAX_FILES: usize = 40;
 const MAX_RECENT: usize = 12;
-/// Запасная папка, если в «Изображениях» ничего нет.
-const SYSTEM_WALLPAPERS: &str = "C:/Windows/Web/Wallpaper";
 
 pub struct Wall {
     cfg_dir: Option<String>,
@@ -103,10 +101,10 @@ impl Wall {
         let mut candidates: Vec<PathBuf> = Vec::new();
         if let Some(d) = &self.cfg_dir {
             candidates.push(PathBuf::from(d));
-        } else if let Some(home) = std::env::var_os("USERPROFILE") {
-            candidates.push(PathBuf::from(home).join("Pictures"));
+        } else if let Some(p) = sys::pictures_dir() {
+            candidates.push(p);
         }
-        candidates.push(PathBuf::from(SYSTEM_WALLPAPERS));
+        candidates.push(sys::windows_dir().join("Web").join("Wallpaper"));
 
         self.files.clear();
         for dir in candidates {
@@ -238,8 +236,9 @@ impl Wall {
             let fi = items[pos];
             let path = self.files[fi].clone();
             let key = (0x57u64 << 56) | ((self.gen as u64) << 32) | fi as u64;
-            let px = self.pending.remove(&fi);
-            let bmp = ui.cache.get(&cv.g.dc, key, thumbs::W, thumbs::H, || px.unwrap_or_default());
+            // Пиксели остаются в `pending` до смены папки: вытесненный из кэша битмап грузится заново.
+            let pending = &self.pending;
+            let bmp = ui.cache.get(&cv.g.dc, key, thumbs::W, thumbs::H, || pending.get(&fi).cloned().unwrap_or_default());
             let cid = id(WALLPAPER, 100 + pos as u32);
             let hit = Rect::new(rect.x, rect.y, rect.w + SLANT, rect.h);
             let (_, clicked) = ui.click_area(cid, hit);
