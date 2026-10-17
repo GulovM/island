@@ -21,10 +21,6 @@ const MAX_TODO: usize = 100;
 const TODO_FILE: &str = "todo.txt";
 
 /// Дни недели с понедельника.
-const WEEK: [&str; 7] = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-const MONTHS: [&str; 12] = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
-const MONTH_NAMES: [&str; 12] =
-    ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const SUN_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.96, g: 0.75, b: 0.19, a: 1.0 };
 
 /// Даты текущей недели с понедельника: (день, месяц).
@@ -44,19 +40,53 @@ fn event_when(ev: &Event, now: i64) -> String {
     let day = ev.start.div_euclid(1440);
     let today = now.div_euclid(1440);
     let tod = ev.start.rem_euclid(1440);
-    let when = if ev.all_day { "весь день".to_string() } else { format!("{:02}:{:02}", tod / 60, tod % 60) };
+    let when = if ev.all_day { crate::i18n::t("весь день").to_string() } else { format!("{:02}:{:02}", tod / 60, tod % 60) };
     if day == today {
-        format!("Далее • {when}")
+        format!("{} • {when}", crate::i18n::pick("Далее", "Next"))
     } else if day == today + 1 {
-        format!("Завтра • {when}")
+        format!("{} • {when}", crate::i18n::pick("Завтра", "Tomorrow"))
     } else {
         let (_, m, d) = civil_from_days(day);
-        format!("{} {} {} • {when}", WEEK[weekday(day) as usize], d, MONTHS[(m as usize).clamp(1, 12) - 1])
+        format!("{} {} {} • {when}", crate::i18n::weekdays()[weekday(day) as usize], d, crate::i18n::months_short()[(m as usize).clamp(1, 12) - 1])
     }
+}
+
+/// Ссылка на календарь: пусто (отключить) или http(s):// / webcal://.
+fn valid_calendar_url(url: &str) -> bool {
+    url.is_empty() || ["https://", "http://", "webcal://"].iter().any(|p| url.starts_with(p))
 }
 
 /// События показанного месяца: (месяц, версия календаря, дни сетки).
 type MonthCache = ((i32, u32), u64, Vec<Vec<DayEvent>>);
+
+/// Плавность строки задачи: смещение при вставке/удалении соседей, появление и отметка «выполнено».
+struct RowAnim {
+    pos: Spring,
+    fade: Spring,
+    done: Spring,
+    /// Положение уже выставлено (первая отрисовка ставит строку на место без движения).
+    placed: bool,
+}
+
+impl RowAnim {
+    fn new(done: bool, entering: bool) -> Self {
+        let mut fade = Spring::unit(if entering { 0.0 } else { 1.0 }, 220.0, 24.0);
+        fade.target = 1.0;
+        let mut d = Spring::unit(done as u8 as f32, 260.0, 26.0);
+        d.target = done as u8 as f32;
+        Self { pos: Spring::new(0.0, 300.0, 28.0), fade, done: d, placed: entering }
+    }
+
+    fn settled(&self) -> bool {
+        self.pos.settled() && self.fade.settled() && self.done.settled()
+    }
+
+    fn step(&mut self, dt: f32) {
+        self.pos.step(dt);
+        self.fade.step(dt);
+        self.done.step(dt);
+    }
+}
 
 pub struct Today {
     /// Выбранный пресет (индекс в `PRESETS`); `None` — время задано вручную.
@@ -72,10 +102,17 @@ pub struct Today {
     sound: bool,
     ring: Spring,
     todo: Vec<(bool, String)>,
+    /// Состояние анимации каждой задачи (та же длина, что у `todo`).
+    anim: Vec<RowAnim>,
+    /// 0 — неделя и таймер, 1 — месячный календарь (плавная смена).
+    month_t: Spring,
     city: String,
     /// Карточка погоды в режиме ввода города.
     editing: bool,
     ics: String,
+    /// Карточка недели в режиме ввода ссылки на календарь; `cal_bad` — введён не адрес.
+    cal_editing: bool,
+    cal_bad: bool,
     online: Online,
     /// Ближайшее событие календаря (пересчитывается раз в минуту).
     next: Option<Event>,
@@ -104,9 +141,13 @@ impl Default for Today {
             sound: true,
             ring: Spring::unit(1.0, 160.0, 22.0),
             todo: Vec::new(),
+            anim: Vec::new(),
+            month_t: Spring::unit(0.0, 240.0, 26.0),
             city: String::new(),
             editing: false,
             ics: String::new(),
+            cal_editing: false,
+            cal_bad: false,
             online: Online::default(),
             next: None,
             next_min: i64::MIN,
@@ -129,6 +170,7 @@ impl Today {
             .map(|(d, t)| (d == "1", t.to_string()))
             .take(MAX_TODO)
             .collect();
+        self.anim = self.todo.iter().map(|(d, _)| RowAnim::new(*d, false)).collect();
     }
 
     pub fn configure(&mut self, cfg: &Config) {
@@ -146,6 +188,9 @@ impl Today {
         online::refresh_weather(&self.city);
         online::refresh_calendar(&self.ics);
         self.month_open = false;
+        self.month_t.value = 0.0;
+        self.month_t.target = 0.0;
+        self.cal_editing = false;
         self.edit = None;
         self.sync()
     }
@@ -175,10 +220,14 @@ impl Today {
 
     pub fn step(&mut self, dt: f32) {
         self.ring.step(dt);
+        self.month_t.step(dt);
+        for a in &mut self.anim {
+            a.step(dt);
+        }
     }
 
     pub fn animating(&self) -> bool {
-        !self.ring.settled()
+        !self.ring.settled() || !self.month_t.settled() || self.anim.iter().any(|a| !a.settled())
     }
 
     /// Сработал ли таймер с прошлого вызова.
@@ -253,18 +302,18 @@ impl Today {
         let dow = (t.wDayOfWeek as usize + 6) % 7;
 
         // Часы: часы и минуты столбиком, между ними три золотые черточки.
-        let c = Rect::new(PAD, TOP, 108.5, 132.0);
+        let c = Rect::new(PAD, TOP, 116.0, 140.0);
         cv.card(c);
-        cv.text(&format!("{:02}", t.wHour), Rect::new(c.x, c.y + 13.0, c.w, 36.0), &f.big_c, txt());
+        cv.text(&format!("{:02}", t.wHour), Rect::new(c.x, c.y + 15.0, c.w, 36.0), &f.big_c, txt());
         for k in -1..=1 {
-            cv.rr(Rect::new(c.cx() + k as f32 * 8.0 - 2.5, c.y + 58.5, 5.0, 3.0), 1.5, cv.accent);
+            cv.rr(Rect::new(c.cx() + k as f32 * 8.0 - 2.5, c.y + 63.5, 5.0, 3.0), 1.5, cv.accent);
         }
-        cv.text(&format!("{:02}", t.wMinute), Rect::new(c.x, c.y + 67.0, c.w, 36.0), &f.big_c, txt());
-        let foot = format!("{} • {} {}", WEEK[dow], t.wDay, MONTHS[(t.wMonth as usize).clamp(1, 12) - 1]);
-        cv.text(&foot, Rect::new(c.x, c.y + 112.0, c.w, 13.0), &f.small_c, dim());
+        cv.text(&format!("{:02}", t.wMinute), Rect::new(c.x, c.y + 73.0, c.w, 36.0), &f.big_c, txt());
+        let foot = format!("{} • {} {}", crate::i18n::weekdays()[dow], t.wDay, crate::i18n::months_short()[(t.wMonth as usize).clamp(1, 12) - 1]);
+        cv.text(&foot, Rect::new(c.x, c.y + 120.0, c.w, 13.0), &f.small_c, dim());
 
         // Погода. Клик по карточке — поле для города (пусто — определить по IP).
-        let wc = Rect::new(PAD, TOP + 141.0, 108.5, 87.0);
+        let wc = Rect::new(PAD, TOP + 150.0, 116.0, 102.0);
         cv.card(wc);
         let field = id(TODAY, 61);
         if self.editing {
@@ -303,33 +352,43 @@ impl Today {
             _ if self.editing => {}
             Some(wt) => {
                 let (g, col) = if wt.code <= 1 { (icon::SUN, SUN_COLOR) } else { (icon::CLOUD, mix(dim(), txt(), 0.5)) };
-                cv.glyph(g, Rect::new(wc.x, wc.y + 12.0, wc.w, 20.0), true, col);
-                cv.text(&format!("{}°C", wt.temp.round() as i32), Rect::new(wc.x, wc.y + 35.0, wc.w, 22.0), &f.num_c, txt());
-                cv.text(online::weather_text(wt.code), Rect::new(wc.x + 4.0, wc.y + 57.0, wc.w - 8.0, 12.0), &f.small_c, dim());
-                cv.text(&wt.city, Rect::new(wc.x + 4.0, wc.y + 69.0, wc.w - 8.0, 12.0), &f.small_c, mix(dim(), crate::ui::card(), 0.35));
+                cv.glyph(g, Rect::new(wc.x, wc.y + 15.0, wc.w, 20.0), true, col);
+                cv.text(&format!("{}°C", wt.temp.round() as i32), Rect::new(wc.x, wc.y + 40.0, wc.w, 22.0), &f.num_c, txt());
+                cv.text(online::weather_text(wt.code), Rect::new(wc.x + 4.0, wc.y + 65.0, wc.w - 8.0, 12.0), &f.small_c, dim());
+                cv.text(&wt.city, Rect::new(wc.x + 4.0, wc.y + 79.0, wc.w - 8.0, 12.0), &f.small_c, mix(dim(), crate::ui::card(), 0.35));
             }
             None => {
-                cv.glyph(icon::CLOUD, Rect::new(wc.x, wc.y + 12.0, wc.w, 20.0), true, dim());
-                cv.text("—", Rect::new(wc.x, wc.y + 35.0, wc.w, 22.0), &f.num_c, dim());
+                cv.glyph(icon::CLOUD, Rect::new(wc.x, wc.y + 15.0, wc.w, 20.0), true, dim());
+                cv.text("—", Rect::new(wc.x, wc.y + 40.0, wc.w, 22.0), &f.num_c, dim());
                 let note = self.online.weather_note.as_deref().unwrap_or("Загрузка…");
-                cv.text(note, Rect::new(wc.x + 4.0, wc.y + 57.0, wc.w - 8.0, 12.0), &f.small_c, dim());
+                cv.text(note, Rect::new(wc.x + 4.0, wc.y + 65.0, wc.w - 8.0, 12.0), &f.small_c, dim());
             }
         }
 
         let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
-        if self.month_open {
-            self.month_card(ui, cv, Rect::new(PAD + 116.5, TOP, 221.0, 228.0), today);
-        } else {
-            self.week_card(ui, cv, Rect::new(PAD + 116.5, TOP, 221.0, 113.0), today, dow);
-            self.timer_card(ui, cv, Rect::new(PAD + 116.5, TOP + 121.0, 221.0, 107.0));
+        self.month_t.target = if self.month_open { 1.0 } else { 0.0 };
+        let mt = self.month_t.value.clamp(0.0, 1.0);
+        // Во время смены обе раскладки видны с обратной прозрачностью.
+        let faded = |a: f32| Canvas { g: cv.g, alpha: cv.alpha * a, accent: cv.accent };
+        if mt > 0.01 {
+            self.month_card(ui, &faded(mt), Rect::new(PAD + 126.0, TOP, 230.0, 252.0), today);
         }
-        let tx = PAD + 116.5 + 221.0 + 7.5;
-        self.todo_card(ui, cv, Rect::new(tx, TOP, (w - PAD - tx).max(120.0), 228.0));
+        if mt < 0.99 {
+            let wcv = faded(1.0 - mt);
+            self.week_card(ui, &wcv, Rect::new(PAD + 126.0, TOP, 230.0, 122.0), today, dow);
+            self.timer_card(ui, &wcv, Rect::new(PAD + 126.0, TOP + 132.0, 230.0, 120.0));
+        }
+        let tx = PAD + 126.0 + 230.0 + 10.0;
+        self.todo_card(ui, cv, Rect::new(tx, TOP, (w - PAD - tx).max(120.0), 252.0));
     }
 
     unsafe fn week_card(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect, today: i64, dow: usize) {
         let f = &cv.g.fonts;
         cv.card(wk);
+        if self.cal_editing {
+            self.calendar_form(ui, cv, wk);
+            return;
+        }
         let (y, m, d) = civil_from_days(today);
         let dates = week_dates(y, m, d);
         let monday = today - dow as i64;
@@ -341,15 +400,15 @@ impl Today {
         let range = format!(
             "{} {} – {} {}",
             dates[0].0,
-            MONTHS[(dates[0].1 as usize).clamp(1, 12) - 1],
+            crate::i18n::months_short()[(dates[0].1 as usize).clamp(1, 12) - 1],
             dates[6].0,
-            MONTHS[(dates[6].1 as usize).clamp(1, 12) - 1]
+            crate::i18n::months_short()[(dates[6].1 as usize).clamp(1, 12) - 1]
         );
         cv.text(&range, Rect::new(wk.right() - 111.0, wk.y + 10.0, 100.0, 14.0), &f.small_r, dim());
         for (i, (day, _)) in dates.iter().enumerate() {
-            let cx = wk.x + 21.0 + i as f32 * 29.4;
-            cv.text(WEEK[i], Rect::new(cx - 14.0, wk.y + 25.0, 28.0, 12.0), &f.small_c, dim());
-            let b = Rect::new(cx - 12.5, wk.y + 39.0, 25.0, 23.0);
+            let cx = wk.x + 23.0 + i as f32 * 30.7;
+            cv.text(crate::i18n::weekdays()[i], Rect::new(cx - 14.0, wk.y + 28.0, 28.0, 12.0), &f.small_c, dim());
+            let b = Rect::new(cx - 12.5, wk.y + 43.0, 25.0, 23.0);
             let is_today = i == dow;
             // Клик по дню открывает месяц с выбранным днём.
             let cid = id(TODAY, 80 + i as u32);
@@ -367,7 +426,7 @@ impl Today {
         }
 
         // Ближайшее событие календаря.
-        let ev = Rect::new(wk.x + 7.0, wk.y + 70.0, wk.w - 14.0, 36.0);
+        let ev = Rect::new(wk.x + 8.0, wk.y + 76.0, wk.w - 16.0, 38.0);
         cv.rr(ev, 8.0, inset());
         cv.rr(Rect::new(ev.x + 8.0, ev.y + 8.0, 3.0, 20.0), 1.5, PINK);
         let (l1, l2) = match (&self.next, self.online.calendar_set) {
@@ -378,11 +437,70 @@ impl Today {
         };
         cv.text(&l1, Rect::new(ev.x + 17.0, ev.y + 5.0, ev.w - 24.0, 13.0), &f.small_b, txt());
         cv.text(&l2, Rect::new(ev.x + 17.0, ev.y + 18.0, ev.w - 24.0, 13.0), &f.small, dim());
+        // Клик по блоку — ссылка на календарь (подключить, сменить или убрать).
+        let (_, clicked) = ui.click_area(id(TODAY, 63), ev);
+        let hv = ui.hover_of(id(TODAY, 63));
+        if hv > 0.01 {
+            cv.rr(ev, 8.0, D2D1_COLOR_F { a: 0.05 * hv, ..fg() });
+            cv.glyph(icon::EDIT, Rect::new(ev.right() - 22.0, ev.y + 10.0, 16.0, 16.0), false, D2D1_COLOR_F { a: hv, ..dim() });
+        }
+        if clicked {
+            self.begin_calendar_edit(ui);
+        }
+    }
+
+    fn begin_calendar_edit(&mut self, ui: &mut Ui) {
+        let field = id(TODAY, 62);
+        self.cal_editing = true;
+        self.cal_bad = false;
+        ui.set_field_text(field, &self.ics);
+        ui.focus = Some(field);
+        ui.caret_on = true;
+    }
+
+    /// Ввод ссылки на календарь (iCal) вместо содержимого карточки недели. Enter — сохранить в
+    /// `config.toml` и сразу загрузить; пусто — отключить; Esc или клик мимо — без изменений.
+    unsafe fn calendar_form(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect) {
+        let f = &cv.g.fonts;
+        let field = id(TODAY, 62);
+        if let Some(url) = ui.take_submitted(field) {
+            let url = url.trim().to_string();
+            if valid_calendar_url(&url) {
+                self.ics = url;
+                crate::config::save_str("calendar_ics", &self.ics);
+                online::refresh_calendar(&self.ics);
+                self.sync();
+                self.cal_editing = false;
+                ui.blur();
+                return;
+            }
+            // Не адрес: остаёмся в поле, чтобы поправить.
+            self.cal_bad = true;
+            ui.set_field_text(field, &url);
+            ui.focus = Some(field);
+        } else if !ui.has_focus(field) {
+            self.cal_editing = false;
+            return;
+        }
+        cv.text("Ссылка на календарь (iCal)", Rect::new(wk.x + 9.0, wk.y + 9.0, wk.w - 18.0, 14.0), &f.body, txt());
+        ui.text_field_ex(cv, field, Rect::new(wk.x + 7.0, wk.y + 30.0, wk.w - 14.0, 28.0), "https://… или webcal://…", icon::LINK, Submit::Keep);
+        let (msg, col) = if self.cal_bad {
+            ("Нужна ссылка вида https:// или webcal://", PINK)
+        } else {
+            ("Enter — сохранить, пусто — отключить, Esc — отмена", dim())
+        };
+        cv.text(msg, Rect::new(wk.x + 9.0, wk.y + 64.0, wk.w - 18.0, 13.0), &f.small, col);
+        cv.text(
+            "Google/Яндекс/Outlook: «секретный адрес в формате iCal»",
+            Rect::new(wk.x + 9.0, wk.y + 80.0, wk.w - 18.0, 13.0),
+            &f.small,
+            mix(dim(), crate::ui::card(), 0.35),
+        );
     }
 
     /// Месячный календарь: дни с событиями помечены точками, клик по дню показывает его события.
     unsafe fn month_card(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect, today: i64) {
-        const ROW: f32 = 20.0;
+        const ROW: f32 = 22.0;
         const PITCH: f32 = 14.0;
         let f = &cv.g.fonts;
         cv.card(r);
@@ -402,7 +520,7 @@ impl Today {
         let title = Rect::new(r.x + 9.0, r.y + 7.0, 118.0, 18.0);
         let (_, jump) = ui.click_area(id(TODAY, 91), title);
         let hv = ui.hover_of(id(TODAY, 91));
-        cv.text(&format!("{} {}", MONTH_NAMES[vm as usize - 1], vy), title, &f.body, mix(txt(), cv.accent, hv));
+        cv.text(&format!("{} {}", crate::i18n::months_full()[vm as usize - 1], vy), title, &f.body, mix(txt(), cv.accent, hv));
         let mut shift = 0;
         if ui.icon_button(cv, id(TODAY, 92), Rect::new(r.right() - 72.0, r.y + 7.0, 18.0, 18.0), icon::LEFT, false) {
             shift = -1;
@@ -414,7 +532,7 @@ impl Today {
 
         // Сетка месяца.
         let cw = (r.w - 14.0) / 7.0;
-        for (c, name) in WEEK.iter().enumerate() {
+        for (c, name) in crate::i18n::weekdays().iter().enumerate() {
             cv.text(name, Rect::new(r.x + 7.0 + c as f32 * cw, r.y + 28.0, cw, 12.0), &f.small_c, dim());
         }
         let gy = r.y + 42.0;
@@ -456,16 +574,16 @@ impl Today {
         let det = Rect::new(r.x + 7.0, top, r.w - 14.0, r.bottom() - 7.0 - top);
         cv.rr(det, 8.0, inset());
         let (_, sm, sd) = civil_from_days(self.sel);
-        let mut head = format!("{} {} {}", WEEK[weekday(self.sel) as usize], sd, MONTHS[(sm as usize).clamp(1, 12) - 1]);
+        let mut head = format!("{} {} {}", crate::i18n::weekdays()[weekday(self.sel) as usize], sd, crate::i18n::months_short()[(sm as usize).clamp(1, 12) - 1]);
         if self.sel == today {
-            head.push_str(" • сегодня");
+            head.push_str(crate::i18n::pick(" • сегодня", " • today"));
         }
         cv.text(&head, Rect::new(det.x + 8.0, det.y + 3.0, det.w - 16.0, 14.0), &f.small_b, txt());
         let list: &[DayEvent] = evs.get((self.sel - start) as usize).map(Vec::as_slice).unwrap_or(&[]);
         let view = Rect::new(det.x + 4.0, det.y + 19.0, det.w - 8.0, (det.h - 21.0).max(PITCH));
         if list.is_empty() {
             let note = if !self.online.calendar_set {
-                "Календарь не подключён: calendar_ics в config.toml"
+                "Календарь не подключён — нажмите, чтобы добавить ссылку"
             } else if self.online.calendar_failed {
                 "Не удалось загрузить календарь"
             } else if self.online.cal_ver == 0 {
@@ -473,7 +591,12 @@ impl Today {
             } else {
                 "Событий нет"
             };
-            cv.text(note, Rect::new(view.x + 4.0, view.y, view.w - 8.0, PITCH), &f.small, dim());
+            let nr = Rect::new(view.x + 4.0, view.y, view.w - 8.0, PITCH);
+            cv.text(note, nr, &f.small, dim());
+            if !self.online.calendar_set && ui.click_area(id(TODAY, 95), nr).1 {
+                self.month_open = false;
+                self.begin_calendar_edit(ui);
+            }
         }
         let sid = id(TODAY, 101);
         let off = ui.scroll_begin(cv, sid, view, list.len() as f32 * PITCH);
@@ -485,7 +608,7 @@ impl Today {
             cv.rr(Rect::new(view.x + 3.0, y + 2.5, 2.5, PITCH - 5.0), 1.25, PINK);
             let when = match e.minute {
                 Some(m) => format!("{:02}:{:02}", m / 60, m % 60),
-                None => "весь день".to_string(),
+                None => crate::i18n::t("весь день").to_string(),
             };
             cv.text(&when, Rect::new(view.x + 10.0, y, 50.0, PITCH), &f.small_b, dim());
             cv.text(&e.title, Rect::new(view.x + 62.0, y, view.w - 70.0, PITCH), &f.small, txt());
@@ -514,7 +637,7 @@ impl Today {
         let rem = self.remaining();
         let frac = if self.total.is_zero() { 0.0 } else { rem.as_secs_f32() / self.total.as_secs_f32() };
         self.ring.target = frac.clamp(0.0, 1.0);
-        let (cx, cy) = (tm.x + 38.0, tm.y + 54.0);
+        let (cx, cy) = (tm.x + 40.0, tm.y + 62.0);
         cv.ring(cx, cy, 24.0, 3.0, self.ring.value, ORANGE);
         let secs = rem.as_secs_f32().ceil() as u64;
         let label = if secs >= 3600 {
@@ -528,8 +651,8 @@ impl Today {
         }
 
         // Часы и минуты: колесо мыши меняет на 1, клик — на 1 час / 5 минут по кругу.
-        let bx = tm.x + 78.0;
-        let boxes = [(Rect::new(bx, tm.y + 10.0, 65.0, 22.0), "ч", true), (Rect::new(bx + 70.0, tm.y + 10.0, 64.0, 22.0), "мин", false)];
+        let bx = tm.x + 82.0;
+        let boxes = [(Rect::new(bx, tm.y + 14.0, 68.0, 24.0), "ч", true), (Rect::new(bx + 74.0, tm.y + 14.0, 68.0, 24.0), "мин", false)];
         for (k, (b, unit, is_h)) in boxes.iter().enumerate() {
             let bid = id(TODAY, 50 + k as u32);
             let (_, clicked) = ui.click_area(bid, *b);
@@ -554,18 +677,18 @@ impl Today {
 
         // Пресеты.
         for (i, m) in PRESETS.iter().enumerate() {
-            let r = Rect::new(bx + i as f32 * 27.6, tm.y + 40.0, 24.0, 17.0);
-            if ui.chip_ex(cv, id(TODAY, i as u32), r, &format!("{m}м"), self.preset == Some(i), false, Some(ORANGE)) {
+            let r = Rect::new(bx + i as f32 * 29.0, tm.y + 48.0, 25.0, 18.0);
+            if ui.chip_ex(cv, id(TODAY, i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, Some(ORANGE)) {
                 self.set_preset(i);
             }
         }
 
         // Старт / пауза и сброс.
         let start = if self.deadline.is_some() { "Пауза" } else { "Старт" };
-        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 62.0, 65.0, 23.0), start, ORANGE, ink(), 6.0) {
+        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 76.0, 68.0, 26.0), start, ORANGE, ink(), 6.0) {
             self.toggle_run();
         }
-        if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + 70.0, tm.y + 62.0, 64.0, 23.0), "Сброс", chip_bg(), txt(), 6.0) {
+        if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + 74.0, tm.y + 76.0, 68.0, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
             self.left = self.total;
             self.deadline = None;
         }
@@ -575,9 +698,9 @@ impl Today {
         cv.card(card);
         let f = &cv.g.fonts;
         let done = self.todo.iter().filter(|(d, _)| *d).count();
-        cv.text("Задачи", Rect::new(card.x + 9.0, card.y + 10.0, 90.0, 14.0), &f.body, txt());
+        cv.text("Задачи", Rect::new(card.x + 11.0, card.y + 12.0, 90.0, 14.0), &f.body, txt());
         // Счётчик «выполнено/всего» в кружке с дугой прогресса.
-        let (bx, by) = (card.right() - 19.0, card.y + 16.0);
+        let (bx, by) = (card.right() - 21.0, card.y + 18.0);
         cv.circle(bx, by, 9.0, chip_bg());
         if !self.todo.is_empty() {
             cv.ring(bx, by, 8.0, 1.4, done as f32 / self.todo.len() as f32, GREEN);
@@ -586,7 +709,7 @@ impl Today {
 
         // Поле «добавить» внизу и золотая кнопка со стрелкой.
         let fid = id(TODAY, 30);
-        let field = Rect::new(card.x + 8.0, card.bottom() - 33.0, card.w - 16.0, 26.0);
+        let field = Rect::new(card.x + 10.0, card.bottom() - 38.0, card.w - 20.0, 28.0);
         let editing = self.edit.is_some_and(|i| i < self.todo.len());
         if !editing {
             self.edit = None;
@@ -598,7 +721,8 @@ impl Today {
         let cancel = Rect::new(add.x - 19.0, add.y, 16.0, 16.0);
         let (_, add_clicked) = ui.click_area(id(TODAY, 31), add);
         let cancel_clicked = editing && ui.click_area(id(TODAY, 32), cancel).1;
-        ui.text_field_ex(cv, fid, field, hint, glyph, Submit::Clear);
+        // Справа поверх поля лежат кнопки: текст до них не доходит.
+        ui.text_field_pad(cv, fid, field, hint, glyph, Submit::Clear, if editing { 45.0 } else { 28.0 });
         cv.rr_line(field, 8.0, if editing { cv.accent } else { track() }, 1.0);
         let hv = ui.hover_of(id(TODAY, 31));
         cv.rr(add, 4.0, mix(cv.accent, fg(), 0.12 * hv));
@@ -628,32 +752,57 @@ impl Today {
                 Some(_) => {}
                 None if !text.is_empty() && self.todo.len() < MAX_TODO => {
                     self.todo.insert(0, (false, text.to_string()));
+                    self.anim.insert(0, RowAnim::new(false, true));
                     self.save();
                 }
                 None => {}
             }
         }
 
-        const ROW: f32 = 25.0;
-        const PITCH: f32 = 27.0;
-        let view = Rect::new(card.x + 7.0, card.y + 32.0, card.w - 14.0, (card.h - 32.0 - 40.0).max(ROW));
+        const ROW: f32 = 27.0;
+        const GAP: f32 = 3.0;
+        /// Длинная задача переносится максимум на столько строк, дальше — «…» (целиком — в правке).
+        const MAX_LINES: usize = 3;
+        let view = Rect::new(card.x + 9.0, card.y + 38.0, card.w - 18.0, (card.h - 38.0 - 48.0).max(ROW));
+        let text_w = (view.w - 4.0 - 25.0 - 8.0).max(20.0);
+        // Раскладка строк: (смещение, высота, число строк, высота строки текста).
+        let mut rows: Vec<(f32, f32, usize, f32)> = Vec::with_capacity(self.todo.len());
+        let mut total = 0.0f32;
+        for (_, text) in &self.todo {
+            let (lines, lh) = cv.wrapped(text, &f.wrap_l, text_w);
+            let lines = lines.clamp(1, MAX_LINES);
+            let h = (lines as f32 * lh + 11.0).max(ROW);
+            rows.push((total, h, lines, lh));
+            total += h + GAP;
+        }
+        self.anim.resize_with(self.todo.len(), || RowAnim::new(false, false));
+        for (a, row) in self.anim.iter_mut().zip(&rows) {
+            a.pos.target = row.0;
+            if !a.placed {
+                a.pos.snap();
+                a.placed = true;
+            }
+        }
         let sid = id(TODAY, 100);
-        let off = ui.scroll_begin(cv, sid, view, self.todo.len() as f32 * PITCH);
+        let off = ui.scroll_begin(cv, sid, view, total);
         let mut toggled = None;
         let mut removed = None;
         let mut edit_req = None;
         for (i, (is_done, text)) in self.todo.iter().enumerate() {
-            let y = view.y + i as f32 * PITCH - off;
-            if y + ROW < view.y || y > view.bottom() {
+            let (_, rh, lines, lh) = rows[i];
+            let (fade, dn) = (self.anim[i].fade.value.clamp(0.0, 1.0), self.anim[i].done.value.clamp(0.0, 1.0));
+            let rcv = Canvas { g: cv.g, alpha: cv.alpha * fade, accent: cv.accent };
+            let cv = &rcv;
+            let y = view.y + self.anim[i].pos.value - off;
+            if y + rh < view.y || y > view.bottom() {
                 continue;
             }
-            let r = Rect::new(view.x, y, view.w - 4.0, ROW);
+            let r = Rect::new(view.x, y, view.w - 4.0, rh);
             let rid = id(TODAY, 200 + i as u32);
             // Кнопки справа («изменить», «удалить») видны при наведении; их области регистрируются
             // раньше строки, иначе строка заберёт нажатие себе.
             let (eid, did) = (id(TODAY, 600 + i as u32), id(TODAY, 400 + i as u32));
-            let cy = r.cy();
-            let del = Rect::new(r.right() - 21.0, cy - 9.0, 18.0, 18.0);
+            let del = Rect::new(r.right() - 21.0, r.y + ROW / 2.0 - 9.0, 18.0, 18.0);
             let edit = Rect::new(del.x - 20.0, del.y, 18.0, 18.0);
             let show = ui.hover_of(rid) > 0.3 || ui.hover_of(did) > 0.3 || ui.hover_of(eid) > 0.3;
             let (mut edit_clicked, mut del_clicked) = (false, false);
@@ -667,18 +816,24 @@ impl Today {
             if self.edit == Some(i) {
                 cv.rr_line(r, 8.0, cv.accent, 1.0);
             }
-            let (cx, cy) = (r.x + 13.0, r.cy());
-            if *is_done {
-                cv.circle(cx, cy, 6.0, GREEN);
-                cv.text(icon::CHECK, Rect::new(cx - 6.0, cy - 6.0, 12.0, 12.0), &f.icon_small, ink());
-            } else {
-                cv.rr_line(Rect::new(cx - 6.0, cy - 6.0, 12.0, 12.0), 6.0, dim(), 1.2);
+            let (cx, cy) = (r.x + 13.0, r.y + ROW / 2.0);
+            // Отметка выполнения проявляется плавно: кольцо гаснет, зелёный круг с галочкой нарастает.
+            if dn < 0.99 {
+                let ring = D2D1_COLOR_F { a: dim().a * (1.0 - dn), ..dim() };
+                cv.rr_line(Rect::new(cx - 6.0, cy - 6.0, 12.0, 12.0), 6.0, ring, 1.2);
             }
-            let tr = Rect::new(r.x + 25.0, r.y, r.w - 25.0 - 44.0, r.h);
-            cv.text(text, tr, &f.small_b, if *is_done { dim() } else { txt() });
-            if *is_done {
-                let tw = (text.chars().count() as f32 * 4.7).min(tr.w);
-                cv.rr(Rect::new(tr.x, cy - 0.5, tw, 1.0), 0.5, dim());
+            if dn > 0.01 {
+                cv.circle(cx, cy, 6.0 * (0.5 + 0.5 * dn), D2D1_COLOR_F { a: dn, ..GREEN });
+                cv.text(icon::CHECK, Rect::new(cx - 6.0, cy - 6.0, 12.0, 12.0), &f.icon_small, D2D1_COLOR_F { a: ink().a * dn, ..ink() });
+            }
+            let th = lines as f32 * lh;
+            let tr = Rect::new(r.x + 25.0, r.y + (r.h - th) / 2.0, text_w, th + 2.0);
+            let shown = cv.wrap_clip(text, &f.wrap_l, text_w, MAX_LINES);
+            cv.text_strike(&shown, tr, &f.wrap_l, mix(txt(), dim(), dn), *is_done);
+            if show {
+                // Кнопки лежат поверх конца первой строки: подложка цвета строки.
+                let patch = Rect::new(edit.x - 4.0, edit.y - 1.0, r.right() - edit.x + 2.0, 20.0);
+                cv.rr(patch, 8.0, mix(inset(), fg(), 0.035 * hv));
             }
             if clicked {
                 toggled = Some(i);
@@ -699,6 +854,9 @@ impl Today {
         ui.scroll_end(cv, sid);
         if let Some(i) = removed {
             self.todo.remove(i);
+            if i < self.anim.len() {
+                self.anim.remove(i);
+            }
             match self.edit {
                 Some(e) if e == i => {
                     let _ = ui.submit_field(fid);
@@ -715,6 +873,9 @@ impl Today {
             ui.caret_on = true;
         } else if let Some(i) = toggled {
             self.todo[i].0 = !self.todo[i].0;
+            if let Some(a) = self.anim.get_mut(i) {
+                a.done.target = self.todo[i].0 as u8 as f32;
+            }
             self.save();
         }
         if self.todo.is_empty() {
@@ -726,6 +887,15 @@ impl Today {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calendar_url_validation() {
+        assert!(valid_calendar_url(""));
+        assert!(valid_calendar_url("https://calendar.google.com/x.ics"));
+        assert!(valid_calendar_url("webcal://example.com/a.ics"));
+        assert!(!valid_calendar_url("calendar.google.com/x.ics"));
+        assert!(!valid_calendar_url("ftp://x"));
+    }
 
     #[test]
     fn week_starts_monday() {

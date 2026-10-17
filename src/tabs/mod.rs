@@ -34,8 +34,8 @@ pub const POWER: usize = 6;
 pub const SETTINGS: usize = 7;
 
 /// Верх области содержимого под рядом вкладок и боковое поле.
-pub const TOP: f32 = 35.0;
-pub const PAD: f32 = 11.5;
+pub const TOP: f32 = 38.0;
+pub const PAD: f32 = 14.0;
 
 /// Просьба вкладки к главному окну.
 pub enum Action {
@@ -109,13 +109,7 @@ pub fn unescape(s: &str) -> String {
 /// «5 мин назад», «3 ч назад» и т. п. по разнице в секундах.
 pub fn ago(now: u64, then: u64) -> String {
     let d = now.saturating_sub(then);
-    match d {
-        0..=9 => "только что".into(),
-        10..=59 => format!("{d} с назад"),
-        60..=3599 => format!("{} мин назад", d / 60),
-        3600..=86_399 => format!("{} ч назад", d / 3600),
-        _ => format!("{} дн назад", d / 86_400),
-    }
+    crate::i18n::ago_long(d)
 }
 
 #[derive(Default)]

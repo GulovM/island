@@ -14,7 +14,7 @@ impl App {
         let collapsed = self.collapsed();
         let (w, h) = if self.expanded {
             let id = self.cur_id();
-            (self.tab_w(id), TAB_SIZES[id].1)
+            (self.tab_w(id), App::tab_h(id))
         } else if self.stripped() {
             // Ширина прежняя: зона наведения не растёт, меняется только высота.
             (collapsed.0, STRIP_H)
@@ -29,19 +29,20 @@ impl App {
     }
 
     /// Остров стал тонкой полоской: окно развёрнуто на весь экран и пользователь включил
-    /// режим полного сворачивания (правый клик по острову). Иначе остров остаётся обычной чёлкой.
+    /// режим полоски (переключатель в Настройках или правый клик по острову). Иначе остров остаётся обычной чёлкой.
     pub(crate) fn stripped(&self) -> bool {
-        self.covered && self.strip_mode
+        self.covered && self.cfg.strip_over_maximized
     }
 
     /// Правый клик по раскрытому острову включает/выключает режим полоски; действует с момента,
-    /// когда мышь уйдёт с острова и он свернётся. Выбор запоминается в `strip.txt`.
+    /// когда мышь уйдёт с острова и он свернётся. Выбор сохраняется в `config.toml`.
     pub(crate) unsafe fn toggle_strip_mode(&mut self) -> bool {
         if !self.expanded || !self.cursor_inside() {
             return false;
         }
-        self.strip_mode = !self.strip_mode;
-        tabs::write_lines(STRIP_FILE, &[(self.strip_mode as u8).to_string()]);
+        self.cfg.strip_over_maximized = !self.cfg.strip_over_maximized;
+        self.save_pending = true;
+        self.tabs.apply_config(&self.cfg);
         self.retarget();
         true
     }
@@ -423,7 +424,7 @@ impl App {
         let Ok(menu) = CreatePopupMenu() else { return false };
         let autostart = sys::autostart_enabled();
         let item = |id: usize, flags: MENU_ITEM_FLAGS, text: &str| {
-            let wide = sys::wz(text);
+            let wide = sys::wz(&crate::i18n::tr(text));
             let _ = AppendMenuW(menu, flags, id, PCWSTR(wide.as_ptr()));
         };
         item(CMD_SETTINGS, MF_STRING, "Открыть config.toml");

@@ -9,6 +9,10 @@ use crate::theme;
 /// Скругление нижних углов по умолчанию и допустимые пределы, логические пиксели.
 pub const DEFAULT_RADIUS: f32 = 14.0;
 pub const MAX_RADIUS: f32 = 30.0;
+/// Масштаб интерфейса (шрифты и панель вместе): по умолчанию и пределы.
+pub const DEFAULT_SCALE: f32 = 1.2;
+pub const MIN_SCALE: f32 = 0.9;
+pub const MAX_SCALE: f32 = 2.0;
 
 pub const DEFAULT_TEMPLATE: &str = r##"# Island — настройки. Изменения применяются из меню в трее: «Перечитать конфиг».
 
@@ -24,6 +28,16 @@ system_colors = 0
 
 # Скругление нижних углов острова, пиксели (0–30)
 corner_radius = 14
+
+# Масштаб интерфейса: шрифты и панель увеличиваются вместе (0.9–2.0). Меняется и в Настройках.
+ui_scale = 1.2
+
+# Язык интерфейса: "auto" (как в Windows), "ru" или "en". Меняется и в Настройках.
+language = "auto"
+
+# 1 — над развёрнутыми на весь экран окнами остров сжимается в тонкую полоску
+# (раскрывается при наведении на верхний край), чтобы не закрывать вкладки браузера
+strip_over_maximized = 1
 
 # Скрытые вкладки (список имён из tabs ниже)
 hidden_tabs = []
@@ -81,6 +95,12 @@ pub struct Config {
     pub system_colors: bool,
     /// Скругление нижних углов раскрытого острова, логические пиксели.
     pub corner_radius: f32,
+    /// Масштаб интерфейса (множитель к DPI монитора).
+    pub ui_scale: f32,
+    /// Над развёрнутыми окнами остров сжимается в тонкую полоску.
+    pub strip_over_maximized: bool,
+    /// `auto`, `ru` или `en`.
+    pub language: String,
     /// Имена скрытых вкладок.
     pub hidden_tabs: Vec<String>,
     /// Время, раскладка и Wi-Fi на свёрнутом острове, когда музыка не играет.
@@ -113,6 +133,9 @@ impl Default for Config {
             bg: theme::DEFAULT_BG,
             system_colors: false,
             corner_radius: DEFAULT_RADIUS,
+            ui_scale: DEFAULT_SCALE,
+            strip_over_maximized: true,
+            language: "auto".to_string(),
             hidden_tabs: Vec::new(),
             idle_face: true,
             leave_delay_ms: 220,
@@ -183,6 +206,9 @@ pub fn save(cfg: &Config, names: &[&str]) {
         ("bg", fmt_str(&theme::to_hex(cfg.bg))),
         ("system_colors", (cfg.system_colors as u8).to_string()),
         ("corner_radius", format!("{}", cfg.corner_radius.round() as i32)),
+        ("ui_scale", format!("{:.3}", cfg.ui_scale)),
+        ("strip_over_maximized", (cfg.strip_over_maximized as u8).to_string()),
+        ("language", fmt_str(&cfg.language)),
         ("tabs", fmt_list(&order)),
         ("hidden_tabs", fmt_list(&cfg.hidden_tabs)),
         ("idle_face", (cfg.idle_face as u8).to_string()),
@@ -341,6 +367,14 @@ pub fn parse(text: &str) -> Config {
             ("", "system_colors", Value::Num(v)) => cfg.system_colors = v != 0.0,
             ("", "idle_face", Value::Num(v)) => cfg.idle_face = v != 0.0,
             ("", "corner_radius", Value::Num(v)) => cfg.corner_radius = (v as f32).clamp(0.0, MAX_RADIUS),
+            ("", "ui_scale", Value::Num(v)) => cfg.ui_scale = (v as f32).clamp(MIN_SCALE, MAX_SCALE),
+            ("", "strip_over_maximized", Value::Num(v)) => cfg.strip_over_maximized = v != 0.0,
+            ("", "language", Value::Str(s)) => {
+                cfg.language = match s.trim().to_lowercase().as_str() {
+                    l @ ("ru" | "en") => l.to_string(),
+                    _ => "auto".to_string(),
+                }
+            }
             ("", "hidden_tabs", Value::List(l)) => cfg.hidden_tabs = l,
             ("", "leave_delay_ms", Value::Num(v)) => cfg.leave_delay_ms = v.clamp(0.0, 5000.0) as u32,
             ("", "env_poll_ms", Value::Num(v)) => cfg.env_poll_ms = v.clamp(100.0, 10_000.0) as u32,
@@ -532,6 +566,8 @@ gmail = \"https://mail.google.com\"
         assert!((c.bg[2] - 0x30 as f32 / 255.0).abs() < 0.001);
         assert!(c.system_colors && !c.idle_face);
         assert_eq!(c.corner_radius, MAX_RADIUS);
+        assert_eq!(parse("ui_scale = 9").ui_scale, MAX_SCALE);
+        assert_eq!(parse("ui_scale = 0.1").ui_scale, MIN_SCALE);
         assert_eq!(c.hidden_tabs, vec!["Power".to_string(), "stats".to_string()]);
         let d = parse(DEFAULT_TEMPLATE);
         assert_eq!((d.corner_radius, d.system_colors, d.idle_face), (DEFAULT_RADIUS, false, true));
@@ -581,6 +617,8 @@ gmail = \"https://mail.google.com\"
         c.bg = theme::parse_hex("#101820").unwrap();
         c.system_colors = true;
         c.corner_radius = 22.0;
+        c.ui_scale = 1.5;
+        c.strip_over_maximized = false;
         c.hidden_tabs = vec!["Power".into(), "Wallpaper".into()];
         c.tabs = vec!["Apps".into(), "Controls".into()];
         c.idle_face = false;
@@ -589,6 +627,8 @@ gmail = \"https://mail.google.com\"
             ("bg", fmt_str(&theme::to_hex(c.bg))),
             ("system_colors", "1".to_string()),
             ("corner_radius", "22".to_string()),
+            ("ui_scale", format!("{:.3}", c.ui_scale)),
+            ("strip_over_maximized", "0".to_string()),
             ("tabs", fmt_list(&c.tabs)),
             ("hidden_tabs", fmt_list(&c.hidden_tabs)),
             ("idle_face", "0".to_string()),

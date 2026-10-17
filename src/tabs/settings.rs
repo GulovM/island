@@ -7,7 +7,7 @@
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use crate::anim::Spring;
-use crate::config::{Config, DEFAULT_RADIUS, MAX_RADIUS};
+use crate::config::{Config, DEFAULT_RADIUS, DEFAULT_SCALE, MAX_RADIUS, MAX_SCALE, MIN_SCALE};
 use crate::theme::{self, Rgb};
 use crate::ui::{chip_bg, dim, icon, inset, txt, Canvas, Rect, Submit, Ui, WHITE};
 
@@ -24,13 +24,16 @@ const N_RADIUS: u32 = 7;
 const N_AUTOSTART: u32 = 8;
 const N_FACE: u32 = 9;
 const N_RESET: u32 = 10;
+const N_SCALE: u32 = 11;
+const N_STRIP: u32 = 12;
+const N_LANG: u32 = 13;
 const N_PRESET: u32 = 20;
 const N_SWITCH: u32 = 40;
 const N_UP: u32 = 60;
 const N_DOWN: u32 = 80;
 
-const ROW_H: f32 = 21.0;
-const ROW_PITCH: f32 = 23.0;
+const ROW_H: f32 = 23.0;
+const ROW_PITCH: f32 = 26.0;
 
 const BLACK: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
 const CLEAR_BLACK: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
@@ -60,6 +63,9 @@ pub struct Settings {
     hsv: [f32; 3],
     /// Ползунок радиуса сейчас тянут.
     glow: bool,
+    /// Значение масштаба, пока ползунок тянут: применяется при отпускании мыши
+    /// (иначе панель меняет размер под курсором и ползунок «убегает»).
+    scale_drag: Option<f32>,
     autostart: bool,
     /// Вертикальные позиции строк вкладок по их номеру (плавная перестановка).
     rows: [Spring; 7],
@@ -74,6 +80,7 @@ impl Default for Settings {
             target: Target::Accent,
             hsv: theme::rgb_to_hsv(theme::DEFAULT_ACCENT),
             glow: false,
+            scale_drag: None,
             autostart: false,
             rows: std::array::from_fn(|_| Spring::new(0.0, 520.0, 38.0)),
             rows_ready: false,
@@ -87,6 +94,13 @@ fn col(c: Rgb) -> D2D1_COLOR_F {
 
 fn rgb_of(c: D2D1_COLOR_F) -> Rgb {
     [c.r, c.g, c.b]
+}
+
+/// Доля ползунка (0..1) → множитель к DPI. Шаг — 5 п.п. суммарного масштаба (DPI × множитель),
+/// именно его пользователь видит в подписи.
+fn snap_scale(frac: f32, dpi: f32) -> f32 {
+    let v = MIN_SCALE + frac.clamp(0.0, 1.0) * (MAX_SCALE - MIN_SCALE);
+    (((v * dpi * 20.0).round() / 20.0) / dpi).clamp(MIN_SCALE, MAX_SCALE)
 }
 
 fn close(a: Rgb, b: Rgb) -> bool {
@@ -196,9 +210,12 @@ impl Settings {
         self.cfg.bg = d.bg;
         self.cfg.system_colors = false;
         self.cfg.corner_radius = DEFAULT_RADIUS;
+        self.cfg.ui_scale = DEFAULT_SCALE;
+        self.scale_drag = None;
         self.cfg.hidden_tabs.clear();
         self.cfg.tabs = crate::TABS.iter().map(|t| t.to_string()).collect();
         self.cfg.idle_face = true;
+        self.cfg.strip_over_maximized = d.strip_over_maximized;
         self.hsv = theme::rgb_to_hsv(self.current());
         self.changed = true;
     }
@@ -211,8 +228,8 @@ impl Settings {
             self.hsv = if n[1] < 0.01 || n[2] < 0.01 { [self.hsv[0], n[1], n[2]] } else { n };
         }
 
-        let lc = Rect::new(PAD, TOP, 270.0, h - TOP - PAD);
-        let rc = Rect::new(lc.right() + 8.0, TOP, w - PAD - (lc.right() + 8.0), lc.h);
+        let lc = Rect::new(PAD, TOP, 290.0, h - TOP - PAD);
+        let rc = Rect::new(lc.right() + 10.0, TOP, w - PAD - (lc.right() + 10.0), lc.h);
         cv.card(lc);
         cv.card(rc);
         self.colors(ui, cv, lc);
@@ -325,6 +342,28 @@ impl Settings {
             self.cfg.idle_face = face;
             self.changed = true;
         }
+        y += 24.0;
+        cv.text("Над окнами на весь экран — полоска", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut strip = self.cfg.strip_over_maximized;
+        if ui.switch(cv, id(SETTINGS, N_STRIP), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut strip, true) {
+            self.cfg.strip_over_maximized = strip;
+            self.changed = true;
+        }
+        y += 18.0;
+        cv.text("Наведите на верхний край, чтобы раскрыть", Rect::new(x, y, iw, 13.0), &f.small, dim());
+        y += 24.0;
+
+        // Язык интерфейса: применяется сразу.
+        cv.text("Язык", Rect::new(x, y, 80.0, 18.0), &f.body, txt());
+        let langs = [("auto", "Авто", 46.0), ("ru", "RU", 34.0), ("en", "EN", 34.0)];
+        let mut cx = lc.right() - 10.0 - (46.0 + 34.0 + 34.0 + 8.0);
+        for (k, (code, label, w)) in langs.iter().enumerate() {
+            if ui.chip(cv, id(SETTINGS, N_LANG + k as u32), Rect::new(cx, y, *w, 18.0), label, self.cfg.language == *code) {
+                self.cfg.language = code.to_string();
+                self.changed = true;
+            }
+            cx += w + 4.0;
+        }
     }
 
     // ---------- Правая карточка: радиус и вкладки ----------
@@ -346,6 +385,27 @@ impl Settings {
             self.changed = true;
         }
         self.glow = ui.is_dragging(rid);
+        y += 28.0;
+
+        // Масштаб интерфейса (шаг 0.05): применяется, когда мышь отпущена.
+        let shown = self.scale_drag.unwrap_or(self.cfg.ui_scale);
+        let dpi = crate::wnd::dpi_factor();
+        cv.text("Масштаб интерфейса", Rect::new(x, y, 170.0, 13.0), &f.body, txt());
+        cv.text(&format!("{}%", (shown * dpi * 100.0).round() as i32), Rect::new(rc.right() - 70.0, y, 60.0, 13.0), &f.body_r, dim());
+        y += 21.0;
+        let mut frac = (shown - MIN_SCALE) / (MAX_SCALE - MIN_SCALE);
+        let sid = id(SETTINGS, N_SCALE);
+        if ui.slider_thin(cv, sid, Rect::new(x + 6.0, y, iw - 12.0, 14.0), &mut frac) {
+            self.scale_drag = Some(snap_scale(frac, dpi));
+        }
+        if !ui.down {
+            if let Some(v) = self.scale_drag.take() {
+                if (v - self.cfg.ui_scale).abs() > 0.001 {
+                    self.cfg.ui_scale = v;
+                    self.changed = true;
+                }
+            }
+        }
         y += 28.0;
 
         // Вкладки.
@@ -372,7 +432,7 @@ impl Settings {
             if ui.switch(cv, id(SETTINGS, N_SWITCH + tab as u32), Rect::new(r.x + 6.0, r.y + 2.5, 30.0, 16.0), &mut on, can_toggle) {
                 self.set_hidden(tab, !on);
             }
-            cv.text(crate::TABS[tab], Rect::new(r.x + 44.0, r.y, r.w - 92.0, r.h), &f.body, if hidden { dim() } else { txt() });
+            cv.text(crate::i18n::tab_name(tab), Rect::new(r.x + 44.0, r.y, r.w - 92.0, r.h), &f.body, if hidden { dim() } else { txt() });
             let up = Rect::new(r.right() - 44.0, r.y + 1.5, 18.0, 18.0);
             let down = Rect::new(r.right() - 23.0, r.y + 1.5, 18.0, 18.0);
             if pos > 0 {
@@ -450,13 +510,26 @@ mod tests {
     }
 
     #[test]
+    fn scale_snaps_to_five_percent() {
+        assert_eq!(snap_scale(0.0, 1.0), MIN_SCALE);
+        assert_eq!(snap_scale(1.0, 1.0), MAX_SCALE);
+        assert!((snap_scale(0.27, 1.0) - 1.2).abs() < 1e-4);
+        assert!((snap_scale(0.5, 1.0) - 1.45).abs() < 1e-4);
+        // При 125% суммарный масштаб кратен 5%: 1.2 × 125% = 150%.
+        let total = snap_scale(0.27, 1.25) * 1.25 * 100.0;
+        assert!((total / 5.0 - (total / 5.0).round()).abs() < 1e-2, "{total}");
+    }
+
+    #[test]
     fn reset_restores_defaults() {
         let mut s = settings();
+        s.cfg.ui_scale = 1.8;
         s.cfg.corner_radius = 3.0;
         s.cfg.hidden_tabs = vec!["Apps".into()];
         s.cfg.idle_face = false;
         s.reset();
         assert_eq!(s.cfg.corner_radius, DEFAULT_RADIUS);
+        assert_eq!(s.cfg.ui_scale, DEFAULT_SCALE);
         assert!(s.cfg.hidden_tabs.is_empty() && s.cfg.idle_face);
         assert_eq!(s.cfg.resolve_visible(&crate::TABS).len(), 7);
     }

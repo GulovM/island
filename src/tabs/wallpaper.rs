@@ -192,7 +192,7 @@ impl Wall {
             }
             x += bw + 5.0;
         }
-        cv.text(&format!("{n} изобр."), Rect::new(x + 4.0, y, 100.0, 17.0), &f.small, dim());
+        cv.text(&format!("{n} {}", crate::i18n::pick("изобр.", "images")), Rect::new(x + 4.0, y, 100.0, 17.0), &f.small, dim());
         let fb = Rect::new(w - PAD - 19.0, y - 1.0, 19.0, 19.0);
         cv.circle(fb.cx(), fb.cy(), 9.5, card());
         if ui.icon_button(cv, id(WALLPAPER, 7), fb, icon::FOLDER, false) && !self.dir_label.is_empty() {
@@ -206,12 +206,12 @@ impl Wall {
         }
         self.offset.target = self.offset.target.clamp(0.0, max_off);
 
-        const CENTER_W: f32 = 208.0;
-        const SIDE_W: f32 = 41.0;
-        const SLANT: f32 = 20.0;
-        const FIRST: f32 = 131.0;
-        const STEP: f32 = 48.5;
-        let (cx, cy) = (w / 2.0, TOP + 87.5);
+        const CENTER_W: f32 = 240.0;
+        const SIDE_W: f32 = 46.0;
+        const SLANT: f32 = 22.0;
+        const FIRST: f32 = 150.0;
+        const STEP: f32 = 54.0;
+        let (cx, cy) = (w / 2.0, TOP + 108.0);
         let mut vis: Vec<(usize, f32)> = (0..n)
             .map(|p| (p, p as f32 - self.offset.value))
             .filter(|(_, r)| r.abs() < 4.6)
@@ -226,7 +226,7 @@ impl Wall {
         for (pos, r) in vis {
             let a = r.abs().min(1.0);
             let cw = SIDE_W + (CENTER_W - SIDE_W) * (1.0 - a);
-            let ch = 107.0 + 8.0 * (1.0 - a);
+            let ch = 126.0 + 10.0 * (1.0 - a);
             let d = if r.abs() <= 1.0 { r.abs() * FIRST } else { FIRST + (r.abs() - 1.0) * STEP };
             let xc = cx + if r < 0.0 { -d } else { d };
             // Центр параллелограмма по середине высоты, нижняя грань левее верхней на SLANT.
@@ -264,7 +264,7 @@ impl Wall {
             let msg = if self.filter == 1 && !self.files.is_empty() {
                 "Недавних обоев пока нет".to_string()
             } else {
-                format!("В папке нет изображений: {}", self.dir_label)
+                format!("{}: {}", crate::i18n::pick("В папке нет изображений", "No images in the folder"), self.dir_label)
             };
             cv.text(&msg, Rect::new(PAD, cy - 8.0, w - 2.0 * PAD, 16.0), &f.small_c, dim());
         }

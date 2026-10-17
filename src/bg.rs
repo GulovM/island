@@ -73,6 +73,8 @@ pub struct Snapshot {
     pub wifi: Option<bool>,
     pub bluetooth: Option<bool>,
     pub volume: Option<f32>,
+    /// Яркость экрана, 0..=1; `None`, если устройство её не поддерживает.
+    pub brightness: Option<f32>,
     pub muted: bool,
     pub media: Option<Media>,
     /// Сеть Wi-Fi, к которой подключены.
@@ -191,6 +193,7 @@ pub enum Cmd {
     Wifi(bool),
     Bluetooth(bool),
     Volume(f32),
+    Brightness(f32),
     Mute(bool),
     PlayPause,
     Next,
@@ -220,6 +223,7 @@ pub fn start(hwnd: HWND) {
     let spawned = std::thread::Builder::new().name("island-bg".into()).spawn(move || {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            crate::bright::probe();
             watch_volume();
             watch_network();
             refresh_net();
@@ -236,9 +240,11 @@ pub fn start(hwnd: HWND) {
             let wants_net = batch.iter().any(|c| matches!(c, Cmd::Net));
             let only_net = batch.iter().all(|c| matches!(c, Cmd::Net));
             let last_volume = batch.iter().rposition(|c| matches!(c, Cmd::Volume(_)));
+            let last_bright = batch.iter().rposition(|c| matches!(c, Cmd::Brightness(_)));
             for (i, cmd) in batch.into_iter().enumerate() {
                 match cmd {
                     Cmd::Volume(_) if Some(i) != last_volume => {}
+                    Cmd::Brightness(_) if Some(i) != last_bright => {}
                     cmd => unsafe { run(cmd, &mut radio_access) },
                 }
             }
@@ -424,11 +430,11 @@ unsafe fn wifi_networks(scan: bool) -> Vec<DevItem> {
                 let sub = if connected {
                     "Подключено".to_string()
                 } else if saved {
-                    format!("Сохранена • {}%", n.wlanSignalQuality)
+                    format!("{} • {}%", crate::i18n::pick("Сохранена", "Saved"), n.wlanSignalQuality)
                 } else if n.bSecurityEnabled.as_bool() {
-                    format!("Защищена • {}%", n.wlanSignalQuality)
+                    format!("{} • {}%", crate::i18n::pick("Защищена", "Secured"), n.wlanSignalQuality)
                 } else {
-                    format!("Открытая • {}%", n.wlanSignalQuality)
+                    format!("{} • {}%", crate::i18n::pick("Открытая", "Open"), n.wlanSignalQuality)
                 };
                 let extra = if saved {
                     String::new()
@@ -973,6 +979,15 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool) {
                 let _ = ep.SetMasterVolumeLevelScalar(v.clamp(0.0, 1.0), std::ptr::null());
             }
         }
+        Cmd::Brightness(v) => {
+            crate::bright::set(v);
+            // Снимок обновляем сами, иначе после удержания ползунок вернётся к старому значению.
+            if let Ok(mut s) = SNAPSHOT.lock() {
+                if let Some(s) = s.as_mut() {
+                    s.brightness = Some(v.clamp(0.0, 1.0));
+                }
+            }
+        }
         Cmd::Mute(m) => {
             if let Some(ep) = endpoint() {
                 let _ = ep.SetMute(m, std::ptr::null());
@@ -1169,6 +1184,11 @@ unsafe fn refresh(full: bool) {
         snap.wifi = prev.wifi;
         snap.bluetooth = prev.bluetooth;
     }
+    snap.brightness = if full || snapshot().brightness.is_none() && crate::bright::available() {
+        crate::bright::get()
+    } else {
+        snapshot().brightness
+    };
     if let Some(dev) = device() {
         snap.audio = device_name(&dev);
         if let Ok(ep) = dev.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None) {

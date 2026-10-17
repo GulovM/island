@@ -11,6 +11,10 @@ impl App {
         self.tab = i;
         self.settings_open = false;
         self.ui.blur();
+        // В буфере обмена клавиатура сразу управляет списком: фокус в поиске.
+        if self.order.get(i) == Some(&tabs::CLIPBOARD) {
+            self.ui.focus = Some(tabs::id(tabs::CLIPBOARD, 0));
+        }
     }
 
     pub(crate) fn tab_row_width(&self) -> f32 {

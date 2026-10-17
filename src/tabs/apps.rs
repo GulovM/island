@@ -3,7 +3,7 @@
 //! Иконки берутся из Shell в фоновом потоке (`icons`), UWP-приложения добавляются из
 //! `shell:AppsFolder`; пока иконка не пришла, в строке — первая буква названия.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::config::Config;
@@ -14,6 +14,8 @@ use crate::ui::{icon, mix, Canvas, Nav, Rect, Submit, Ui, card, dim, fg, txt};
 use super::{id, read_lines, write_lines, Action, APPS, PAD, TOP};
 
 const FILE: &str = "apps.txt";
+/// Пути, скрытые пользователем клавишей Delete.
+const HIDDEN_FILE: &str = "apps_hidden.txt";
 const MAX_DEPTH: u32 = 4;
 const RECENT_COUNT: usize = 5;
 /// Глиф «молния» для быстрых ссылок.
@@ -41,6 +43,7 @@ pub struct Apps {
     /// приложений, которых сейчас нет в индексе (UWP подгружаются позже).
     stats: HashMap<String, (u32, u64, bool)>,
     icons_gen: u32,
+    hidden: HashSet<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -74,8 +77,12 @@ impl Apps {
         for d in &dirs {
             scan(d, 0, &mut files);
         }
+        self.hidden = read_lines(HIDDEN_FILE).into_iter().filter(|l| !l.is_empty()).collect();
         let mut entries: Vec<Entry> = Vec::new();
         for p in files {
+            if p.to_str().is_some_and(|s| self.hidden.contains(s)) {
+                continue;
+            }
             let Some(name) = p.file_stem().and_then(|s| s.to_str()).map(str::to_string) else { continue };
             let lower = name.to_lowercase();
             if lower.contains("uninstall") || lower.contains("удалить") || lower.contains("удаление") {
@@ -115,7 +122,7 @@ impl Apps {
         if found.is_empty() {
             return false;
         }
-        let mut resort = false;
+        let (mut resort, mut dead) = (false, false);
         for f in found {
             match f {
                 icons::Found::Icon(path, px) => {
@@ -123,7 +130,15 @@ impl Apps {
                         e.icon = Some(px);
                     }
                 }
+                icons::Found::Dead(path) => {
+                    self.entries.retain(|e| e.path.to_str() != Some(path.as_str()));
+                    self.stats.remove(&path);
+                    dead = true;
+                }
                 icons::Found::Uwp(u) => {
+                    if self.hidden.contains(&u.target) {
+                        continue;
+                    }
                     let lower = u.name.to_lowercase();
                     if self.entries.iter().any(|e| e.lower == lower) {
                         continue;
@@ -144,6 +159,10 @@ impl Apps {
         }
         if resort {
             self.entries.sort_by(|a, b| a.lower.cmp(&b.lower));
+        }
+        if dead {
+            // Статистика мёртвых ярлыков больше не нужна.
+            self.save();
         }
         true
     }
@@ -207,16 +226,36 @@ impl Apps {
         scored.into_iter().map(|(_, it)| (it, "")).collect()
     }
 
+    /// Убирает запись из списка насовсем (для ярлыков, которые не определить как мёртвые).
+    fn hide(&mut self, i: usize) {
+        let e = self.entries.remove(i);
+        if let Some(p) = e.path.to_str() {
+            self.stats.remove(p);
+            self.hidden.insert(p.to_string());
+        }
+        let mut lines: Vec<String> = self.hidden.iter().cloned().collect();
+        lines.sort();
+        write_lines(HIDDEN_FILE, &lines);
+        self.save();
+    }
+
     fn launch(&mut self, it: Item, act: &mut Vec<Action>) {
         match it {
             Item::App(i) => {
                 let e = &mut self.entries[i];
-                sys::open(&e.path.display().to_string());
+                // Отказ Shell (цель удалена) не считается запуском и не закрывает остров.
+                if !sys::open(&e.path.display().to_string()) {
+                    return;
+                }
                 e.launches += 1;
                 e.last = sys::now_secs();
                 self.save();
             }
-            Item::Snippet(i) => sys::open(&self.snippets[i].1),
+            Item::Snippet(i) => {
+                if !sys::open(&self.snippets[i].1) {
+                    return;
+                }
+            }
         }
         act.push(Action::Collapse);
     }
@@ -246,7 +285,13 @@ impl Apps {
                         self.save();
                     }
                 }
-                Nav::Copy | Nav::Delete | Nav::Tab => {}
+                Nav::Delete => {
+                    if let Some((Item::App(i), _)) = self.sel.and_then(|s| items.get(s)).copied() {
+                        self.hide(i);
+                        return;
+                    }
+                }
+                Nav::Copy | Nav::Tab => {}
             }
         }
         if ui.take_submitted(fid).is_some() {

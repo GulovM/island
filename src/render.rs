@@ -111,7 +111,7 @@ impl App {
 
         if open > 0.02 {
             // Точка слева в ряду вкладок: режим полоски включён.
-            if self.strip_mode {
+            if self.cfg.strip_over_maximized {
                 g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
                 let mut c = accent;
                 c.a = open;
@@ -160,7 +160,7 @@ impl App {
                 }
                 let mut c = if active { accent } else { ui::dim() };
                 c.a *= open;
-                g.draw_text(TABS[self.order[i]], px, py, pw, ph, c);
+                g.draw_text(crate::i18n::tab_name(self.order[i]), px, py, pw, ph, c);
             }
 
             // Шестерёнка настроек: при наведении поворачивается, при открытых настройках залита акцентом.
@@ -209,7 +209,7 @@ impl App {
                 if alpha < 0.01 {
                     return;
                 }
-                let (w, h) = (self.tab_w(id), TAB_SIZES[id].1);
+                let (w, h) = (self.tab_w(id), App::tab_h(id));
                 let ox = centre - w / 2.0 + dx;
                 g.dc.SetTransform(&ui::matrix(s, ox * s, 0.0));
                 ui.begin_content(ox, interactive);

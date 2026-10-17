@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use super::*;
 
 // ---------- События от оконной процедуры к главному циклу ----------
@@ -319,22 +321,52 @@ pub(crate) unsafe extern "system" fn scan_window(hwnd: HWND, lp: LPARAM) -> BOOL
     BOOL(0)
 }
 
+/// Масштаб интерфейса из настроек (биты f32); читается при каждом расчёте размера окна.
+static UI_SCALE: AtomicU32 = AtomicU32::new(0);
+
+pub(crate) fn set_ui_scale(v: f32) {
+    UI_SCALE.store(v.to_bits(), Ordering::Relaxed);
+}
+
+/// Коэффициент DPI (1.25 при 125% в Windows) последнего измеренного монитора; в Настройках
+/// масштаб показывается суммарно: DPI × множитель.
+static DPI_FACTOR: AtomicU32 = AtomicU32::new(0);
+
+pub(crate) fn dpi_factor() -> f32 {
+    match DPI_FACTOR.load(Ordering::Relaxed) {
+        0 => 1.0,
+        b => f32::from_bits(b),
+    }
+}
+
 pub(crate) unsafe fn monitor_scale(mon: HMONITOR) -> f32 {
     let (mut x, mut y) = (96u32, 96u32);
     let _ = GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut x, &mut y);
-    x as f32 / 96.0 * UI_ZOOM
+    let zoom = match UI_SCALE.load(Ordering::Relaxed) {
+        0 => config::DEFAULT_SCALE,
+        b => f32::from_bits(b),
+    };
+    DPI_FACTOR.store((x as f32 / 96.0).to_bits(), Ordering::Relaxed);
+    let mut scale = x as f32 / 96.0 * zoom;
+    // Окно не должно быть больше монитора.
+    let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+    if GetMonitorInfoW(mon, &mut mi).as_bool() {
+        let (mw, mh) = ((mi.rcMonitor.right - mi.rcMonitor.left) as f32, (mi.rcMonitor.bottom - mi.rcMonitor.top) as f32);
+        scale = scale.min(mw / WIN_LOGICAL.0).min(mh * 0.95 / WIN_LOGICAL.1);
+    }
+    scale
 }
 
 /// Ширина подписи каждой вкладки (логические пиксели, вместе с внутренними полями).
 pub(crate) unsafe fn measure_tabs(dwrite: &IDWriteFactory, scale: f32) -> Result<[f32; TAB_COUNT]> {
     let text = gfx::make_text(dwrite, scale)?;
     let mut widths = [0.0f32; TAB_COUNT];
-    for (i, name) in TABS.iter().enumerate() {
-        let wide: Vec<u16> = name.encode_utf16().collect();
+    for (i, width) in widths.iter_mut().enumerate() {
+        let wide: Vec<u16> = crate::i18n::tab_name(i).encode_utf16().collect();
         let layout = dwrite.CreateTextLayout(&wide, &text, 1000.0, 100.0)?;
         let mut m = DWRITE_TEXT_METRICS::default();
         layout.GetMetrics(&mut m)?;
-        widths[i] = m.widthIncludingTrailingWhitespace / scale + TAB_PAD * 2.0;
+        *width = m.widthIncludingTrailingWhitespace / scale + TAB_PAD * 2.0;
     }
     Ok(widths)
 }

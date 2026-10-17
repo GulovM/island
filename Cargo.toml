@@ -1,6 +1,6 @@
 [package]
 name = "island"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "Dynamic island for Windows 10/11: a GPU-drawn notch at the top of the screen"
 license = "MIT"
@@ -18,6 +18,8 @@ windows-future = "0.2"
 version = "0.61"
 features = [
     "Win32_Foundation",
+    "Win32_Devices_Display",
+    "Win32_System_IO",
     "Win32_Globalization",
     "Win32_Networking_WinSock",
     "Win32_Devices_FunctionDiscovery",

@@ -14,8 +14,8 @@ use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPRO
 
 use crate::{bg, log, sys};
 
-pub const W: u32 = 160;
-pub const H: u32 = 90;
+pub const W: u32 = 384;
+pub const H: u32 = 216;
 
 static GEN: AtomicU32 = AtomicU32::new(0);
 static READY: Mutex<Vec<(u32, usize, Vec<u8>)>> = Mutex::new(Vec::new());

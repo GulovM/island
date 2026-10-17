@@ -3,9 +3,11 @@
 
 mod anim;
 mod bg;
+mod bright;
 mod config;
 mod face;
 mod gfx;
+mod i18n;
 mod log;
 mod online;
 mod perf;
@@ -59,19 +61,17 @@ const TAB_COUNT: usize = 7;
 const TABS: [&str; TAB_COUNT] = ["Controls", "Today", "Stats", "Clipboard", "Apps", "Wallpaper", "Power"];
 /// Размер панели для каждой вкладки (ширина, высота) — как на скриншотах; последний — страница настроек.
 const TAB_SIZES: [(f32, f32); 8] = [
-    (400.0, 242.0),
-    (550.0, 275.0),
-    (550.0, 210.0),
-    (550.0, 278.0),
-    (450.0, 395.0),
-    (650.0, 194.0),
-    (400.0, 103.0),
-    (580.0, 322.0),
+    (430.0, 282.0),
+    (660.0, 304.0),
+    (640.0, 282.0),
+    (590.0, 300.0),
+    (480.0, 420.0),
+    (700.0, 236.0),
+    (420.0, 112.0),
+    (620.0, 398.0),
 ];
 /// Высота «тонкой полоски», в которую остров сворачивается поверх развёрнутого на весь экран окна.
 const STRIP_H: f32 = 3.0;
-/// Общий коэффициент увеличения интерфейса поверх масштаба DPI (размеры и шрифты растут вместе).
-const UI_ZOOM: f32 = 1.2;
 const TAB_H: f32 = 17.0;
 const TAB_GAP: f32 = 4.0;
 const TAB_PAD: f32 = 8.0;
@@ -79,7 +79,7 @@ const TAB_TOP: f32 = 9.0;
 /// Отступ ряда вкладок от краёв панели.
 const TAB_SIDE: f32 = 28.0;
 /// Размер окна: самая большая панель (650×400) + запас под перелёт пружины и «ушки».
-const WIN_LOGICAL: (f32, f32) = (700.0, 430.0);
+const WIN_LOGICAL: (f32, f32) = (760.0, 500.0);
 /// Допуск вокруг раскрытой формы, где мышь ещё считается «на острове» (только слева/справа/снизу).
 const HIT_SLOP: f32 = 4.0;
 /// Радиус шестерёнки настроек в ряду вкладок.
@@ -209,7 +209,6 @@ struct App {
     /// Включён ли секундный тик мини-плеера.
     live_tick_on: bool,
     /// Режим «полоска над развёрнутыми окнами» (по умолчанию выключен).
-    strip_mode: bool,
     /// Клавиатурный ввод включён: окно временно активно и принимает фокус.
     kbd: bool,
     /// Окно, которое было активным до включения ввода.
@@ -261,6 +260,7 @@ impl App {
             TASKBAR_MSG.with(|c| c.set(RegisterWindowMessageW(w!("TaskbarCreated"))));
 
             let mon = MonitorFromPoint(POINT::default(), MONITOR_DEFAULTTOPRIMARY);
+            set_ui_scale(cfg.ui_scale);
             let scale = monitor_scale(mon);
             let cw = (WIN_LOGICAL.0 * scale).ceil() as i32;
             let ch = (WIN_LOGICAL.1 * scale).ceil() as i32;
@@ -314,7 +314,6 @@ impl App {
                 tab_dir: 1.0,
                 live: live::Live::new(cfg.live_media),
                 live_tick_on: false,
-                strip_mode: tabs::read_lines(STRIP_FILE).first().is_some_and(|l| l.trim() == "1"),
                 kbd: false,
                 prev_fg: HWND(std::ptr::null_mut()),
                 high_surrogate: 0,
@@ -404,9 +403,21 @@ impl App {
         self.cfg.bg = new.bg;
         self.cfg.system_colors = new.system_colors;
         self.cfg.corner_radius = new.corner_radius;
+        if (self.cfg.ui_scale - new.ui_scale).abs() > 0.001 {
+            self.cfg.ui_scale = new.ui_scale;
+            set_ui_scale(new.ui_scale);
+            // SAFETY: вызывается из оконного потока, `mon` — монитор, на котором стоит остров.
+            unsafe { self.apply_monitor(self.mon, true) };
+        }
         self.cfg.tabs = new.tabs;
         self.cfg.hidden_tabs = new.hidden_tabs;
+        self.cfg.strip_over_maximized = new.strip_over_maximized;
         self.cfg.idle_face = new.idle_face;
+        if self.cfg.language != new.language {
+            self.cfg.language = new.language;
+            // SAFETY: оконный поток, DirectWrite-фабрика жива.
+            unsafe { self.refresh_language() };
+        }
         self.order = self.cfg.resolve_visible(&TABS);
         self.tab = self.order.iter().position(|&i| i == current).unwrap_or(0);
         self.face.set_enabled(self.cfg.idle_face);
@@ -416,8 +427,24 @@ impl App {
     }
 
     /// Ширина панели вкладки: не уже ряда вкладок, иначе они обрезаются.
+    /// Высота панели вкладки: у «Управления» прибавляется полоска яркости, если она поддерживается.
+    fn tab_h(id: usize) -> f32 {
+        let extra = if id == tabs::CONTROLS && bright::available() { 34.0 } else { 0.0 };
+        TAB_SIZES[id].1 + extra
+    }
+
     fn tab_w(&self, id: usize) -> f32 {
         TAB_SIZES[id].0.max(self.tab_row_width() + 2.0 * TAB_SIDE)
+    }
+
+    /// Применяет язык из конфига: подписи вкладок меняют ширину, поэтому ряд измеряется заново.
+    unsafe fn refresh_language(&mut self) {
+        i18n::set(i18n::from_config(&self.cfg.language));
+        match measure_tabs(&self.dwrite, self.scale) {
+            Ok(w) => self.tab_widths = w,
+            Err(e) => log::error(&format!("не удалось измерить вкладки: {e}")),
+        }
+        self.retarget();
     }
 
     unsafe fn apply_config(&mut self, cfg: Config) {
@@ -425,6 +452,9 @@ impl App {
         self.order = cfg.resolve_visible(&TABS);
         self.tab = self.order.iter().position(|&i| i == current).unwrap_or(0);
         self.cfg = cfg;
+        set_ui_scale(self.cfg.ui_scale);
+        self.refresh_language();
+        self.apply_monitor(self.mon, true);
         self.face.set_enabled(self.cfg.idle_face);
         self.apply_theme();
         self.live.set_media_enabled(self.cfg.live_media);
@@ -501,7 +531,14 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let cfg = config::load();
+    let mut cfg = config::load();
+    // Прежний выбор из strip.txt переносится в config.toml один раз.
+    if let Some(l) = tabs::read_lines(STRIP_FILE).first() {
+        cfg.strip_over_maximized = l.trim() == "1";
+        config::save(&cfg, &TABS);
+        let _ = std::fs::remove_file(sys::data_dir().join(STRIP_FILE));
+    }
+    i18n::set(i18n::from_config(&cfg.language));
     log::info("запуск");
     let mut app = App::new(cfg)?;
     let mut last = Instant::now();

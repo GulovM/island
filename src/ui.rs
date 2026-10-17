@@ -227,6 +227,8 @@ pub struct Fonts {
     pub big_c: IDWriteTextFormat,
     /// Жирный абзац по центру с переносом (превью буфера обмена).
     pub wrap_b: IDWriteTextFormat,
+    /// Полужирный абзац слева с переносом по словам (текст задач).
+    pub wrap_l: IDWriteTextFormat,
     pub icon: IDWriteTextFormat,
     pub icon_big: IDWriteTextFormat,
     /// Готовые раскладки текста: `DrawText` строит её заново при каждом вызове, а в кадре
@@ -274,6 +276,34 @@ unsafe fn fmt(
     Ok(t)
 }
 
+/// Обрезает `s` до `units` единиц UTF-16 (границы строк DirectWrite) и ставит «…» вместо
+/// последних символов, чтобы многоточие поместилось в ту же строку.
+/// Масштаб и сдвиг, чтобы картинка `bw`×`bh` закрыла прямоугольник `w`×`h` целиком
+/// (режим «cover»): излишек обрезается поровну с обеих сторон.
+fn cover_transform(w: f32, h: f32, bw: f32, bh: f32) -> (f32, f32, f32) {
+    let s = (w / bw).max(h / bh);
+    (s, (w - bw * s) / 2.0, (h - bh * s) / 2.0)
+}
+
+fn ellipsize_units(s: &str, units: usize) -> String {
+    let (mut out, mut used) = (String::new(), 0usize);
+    for c in s.chars() {
+        used += c.len_utf16();
+        if used > units {
+            break;
+        }
+        out.push(c);
+    }
+    for _ in 0..3 {
+        out.pop();
+    }
+    while out.ends_with(char::is_whitespace) {
+        out.pop();
+    }
+    out.push('…');
+    out
+}
+
 impl Fonts {
     pub unsafe fn new(f: &IDWriteFactory) -> Result<Self> {
         // Segoe UI Variable Text (Windows 11) — оптимизирован для мелкого размера; запасной — Segoe UI.
@@ -308,6 +338,12 @@ impl Fonts {
                 t.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
                 t
             },
+            wrap_l: {
+                let t = fmt(f, ui, semi, 8.0, false)?;
+                t.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
+                t.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
+                t
+            },
             icon: fmt(f, icons, reg, 9.0, true)?,
             icon_big: fmt(f, icons, reg, 12.0, true)?,
             layouts: RefCell::new(HashMap::new()),
@@ -320,6 +356,7 @@ impl Fonts {
         if !(w > 0.0 && h > 0.0) {
             return None;
         }
+        let s = &*crate::i18n::tr(s);
         let mut hasher = DefaultHasher::new();
         s.hash(&mut hasher);
         (f.as_raw() as usize).hash(&mut hasher);
@@ -443,6 +480,47 @@ impl Canvas<'_> {
 
     /// Ширина строки в логических пикселях по формату `f` (раскладка из кэша); при отказе DirectWrite —
     /// грубая оценка по числу символов.
+    /// Сколько строк займёт `s` при переносе по словам в ширину `w` и какова высота строки.
+    pub unsafe fn wrapped(&self, s: &str, f: &IDWriteTextFormat, w: f32) -> (usize, f32) {
+        if let Some(l) = self.g.fonts.layout(s, f, w, 10_000.0) {
+            let mut m = DWRITE_TEXT_METRICS::default();
+            if l.GetMetrics(&mut m).is_ok() && m.lineCount > 0 {
+                return (m.lineCount as usize, m.height / m.lineCount as f32);
+            }
+        }
+        (1, 11.0)
+    }
+
+    /// Текст, не длиннее `max_lines` строк при переносе в ширину `w`: лишнее заменяется «…».
+    pub unsafe fn wrap_clip<'s>(&self, s: &'s str, f: &IDWriteTextFormat, w: f32, max_lines: usize) -> std::borrow::Cow<'s, str> {
+        let Some(l) = self.g.fonts.layout(s, f, w, 10_000.0) else { return s.into() };
+        let mut m = DWRITE_TEXT_METRICS::default();
+        if l.GetMetrics(&mut m).is_err() || (m.lineCount as usize) <= max_lines {
+            return s.into();
+        }
+        let mut lines = vec![DWRITE_LINE_METRICS::default(); m.lineCount as usize];
+        let mut n = 0u32;
+        if l.GetLineMetrics(Some(&mut lines), &mut n).is_err() {
+            return s.into();
+        }
+        let units: u32 = lines.iter().take(max_lines).map(|x| x.length).sum();
+        ellipsize_units(s, units as usize).into()
+    }
+
+    /// Как `text`, но с переключаемым зачёркиванием (для выполненных задач).
+    pub unsafe fn text_strike(&self, s: &str, r: Rect, f: &IDWriteTextFormat, c: D2D1_COLOR_F, strike: bool) {
+        if s.is_empty() {
+            return;
+        }
+        self.g.brush.SetColor(&self.col(c));
+        if let Some(layout) = self.g.fonts.layout(s, f, r.w, r.h) {
+            // Раскладка общая из кэша: признак ставится явно при каждой отрисовке.
+            let range = DWRITE_TEXT_RANGE { startPosition: 0, length: s.encode_utf16().count() as u32 };
+            let _ = layout.SetStrikethrough(strike, range);
+            self.g.dc.DrawTextLayout(pt(r.x, r.y), &layout, &self.g.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
+    }
+
     pub unsafe fn text_w(&self, s: &str, f: &IDWriteTextFormat) -> f32 {
         if let Some(l) = self.g.fonts.layout(s, f, 10_000.0, 100.0) {
             let mut m = DWRITE_TEXT_METRICS::default();
@@ -517,14 +595,9 @@ impl Canvas<'_> {
                 let Ok(br) = self.g.dc.CreateBitmapBrush(b, None, None) else { return };
                 br.SetInterpolationMode(D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
                 br.SetOpacity(opacity * self.alpha);
-                br.SetTransform(&Matrix3x2 {
-                    M11: r.w / sz.width as f32,
-                    M12: 0.0,
-                    M21: 0.0,
-                    M22: r.h / sz.height as f32,
-                    M31: r.x,
-                    M32: r.y,
-                });
+                // Картинка не сжимается по одной оси: масштаб «cover», лишнее по краям обрезается.
+                let (s, dx, dy) = cover_transform(r.w + slant, r.h, sz.width as f32, sz.height as f32);
+                br.SetTransform(&Matrix3x2 { M11: s, M12: 0.0, M21: 0.0, M22: s, M31: r.x + dx, M32: r.y + dy });
                 self.g.dc.FillGeometry(&geo, &br, None);
             }
             _ => {
@@ -865,6 +938,8 @@ pub struct Ui {
     fields: HashMap<u32, Field>,
     /// Поле с клавиатурным фокусом.
     pub focus: Option<u32>,
+    /// Поле, которое возвращает себе фокус после нажатия мимо полей (поиск в буфере обмена).
+    pub sticky_focus: Option<u32>,
     pub caret_on: bool,
     focus_claimed: bool,
     /// Куда поставить окно IME: (x, y) в логических пикселях окна.
@@ -888,13 +963,14 @@ impl Ui {
             self.drag = None;
         }
         self.focus_claimed = false;
+        self.sticky_focus = None;
         self.ime_pos = None;
     }
 
     pub fn end_frame(&mut self) {
         // Нажатие мимо текстового поля снимает фокус ввода.
         if self.pressed && !self.focus_claimed {
-            self.focus = None;
+            self.focus = self.sticky_focus;
         }
         if self.released {
             self.drag = None;
@@ -1414,9 +1490,15 @@ impl Ui {
     /// Однострочное поле ввода: курсор, выделение мышью и клавишами, прокрутка по caret.
     /// Поле ввода с иконкой и режимом Enter.
     pub unsafe fn text_field_ex(&mut self, cv: &Canvas, id: u32, r: Rect, placeholder: &str, glyph: &str, submit: Submit) {
+        self.text_field_pad(cv, id, r, placeholder, glyph, submit, 10.0);
+    }
+
+    /// То же, но с заданным отступом справа: текст не заезжает под кнопки поверх поля.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn text_field_pad(&mut self, cv: &Canvas, id: u32, r: Rect, placeholder: &str, glyph: &str, submit: Submit, right: f32) {
         self.fields.entry(id).or_default().submit = submit;
         let (hover, _) = self.interact(id, r);
-        let inner = Rect::new(r.x + 30.0, r.y, (r.w - 30.0 - 10.0).max(1.0), r.h);
+        let inner = Rect::new(r.x + 30.0, r.y, (r.w - 30.0 - right).max(1.0), r.h);
         let w = self.widget(id);
         let (hv, ov) = (w.hover.value, w.on.value);
         let focused_now = self.focus == Some(id);
@@ -1617,7 +1699,27 @@ fn shift_down() -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cover_crops_instead_of_squeezing() {
+        // Узкая карточка 40×100 для кадра 16:9 384×216: масштаб по высоте, обрезка по бокам.
+        let (s, dx, dy) = super::cover_transform(40.0, 100.0, 384.0, 216.0);
+        assert!((s - 100.0 / 216.0).abs() < 1e-5 && dy.abs() < 1e-4);
+        assert!(dx < 0.0 && ((384.0 * s + 2.0 * dx) - 40.0).abs() < 1e-3);
+        // Широкая карточка: масштаб по ширине, обрезка сверху и снизу.
+        let (s, dx, dy) = super::cover_transform(384.0, 100.0, 384.0, 216.0);
+        assert!((s - 1.0).abs() < 1e-5 && dx.abs() < 1e-4 && dy < 0.0);
+    }
+
     use super::*;
+
+    #[test]
+    fn ellipsize_cuts_on_utf16_units() {
+        assert_eq!(ellipsize_units("абвгдежзик", 8), "абвгд…");
+        assert_eq!(ellipsize_units("ab", 10), "…");
+        // Символ вне BMP занимает две единицы.
+        assert_eq!(ellipsize_units("😀😀😀😀😀", 6), "…");
+        assert_eq!(ellipsize_units("слово слово слово", 12), "слово сло…");
+    }
 
     #[test]
     fn field_edit() {

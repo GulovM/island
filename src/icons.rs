@@ -14,10 +14,12 @@ use windows::Win32::Graphics::Gdi::{
     DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
     HGDIOBJ,
 };
-use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_MULTITHREADED};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, STGM_READ,
+};
 use windows::Win32::UI::Shell::{
-    FOLDERID_AppsFolder, IEnumShellItems, IShellItem, IShellItemImageFactory, SHCreateItemFromParsingName,
-    SHGetKnownFolderItem, BHID_EnumItems, KF_FLAG_DEFAULT, SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING,
+    FOLDERID_AppsFolder, IEnumShellItems, IShellItem, IShellItemImageFactory, IShellLinkW, SHCreateItemFromParsingName,
+    SHGetKnownFolderItem, ShellLink, BHID_EnumItems, KF_FLAG_DEFAULT, SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING,
     SIIGBF_ICONONLY,
 };
 
@@ -36,6 +38,8 @@ pub enum Found {
     /// Иконка для записи с таким путём.
     Icon(String, Vec<u8>),
     Uwp(Uwp),
+    /// Ярлык с таким путём ведёт в никуда (приложение удалено) — из списка его надо убрать.
+    Dead(String),
 }
 
 static GEN: AtomicU32 = AtomicU32::new(0);
@@ -56,7 +60,9 @@ pub fn request(paths: Vec<String>) -> u32 {
             if GEN.load(Ordering::SeqCst) != gen {
                 return;
             }
-            if let Some(px) = path_icon(&p) {
+            if shortcut_dead(&p) {
+                push(Found::Dead(p));
+            } else if let Some(px) = path_icon(&p) {
                 push(Found::Icon(p, px));
             }
         }
@@ -75,6 +81,56 @@ pub fn request(paths: Vec<String>) -> u32 {
 pub fn drain(gen: u32) -> Vec<Found> {
     let Ok(mut r) = READY.lock() else { return Vec::new() };
     std::mem::take(&mut *r).into_iter().filter(|(g, _)| *g == gen).map(|(_, f)| f).collect()
+}
+
+/// Ярлык меню «Пуск» ведёт в никуда. `.lnk` — сохранённая цель задана и файла нет; `.url` —
+/// см. `url_dead`. Ярлыки без файловой цели (UWP, MSI-«рекламируемые», сетевые пути) живыми.
+pub unsafe fn shortcut_dead(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    if lower.ends_with(".url") {
+        return std::fs::read(path).is_ok_and(|b| url_dead(&String::from_utf8_lossy(&b)));
+    }
+    if !lower.ends_with(".lnk") {
+        return false;
+    }
+    match lnk_target(path) {
+        Some(t) => !t.is_empty() && !t.starts_with("\\\\") && !std::path::Path::new(&t).exists(),
+        None => false,
+    }
+}
+
+unsafe fn lnk_target(path: &str) -> Option<String> {
+    let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+    let file: IPersistFile = link.cast().ok()?;
+    let wide = sys::wz(path);
+    file.Load(PCWSTR(wide.as_ptr()), STGM_READ).ok()?;
+    let mut buf = [0u16; 520];
+    link.GetPath(&mut buf, std::ptr::null_mut(), 0).ok()?;
+    let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    Some(String::from_utf16_lossy(&buf[..n]))
+}
+
+/// `.url` мёртв, если ведёт на `file:` без файла либо на нестандартный протокол (`steam://`,
+/// `goggalaxy://`…), а его иконка лежит по абсолютному пути, которого уже нет: так выглядят
+/// удалённые игры, оставившие ярлык в меню «Пуск».
+fn url_dead(text: &str) -> bool {
+    let (mut url, mut icon) = ("", "");
+    for l in text.lines() {
+        let l = l.trim();
+        if let Some(v) = l.strip_prefix("URL=") {
+            url = v.trim();
+        } else if let Some(v) = l.strip_prefix("IconFile=") {
+            icon = v.trim().trim_matches('"');
+        }
+    }
+    let low = url.to_ascii_lowercase();
+    let absolute = |p: &str| p.len() > 2 && p.as_bytes()[1] == b':';
+    if let Some(rest) = low.strip_prefix("file:") {
+        let rest = rest.trim_start_matches('/');
+        return !rest.contains('%') && absolute(rest) && !std::path::Path::new(rest).exists();
+    }
+    let web = ["http:", "https:", "ftp:"].iter().any(|s| low.starts_with(s));
+    !url.is_empty() && !web && absolute(icon) && !std::path::Path::new(icon).exists()
 }
 
 /// Иконка по пути ярлыка. Используется также тестом-«выгрузкой» для проверки.
@@ -230,6 +286,22 @@ mod tests {
             }
             crate::img::save_png(&dir.join("icons.png"), w as u32, h as u32, &out).expect("png");
         }
+    }
+
+    #[test]
+    fn url_shortcuts_to_removed_games_are_dead() {
+        // Удалённая игра Steam: протокол нестандартный, иконки на диске нет.
+        assert!(url_dead("[InternetShortcut]\r\nURL=steam://rungameid/1\r\nIconFile=C:\\no\\such\\dir\\game.ico\r\n"));
+        // Иконка на месте (берём существующий файл) — игра считается установленной.
+        let exe = std::env::current_exe().unwrap();
+        assert!(!url_dead(&format!("URL=steam://rungameid/1\nIconFile={}\n", exe.display())));
+        // Обычные ссылки и ссылки без иконки не трогаем.
+        assert!(!url_dead("URL=https://example.com\nIconFile=C:\\no\\such.ico\n"));
+        assert!(!url_dead("URL=steam://rungameid/1\n"));
+        assert!(!url_dead(""));
+        // file: на несуществующий файл.
+        assert!(url_dead("URL=file:///C:/no/such/file.exe\n"));
+        assert!(!url_dead(&format!("URL=file:///{}\n", exe.display().to_string().replace('\\', "/"))));
     }
 
     #[test]

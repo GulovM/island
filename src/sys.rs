@@ -386,12 +386,15 @@ pub fn current_wallpaper() -> Option<String> {
 }
 
 /// Открывает файл, ярлык или ссылку программой по умолчанию.
-pub fn open(target: &str) {
+/// Открывает файл, ссылку или ярлык через Shell. `false` — Shell отказался (ShellExecute
+/// возвращает значение ≤ 32): например, цель ярлыка удалена.
+pub fn open(target: &str) -> bool {
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     unsafe {
         let t = wz(target);
-        ShellExecuteW(None, w!("open"), PCWSTR(t.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+        let h = ShellExecuteW(None, w!("open"), PCWSTR(t.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+        h.0 as isize > 32
     }
 }
 

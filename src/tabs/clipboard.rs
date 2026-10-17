@@ -20,7 +20,7 @@ const FILE: &str = "clipboard.txt";
 const MAX_ITEMS: usize = 100;
 /// Длиннее этого текст не сохраняется целиком.
 const MAX_CHARS: usize = 20_000;
-const LIST_W: f32 = 228.0;
+const LIST_W: f32 = 250.0;
 const IMG_TAG: &str = "\u{1}img:";
 /// Размер превью-изображения (пиксели), вписывается без увеличения.
 const PREVIEW_MAX: (u32, u32) = (420, 280);
@@ -31,6 +31,8 @@ pub fn clip_dir() -> PathBuf {
 }
 
 /// Готовые к записи в историю изображения: (файл, ширина, высота).
+/// Подпись и время последнего снимка (для отсева повторных уведомлений).
+static LAST_IMG: Mutex<(u64, u64)> = Mutex::new((0, 0));
 static DONE: Mutex<Vec<(String, u32, u32)>> = Mutex::new(Vec::new());
 /// Декодированное превью: (файл, ширина, высота, пиксели BGRA premultiplied).
 #[allow(clippy::type_complexity)]
@@ -71,7 +73,7 @@ impl Item {
     /// Подпись в списке.
     fn label(&self) -> String {
         match self.image() {
-            Some((_, w, h)) => format!("Изображение {w}×{h}"),
+            Some((_, w, h)) => format!("{} {w}×{h}", crate::i18n::t("Изображение")),
             None => first_line(&self.text).to_string(),
         }
     }
@@ -175,6 +177,20 @@ impl Clip {
         if self.paused {
             return;
         }
+        // Одно копирование часто даёт два уведомления подряд: одинаковый снимок не дублируем.
+        let sig = {
+            use std::hash::{Hash, Hasher};
+            let mut hs = std::collections::hash_map::DefaultHasher::new();
+            (w, h, px.len()).hash(&mut hs);
+            px.hash(&mut hs);
+            (hs.finish(), sys::now_secs())
+        };
+        if let Ok(mut last) = LAST_IMG.lock() {
+            if last.0 == sig.0 && sig.1.saturating_sub(last.1) < 3 {
+                return;
+            }
+            *last = sig;
+        }
         let seq = IMG_SEQ.fetch_add(1, Ordering::Relaxed);
         let name = format!("{}_{}.png", sys::now_secs(), seq);
         let spawned = std::thread::Builder::new().name("island-clip-img".into()).spawn(move || unsafe {
@@ -255,12 +271,16 @@ impl Clip {
         let bar = Rect::new(PAD, TOP, w - 2.0 * PAD, 26.0);
         cv.rr(bar, 10.0, card());
         let names = ["Все", "Текст", "Ссылки", "Фото"];
-        let widths: Vec<f32> = names.iter().map(|n| n.chars().count() as f32 * 5.0 + 14.0).collect();
+        let widths: Vec<f32> = names.iter().map(|n| crate::i18n::tr(n).chars().count() as f32 * 5.0 + 14.0).collect();
         let gear = Rect::new(bar.right() - 23.0, bar.y + 4.0, 18.0, 18.0);
         let pills_w: f32 = widths.iter().sum::<f32>() + 4.0 * (names.len() - 1) as f32;
         let mut px = gear.x - 8.0 - pills_w;
         let fid = id(CLIPBOARD, 0);
-        let ph = format!("Поиск среди {} записей…", self.items.len());
+        let ph = if crate::i18n::en() {
+            format!("Search {} items…", self.items.len())
+        } else {
+            format!("Поиск среди {} записей…", self.items.len())
+        };
         ui.text_field_ex(cv, fid, Rect::new(bar.x, bar.y, px - bar.x - 6.0, bar.h), &ph, icon::SEARCH, Submit::Keep);
         for (i, name) in names.iter().enumerate() {
             let r = Rect::new(px, bar.y + 4.5, widths[i], 17.0);
@@ -273,11 +293,17 @@ impl Clip {
             self.paused = !self.paused;
         }
 
+        ui.sticky_focus = Some(fid);
         let query = ui.field_text(fid);
         let order = self.visible(&query);
 
         // Клавиши, пока в поиске фокус: стрелки двигают выбор, Ctrl+P закрепляет, Enter вставляет.
-        let cur = self.selected.as_deref().and_then(|t| order.iter().position(|&n| self.items[n].text == t));
+        let mut cur = self.selected.as_deref().and_then(|t| order.iter().position(|&n| self.items[n].text == t));
+        // Выбор по умолчанию — первая запись: кнопки внизу и превью сразу работают.
+        if cur.is_none() && !order.is_empty() {
+            self.selected = Some(self.items[order[0]].text.clone());
+            cur = Some(0);
+        }
         let mut pos = cur;
         for n in ui.take_nav() {
             match n {
@@ -321,7 +347,7 @@ impl Clip {
         let now = sys::now_secs();
         let lt = GetLocalTime();
         let day_start = now.saturating_sub(lt.wHour as u64 * 3600 + lt.wMinute as u64 * 60 + lt.wSecond as u64);
-        let list = Rect::new(PAD, TOP + 33.0, LIST_W, (h - TOP - 33.0 - 36.0).max(ROW));
+        let list = Rect::new(PAD, TOP + 36.0, LIST_W, (h - TOP - 36.0 - 36.0).max(ROW));
 
         let mut rows: Vec<(f32, Option<&'static str>, usize)> = Vec::new();
         let (mut y, mut last) = (0.0f32, None::<&'static str>);
@@ -377,7 +403,7 @@ impl Clip {
             cv.text(msg, Rect::new(list.x + 5.0, list.y + 6.0, list.w, 14.0), &f.small, dim());
         }
 
-        let prev = Rect::new(PAD + LIST_W + 11.0, TOP + 32.0, w - 2.0 * PAD - LIST_W - 11.0, 175.0);
+        let prev = Rect::new(PAD + LIST_W + 14.0, TOP + 36.0, w - 2.0 * PAD - LIST_W - 14.0, (h - TOP - 36.0 - 36.0).max(120.0));
         self.preview(ui, cv, prev, day_start);
         self.footer(ui, cv, w, h, act);
     }
@@ -441,8 +467,12 @@ impl Clip {
             let chars = text.chars().count();
             let words = text.split_whitespace().count();
             let lines = text.lines().count().max(1);
-            meta[0].1 = if is_link { "Ссылка".to_string() } else { "Текст".to_string() };
-            meta[1].1 = format!("{chars} симв. • {words} сл. • {lines} стр.");
+            meta[0].1 = crate::i18n::t(if is_link { "Ссылка" } else { "Текст" }).to_string();
+            meta[1].1 = if crate::i18n::en() {
+                format!("{chars} chars • {words} words • {lines} lines")
+            } else {
+                format!("{chars} симв. • {words} сл. • {lines} стр.")
+            };
         }
         for (k, (label, value)) in meta.iter().enumerate() {
             let cy = r.bottom() - 41.0 + k as f32 * 12.5;
@@ -497,13 +527,12 @@ fn copied_at(ts: u64, day_start: u64) -> String {
     let tod = local.rem_euclid(1440);
     let hm = format!("{}:{:02}", tod / 60, tod % 60);
     if ts >= day_start {
-        format!("Сегодня, {hm}")
+        format!("{}, {hm}", crate::i18n::pick("Сегодня", "Today"))
     } else if ts + 86_400 >= day_start {
-        format!("Вчера, {hm}")
+        format!("{}, {hm}", crate::i18n::pick("Вчера", "Yesterday"))
     } else {
-        const MONTHS: [&str; 12] = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
         let (_, m, d) = crate::online::civil_from_days(local.div_euclid(1440));
-        format!("{d} {}, {hm}", MONTHS[(m as usize).clamp(1, 12) - 1])
+        format!("{d} {}, {hm}", crate::i18n::months_short()[(m as usize).clamp(1, 12) - 1])
     }
 }
 
@@ -522,12 +551,7 @@ fn section(it: &Item, day_start: u64) -> &'static str {
 /// Короткая подпись времени для строки списка: «сейчас», «4 м», «1 ч», «2 д».
 fn short_ago(now: u64, then: u64) -> String {
     let d = now.saturating_sub(then);
-    match d {
-        0..=59 => "сейчас".into(),
-        60..=3599 => format!("{} м", d / 60),
-        3600..=86_399 => format!("{} ч", d / 3600),
-        _ => format!("{} д", d / 86_400),
-    }
+    crate::i18n::ago_short(d)
 }
 
 fn first_line(s: &str) -> &str {

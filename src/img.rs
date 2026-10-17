@@ -37,6 +37,9 @@ pub unsafe fn save_png(path: &Path, w: u32, h: u32, bgra: &[u8]) -> Option<()> {
     frame.WritePixels(h, w * 4, bgra).ok()?;
     frame.Commit().ok()?;
     enc.Commit().ok()?;
+    // Кодировщик и поток держат файл открытым: без этого переименование при шифровании не пройдёт.
+    drop(frame);
+    drop(enc);
     drop(stream);
     seal_file(path)
 }
@@ -49,7 +52,11 @@ pub fn seal_file(path: &Path) -> Option<()> {
     }
     let sealed = sys::seal(&bytes)?;
     let tmp = path.with_extension("png.tmp");
-    std::fs::write(&tmp, sealed).and_then(|()| std::fs::rename(&tmp, path)).ok()
+    let done = std::fs::write(&tmp, sealed).and_then(|()| std::fs::rename(&tmp, path));
+    if done.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    done.ok()
 }
 
 unsafe fn open(f: &IWICImagingFactory, path: &Path) -> Option<(IWICBitmapFrameDecode, u32, u32)> {

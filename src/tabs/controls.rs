@@ -30,6 +30,8 @@ pub struct Controls {
     muted: bool,
     volume: f32,
     hold_until: Option<Instant>,
+    brightness: f32,
+    bright_hold: Option<Instant>,
     rev: u64,
     media: Option<Media>,
     ssid: Option<String>,
@@ -105,6 +107,10 @@ impl Controls {
         if let (Some(v), false) = (s.volume, holding) {
             self.volume = v;
         }
+        let holding = self.bright_hold.is_some_and(|t| Instant::now() < t);
+        if let (Some(v), false) = (s.brightness, holding) {
+            self.brightness = v;
+        }
         // Позиция трека у приложений приходит неточной: пока трек тот же и расхождение мало,
         // оставляем свой отсчёт, иначе время дёргается назад-вперёд.
         self.media = match (s.media, self.media.take()) {
@@ -126,10 +132,10 @@ impl Controls {
     }
 
     pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, w: f32) {
-        let gap = 6.5;
-        let th = 36.0;
+        let gap = 10.0;
+        let th = 40.0;
         let y1 = TOP;
-        let y2 = y1 + th + 6.0;
+        let y2 = y1 + th + 10.0;
         let w3 = (w - 2.0 * PAD - 2.0 * gap) / 3.0;
         let w2 = (w - 2.0 * PAD - gap) / 2.0;
         let state = |on: bool| if on { "Вкл" } else { "Выкл" };
@@ -188,7 +194,7 @@ impl Controls {
         }
 
         if let Some(kind) = self.open {
-            let area = Rect::new(PAD, y2 + th + 7.0, w - 2.0 * PAD, 112.0);
+            let area = Rect::new(PAD, y2 + th + 10.0, w - 2.0 * PAD, 116.0);
             self.device_list(ui, cv, area, kind);
             return;
         }
@@ -201,13 +207,23 @@ impl Controls {
             v if v < 0.67 => icon::VOLUME2,
             _ => icon::VOLUME3,
         };
-        let bar = Rect::new(PAD, y2 + th + 7.0, w - 2.0 * PAD, 23.0);
+        let bar = Rect::new(PAD, y2 + th + 10.0, w - 2.0 * PAD, 24.0);
         if ui.slider_bar(cv, id(CONTROLS, 10), bar, g, &mut self.volume) {
             self.hold_until = Some(Instant::now() + HOLD);
             bg::send(Cmd::Volume(self.volume));
         }
 
-        self.media_card(ui, cv, Rect::new(PAD, bar.bottom() + 7.0, w - 2.0 * PAD, 82.0), &device);
+        let mut bottom = bar.bottom();
+        if crate::bright::available() {
+            let bar = Rect::new(PAD, bottom + 10.0, w - 2.0 * PAD, 24.0);
+            if ui.slider_bar(cv, id(CONTROLS, 11), bar, icon::BRIGHTNESS, &mut self.brightness) {
+                self.bright_hold = Some(Instant::now() + HOLD);
+                bg::send(Cmd::Brightness(self.brightness));
+            }
+            bottom = bar.bottom();
+        }
+
+        self.media_card(ui, cv, Rect::new(PAD, bottom + 10.0, w - 2.0 * PAD, 90.0), &device);
     }
 
     /// Выпадающий список устройств вместо громкости и плеера.
@@ -365,7 +381,7 @@ impl Controls {
         cv.glyph(icon::VOLUME, Rect::new(r.x + 8.0, r.y + 4.0, 12.0, 14.0), false, dim());
         cv.text(device, Rect::new(r.x + 21.0, r.y + 4.0, 150.0, 14.0), &f.small, dim());
 
-        let art = Rect::new(r.x + 9.0, r.y + 21.0, 34.0, 34.0);
+        let art = Rect::new(r.x + 11.0, r.y + 24.0, 36.0, 36.0);
         let cover = self.media.as_ref().and_then(|m| m.art.clone().map(|px| (m.key, px)));
         let mut has_cover = false;
         if let Some((key, px)) = cover {
@@ -387,24 +403,24 @@ impl Controls {
         if !has_cover {
             cv.glyph(icon::MUSIC, art, false, D2D1_COLOR_F { a: 0.7, ..WHITE });
         }
-        cv.text(title, Rect::new(r.x + 50.0, r.y + 21.0, 230.0, 20.0), &f.title, txt());
-        cv.text(artist, Rect::new(r.x + 50.0, r.y + 39.0, 230.0, 14.0), &f.small, dim());
+        cv.text(title, Rect::new(r.x + 56.0, r.y + 25.0, r.w - 150.0, 20.0), &f.title, txt());
+        cv.text(artist, Rect::new(r.x + 56.0, r.y + 43.0, r.w - 150.0, 14.0), &f.small, dim());
 
         // Кнопки: назад, играть/пауза (светлая), вперёд.
-        let cy = r.y + 36.0;
-        if Self::round_button(ui, cv, id(CONTROLS, 20), r.x + 302.0, cy, 9.5, icon::PREV, chip_bg(), txt()) {
+        let cy = r.y + 40.0;
+        if Self::round_button(ui, cv, id(CONTROLS, 20), r.right() - 75.0, cy, 9.5, icon::PREV, chip_bg(), txt()) {
             bg::send(Cmd::Prev);
         }
         let toggle = if playing { icon::PAUSE } else { icon::PLAY_SOLID };
-        if Self::round_button(ui, cv, id(CONTROLS, 21), r.x + 332.0, cy, 14.0, toggle, CREAM, ink()) {
+        if Self::round_button(ui, cv, id(CONTROLS, 21), r.right() - 45.0, cy, 14.0, toggle, CREAM, ink()) {
             bg::send(Cmd::PlayPause);
         }
-        if Self::round_button(ui, cv, id(CONTROLS, 22), r.x + 361.0, cy, 9.5, icon::NEXT, chip_bg(), txt()) {
+        if Self::round_button(ui, cv, id(CONTROLS, 22), r.right() - 16.0, cy, 9.5, icon::NEXT, chip_bg(), txt()) {
             bg::send(Cmd::Next);
         }
 
         // Прогресс и время.
-        let py = r.y + 68.0;
+        let py = r.y + 76.0;
         cv.text(&mmss(pos), Rect::new(r.x + 9.0, py - 6.0, 30.0, 12.0), &f.small, dim());
         cv.text(&mmss(dur), Rect::new(r.right() - 46.0, py - 6.0, 36.0, 12.0), &f.small_r, dim());
         let frac = if dur > 0.0 { pos / dur } else { 0.0 };
