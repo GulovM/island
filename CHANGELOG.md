@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-18
+
+### Добавлено
+
+- Wallpaper: кнопка «Выбрать папку…» — системный диалог выбора папки с обоями; выбор сохраняется в `wallpaper_dir` в `config.toml`. Обои берутся из выбранной папки и её прямых подпапок (глубже не заходим), только `jpg`/`jpeg`/`png`/`bmp`; выбранная пустая папка больше не подменяется системными обоями.
+- Wallpaper: раздел «WE» — обои Wallpaper Engine (подписки Steam Workshop и проекты программы; Steam и его библиотеки находятся автоматически). В карусели превью с названием, обои включает сам Wallpaper Engine (`-control openWallpaper`), поэтому анимация, плагины и настройки проекта работают; если Wallpaper Engine не запущен, остров его запускает. Обычная картинка из «Папки» снимает обои Wallpaper Engine. Раздел скрыт, если Wallpaper Engine не установлен.
+
+### Изменено
+- Wallpaper: размер миниатюр подбирается по масштабу экрана (центральная карточка больше не растягивается), кубическая фильтрация при отрисовке и увеличении; копии пикселей не держатся в памяти, лимит списка — 100 обоев.
+
 ## [0.2.2] — 2026-10-17
 
 ### Добавлено
@@ -76,7 +86,8 @@
 - Установщик (Inno Setup, установка без прав администратора) и portable-архив, `SHA256SUMS.txt`.
 - Лицензия MIT.
 
-[Unreleased]: https://github.com/GulovM/island/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/GulovM/island/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/GulovM/island/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/GulovM/island/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/GulovM/island/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/GulovM/island/compare/v0.1.1...v0.2.0
