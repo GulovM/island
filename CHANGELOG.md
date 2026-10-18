@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-18
+
 ### Добавлено
 
 - Обновления: кнопка «Проверить» в Настройках сверяется с последним релизом на GitHub; если версия новее, предлагает «Установить» — остров сам скачивает установщик, сверяет SHA-256 с `SHA256SUMS.txt` из релиза, тихо ставит обновление и запускается снова. Сама программа проверяет обновления не чаще раза в сутки; найденное обновление отмечается точкой на шестерёнке.
@@ -91,7 +93,8 @@
 - Установщик (Inno Setup, установка без прав администратора) и portable-архив, `SHA256SUMS.txt`.
 - Лицензия MIT.
 
-[Unreleased]: https://github.com/GulovM/island/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/GulovM/island/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/GulovM/island/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/GulovM/island/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/GulovM/island/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/GulovM/island/compare/v0.2.0...v0.2.1
