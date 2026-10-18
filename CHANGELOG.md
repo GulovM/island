@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-10-18
+
+### Исправлено
+
+- Wallpaper: остров падал при переходе из раздела «WE» обратно в «Папку», если в папке меньше картинок, чем обоев Wallpaper Engine.
+
 ## [0.4.0] — 2026-10-18
 
 ### Добавлено
@@ -93,7 +99,8 @@
 - Установщик (Inno Setup, установка без прав администратора) и portable-архив, `SHA256SUMS.txt`.
 - Лицензия MIT.
 
-[Unreleased]: https://github.com/GulovM/island/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/GulovM/island/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/GulovM/island/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/GulovM/island/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/GulovM/island/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/GulovM/island/compare/v0.2.1...v0.2.2
