@@ -119,7 +119,12 @@ impl App {
                     }
                 }
                 let net = self.face.sync_net() && self.face.visible();
-                tab || media || net
+                // Проверка или скачивание обновления закончились — страница настроек перерисуется.
+                tab || media || net || (self.expanded && self.settings_open)
+            }
+            Ev::UpdateTimer => {
+                update::tick(self.cfg.auto_update);
+                false
             }
             Ev::FaceTick => {
                 if !self.face.visible() {

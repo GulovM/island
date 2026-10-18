@@ -25,6 +25,7 @@ mod render;
 mod window;
 mod wnd;
 mod we;
+mod update;
 
 use std::cell::{Cell, RefCell};
 use std::time::Instant;
@@ -69,7 +70,7 @@ const TAB_SIZES: [(f32, f32); 8] = [
     (480.0, 420.0),
     (700.0, 236.0),
     (420.0, 112.0),
-    (620.0, 398.0),
+    (620.0, 428.0),
 ];
 /// Высота «тонкой полоски», в которую остров сворачивается поверх развёрнутого на весь экран окна.
 const STRIP_H: f32 = 3.0;
@@ -126,6 +127,9 @@ const LIVE_TICK_MS: u32 = 33;
 const FACE_TIMER: usize = 10;
 /// Файл в `%APPDATA%\island` с выбором режима полоски: «1» — включён.
 const STRIP_FILE: &str = "strip.txt";
+/// Раз в час проверяет, не прошли ли сутки с последней проверки обновлений.
+const UPDATE_TIMER: usize = 11;
+const UPDATE_TICK_MS: u32 = 60 * 60 * 1000;
 const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 const WM_HOTKEY: u32 = 0x0312;
 const HOTKEY_ID: i32 = 1;
@@ -414,6 +418,7 @@ impl App {
         self.cfg.hidden_tabs = new.hidden_tabs;
         self.cfg.strip_over_maximized = new.strip_over_maximized;
         self.cfg.idle_face = new.idle_face;
+        self.cfg.auto_update = new.auto_update;
         if self.cfg.language != new.language {
             self.cfg.language = new.language;
             // SAFETY: оконный поток, DirectWrite-фабрика жива.
@@ -585,6 +590,8 @@ fn run() -> Result<()> {
             ),
         ];
         SetTimer(Some(app.hwnd), ENV_TIMER, app.cfg.env_poll_ms, None);
+        SetTimer(Some(app.hwnd), UPDATE_TIMER, UPDATE_TICK_MS, None);
+        update::tick(app.cfg.auto_update);
 
         let mut msg = MSG::default();
         'outer: loop {

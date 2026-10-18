@@ -61,6 +61,8 @@ pub(crate) enum Ev {
     RightClick,
     /// Началась новая минута: обновить часы на свёрнутом острове.
     FaceTick,
+    /// Часовой тик: пора ли суточная проверка обновлений.
+    UpdateTimer,
     /// Системные цвета (акцент Windows, светлая/тёмная тема) изменились.
     SysColors,
 }
@@ -206,6 +208,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_TIMER if wp.0 == LIVE_TIMER => {
             push(Ev::LiveTick);
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == UPDATE_TIMER => {
+            push(Ev::UpdateTimer);
             LRESULT(0)
         }
         WM_TIMER if wp.0 == FACE_TIMER => {

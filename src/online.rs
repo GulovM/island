@@ -764,12 +764,24 @@ unsafe fn http(url: &str, upload: Option<usize>, keep: usize) -> Result<Resp, St
     Ok(Resp { status, body, total, secs: t0.elapsed().as_secs_f64() })
 }
 
-fn get_text(url: &str) -> Result<String, String> {
+pub(crate) fn get_text(url: &str) -> Result<String, String> {
     let r = unsafe { http(url, None, 4 << 20)? };
     if r.status >= 400 {
         return Err(format!("HTTP {} для {url}", r.status));
     }
     Ok(String::from_utf8_lossy(&r.body).into_owned())
+}
+
+/// Скачивает файл целиком в память; больше `max` байт — ошибка.
+pub(crate) fn get_bytes(url: &str, max: usize) -> Result<Vec<u8>, String> {
+    let r = unsafe { http(url, None, max)? };
+    if r.status >= 400 {
+        return Err(format!("HTTP {} для {url}", r.status));
+    }
+    if r.total as usize > max {
+        return Err(format!("файл больше {max} байт"));
+    }
+    Ok(r.body)
 }
 
 fn urlenc(s: &str) -> String {
@@ -792,7 +804,7 @@ fn json_num(text: &str, key: &str) -> Option<f64> {
 }
 
 /// Строка по ключу `"key":"…"` (первое вхождение).
-fn json_str(text: &str, key: &str) -> Option<String> {
+pub(crate) fn json_str(text: &str, key: &str) -> Option<String> {
     let i = text.find(&format!("\"{key}\":"))? + key.len() + 3;
     let rest = text[i..].trim_start().strip_prefix('"')?;
     let mut out = String::new();

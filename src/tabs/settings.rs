@@ -9,7 +9,7 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use crate::anim::Spring;
 use crate::config::{Config, DEFAULT_RADIUS, DEFAULT_SCALE, MAX_RADIUS, MAX_SCALE, MIN_SCALE};
 use crate::theme::{self, Rgb};
-use crate::ui::{chip_bg, dim, icon, inset, txt, Canvas, Rect, Submit, Ui, WHITE};
+use crate::ui::{chip_bg, dim, icon, ink, inset, txt, Canvas, Rect, Submit, Ui, WHITE};
 
 use super::{id, PAD, SETTINGS, TOP};
 
@@ -26,7 +26,10 @@ const N_FACE: u32 = 9;
 const N_RESET: u32 = 10;
 const N_SCALE: u32 = 11;
 const N_STRIP: u32 = 12;
+/// Занимает три номера подряд (13–15): следующие свободные — 16 и выше.
 const N_LANG: u32 = 13;
+const N_AUTOUPDATE: u32 = 16;
+const N_UPDATE: u32 = 17;
 const N_PRESET: u32 = 20;
 const N_SWITCH: u32 = 40;
 const N_UP: u32 = 60;
@@ -364,6 +367,43 @@ impl Settings {
             }
             cx += w + 4.0;
         }
+        y += 28.0;
+
+        // Автообновление: раз в сутки остров проверяет сам и ставит найденное без вопросов.
+        cv.text("Автообновление", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut au = self.cfg.auto_update;
+        if ui.switch(cv, id(SETTINGS, N_AUTOUPDATE), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut au, true) {
+            self.cfg.auto_update = au;
+            self.changed = true;
+        }
+    }
+
+    /// Строка «Версия … / Проверить»: ручная проверка обновлений и предложение установить найденное.
+    unsafe fn update_row(&mut self, ui: &mut Ui, cv: &Canvas, x: f32, y: f32, iw: f32) {
+        use crate::i18n::pick;
+        use crate::update::{self, State};
+        let f = &cv.g.fonts;
+        let ver = update::VERSION;
+        let (text, label, accent) = match update::state() {
+            State::Idle => (format!("{} {ver}", pick("Версия", "Version")), "Проверить", false),
+            State::Checking => (pick("Проверяем…", "Checking…").to_string(), "Проверка…", false),
+            State::UpToDate => (format!("{} {ver} — {}", pick("Версия", "Version"), pick("актуальная", "up to date")), "Проверить", false),
+            State::Available(r) => (format!("{} {}", pick("Доступна версия", "Version available:"), r.version), "Установить", true),
+            State::Downloading => (pick("Скачиваем и устанавливаем…", "Downloading and installing…").to_string(), "Установка…", false),
+            State::Failed(msg) => (crate::i18n::tr(msg).into_owned(), "Повторить", false),
+        };
+        let bw = 104.0;
+        let col = if accent { cv.accent } else { dim() };
+        cv.text(&text, Rect::new(x, y, iw - bw - 8.0, 22.0), &f.small, col);
+        let (bg, fg) = if accent { (cv.accent, ink()) } else { (chip_bg(), txt()) };
+        let clicked = ui.solid_button(cv, id(SETTINGS, N_UPDATE), Rect::new(x + iw - bw, y, bw, 22.0), label, bg, fg, 7.0);
+        if clicked && !update::busy() {
+            if update::available() {
+                update::install();
+            } else {
+                update::check(false);
+            }
+        }
     }
 
     // ---------- Правая карточка: радиус и вкладки ----------
@@ -455,6 +495,7 @@ impl Settings {
         }
 
         let reset = Rect::new(x, rc.bottom() - 10.0 - 22.0, iw, 22.0);
+        self.update_row(ui, cv, x, reset.y - 30.0, iw);
         if ui.solid_button(cv, id(SETTINGS, N_RESET), reset, "Сбросить внешний вид", chip_bg(), txt(), 7.0) {
             self.reset();
         }

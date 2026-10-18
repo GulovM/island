@@ -45,6 +45,10 @@ hidden_tabs = []
 # 1 — в свёрнутом острове без музыки показывать время, раскладку клавиатуры и Wi-Fi
 idle_face = 1
 
+# 1 — найденные обновления скачиваются и ставятся сами (проверка — раз в сутки);
+# 0 — остров только сообщает об обновлении. Меняется и в Настройках.
+auto_update = 0
+
 # Через сколько мс после ухода курсора остров сворачивается
 leave_delay_ms = 220
 
@@ -105,6 +109,8 @@ pub struct Config {
     pub hidden_tabs: Vec<String>,
     /// Время, раскладка и Wi-Fi на свёрнутом острове, когда музыка не играет.
     pub idle_face: bool,
+    /// Устанавливать найденные обновления без вопросов.
+    pub auto_update: bool,
     pub leave_delay_ms: u32,
     pub env_poll_ms: u32,
     pub collapsed: (f32, f32),
@@ -138,6 +144,7 @@ impl Default for Config {
             language: "auto".to_string(),
             hidden_tabs: Vec::new(),
             idle_face: true,
+            auto_update: false,
             leave_delay_ms: 220,
             env_poll_ms: 400,
             collapsed: (180.0, 24.0),
@@ -212,6 +219,7 @@ pub fn save(cfg: &Config, names: &[&str]) {
         ("tabs", fmt_list(&order)),
         ("hidden_tabs", fmt_list(&cfg.hidden_tabs)),
         ("idle_face", (cfg.idle_face as u8).to_string()),
+        ("auto_update", (cfg.auto_update as u8).to_string()),
     ];
     write_updates(&updates);
 }
@@ -366,6 +374,7 @@ pub fn parse(text: &str) -> Config {
             },
             ("", "system_colors", Value::Num(v)) => cfg.system_colors = v != 0.0,
             ("", "idle_face", Value::Num(v)) => cfg.idle_face = v != 0.0,
+            ("", "auto_update", Value::Num(v)) => cfg.auto_update = v != 0.0,
             ("", "corner_radius", Value::Num(v)) => cfg.corner_radius = (v as f32).clamp(0.0, MAX_RADIUS),
             ("", "ui_scale", Value::Num(v)) => cfg.ui_scale = (v as f32).clamp(MIN_SCALE, MAX_SCALE),
             ("", "strip_over_maximized", Value::Num(v)) => cfg.strip_over_maximized = v != 0.0,
@@ -572,6 +581,7 @@ gmail = \"https://mail.google.com\"
         let d = parse(DEFAULT_TEMPLATE);
         assert_eq!((d.corner_radius, d.system_colors, d.idle_face), (DEFAULT_RADIUS, false, true));
         assert!(d.hidden_tabs.is_empty());
+        assert!(!d.auto_update && !Config::default().auto_update, "автообновление по умолчанию выключено");
     }
 
     #[test]
@@ -622,6 +632,7 @@ gmail = \"https://mail.google.com\"
         c.hidden_tabs = vec!["Power".into(), "Wallpaper".into()];
         c.tabs = vec!["Apps".into(), "Controls".into()];
         c.idle_face = false;
+        c.auto_update = true;
         let updates = [
             ("accent", fmt_str(&theme::to_hex(c.accent))),
             ("bg", fmt_str(&theme::to_hex(c.bg))),
@@ -632,6 +643,7 @@ gmail = \"https://mail.google.com\"
             ("tabs", fmt_list(&c.tabs)),
             ("hidden_tabs", fmt_list(&c.hidden_tabs)),
             ("idle_face", "0".to_string()),
+            ("auto_update", "1".to_string()),
         ];
         let back = parse(&set_keys(DEFAULT_TEMPLATE, &updates));
         assert_eq!(back, c);
