@@ -73,6 +73,9 @@ hotkey = "ctrl+alt+space"
 # Пусто — город определяется по IP. Меняется и прямо в острове: клик по карточке погоды.
 weather_city = ""
 
+# Циферблат часов на вкладке Today, 0–4 (переключается стрелками на карточке часов).
+clock_style = 0
+
 # Календарь: «секретный адрес в формате iCal» из настроек Google Calendar (или любой .ics)
 calendar_ics = ""
 
@@ -122,6 +125,8 @@ pub struct Config {
     pub snippets: Vec<(String, String)>,
     /// Город для погоды; пустой — погода не запрашивается.
     pub weather_city: String,
+    /// Номер циферблата часов на вкладке Today.
+    pub clock_style: usize,
     /// Ссылка на календарь в формате iCal.
     pub calendar_ics: String,
     /// Глобальная горячая клавиша («ctrl+alt+space»); пустая — отключена.
@@ -153,6 +158,7 @@ impl Default for Config {
             wallpaper_dir: None,
             snippets: Vec::new(),
             weather_city: String::new(),
+            clock_style: 0,
             calendar_ics: String::new(),
             hotkey: "ctrl+alt+space".into(),
             live_media: true,
@@ -227,6 +233,11 @@ pub fn save(cfg: &Config, names: &[&str]) {
 /// Записывает одну строку верхнего уровня (`key = "value"`) в `config.toml` (город погоды из острова).
 pub fn save_str(key: &str, value: &str) {
     write_updates(&[(key, fmt_str(value))]);
+}
+
+/// Записывает одно число верхнего уровня (`key = 3`) в `config.toml`.
+pub fn save_num(key: &str, value: usize) {
+    write_updates(&[(key, value.to_string())]);
 }
 
 fn write_updates(updates: &[(&str, String)]) {
@@ -393,6 +404,7 @@ pub fn parse(text: &str) -> Config {
             ("", "live_toasts", Value::Num(v)) => cfg.live_toasts = v != 0.0,
             ("", "tabs", Value::List(l)) => cfg.tabs = l,
             ("", "weather_city", Value::Str(s)) => cfg.weather_city = s,
+            ("", "clock_style", Value::Num(v)) => cfg.clock_style = (v.max(0.0) as usize).min(4),
             ("", "calendar_ics", Value::Str(s)) => cfg.calendar_ics = s,
             ("", "hotkey", Value::Str(s)) => {
                 if !s.is_empty() && parse_hotkey(&s).is_none() {

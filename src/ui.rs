@@ -799,6 +799,8 @@ struct Field {
     submit: Submit,
     /// Поле пароля: символы показываются точками, копировать нельзя.
     secret: bool,
+    /// Только цифры (не больше 5 знаков): поля времени.
+    digits: bool,
 }
 
 /// Стрелка справа на широкой плитке.
@@ -866,8 +868,9 @@ impl Field {
     }
     fn insert(&mut self, s: &str) {
         self.delete_sel();
-        for c in s.chars().filter(|c| !c.is_control()) {
-            if self.chars.len() >= FIELD_MAX {
+        let digits = self.digits;
+        for c in s.chars().filter(|c| !c.is_control() && (!digits || c.is_ascii_digit())) {
+            if self.chars.len() >= if digits { 5 } else { FIELD_MAX } {
                 break;
             }
             self.chars.insert(self.caret, c);
@@ -1265,6 +1268,11 @@ impl Ui {
         self.interact(id, r)
     }
 
+    /// Курсор над прямоугольником (без захвата нажатия, в отличие от `click_area`).
+    pub fn hovering(&self, r: Rect) -> bool {
+        self.interactive && r.contains(self.mouse)
+    }
+
     pub fn hover_of(&mut self, id: u32) -> f32 {
         self.widget(id).hover.value
     }
@@ -1404,9 +1412,21 @@ impl Ui {
         f.scroll = 0.0;
     }
 
+    /// Поле принимает только цифры.
+    pub fn set_digits(&mut self, id: u32, on: bool) {
+        self.fields.entry(id).or_default().digits = on;
+    }
+
     /// Делает поле полем пароля (точки вместо символов, без Ctrl+C/X).
     pub fn set_secret(&mut self, id: u32, on: bool) {
         self.fields.entry(id).or_default().secret = on;
+    }
+
+    /// Выделяет весь текст поля (ввод заменит его).
+    pub fn select_all(&mut self, id: u32) {
+        let f = self.fields.entry(id).or_default();
+        f.anchor = 0;
+        f.caret = f.chars.len();
     }
 
     pub fn has_focus(&self, id: u32) -> bool {
@@ -1497,9 +1517,15 @@ impl Ui {
     /// То же, но с заданным отступом справа: текст не заезжает под кнопки поверх поля.
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn text_field_pad(&mut self, cv: &Canvas, id: u32, r: Rect, placeholder: &str, glyph: &str, submit: Submit, right: f32) {
+        self.text_field_at(cv, id, r, placeholder, glyph, submit, 30.0, right);
+    }
+
+    /// Поле с заданными отступами слева (под значок) и справа (под кнопки или единицу измерения).
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn text_field_at(&mut self, cv: &Canvas, id: u32, r: Rect, placeholder: &str, glyph: &str, submit: Submit, left: f32, right: f32) {
         self.fields.entry(id).or_default().submit = submit;
         let (hover, _) = self.interact(id, r);
-        let inner = Rect::new(r.x + 30.0, r.y, (r.w - 30.0 - right).max(1.0), r.h);
+        let inner = Rect::new(r.x + left, r.y, (r.w - left - right).max(1.0), r.h);
         let w = self.widget(id);
         let (hv, ov) = (w.hover.value, w.on.value);
         let focused_now = self.focus == Some(id);

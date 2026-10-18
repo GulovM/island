@@ -2,12 +2,14 @@
 //! таймер (часы/минуты, пресеты, кольцо, сигнал по окончании), список задач.
 //! Раскладка снята с макета 1:1 (панель 550×275).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
-use windows::Win32::System::Diagnostics::Debug::MessageBeep;
+use windows::Win32::Media::Audio::{PlaySoundW, SND_FILENAME, SND_MEMORY, SND_NODEFAULT, SND_SYNC};
+use windows::Win32::System::Diagnostics::Debug::Beep;
+use windows::Win32::Foundation::SYSTEMTIME;
 use windows::Win32::System::SystemInformation::GetLocalTime;
-use windows::Win32::UI::WindowsAndMessaging::MB_ICONEXCLAMATION;
 
 use crate::anim::Spring;
 use crate::config::Config;
@@ -18,6 +20,10 @@ use super::{id, read_lines, write_lines, PAD, TODAY, TOP};
 
 const PRESETS: [u32; 5] = [1, 5, 10, 15, 20];
 const MAX_TODO: usize = 100;
+/// Число циферблатов часов.
+const CLOCK_STYLES: usize = 5;
+/// Через сколько без действий выключается режим выбора циферблата.
+const CLOCK_PICK_TIMEOUT: Duration = Duration::from_secs(5);
 const TODO_FILE: &str = "todo.txt";
 
 /// Дни недели с понедельника.
@@ -49,6 +55,91 @@ fn event_when(ev: &Event, now: i64) -> String {
         let (_, m, d) = civil_from_days(day);
         format!("{} {} {} • {when}", crate::i18n::weekdays()[weekday(day) as usize], d, crate::i18n::months_short()[(m as usize).clamp(1, 12) - 1])
     }
+}
+
+/// Доля круга секунд 0..1: на :59 круг замкнут, дальше счёт идёт заново (+1 минута).
+fn second_frac(sec: u16) -> f32 {
+    (f32::from(sec.min(59)) + 1.0) / 60.0
+}
+
+/// Число из текста поля: берутся только цифры, пусто — 0.
+fn parse_num(s: &str) -> u32 {
+    s.chars().filter_map(|c| c.to_digit(10)).fold(0u32, |a, d| a.saturating_mul(10).saturating_add(d)).min(99_999)
+}
+
+/// WAV (16 бит, моно) с тремя двойными гудками: звучит через звуковое устройство по умолчанию,
+/// в отличие от `Beep` и звуков схемы Windows, которые на многих системах молчат.
+fn alarm_wav() -> Vec<u8> {
+    const RATE: u32 = 44_100;
+    let mut pcm: Vec<i16> = Vec::new();
+    let tone = |pcm: &mut Vec<i16>, freq: f32, ms: u32| {
+        let n = RATE * ms / 1000;
+        for i in 0..n {
+            let t = i as f32 / RATE as f32;
+            // Короткое нарастание и затухание, чтобы не щёлкало.
+            let env = (i.min(n - i) as f32 / (RATE as f32 * 0.01)).min(1.0);
+            pcm.push((env * 0.4 * i16::MAX as f32 * (std::f32::consts::TAU * freq * t).sin()) as i16);
+        }
+    };
+    for _ in 0..2 {
+        tone(&mut pcm, 523.0, 220);
+        tone(&mut pcm, 659.0, 220);
+        tone(&mut pcm, 784.0, 420);
+        pcm.extend(std::iter::repeat_n(0i16, (RATE * 400 / 1000) as usize));
+    }
+    let bytes = (pcm.len() * 2) as u32;
+    let mut w = Vec::with_capacity(44 + bytes as usize);
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36 + bytes).to_le_bytes());
+    w.extend_from_slice(b"WAVEfmt ");
+    w.extend_from_slice(&16u32.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes());
+    w.extend_from_slice(&RATE.to_le_bytes());
+    w.extend_from_slice(&(RATE * 2).to_le_bytes());
+    w.extend_from_slice(&2u16.to_le_bytes());
+    w.extend_from_slice(&16u16.to_le_bytes());
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&bytes.to_le_bytes());
+    for v in pcm {
+        w.extend_from_slice(&v.to_le_bytes());
+    }
+    w
+}
+
+/// Сигнал окончания таймера в отдельном потоке (не блокирует интерфейс).
+fn play_alarm() {
+    static PLAYING: AtomicBool = AtomicBool::new(false);
+    if PLAYING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    std::thread::spawn(|| {
+        unsafe {
+            // Стандартный сигнал будильника Windows (дважды); нет файла — мягкий звон из памяти,
+            // и только если не звучит ничего — системный гудок.
+            let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+            let file: Vec<u16> = format!(r"{root}\Media\Alarm01.wav").encode_utf16().chain(Some(0)).collect();
+            let mut ok = false;
+            for _ in 0..2 {
+                ok = PlaySoundW(windows::core::PCWSTR(file.as_ptr()), None, SND_FILENAME | SND_SYNC | SND_NODEFAULT).as_bool();
+                if !ok {
+                    break;
+                }
+            }
+            if !ok {
+                let wav = alarm_wav();
+                ok = PlaySoundW(windows::core::PCWSTR(wav.as_ptr().cast()), None, SND_MEMORY | SND_SYNC | SND_NODEFAULT).as_bool();
+            }
+            if !ok {
+                for _ in 0..3 {
+                    let _ = Beep(880, 150);
+                    let _ = Beep(1175, 200);
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            }
+        }
+        PLAYING.store(false, Ordering::Release);
+    });
 }
 
 /// Ссылка на календарь: пусто (отключить) или http(s):// / webcal://.
@@ -126,6 +217,16 @@ pub struct Today {
     cache: Option<MonthCache>,
     /// Индекс редактируемой задачи: её текст лежит в поле внизу списка.
     edit: Option<usize>,
+    /// Циферблат часов (0..`CLOCK_STYLES`), хранится в конфиге.
+    clock_style: usize,
+    /// Режим выбора циферблата включён (время последнего действия) и время последнего клика по часам.
+    clock_pick: Option<Instant>,
+    clock_click: Option<Instant>,
+    /// Круг секунд циферблатов с секундами.
+    sec_ring: Spring,
+    /// Какое поле времени (0 — часы, 1 — минуты, 2 — секунды) было в фокусе в прошлом кадре.
+    time_focus: Option<usize>,
+    seconds: u32,
 }
 
 impl Default for Today {
@@ -156,6 +257,12 @@ impl Default for Today {
             sel: 0,
             cache: None,
             edit: None,
+            clock_style: 0,
+            clock_pick: None,
+            clock_click: None,
+            sec_ring: Spring::unit(0.0, 120.0, 20.0),
+            time_focus: None,
+            seconds: 0,
         };
         t.set_preset(1);
         t
@@ -176,6 +283,7 @@ impl Today {
     pub fn configure(&mut self, cfg: &Config) {
         self.city = cfg.weather_city.clone();
         self.ics = cfg.calendar_ics.clone();
+        self.clock_style = cfg.clock_style.min(CLOCK_STYLES - 1);
     }
 
     fn save(&self) {
@@ -186,7 +294,7 @@ impl Today {
     /// Вкладка открылась: обновить погоду и календарь, если устарели.
     pub fn show(&mut self) -> bool {
         online::refresh_weather(&self.city);
-        online::refresh_calendar(&self.ics);
+        online::refresh_calendar_age(&self.ics, Duration::from_secs(60));
         self.month_open = false;
         self.month_t.value = 0.0;
         self.month_t.target = 0.0;
@@ -220,6 +328,7 @@ impl Today {
 
     pub fn step(&mut self, dt: f32) {
         self.ring.step(dt);
+        self.sec_ring.step(dt);
         self.month_t.step(dt);
         for a in &mut self.anim {
             a.step(dt);
@@ -227,7 +336,7 @@ impl Today {
     }
 
     pub fn animating(&self) -> bool {
-        !self.ring.settled() || !self.month_t.settled() || self.anim.iter().any(|a| !a.settled())
+        !self.ring.settled() || !self.sec_ring.settled() || !self.month_t.settled() || self.anim.iter().any(|a| !a.settled())
     }
 
     /// Сработал ли таймер с прошлого вызова.
@@ -253,9 +362,7 @@ impl Today {
             self.left = self.total;
             self.fired = true;
             if self.sound {
-                unsafe {
-                    let _ = MessageBeep(MB_ICONEXCLAMATION);
-                }
+                play_alarm();
             }
         }
         // Проверки «устарело ли» дешёвые: сеть дёргается раз в 15–20 минут.
@@ -281,12 +388,19 @@ impl Today {
 
     /// Новое время таймера (останавливает его).
     fn set_time(&mut self, hours: u32, minutes: u32) {
-        self.hours = hours.min(9);
-        self.minutes = minutes.min(59);
-        if self.hours == 0 && self.minutes == 0 {
-            self.minutes = 1;
+        self.set_time_hms(hours, minutes, 0);
+    }
+
+    /// Время в часах, минутах и секундах: лишнее переносится в старшие единицы, от 1 минуты (пусто) до 9:59:59.
+    fn set_time_hms(&mut self, hours: u32, minutes: u32, seconds: u32) {
+        let mut total = (hours.min(99) * 3600 + minutes.min(9999) * 60 + seconds.min(99_999)).min(9 * 3600 + 59 * 60 + 59);
+        if total == 0 {
+            total = 60;
         }
-        self.total = Duration::from_secs((self.hours * 60 + self.minutes) as u64 * 60);
+        self.hours = total / 3600;
+        self.minutes = total / 60 % 60;
+        self.seconds = total % 60;
+        self.total = Duration::from_secs(u64::from(total));
         self.left = self.total;
         self.deadline = None;
     }
@@ -301,14 +415,46 @@ impl Today {
         let f = &cv.g.fonts;
         let dow = (t.wDayOfWeek as usize + 6) % 7;
 
-        // Часы: часы и минуты столбиком, между ними три золотые черточки.
+        // Часы: 5 циферблатов. Двойной клик включает режим выбора (подсветка и стрелки по бокам),
+        // стрелки и колесо мыши листают по кругу; клик мимо или бездействие выключают режим.
         let c = Rect::new(PAD, TOP, 116.0, 140.0);
         cv.card(c);
-        cv.text(&format!("{:02}", t.wHour), Rect::new(c.x, c.y + 15.0, c.w, 36.0), &f.big_c, txt());
-        for k in -1..=1 {
-            cv.rr(Rect::new(c.cx() + k as f32 * 8.0 - 2.5, c.y + 63.5, 5.0, 3.0), 1.5, cv.accent);
+        if self.clock_pick.is_some_and(|at| at.elapsed() >= CLOCK_PICK_TIMEOUT) || (ui.pressed && !ui.hovering(c)) {
+            self.clock_pick = None;
         }
-        cv.text(&format!("{:02}", t.wMinute), Rect::new(c.x, c.y + 73.0, c.w, 36.0), &f.big_c, txt());
+        let picking = self.clock_pick.is_some();
+        let mut step = 0i32;
+        let wheel = ui.wheel_in(c);
+        if wheel != 0.0 {
+            step = if wheel > 0.0 { -1 } else { 1 };
+        }
+        if picking {
+            cv.rr(c, 11.0, D2D1_COLOR_F { a: 0.05, ..cv.accent });
+            cv.rr_line(c, 11.0, cv.accent, 1.5);
+            let ay = c.cy() - 10.0;
+            if ui.icon_button(cv, id(TODAY, 71), Rect::new(c.x + 3.0, ay, 20.0, 20.0), icon::LEFT, false) {
+                step = -1;
+            }
+            if ui.icon_button(cv, id(TODAY, 72), Rect::new(c.right() - 23.0, ay, 20.0, 20.0), icon::RIGHT, false) {
+                step = 1;
+            }
+        }
+        // Карточка опрашивается после стрелок: нажатие на стрелку не достаётся ей.
+        if ui.click_area(id(TODAY, 70), c).1 {
+            let double = self.clock_click.is_some_and(|at| at.elapsed() < Duration::from_millis(400));
+            self.clock_click = if double { None } else { Some(Instant::now()) };
+            if double {
+                self.clock_pick = if picking { None } else { Some(Instant::now()) };
+            }
+        }
+        if step != 0 {
+            self.clock_style = (self.clock_style as i32 + step).rem_euclid(CLOCK_STYLES as i32) as usize;
+            crate::config::save_num("clock_style", self.clock_style);
+            if picking {
+                self.clock_pick = Some(Instant::now());
+            }
+        }
+        self.clock_face(cv, c, &t);
         let foot = format!("{} • {} {}", crate::i18n::weekdays()[dow], t.wDay, crate::i18n::months_short()[(t.wMonth as usize).clamp(1, 12) - 1]);
         cv.text(&foot, Rect::new(c.x, c.y + 120.0, c.w, 13.0), &f.small_c, dim());
 
@@ -382,6 +528,49 @@ impl Today {
         self.todo_card(ui, cv, Rect::new(tx, TOP, (w - PAD - tx).max(120.0), 252.0));
     }
 
+    /// Циферблат: 0 — столбик ЧЧ/ММ; 1 — столбик с секундами; 2 — «ЧЧ:ММ»; 3 — «ЧЧ:ММ» с полоской секунд;
+    /// 4 — круг секунд (полный оборот — +1 минута) вокруг «ЧЧ:ММ».
+    unsafe fn clock_face(&mut self, cv: &Canvas, c: Rect, t: &SYSTEMTIME) {
+        let f = &cv.g.fonts;
+        let hm = format!("{:02}:{:02}", t.wHour, t.wMinute);
+        let (hh, mm) = (format!("{:02}", t.wHour), format!("{:02}", t.wMinute));
+        let ss = format!(":{:02}", t.wSecond);
+        let frac = second_frac(t.wSecond);
+        if self.clock_style >= 3 {
+            // Новая минута: круг начинается заново, а не откатывается назад.
+            if frac < self.sec_ring.target - 0.5 {
+                self.sec_ring.value = 0.0;
+            }
+            self.sec_ring.target = frac;
+        }
+        match self.clock_style {
+            0 => {
+                cv.text(&hh, Rect::new(c.x, c.y + 24.0, c.w, 36.0), &f.big_c, txt());
+                cv.text(&mm, Rect::new(c.x, c.y + 66.0, c.w, 36.0), &f.big_c, txt());
+            }
+            1 => {
+                cv.text(&hh, Rect::new(c.x, c.y + 18.0, c.w, 36.0), &f.big_c, txt());
+                cv.text(&mm, Rect::new(c.x, c.y + 52.0, c.w, 36.0), &f.big_c, txt());
+                cv.text(&ss, Rect::new(c.x, c.y + 94.0, c.w, 18.0), &f.num_c, cv.accent);
+            }
+            2 => {
+                cv.text(&hm, Rect::new(c.x, c.y + 44.0, c.w, 36.0), &f.big_c, txt());
+            }
+            3 => {
+                cv.text(&hm, Rect::new(c.x, c.y + 32.0, c.w, 36.0), &f.big_c, txt());
+                let bar = Rect::new(c.x + 18.0, c.y + 78.0, c.w - 36.0, 4.0);
+                cv.rr(bar, 2.0, track());
+                cv.rr(Rect::new(bar.x, bar.y, (bar.w * self.sec_ring.value.clamp(0.0, 1.0)).max(4.0), bar.h), 2.0, cv.accent);
+                cv.text(&ss, Rect::new(c.x, c.y + 90.0, c.w, 18.0), &f.num_c, cv.accent);
+            }
+            _ => {
+                let cy = c.y + 68.0;
+                cv.ring(c.cx(), cy, 42.0, 4.0, self.sec_ring.value, cv.accent);
+                cv.text(&hm, Rect::new(c.x, cy - 18.0, c.w, 36.0), &f.num_c, txt());
+            }
+        }
+    }
+
     unsafe fn week_card(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect, today: i64, dow: usize) {
         let f = &cv.g.fonts;
         cv.card(wk);
@@ -433,7 +622,7 @@ impl Today {
             (Some(e), _) => (event_when(e, online::now_local_minutes()), e.title.clone()),
             (None, true) if self.online.calendar_failed => ("Не удалось загрузить".to_string(), "Проверьте ссылку calendar_ics".to_string()),
             (None, true) => ("Событий нет".to_string(), "Календарь пуст на ближайшее время".to_string()),
-            (None, false) => ("Календарь не подключён".to_string(), "calendar_ics в config.toml".to_string()),
+            (None, false) => ("Календарь не подключён".to_string(), "Нажмите, чтобы добавить ссылку".to_string()),
         };
         cv.text(&l1, Rect::new(ev.x + 17.0, ev.y + 5.0, ev.w - 24.0, 13.0), &f.small_b, txt());
         cv.text(&l2, Rect::new(ev.x + 17.0, ev.y + 18.0, ev.w - 24.0, 13.0), &f.small, dim());
@@ -638,6 +827,29 @@ impl Today {
         let frac = if self.total.is_zero() { 0.0 } else { rem.as_secs_f32() / self.total.as_secs_f32() };
         self.ring.target = frac.clamp(0.0, 1.0);
         let (cx, cy) = (tm.x + 40.0, tm.y + 62.0);
+        // Поля времени (ч, мин, с): ввод цифр, Enter или уход из поля применяет.
+        let tf = [id(TODAY, 110), id(TODAY, 111), id(TODAY, 112)];
+        let focused = (0..3).find(|&k| ui.has_focus(tf[k]));
+        let entered = (0..3).any(|k| ui.take_submitted(tf[k]).is_some());
+        for &t in &tf {
+            ui.set_digits(t, true);
+        }
+        // Применяем при Enter и при любом уходе из поля (в том числе в соседнее).
+        if entered || (self.time_focus.is_some() && focused != self.time_focus) {
+            let n: Vec<u32> = tf.iter().map(|&t| parse_num(&ui.field_text(t))).collect();
+            self.preset = None;
+            self.set_time_hms(n[0], n[1], n[2]);
+            if entered {
+                ui.blur();
+            }
+        }
+        if let Some(k) = focused.filter(|_| focused != self.time_focus) {
+            // Новое поле: показать нормализованное значение и выделить его, чтобы ввод заменил текст.
+            let v = [self.hours, self.minutes, self.seconds][k];
+            ui.set_field_text(tf[k], &v.to_string());
+            ui.select_all(tf[k]);
+        }
+        self.time_focus = focused;
         cv.ring(cx, cy, 24.0, 3.0, self.ring.value, ORANGE);
         let secs = rem.as_secs_f32().ceil() as u64;
         let label = if secs >= 3600 {
@@ -650,28 +862,24 @@ impl Today {
             self.sound = !self.sound;
         }
 
-        // Часы и минуты: колесо мыши меняет на 1, клик — на 1 час / 5 минут по кругу.
+        // Часы, минуты, секунды: поле ввода; колесо мыши меняет значение.
         let bx = tm.x + 82.0;
-        let boxes = [(Rect::new(bx, tm.y + 14.0, 68.0, 24.0), "ч", true), (Rect::new(bx + 74.0, tm.y + 14.0, 68.0, 24.0), "мин", false)];
-        for (k, (b, unit, is_h)) in boxes.iter().enumerate() {
-            let bid = id(TODAY, 50 + k as u32);
-            let (_, clicked) = ui.click_area(bid, *b);
-            let hv = ui.hover_of(bid);
-            let wheel = ui.wheel_in(*b);
-            cv.rr(*b, 6.0, mix(inset(), fg(), 0.04 * hv));
-            let value = if *is_h { self.hours.to_string() } else { format!("{:02}", self.minutes) };
-            cv.text(&value, Rect::new(b.x, b.y, b.w - 26.0, b.h), &f.body_r, txt());
-            cv.text(unit, Rect::new(b.right() - 23.0, b.y + 1.0, 22.0, b.h), &f.small, dim());
-            let step = if wheel > 0.0 { 1i32 } else if wheel < 0.0 { -1 } else { 0 };
-            if clicked || step != 0 {
-                let (mut hh, mut mm) = (self.hours as i32, self.minutes as i32);
-                if *is_h {
-                    hh = if clicked { (hh + 1) % 10 } else { (hh + step).clamp(0, 9) };
-                } else {
-                    mm = if clicked { (mm / 5 * 5 + 5) % 60 } else { (mm + step).clamp(0, 59) };
-                }
+        let vals = [self.hours, self.minutes, self.seconds];
+        let units = [crate::i18n::pick("ч", "h"), crate::i18n::pick("м", "m"), crate::i18n::pick("с", "s")];
+        for k in 0..3 {
+            let b = Rect::new(bx + k as f32 * 49.0, tm.y + 14.0, 46.0, 24.0);
+            if self.time_focus != Some(k) {
+                ui.set_field_text(tf[k], &if k == 0 { vals[k].to_string() } else { format!("{:02}", vals[k]) });
+            }
+            ui.text_field_at(cv, tf[k], b, "0", "", Submit::Keep, 8.0, 16.0);
+            cv.text(units[k], Rect::new(b.right() - 15.0, b.y + 1.0, 12.0, b.h), &f.small, dim());
+            let wheel = ui.wheel_in(b);
+            if wheel != 0.0 {
+                let d = if wheel > 0.0 { 1i32 } else { -1 };
+                let mut v = [self.hours as i32, self.minutes as i32, self.seconds as i32];
+                v[k] = (v[k] + d).max(0);
                 self.preset = None;
-                self.set_time(hh as u32, mm as u32);
+                self.set_time_hms(v[0] as u32, v[1] as u32, v[2] as u32);
             }
         }
 
@@ -941,6 +1149,53 @@ mod tests {
         assert_eq!(t.total, Duration::from_secs(60));
         t.set_time(20, 99);
         assert_eq!((t.hours, t.minutes), (9, 59));
+    }
+
+    #[test]
+    fn number_parsing() {
+        assert_eq!(parse_num("25"), 25);
+        assert_eq!(parse_num(" 7 "), 7);
+        assert_eq!(parse_num(""), 0);
+        assert_eq!(parse_num("x"), 0);
+        assert_eq!(parse_num("99999999999"), 99_999);
+    }
+
+    #[test]
+    fn hms_normalizes() {
+        let mut t = Today::default();
+        t.set_time_hms(0, 90, 75);
+        assert_eq!((t.hours, t.minutes, t.seconds), (1, 31, 15));
+        t.set_time_hms(0, 0, 0);
+        assert_eq!(t.total, Duration::from_secs(60));
+        t.set_time_hms(0, 0, 30);
+        assert_eq!(t.total, Duration::from_secs(30));
+        t.set_time_hms(50, 0, 0);
+        assert_eq!((t.hours, t.minutes, t.seconds), (9, 59, 59));
+    }
+
+    /// Слышимая проверка: `cargo test alarm_plays -- --ignored`.
+    #[test]
+    #[ignore]
+    fn alarm_plays() {
+        let wav = alarm_wav();
+        let ok = unsafe { PlaySoundW(windows::core::PCWSTR(wav.as_ptr().cast()), None, SND_MEMORY | SND_SYNC | SND_NODEFAULT).as_bool() };
+        assert!(ok);
+    }
+
+    #[test]
+    fn alarm_wav_is_valid() {
+        let w = alarm_wav();
+        assert_eq!(&w[..4], b"RIFF");
+        assert_eq!(&w[8..12], b"WAVE");
+        let data = u32::from_le_bytes(w[40..44].try_into().unwrap()) as usize;
+        assert_eq!(w.len(), 44 + data);
+    }
+
+    #[test]
+    fn seconds_circle() {
+        assert!((second_frac(0) - 1.0 / 60.0).abs() < 1e-6);
+        assert!((second_frac(59) - 1.0).abs() < 1e-6);
+        assert!((second_frac(200) - 1.0).abs() < 1e-6);
     }
 
     #[test]
