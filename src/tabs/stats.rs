@@ -211,7 +211,7 @@ impl Stats {
 
     unsafe fn sample_disk(&mut self) {
         let (mut free, mut total) = (0u64, 0u64);
-        if GetDiskFreeSpaceExW(w!("C:\\"), None, Some(&mut total), Some(&mut free)).is_ok() {
+        if GetDiskFreeSpaceExW(PCWSTR(crate::sys::system_drive_root().as_ptr()), None, Some(&mut total), Some(&mut free)).is_ok() {
             self.cur.disk_total = total as f32;
             self.cur.disk_used = total.saturating_sub(free) as f32;
         }
@@ -242,21 +242,21 @@ impl Stats {
         self.prev_net = Some((now, rx, tx));
     }
 
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, _w: f32) {
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, w: f32) {
         let f = &cv.g.fonts;
         let c = &self.cur;
         let gb = |v: f32| format!("{:.1}", v / GB);
-        let (cw, gap) = (114.0, 7.0);
+        let (cw, gap) = (120.0, 10.0);
 
         // Кольца.
         let mut cpu_chips = Vec::new();
         if c.mhz > 0 {
-            cpu_chips.push(format!("{:.1} ГГц", c.mhz as f32 / 1000.0));
+            cpu_chips.push(format!("{:.1} {}", c.mhz as f32 / 1000.0, crate::i18n::pick("ГГц", "GHz")));
         }
-        cpu_chips.push(format!("{} проц.", c.procs));
+        cpu_chips.push(format!("{} {}", c.procs, crate::i18n::pick("проц.", "cores")));
         let h = &self.heavy;
         let gpu_chip = if h.vram_total > 0.0 {
-            vec![format!("{:.1} / {:.1} ГБ", h.vram_used / GB as f64, h.vram_total / GB as f64)]
+            vec![format!("{:.1} / {:.1} {}", h.vram_used / GB as f64, h.vram_total / GB as f64, crate::i18n::pick("ГБ", "GB"))]
         } else {
             Vec::new()
         };
@@ -266,47 +266,48 @@ impl Stats {
             ("GPU", gpu_name, gpu_chip, VIOLET),
             (
                 "RAM",
-                format!("{} / {} ГБ", gb(c.ram_used), gb(c.ram_total)),
-                vec![format!("{} ГБ своб.", gb((c.ram_total - c.ram_used).max(0.0)))],
+                format!("{} / {} {}", gb(c.ram_used), gb(c.ram_total), crate::i18n::pick("ГБ", "GB")),
+                vec![format!("{} {}", gb((c.ram_total - c.ram_used).max(0.0)), crate::i18n::pick("ГБ своб.", "GB free"))],
                 GREEN,
             ),
         ];
         for (i, (name, sub, chips, col)) in cards.iter().enumerate() {
-            let r = Rect::new(PAD + i as f32 * (cw + gap), TOP, cw, 122.0);
+            let r = Rect::new(PAD + i as f32 * (cw + gap), TOP, cw, 150.0);
             cv.card(r);
-            let (rx, ry) = (r.cx(), r.y + 37.0);
-            cv.ring(rx, ry, 28.0, 4.5, self.rings[i].value, *col);
+            let (rx, ry) = (r.cx(), r.y + 46.0);
+            cv.ring(rx, ry, 31.0, 5.0, self.rings[i].value, *col);
             cv.text(&format!("{}%", (self.rings[i].value * 100.0).round() as i32), Rect::new(rx - 26.0, ry - 8.0, 52.0, 16.0), &f.body_c, txt());
-            cv.text(name, Rect::new(r.x, r.y + 71.0, r.w, 14.0), &f.body_c, txt());
-            cv.text(sub, Rect::new(r.x + 5.0, r.y + 84.0, r.w - 10.0, 12.0), &f.small_c, dim());
-            chips_row(cv, r.cx(), r.y + 100.0, chips);
+            cv.text(name, Rect::new(r.x, r.y + 88.0, r.w, 14.0), &f.body_c, txt());
+            cv.text(sub, Rect::new(r.x + 6.0, r.y + 106.0, r.w - 12.0, 12.0), &f.small_c, dim());
+            chips_row(cv, r.cx(), r.y + 126.0, chips);
         }
 
         // Нижний ряд: диск, сеть, аптайм.
-        let y = TOP + 128.0;
+        let y = TOP + 160.0;
         let infos = [
-            ("ДИСК C:", format!("{:.0} / {:.0} ГБ", c.disk_used / GB, c.disk_total / GB)),
+            ("ДИСК C:", format!("{:.0} / {:.0} {}", c.disk_used / GB, c.disk_total / GB, crate::i18n::pick("ГБ", "GB"))),
             ("СЕТЬ", format!("↓{}  ↑{}", fmt_rate(c.rx_bps), fmt_rate(c.tx_bps))),
             ("В РАБОТЕ", fmt_uptime(c.uptime_s)),
         ];
         for (i, (label, value)) in infos.iter().enumerate() {
-            let r = Rect::new(PAD + i as f32 * (cw + gap), y, cw, 36.0);
+            let r = Rect::new(PAD + i as f32 * (cw + gap), y, cw, 70.0);
             cv.card(r);
-            cv.text(label, Rect::new(r.x + 10.0, r.y + 5.0, r.w - 16.0, 11.0), &f.caps, dim());
-            cv.text(value, Rect::new(r.x + 10.0, r.y + 17.0, r.w - 14.0, 14.0), &f.body, txt());
+            cv.text(label, Rect::new(r.x + 12.0, r.y + 15.0, r.w - 20.0, 11.0), &f.caps, dim());
+            cv.text(value, Rect::new(r.x + 12.0, r.y + 36.0, r.w - 18.0, 16.0), &f.body, txt());
         }
 
-        let col_x = PAD + 3.0 * (cw + gap) + 1.0;
-        self.top_apps(ui, cv, Rect::new(col_x, TOP, 163.0, 84.0));
-        self.speed_card(ui, cv, Rect::new(col_x, TOP + 92.0, 163.0, 72.0));
+        let col_x = PAD + 3.0 * (cw + gap);
+        let col_w = (w - PAD - col_x).max(160.0);
+        self.top_apps(ui, cv, Rect::new(col_x, TOP, col_w, 142.0));
+        self.speed_card(ui, cv, Rect::new(col_x, TOP + 152.0, col_w, 78.0));
     }
 
     unsafe fn top_apps(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect) {
         let f = &cv.g.fonts;
         cv.card(r);
         let mode = if self.top_by_cpu { "CPU" } else { "RAM" };
-        cv.text(&format!("Топ приложений • {mode}"), Rect::new(r.x + 8.0, r.y + 5.0, 120.0, 12.0), &f.small, dim());
-        let sw = Rect::new(r.right() - 40.0, r.y + 4.0, 34.0, 13.0);
+        cv.text(&format!("{} • {mode}", crate::i18n::pick("Топ приложений", "Top apps")), Rect::new(r.x + 12.0, r.y + 9.0, 140.0, 12.0), &f.small, dim());
+        let sw = Rect::new(r.right() - 46.0, r.y + 8.0, 36.0, 13.0);
         let (_, clicked) = ui.click_area(id(STATS, 10), sw);
         let other = if self.top_by_cpu { "RAM ⇄" } else { "CPU ⇄" };
         cv.text(other, sw, &f.body_r, cv.accent);
@@ -315,9 +316,9 @@ impl Stats {
         }
         let list = if self.top_by_cpu { &self.heavy.top_cpu } else { &self.heavy.top_ram };
         let max = list.first().map(|x| x.1).unwrap_or(0.0).max(1e-9);
-        for (k, (name, v)) in list.iter().take(4).enumerate() {
-            let y = r.y + 22.0 + k as f32 * 15.0;
-            let tile = Rect::new(r.x + 9.0, y, 13.0, 13.0);
+        for (k, (name, v)) in list.iter().take(5).enumerate() {
+            let y = r.y + 28.0 + k as f32 * 22.0;
+            let tile = Rect::new(r.x + 12.0, y, 19.0, 19.0);
             let bmp = self.heavy.app_icons.get(name).and_then(|px| {
                 let key = {
                     use std::hash::{Hash, Hasher};
@@ -335,14 +336,14 @@ impl Stats {
                 cv.text(&letter, tile, &f.caps_c, txt());
             }
             let value = if self.top_by_cpu { format!("{:.0}%", v * 100.0) } else { fmt_bytes(*v) };
-            cv.text(name, Rect::new(r.x + 27.0, y - 2.0, 100.0, 11.0), &f.caps_c, txt());
-            cv.text(&value, Rect::new(r.right() - 58.0, y - 2.0, 50.0, 11.0), &f.small_r, dim());
-            let bar = Rect::new(r.x + 27.0, y + 9.5, r.w - 35.0, 2.0);
-            cv.rr(bar, 1.0, track());
-            cv.rr(Rect::new(bar.x, bar.y, (bar.w * (*v / max) as f32).max(2.0), 2.0), 1.0, BAR_GREEN);
+            cv.text(name, Rect::new(r.x + 38.0, y - 2.0, r.w - 110.0, 13.0), &f.small_b, txt());
+            cv.text(&value, Rect::new(r.right() - 68.0, y - 2.0, 56.0, 13.0), &f.small_r, dim());
+            let bar = Rect::new(r.x + 38.0, y + 14.0, r.w - 50.0, 3.0);
+            cv.rr(bar, 1.5, track());
+            cv.rr(Rect::new(bar.x, bar.y, (bar.w * (*v / max) as f32).max(3.0), 3.0), 1.5, BAR_GREEN);
         }
         if list.is_empty() {
-            cv.text("Собираю данные…", Rect::new(r.x + 9.0, r.y + 30.0, r.w - 18.0, 12.0), &f.small, dim());
+            cv.text("Собираю данные…", Rect::new(r.x + 12.0, r.y + 34.0, r.w - 24.0, 12.0), &f.small, dim());
         }
     }
 
@@ -350,24 +351,24 @@ impl Stats {
         let f = &cv.g.fonts;
         cv.card(r);
         let sp = &self.online.speed;
-        cv.text("Скорость сети", Rect::new(r.x + 8.0, r.y + 5.0, 80.0, 12.0), &f.small, dim());
+        cv.text("Скорость сети", Rect::new(r.x + 12.0, r.y + 8.0, 90.0, 12.0), &f.small, dim());
         let info = if sp.at > 0 {
             let when = ago(sys::now_secs(), sp.at);
             if sp.place.is_empty() { when } else { format!("{when} • {}", sp.place) }
         } else {
             "ещё не замеряли".into()
         };
-        cv.text(&info, Rect::new(r.right() - 88.0, r.y + 5.0, 80.0, 12.0), &f.small_r, dim());
+        cv.text(&info, Rect::new(r.right() - 112.0, r.y + 8.0, 100.0, 12.0), &f.small_r, dim());
         let num = |v: f32| if sp.at > 0 { format!("{:.0}", v) } else { "—".into() };
         let (d, u) = (num(sp.down), num(sp.up));
         let digits = |t: &str| if sp.at > 0 { t.chars().count() as f32 * 8.6 + 3.0 } else { 22.0 };
         let dw = digits(&d);
-        cv.text(&d, Rect::new(r.x + 8.0, r.y + 18.0, dw + 4.0, 22.0), &f.num, txt());
-        cv.text("Мбит/с ↓", Rect::new(r.x + 8.0 + dw, r.y + 25.0, 50.0, 12.0), &f.small, dim());
-        let ux = r.x + 76.0;
+        cv.text(&d, Rect::new(r.x + 12.0, r.y + 21.0, dw + 4.0, 22.0), &f.num, txt());
+        cv.text("Мбит/с ↓", Rect::new(r.x + 12.0 + dw, r.y + 28.0, 50.0, 12.0), &f.small, dim());
+        let ux = r.x + 12.0 + r.w / 2.0 - 8.0;
         let uw = digits(&u);
-        cv.text(&u, Rect::new(ux, r.y + 18.0, uw + 4.0, 22.0), &f.num, txt());
-        cv.text("Мбит/с ↑", Rect::new(ux + uw, r.y + 25.0, 50.0, 12.0), &f.small, dim());
+        cv.text(&u, Rect::new(ux, r.y + 21.0, uw + 4.0, 22.0), &f.num, txt());
+        cv.text("Мбит/с ↑", Rect::new(ux + uw, r.y + 28.0, 50.0, 12.0), &f.small, dim());
         let label = if sp.running {
             "Идёт замер…"
         } else if sp.failed {
@@ -377,7 +378,7 @@ impl Stats {
         };
         let bg = if sp.running { chip_bg() } else { cv.accent };
         let fg = if sp.running { dim() } else { ink() };
-        if ui.solid_button(cv, id(STATS, 11), Rect::new(r.x + 8.0, r.y + 43.0, r.w - 16.0, 21.0), label, bg, fg, 8.0) && !sp.running {
+        if ui.solid_button(cv, id(STATS, 11), Rect::new(r.x + 12.0, r.y + 49.0, r.w - 24.0, 21.0), label, bg, fg, 8.0) && !sp.running {
             online::run_speedtest();
         }
         let _ = icon::PLAY;
@@ -386,7 +387,7 @@ impl Stats {
 
 /// Ряд маленьких плашек по центру (частота, «N ГБ своб.»).
 unsafe fn chips_row(cv: &Canvas, cx: f32, y: f32, labels: &[String]) {
-    let widths: Vec<f32> = labels.iter().map(|l| l.chars().count() as f32 * 4.6 + 12.0).collect();
+    let widths: Vec<f32> = labels.iter().map(|l| cv.text_w(l, &cv.g.fonts.small_c) + 12.0).collect();
     let total = widths.iter().sum::<f32>() + 5.0 * labels.len().saturating_sub(1) as f32;
     let mut x = cx - total / 2.0;
     for (l, w) in labels.iter().zip(widths) {
@@ -442,31 +443,32 @@ fn short_gpu(raw: &str) -> String {
 pub fn fmt_rate(bps: f32) -> String {
     const K: f32 = 1024.0;
     if bps < K {
-        format!("{:.0} Б/с", bps)
+        format!("{:.0} {}", bps, crate::i18n::pick("Б/с", "B/s"))
     } else if bps < K * K {
-        format!("{:.0} КБ/с", bps / K)
+        format!("{:.0} {}", bps / K, crate::i18n::pick("КБ/с", "KB/s"))
     } else {
-        format!("{:.1} МБ/с", bps / (K * K))
+        format!("{:.1} {}", bps / (K * K), crate::i18n::pick("МБ/с", "MB/s"))
     }
 }
 
 fn fmt_bytes(b: f64) -> String {
     let mb = b / (1024.0 * 1024.0);
     if mb >= 1024.0 {
-        format!("{:.1} ГБ", mb / 1024.0)
+        format!("{:.1} {}", mb / 1024.0, crate::i18n::pick("ГБ", "GB"))
     } else {
-        format!("{:.0} МБ", mb)
+        format!("{:.0} {}", mb, crate::i18n::pick("МБ", "MB"))
     }
 }
 
 pub fn fmt_uptime(secs: u64) -> String {
     let (d, h, m) = (secs / 86_400, secs / 3600 % 24, secs / 60 % 60);
+    let (du, hu, mu) = if crate::i18n::en() { ("d", "h", "min") } else { ("д", "ч", "мин") };
     if d > 0 {
-        format!("{d} д {h} ч")
+        format!("{d} {du} {h} {hu}")
     } else if h > 0 {
-        format!("{h} ч {m} мин")
+        format!("{h} {hu} {m} {mu}")
     } else {
-        format!("{m} мин")
+        format!("{m} {mu}")
     }
 }
 
@@ -629,7 +631,7 @@ impl ProcSampler {
         let top = |m: HashMap<String, f64>| {
             let mut v: Vec<(String, f64)> = m.into_iter().filter(|x| x.1 > 0.0).collect();
             v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            v.truncate(4);
+            v.truncate(5);
             v
         };
         let (top_ram, top_cpu) = (top(ram), top(cpu));

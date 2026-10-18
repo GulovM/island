@@ -158,7 +158,7 @@ pub fn refresh_weather(city: &str) {
                         let note = if e == NOT_FOUND { "Город не найден" } else { "Нет данных" };
                         s.snap.weather_note = Some(note.into());
                     }
-                    s.weather_at = Instant::now().checked_sub(WEATHER_TTL - RETRY_AFTER);
+                    s.weather_at = Instant::now().checked_sub(WEATHER_TTL - RETRY_AFTER).or_else(|| Some(Instant::now())); // при малом аптайме checked_sub = None: без запасного значения повторы шли бы без паузы
                 }
             }
         });
@@ -269,7 +269,7 @@ pub fn refresh_calendar(url: &str) {
         return;
     }
     spawn("island-calendar", move || {
-        let r = get_text(&url).map(|ics| parse_ics(&ics, utc_offset_minutes()));
+        let r = get_text(&url).map(|ics| parse_ics(&ics, SYSTEM_TZ));
         with(|s| {
             s.cal_busy = false;
             s.cal_key = url.clone();
@@ -283,7 +283,7 @@ pub fn refresh_calendar(url: &str) {
                 Err(e) => {
                     log::error(&format!("календарь: {e}"));
                     s.snap.calendar_failed = true;
-                    s.cal_at = Instant::now().checked_sub(CALENDAR_TTL - RETRY_AFTER);
+                    s.cal_at = Instant::now().checked_sub(CALENDAR_TTL - RETRY_AFTER).or_else(|| Some(Instant::now()));
                 }
             }
         });
@@ -331,6 +331,29 @@ pub fn utc_offset_minutes() -> i64 {
     now_local_minutes() - utc
 }
 
+/// Вместо фиксированного смещения: переводить время из UTC по правилам часового пояса системы на
+/// дату события (учёт летнего времени).
+pub const SYSTEM_TZ: i64 = i64::MIN;
+
+/// Смещение местного времени от UTC на момент `utc` (минуты с эпохи). `offset == SYSTEM_TZ` —
+/// правила системы, иначе заданное смещение.
+fn offset_at(utc: i64, offset: i64) -> i64 {
+    if offset != SYSTEM_TZ {
+        return offset;
+    }
+    use windows::Win32::Foundation::SYSTEMTIME;
+    use windows::Win32::System::Time::SystemTimeToTzSpecificLocalTime;
+    let (y, mo, d) = civil_from_days(utc.div_euclid(1440));
+    let m = utc.rem_euclid(1440);
+    let st = SYSTEMTIME { wYear: y as u16, wMonth: mo as u16, wDay: d as u16, wHour: (m / 60) as u16, wMinute: (m % 60) as u16, ..Default::default() };
+    let mut local = SYSTEMTIME::default();
+    if unsafe { SystemTimeToTzSpecificLocalTime(None, &st, &mut local) }.is_err() {
+        return utc_offset_minutes();
+    }
+    let l = days_from_civil(local.wYear as i32, local.wMonth as u32, local.wDay as u32) * 1440 + local.wHour as i64 * 60 + local.wMinute as i64;
+    l - utc
+}
+
 /// Разбирает `DTSTART`: (местные минуты, весь день). Время с `Z` переводится из UTC в местное,
 /// время с `TZID` считается местным.
 fn parse_dt(value: &str, offset: i64) -> Option<(i64, bool)> {
@@ -342,7 +365,7 @@ fn parse_dt(value: &str, offset: i64) -> Option<(i64, bool)> {
     }
     let mut t = day * 1440 + num(9, 11)? as i64 * 60 + num(11, 13)? as i64;
     if v.ends_with('Z') {
-        t += offset;
+        t += offset_at(t, offset);
     }
     Some((t, false))
 }
@@ -352,8 +375,8 @@ fn rule_part<'a>(rule: &'a str, key: &str) -> Option<&'a str> {
 }
 
 /// Ближайшее наступление события, не раньше `now` (для событий на весь день — не раньше
-/// сегодняшнего дня). Повторы: DAILY, WEEKLY (с BYDAY), MONTHLY, YEARLY, INTERVAL, UNTIL, COUNT
-/// (для DAILY); исключения EXDATE не учитываются.
+/// сегодняшнего дня). Повторы: DAILY, WEEKLY (с BYDAY), MONTHLY, YEARLY, INTERVAL, UNTIL, COUNT;
+/// исключения EXDATE обрабатывает `occurrence_from`.
 fn next_occurrence(start: i64, all_day: bool, rrule: Option<&str>, now: i64, offset: i64) -> Option<i64> {
     let threshold = if all_day { now - now.rem_euclid(1440) } else { now };
     if start >= threshold {
@@ -393,26 +416,32 @@ fn next_occurrence(start: i64, all_day: bool, rrule: Option<&str>, now: i64, off
                 .unwrap_or_default();
             let days = if days.is_empty() { vec![weekday(sday)] } else { days };
             let start_monday = sday - weekday(sday);
-            (tday.max(sday)..tday.max(sday) + 7 * interval + 7).find_map(|d| {
-                let week = (d - weekday(d) - start_monday) / 7;
-                let t = d * 1440 + tod;
-                (week % interval == 0 && days.contains(&weekday(d)) && t >= threshold).then_some(t)
-            })
+            let hit = |d: i64| ((d - weekday(d) - start_monday) / 7) % interval == 0 && days.contains(&weekday(d));
+            let first = (tday.max(sday)..tday.max(sday) + 7 * interval + 7).find(|&d| hit(d) && d * 1440 + tod >= threshold);
+            // COUNT: номер найденного наступления среди всех с начала серии.
+            first.filter(|&d| count.is_none_or(|c| (sday..=d).filter(|&x| hit(x)).count() as i64 <= c)).map(|d| d * 1440 + tod)
         }
         freq @ ("MONTHLY" | "YEARLY") => {
             let (y, m, d) = civil_from_days(sday);
             let step = if freq == "MONTHLY" { interval } else { 12 * interval };
-            (0..1200).find_map(|k| {
+            let mut seen = 0i64;
+            let mut res = None;
+            for k in 0..1200 {
                 let months = (m as i64 - 1) + k * step;
                 let (yy, mm) = (y as i64 + months.div_euclid(12), months.rem_euclid(12) as u32 + 1);
                 let day = days_from_civil(yy as i32, mm, d);
                 // Нет такого числа в месяце (31-е) — пропускаем.
                 if civil_from_days(day).2 != d {
-                    return None;
+                    continue;
                 }
+                seen += 1;
                 let t = day * 1440 + tod;
-                (t >= threshold).then_some(t)
-            })
+                if t >= threshold {
+                    res = count.is_none_or(|c| seen <= c).then_some(t);
+                    break;
+                }
+            }
+            res
         }
         _ => None,
     };
@@ -815,7 +844,7 @@ mod tests {
     fn url_and_json_helpers() {
         assert_eq!(urlenc("Москва"), "%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0");
         assert_eq!(split_url("https://a.b:8443/x?y").unwrap(), (true, "a.b".into(), 8443, "/x?y".into()));
-        assert_eq!(split_url("webcal://cal.example/p.ics").unwrap().0, true);
+        assert!(split_url("webcal://cal.example/p.ics").unwrap().0);
         let j = r#"{"results":[{"id":1,"name":"Москва","latitude":55.75,"longitude":37.61}]}"#;
         assert_eq!(json_num(j, "latitude"), Some(55.75));
         assert_eq!(json_str(j, "name").as_deref(), Some("Москва"));
@@ -886,5 +915,33 @@ mod tests {
         let ev = next_event(monthly, now, 0).unwrap();
         assert!(ev.all_day);
         assert_eq!(ev.start, at(2026, 10, 31, 0, 0));
+    }
+
+    #[test]
+    fn ics_count_non_daily() {
+        let now = at(2026, 10, 15, 12, 0);
+        let weekly = |c: u32| format!("BEGIN:VEVENT
+DTSTART:20260907T100000
+RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT={c}
+SUMMARY:W
+END:VEVENT
+");
+        assert!(next_event(&weekly(2), now, 0).is_none());
+        assert_eq!(next_event(&weekly(8), now, 0).unwrap().start, at(2026, 10, 19, 10, 0));
+        let monthly = |c: u32| format!("BEGIN:VEVENT
+DTSTART:20260901T100000
+RRULE:FREQ=MONTHLY;COUNT={c}
+SUMMARY:M
+END:VEVENT
+");
+        assert!(next_event(&monthly(2), now, 0).is_none());
+        assert_eq!(next_event(&monthly(3), now, 0).unwrap().start, at(2026, 11, 1, 10, 0));
+    }
+
+    #[test]
+    fn tz_offset_per_date() {
+        assert_eq!(offset_at(at(2026, 7, 1, 0, 0), 180), 180);
+        let o = offset_at(at(2026, 7, 1, 0, 0), SYSTEM_TZ);
+        assert!((-14 * 60..=14 * 60).contains(&o));
     }
 }

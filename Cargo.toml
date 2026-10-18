@@ -1,21 +1,25 @@
 [package]
 name = "island"
-version = "0.2.0"
+version = "0.2.2"
 edition = "2021"
-description = "Dynamic island for Windows 11: a GPU-drawn notch at the top of the screen"
+description = "Dynamic island for Windows 10/11: a GPU-drawn notch at the top of the screen"
 license = "MIT"
 readme = "README.md"
 publish = false
+rust-version = "1.82"
 
 [dependencies]
 windows-numerics = "0.2"
 windows-core = "0.61"
 windows-collections = "0.2"
+windows-future = "0.2"
 
 [dependencies.windows]
 version = "0.61"
 features = [
     "Win32_Foundation",
+    "Win32_Devices_Display",
+    "Win32_System_IO",
     "Win32_Globalization",
     "Win32_Networking_WinSock",
     "Win32_Devices_FunctionDiscovery",
@@ -55,12 +59,14 @@ features = [
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_Security_Cryptography",
     "Win32_System_DataExchange",
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_Registry",
     "Win32_System_RemoteDesktop",
     "Win32_System_SystemInformation",
+    "Win32_System_Time",
     "Win32_System_Threading",
     "Win32_UI_Accessibility",
     "Win32_UI_HiDpi",

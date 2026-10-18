@@ -1,0 +1,3 @@
+# Статическая CRT: exe не требует VC++ Redistributable (чистая Windows 10 / LTSC).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

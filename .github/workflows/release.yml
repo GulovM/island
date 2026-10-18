@@ -3,6 +3,7 @@ name: release
 on:
   push:
     tags: ["v*"]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -11,17 +12,41 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      # build.rs падает, если не нашёл rc.exe: иначе exe собрался бы без иконки и манифеста.
+      ISLAND_REQUIRE_RC: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Tag matches Cargo.toml version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          ver=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+          [ "v$ver" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != Cargo.toml $ver"; exit 1; }
+      - name: Clippy
+        run: cargo clippy --release --locked --all-targets -- -D warnings
       - name: Tests
-        run: cargo test --release
+        run: cargo test --release --locked
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
       - name: Package
         shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File tools\package.ps1
+        # Подпись включается секретами SIGN_PFX_BASE64 / SIGN_PFX_PASSWORD; без них пакет собирается неподписанным.
+        env:
+          SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
+          ISLAND_SIGN_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
+        run: |
+          if ($env:SIGN_PFX_BASE64) {
+            $pfx = Join-Path $env:RUNNER_TEMP "sign.pfx"
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_BASE64))
+            $env:ISLAND_SIGN_PFX = $pfx
+          }
+          powershell -ExecutionPolicy Bypass -File tools\package.ps1
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2

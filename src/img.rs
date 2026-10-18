@@ -37,14 +37,39 @@ pub unsafe fn save_png(path: &Path, w: u32, h: u32, bgra: &[u8]) -> Option<()> {
     frame.WritePixels(h, w * 4, bgra).ok()?;
     frame.Commit().ok()?;
     enc.Commit().ok()?;
-    Some(())
+    // Кодировщик и поток держат файл открытым: без этого переименование при шифровании не пройдёт.
+    drop(frame);
+    drop(enc);
+    drop(stream);
+    seal_file(path)
+}
+
+/// Шифрует PNG на месте (DPAPI). Уже зашифрованный файл не трогает.
+pub fn seal_file(path: &Path) -> Option<()> {
+    let bytes = std::fs::read(path).ok()?;
+    if sys::is_sealed(&bytes) {
+        return Some(());
+    }
+    let sealed = sys::seal(&bytes)?;
+    let tmp = path.with_extension("png.tmp");
+    let done = std::fs::write(&tmp, sealed).and_then(|()| std::fs::rename(&tmp, path));
+    if done.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    done.ok()
 }
 
 unsafe fn open(f: &IWICImagingFactory, path: &Path) -> Option<(IWICBitmapFrameDecode, u32, u32)> {
-    let wide = sys::wz(path.to_str()?);
-    let dec = f
-        .CreateDecoderFromFilename(PCWSTR(wide.as_ptr()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)
-        .ok()?;
+    let bytes = std::fs::read(path).ok()?;
+    let dec = if sys::is_sealed(&bytes) {
+        // Зашифрованный PNG: расшифровываем в память, на диск открытый вариант не попадает.
+        let plain = sys::unseal(&bytes)?;
+        let mem = windows::Win32::UI::Shell::SHCreateMemStream(Some(&plain))?;
+        f.CreateDecoderFromStream(&mem, std::ptr::null(), WICDecodeMetadataCacheOnDemand).ok()?
+    } else {
+        let wide = sys::wz(path.to_str()?);
+        f.CreateDecoderFromFilename(PCWSTR(wide.as_ptr()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand).ok()?
+    };
     let frame = dec.GetFrame(0).ok()?;
     let (mut w, mut h) = (0u32, 0u32);
     frame.GetSize(&mut w, &mut h).ok()?;

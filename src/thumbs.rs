@@ -1,6 +1,6 @@
 //! Миниатюры обоев: декодирование через WIC в коротком фоновом потоке (в простое потока нет).
 //! Пиксели BGRA premultiplied размером `W`×`H`, обрезка по центру до пропорций кадра.
-//! Готовые миниатюры лежат на диске в `%APPDATA%\island	humbs` (ключ — путь, размер и время
+//! Готовые миниатюры лежат на диске в `%APPDATA%\island\thumbs` (ключ — путь, размер и время
 //! изменения файла): при следующем запуске картинки целиком не декодируются.
 
 use std::path::PathBuf;
@@ -14,8 +14,8 @@ use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPRO
 
 use crate::{bg, log, sys};
 
-pub const W: u32 = 160;
-pub const H: u32 = 90;
+pub const W: u32 = 384;
+pub const H: u32 = 216;
 
 static GEN: AtomicU32 = AtomicU32::new(0);
 static READY: Mutex<Vec<(u32, usize, Vec<u8>)>> = Mutex::new(Vec::new());

@@ -57,42 +57,46 @@ foreach ($tab in $Tabs) {
     $psi.EnvironmentVariables["ISLAND_PERF"] = "1"
     Move-Mouse $cx ($sh - 50)
     $p = [System.Diagnostics.Process]::Start($psi)
-    Start-Sleep -Seconds 4
+    try {
+        Start-Sleep -Seconds 4
 
-    $collapsed = Sample $p $Idle
+        $collapsed = Sample $p $Idle
 
-    Move-Mouse $cx 1
-    Start-Sleep -Milliseconds 300
-    Move-Mouse $cx 40
-    Start-Sleep -Seconds 3
-    $open = Sample $p $Idle
-    # Second window: separates one-time first-show work (index, icons, GPU counters) from steady state.
-    $open2 = Sample $p $Idle
-
-    $h0 = $p.HandleCount
-    for ($i = 0; $i -lt $Cycles; $i++) {
         Move-Mouse $cx 1
-        Start-Sleep -Milliseconds 120
+        Start-Sleep -Milliseconds 300
         Move-Mouse $cx 40
-        Start-Sleep -Milliseconds 450
-        Move-Mouse $cx ($sh - 50)
-        Start-Sleep -Milliseconds 550
-    }
-    Start-Sleep -Seconds 2
-    $after = Sample $p 3
+        Start-Sleep -Seconds 3
+        $open = Sample $p $Idle
+        # Second window: separates one-time first-show work (index, icons, GPU counters) from steady state.
+        $open2 = Sample $p $Idle
 
-    $rows += [pscustomobject]@{
-        Tab = $tab
-        CollapsedCpu = $collapsed.CpuPct; CollapsedMB = $collapsed.WsMB
-        OpenCpu = $open.CpuPct; OpenMB = $open.WsMB; Open2Cpu = $open2.CpuPct; Open2MB = $open2.WsMB
-        HandlesBefore = $h0; HandlesAfter = $after.Handles; MBAfter = $after.WsMB
-        Threads = $after.Threads
-    }
+        $h0 = $p.HandleCount
+        for ($i = 0; $i -lt $Cycles; $i++) {
+            Move-Mouse $cx 1
+            Start-Sleep -Milliseconds 120
+            Move-Mouse $cx 40
+            Start-Sleep -Milliseconds 450
+            Move-Mouse $cx ($sh - 50)
+            Start-Sleep -Milliseconds 550
+        }
+        Start-Sleep -Seconds 2
+        $after = Sample $p 3
 
-    $log = Join-Path $appdata "island\island.log"
-    Write-Host "=== ${tab}: log ==="
-    if (Test-Path $log) { Get-Content $log -Tail 12 -Encoding UTF8 } else { Write-Host "(no log)" }
-    if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() } else { Write-Host "!!! process exited on its own" }
+        $rows += [pscustomobject]@{
+            Tab = $tab
+            CollapsedCpu = $collapsed.CpuPct; CollapsedMB = $collapsed.WsMB
+            OpenCpu = $open.CpuPct; OpenMB = $open.WsMB; Open2Cpu = $open2.CpuPct; Open2MB = $open2.WsMB
+            HandlesBefore = $h0; HandlesAfter = $after.Handles; MBAfter = $after.WsMB
+            Threads = $after.Threads
+        }
+
+        $log = Join-Path $appdata "island\island.log"
+        Write-Host "=== ${tab}: log ==="
+        if (Test-Path $log) { Get-Content $log -Tail 12 -Encoding UTF8 } else { Write-Host "(no log)" }
+    } finally {
+        # Do not leave island.exe running if the measurement throws (single-instance mutex).
+        if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() } else { Write-Host "!!! process exited on its own" }
+    }
 }
 
 Move-Mouse $cx ($sh - 50)
