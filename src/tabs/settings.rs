@@ -26,9 +26,10 @@ const N_FACE: u32 = 9;
 const N_RESET: u32 = 10;
 const N_SCALE: u32 = 11;
 const N_STRIP: u32 = 12;
+/// Занимает три номера подряд (13–15): следующие свободные — 16 и выше.
 const N_LANG: u32 = 13;
-const N_AUTOUPDATE: u32 = 14;
-const N_UPDATE: u32 = 15;
+const N_AUTOUPDATE: u32 = 16;
+const N_UPDATE: u32 = 17;
 const N_PRESET: u32 = 20;
 const N_SWITCH: u32 = 40;
 const N_UP: u32 = 60;
