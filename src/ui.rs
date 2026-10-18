@@ -593,7 +593,8 @@ impl Canvas<'_> {
         match (bmp, size) {
             (Some(b), Some(sz)) if sz.width > 0 && sz.height > 0 => {
                 let Ok(br) = self.g.dc.CreateBitmapBrush(b, None, None) else { return };
-                br.SetInterpolationMode(D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                // Кубическая фильтрация: линейная при сильном уменьшении (узкие карточки карусели) рябит.
+                br.SetInterpolationMode1(D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC);
                 br.SetOpacity(opacity * self.alpha);
                 // Картинка не сжимается по одной оси: масштаб «cover», лишнее по краям обрезается.
                 let (s, dx, dy) = cover_transform(r.w + slant, r.h, sz.width as f32, sz.height as f32);

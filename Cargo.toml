@@ -1,6 +1,6 @@
 [package]
 name = "island"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 description = "Dynamic island for Windows 10/11: a GPU-drawn notch at the top of the screen"
 license = "MIT"
@@ -35,6 +35,7 @@ features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
     "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Power",
     "Win32_System_ProcessStatus",

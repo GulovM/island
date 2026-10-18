@@ -24,6 +24,7 @@ mod input;
 mod render;
 mod window;
 mod wnd;
+mod we;
 
 use std::cell::{Cell, RefCell};
 use std::time::Instant;
