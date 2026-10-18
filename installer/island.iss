@@ -88,6 +88,19 @@ begin
   Result := '';
 end;
 
+// Установка «для себя», запущенная с правами администратора, может лечь в защищённую папку
+// (например, D:\Program Files): тогда обычный пользователь не может ни обновить, ни удалить остров.
+// Отдаём текущему пользователю право изменять папку установки — дальше хватает обычных прав.
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Code: Integer;
+begin
+  if (CurStep = ssPostInstall) and IsAdmin and (not IsAdminInstallMode) then
+    Exec(ExpandConstant('{sys}\icacls.exe'),
+      AddQuotes(ExpandConstant('{app}')) + ' /grant ' + AddQuotes(ExpandConstant('{username}') + ':(OI)(CI)M'),
+      '', SW_HIDE, ewWaitUntilTerminated, Code);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then

@@ -189,16 +189,34 @@ fn download_and_launch(r: &Release) -> Result<(), &'static str> {
     let path = dir.join(name);
     std::fs::write(&path, &bytes).map_err(|e| fail("запись установщика", e, "Не удалось скачать"))?;
 
-    // ShellExecute, а не Command: при установке «для всех» установщик сам запросит права.
+    // ShellExecute, а не Command: при установке «для всех» установщик сам запросит права. Установку
+    // «для себя» в защищённую папку (например, Program Files) он не повышает — просим права сами,
+    // иначе старый island.exe не заменить («отказано в доступе»).
+    let verb = if install_dir_writable() { w!("open") } else { w!("runas") };
     let file = sys::wz(&path.to_string_lossy());
     let h = unsafe {
-        ShellExecuteW(None, w!("open"), PCWSTR(file.as_ptr()), w!("/SILENT /SP- /NORESTART"), PCWSTR::null(), SW_SHOWNORMAL)
+        ShellExecuteW(None, verb, PCWSTR(file.as_ptr()), w!("/SILENT /SP- /NORESTART"), PCWSTR::null(), SW_SHOWNORMAL)
     };
     if (h.0 as isize) <= 32 {
         log::error("не удалось запустить установщик");
         return Err("Не удалось запустить установщик");
     }
     Ok(())
+}
+
+/// Можно ли без повышения прав писать в папку, где лежит island.exe (пробный файл создаётся и удаляется).
+fn install_dir_writable() -> bool {
+    let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) else { return true };
+    let probe = dir.join(format!(".island-write-test-{}", std::process::id()));
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&probe) {
+        Ok(f) => {
+            drop(f);
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => false,
+        Err(_) => true,
+    }
 }
 
 fn fail(what: &str, e: impl std::fmt::Display, msg: &'static str) -> &'static str {
