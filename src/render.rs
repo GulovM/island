@@ -176,6 +176,12 @@ impl App {
             let gcol = if self.settings_open { accent } else { ui::mix(ui::dim(), ui::txt(), gv) };
             gcv.glyph(ui::icon::SETTINGS, ui::Rect::new(gx - GEAR_R, gy - GEAR_R, 2.0 * GEAR_R, 2.0 * GEAR_R), false, gcol);
 
+            // Точка на шестерёнке: найдено обновление, его можно установить в Настройках.
+            if crate::update::available() && !self.settings_open {
+                g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
+                gcv.circle(gx + GEAR_R * 0.75, gy - GEAR_R * 0.75, 2.8, accent);
+            }
+
             // Содержимое вкладок: клип по текущему телу острова, кроссфейд старой и новой.
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
             // При большом радиусе нижние углы карточек вылезли бы за скругление острова: обрезаем по его форме.

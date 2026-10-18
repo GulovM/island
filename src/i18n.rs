@@ -192,6 +192,17 @@ const TABLE: &[(&str, &str)] = &[
     ("Открыть config.toml", "Open config.toml"),
     ("Перечитать конфиг", "Reload config"),
     ("Автозапуск", "Start with Windows"),
+    // Обновления
+    ("Автообновление", "Auto-update"),
+    ("Проверить", "Check"),
+    ("Проверка…", "Checking…"),
+    ("Установить", "Install"),
+    ("Установка…", "Installing…"),
+    ("Повторить", "Retry"),
+    ("Нет связи с GitHub", "Can't reach GitHub"),
+    ("Не удалось скачать", "Download failed"),
+    ("Файл повреждён", "File is corrupted"),
+    ("Не удалось запустить установщик", "Couldn't start the installer"),
     ("Выход", "Exit"),
     // Apps
     ("ИЗБРАННОЕ", "FAVORITES"),
