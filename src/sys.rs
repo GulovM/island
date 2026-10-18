@@ -265,6 +265,66 @@ fn read_dword(key: PCWSTR, name: PCWSTR) -> Option<u32> {
     }
 }
 
+/// Строковое значение реестра (`REG_SZ`/`REG_EXPAND_SZ`). `machine` — HKLM, иначе HKCU.
+pub fn reg_str(machine: bool, key: &str, name: &str) -> Option<String> {
+    use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_EXPAND_SZ};
+    let root = if machine { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER };
+    let (k, n) = (wz(key), wz(name));
+    unsafe {
+        let mut size = 0u32;
+        let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ;
+        if RegGetValueW(root, PCWSTR(k.as_ptr()), PCWSTR(n.as_ptr()), flags, None, None, Some(&mut size)) != ERROR_SUCCESS {
+            return None;
+        }
+        let mut buf = vec![0u16; (size as usize).div_ceil(2)];
+        let r = RegGetValueW(
+            root,
+            PCWSTR(k.as_ptr()),
+            PCWSTR(n.as_ptr()),
+            flags,
+            None,
+            Some(buf.as_mut_ptr() as *mut c_void),
+            Some(&mut size),
+        );
+        if r != ERROR_SUCCESS {
+            return None;
+        }
+        let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        Some(String::from_utf16_lossy(&buf[..end])).filter(|s| !s.is_empty())
+    }
+}
+
+/// Запущен ли процесс с одним из имён `names` (без учёта регистра).
+pub fn process_running(names: &[&str]) -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    };
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return false };
+        let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut found = false;
+        let mut ok = Process32FirstW(snap, &mut e).is_ok();
+        while ok {
+            let end = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
+            let exe = String::from_utf16_lossy(&e.szExeFile[..end]);
+            if names.iter().any(|n| exe.eq_ignore_ascii_case(n)) {
+                found = true;
+                break;
+            }
+            ok = Process32NextW(snap, &mut e).is_ok();
+        }
+        let _ = CloseHandle(snap);
+        found
+    }
+}
+
+/// Число мониторов рабочего стола.
+pub fn monitor_count() -> u32 {
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CMONITORS};
+    unsafe { GetSystemMetrics(SM_CMONITORS).max(1) as u32 }
+}
+
 /// Тёмная тема приложений включена.
 pub fn dark_mode() -> bool {
     read_dword(PERSONALIZE, w!("AppsUseLightTheme")) == Some(0)
@@ -806,6 +866,41 @@ pub fn pictures_dir() -> Option<std::path::PathBuf> {
         let s = p.to_string().ok();
         CoTaskMemFree(Some(p.0 as *const _));
         s.map(Into::into)
+    }
+}
+
+/// Системный диалог выбора папки. Блокирует поток до закрытия диалога — вызывать только из
+/// отдельного потока. `initial` — папка, с которой диалог открывается. `None` — отмена или сбой.
+pub fn pick_folder(initial: Option<&str>) -> Option<String> {
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{
+        FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName, FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
+    };
+    unsafe {
+        // Парный CoUninitialize нужен и при S_FALSE; при RPC_E_CHANGED_MODE (is_err) — нет.
+        let inited = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
+        let path = (|| {
+            let dlg: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+            let opts = dlg.GetOptions().ok()?;
+            dlg.SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
+            if let Some(dir) = initial {
+                let wide = wz(&dir.replace('/', "\\"));
+                if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(wide.as_ptr()), None) {
+                    let _ = dlg.SetFolder(&item);
+                }
+            }
+            // Отмена тоже возвращает ошибку (ERROR_CANCELLED) — это не сбой.
+            dlg.Show(None).ok()?;
+            let item = dlg.GetResult().ok()?;
+            let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+            let s = name.to_string().ok();
+            CoTaskMemFree(Some(name.0 as *const _));
+            s
+        })();
+        if inited {
+            CoUninitialize();
+        }
+        path
     }
 }
 

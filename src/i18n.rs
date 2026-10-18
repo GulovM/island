@@ -308,6 +308,8 @@ const TABLE: &[(&str, &str)] = &[
     ("Недавние", "Recent"),
     ("Папка", "Folder"),
     ("Недавних обоев пока нет", "No recent wallpapers yet"),
+    ("Выбрать папку…", "Choose folder…"),
+    ("Обои Wallpaper Engine не найдены", "No Wallpaper Engine wallpapers found"),
 ];
 
 #[cfg(test)]

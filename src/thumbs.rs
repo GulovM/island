@@ -1,7 +1,8 @@
 //! Миниатюры обоев: декодирование через WIC в коротком фоновом потоке (в простое потока нет).
-//! Пиксели BGRA premultiplied размером `W`×`H`, обрезка по центру до пропорций кадра.
-//! Готовые миниатюры лежат на диске в `%APPDATA%\island\thumbs` (ключ — путь, размер и время
-//! изменения файла): при следующем запуске картинки целиком не декодируются.
+//! Пиксели BGRA premultiplied запрошенного размера (его выбирает вкладка по масштабу экрана),
+//! обрезка по центру до пропорций кадра. Готовые миниатюры лежат на диске в
+//! `%APPDATA%\island\thumbs` (ключ — путь, размер и время изменения файла, размер миниатюры):
+//! при следующем запуске картинки целиком не декодируются.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -14,15 +15,12 @@ use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPRO
 
 use crate::{bg, log, sys};
 
-pub const W: u32 = 384;
-pub const H: u32 = 216;
-
 static GEN: AtomicU32 = AtomicU32::new(0);
 static READY: Mutex<Vec<(u32, usize, Vec<u8>)>> = Mutex::new(Vec::new());
 
-/// Начинает декодирование списка; возвращает номер поколения. Результаты старых поколений
-/// отбрасываются в `drain`.
-pub fn request(paths: Vec<PathBuf>) -> u32 {
+/// Начинает декодирование списка в миниатюры `w`×`h`; возвращает номер поколения. Результаты
+/// старых поколений отбрасываются в `drain`.
+pub fn request(paths: Vec<PathBuf>, w: u32, h: u32) -> u32 {
     let gen = GEN.fetch_add(1, Ordering::SeqCst) + 1;
     if let Ok(mut r) = READY.lock() {
         r.clear();
@@ -38,9 +36,9 @@ pub fn request(paths: Vec<PathBuf>) -> u32 {
             if GEN.load(Ordering::SeqCst) != gen {
                 return;
             }
-            if let Some(px) = cached(p).or_else(|| {
-                let px = decode(&factory, p)?;
-                store(p, &px);
+            if let Some(px) = load(p, w, h).or_else(|| {
+                let px = decode(&factory, p, w, h)?;
+                store(p, w, h, &px);
                 Some(px)
             }) {
                 if let Ok(mut r) = READY.lock() {
@@ -64,29 +62,30 @@ pub fn drain(gen: u32) -> Vec<(usize, Vec<u8>)> {
 }
 
 /// Путь файла кэша для картинки; меняется при изменении файла.
-fn cache_path(src: &std::path::Path) -> Option<PathBuf> {
+fn cache_path(src: &std::path::Path, w: u32, h: u32) -> Option<PathBuf> {
     use std::hash::{Hash, Hasher};
     let meta = std::fs::metadata(src).ok()?;
     let mtime = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    (src.to_string_lossy().to_lowercase(), meta.len(), mtime, W, H).hash(&mut h);
-    Some(sys::data_dir().join("thumbs").join(format!("{:016x}.bin", h.finish())))
+    let mut hs = std::collections::hash_map::DefaultHasher::new();
+    (src.to_string_lossy().to_lowercase(), meta.len(), mtime, w, h).hash(&mut hs);
+    Some(sys::data_dir().join("thumbs").join(format!("{:016x}.bin", hs.finish())))
 }
 
-fn cached(src: &std::path::Path) -> Option<Vec<u8>> {
-    let px = std::fs::read(cache_path(src)?).ok()?;
-    (px.len() == (W * H * 4) as usize).then_some(px)
+/// Готовая миниатюра из кэша на диске (`None` — её ещё не делали или картинка изменилась).
+pub fn load(src: &std::path::Path, w: u32, h: u32) -> Option<Vec<u8>> {
+    let px = std::fs::read(cache_path(src, w, h)?).ok()?;
+    (px.len() == (w * h * 4) as usize).then_some(px)
 }
 
-fn store(src: &std::path::Path, px: &[u8]) {
-    let Some(path) = cache_path(src) else { return };
+fn store(src: &std::path::Path, w: u32, h: u32, px: &[u8]) {
+    let Some(path) = cache_path(src, w, h) else { return };
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     let _ = std::fs::write(path, px);
 }
 
-unsafe fn decode(factory: &IWICImagingFactory, path: &std::path::Path) -> Option<Vec<u8>> {
+unsafe fn decode(factory: &IWICImagingFactory, path: &std::path::Path, tw: u32, th: u32) -> Option<Vec<u8>> {
     let wide = sys::wz(path.to_str()?);
     let dec = factory
         .CreateDecoderFromFilename(PCWSTR(wide.as_ptr()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)
@@ -97,22 +96,24 @@ unsafe fn decode(factory: &IWICImagingFactory, path: &std::path::Path) -> Option
     if w == 0 || h == 0 {
         return None;
     }
-    let k = (W as f32 / w as f32).max(H as f32 / h as f32);
-    let nw = ((w as f32 * k).ceil() as u32).max(W);
-    let nh = ((h as f32 * k).ceil() as u32).max(H);
+    let k = (tw as f32 / w as f32).max(th as f32 / h as f32);
+    let nw = ((w as f32 * k).ceil() as u32).max(tw);
+    let nh = ((h as f32 * k).ceil() as u32).max(th);
 
+    // Fant хорошо уменьшает, но при увеличении (мелкие превью WE) даёт «кубики» — там кубическая.
+    let mode = if k < 1.0 { WICBitmapInterpolationModeFant } else { WICBitmapInterpolationModeHighQualityCubic };
     let scaler = factory.CreateBitmapScaler().ok()?;
-    scaler.Initialize(&frame, nw, nh, WICBitmapInterpolationModeFant).ok()?;
+    scaler.Initialize(&frame, nw, nh, mode).ok()?;
     let conv = factory.CreateFormatConverter().ok()?;
     conv.Initialize(&scaler, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeCustom)
         .ok()?;
     let rect = WICRect {
-        X: ((nw - W) / 2) as i32,
-        Y: ((nh - H) / 2) as i32,
-        Width: W as i32,
-        Height: H as i32,
+        X: ((nw - tw) / 2) as i32,
+        Y: ((nh - th) / 2) as i32,
+        Width: tw as i32,
+        Height: th as i32,
     };
-    let mut buf = vec![0u8; (W * H * 4) as usize];
-    conv.CopyPixels(&rect, W * 4, &mut buf).ok()?;
+    let mut buf = vec![0u8; (tw * th * 4) as usize];
+    conv.CopyPixels(&rect, tw * 4, &mut buf).ok()?;
     Some(buf)
 }
