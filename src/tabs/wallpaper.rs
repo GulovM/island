@@ -323,9 +323,7 @@ impl Wall {
     }
 
     pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, w: f32, h: f32) {
-        let items = self.shown();
-        let n = items.len();
-        let max_off = n.saturating_sub(1) as f32;
+        let mut items = self.shown();
         let f = &cv.g.fonts;
 
         // Верхний ряд: «Недавние» / «Папка» / «WE», счётчик, кнопка открытия папки.
@@ -342,9 +340,13 @@ impl Wall {
                 self.offset.target = 0.0;
                 // Переход между папкой и WE пересобирает список (миниатюры берутся из кэша на диске).
                 self.show();
+                // `show` подменил `files`: старые индексы карточек дальше в кадре брать нельзя.
+                items = self.shown();
             }
             x += bw + 5.0;
         }
+        let n = items.len();
+        let max_off = n.saturating_sub(1) as f32;
         cv.text(&format!("{n} {}", crate::i18n::pick("изобр.", "images")), Rect::new(x + 4.0, y, 100.0, 17.0), &f.small, dim());
         let fb = Rect::new(w - PAD - 19.0, y - 1.0, 19.0, 19.0);
         let pick_w = crate::i18n::pick("Выбрать папку…", "Choose folder…").chars().count() as f32 * 5.0 + 16.0;
