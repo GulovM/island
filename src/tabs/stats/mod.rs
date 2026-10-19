@@ -27,6 +27,8 @@ use crate::online::{self, Online};
 use crate::ui::{icon, Canvas, Rect, Ui, BAR_GREEN, chip_bg, dim, GREEN, ink, txt, track, VIOLET};
 use crate::{icons, sys};
 
+use super::grid::Grid;
+use super::layout::{sz, Size, Spec, TabSpec};
 use super::{ago, id, PAD, STATS, TOP};
 
 mod format;
@@ -41,6 +43,40 @@ mod procs;
 use procs::*;
 
 const GB: f32 = 1024.0 * 1024.0 * 1024.0;
+
+// Номера виджетов в `SPEC`.
+const CPU: usize = 0;
+const GPU: usize = 1;
+const RAM: usize = 2;
+const DISK: usize = 3;
+const NET: usize = 4;
+const UPTIME: usize = 5;
+const TOP_APPS: usize = 6;
+const SPEEDTEST: usize = 7;
+
+/// Кольцо: мини (кольцо и название), карточка, широкая карточка с подробностями.
+static RING: [Size; 3] = [sz(2, 64.0), sz(2, 150.0), sz(4, 104.0)];
+static INFO: [Size; 2] = [sz(2, 70.0), sz(4, 70.0)];
+/// Топ приложений: три, четыре или пять строк.
+static APPS_SIZES: [Size; 3] = [sz(4, 98.0), sz(4, 142.0), sz(6, 142.0)];
+/// Замер скорости: компактный (кнопка «▶» в строке с числами) и обычный.
+static SPEED_SIZES: [Size; 3] = [sz(4, 52.0), sz(4, 78.0), sz(6, 78.0)];
+
+/// Сетка вкладки: 10 колонок по ~62 px (612 px внутри полей). Кольца и карточки занимают по
+/// 2 колонки, топ приложений и замер скорости — 4: так получаются исходные пропорции макета.
+pub static SPEC: TabSpec = TabSpec {
+    cols: 10,
+    specs: &[
+        Spec { key: "cpu", title: "CPU", sizes: &RING, size: 1, col: 0 },
+        Spec { key: "gpu", title: "GPU", sizes: &RING, size: 1, col: 2 },
+        Spec { key: "ram", title: "RAM", sizes: &RING, size: 1, col: 4 },
+        Spec { key: "disk", title: "Диск", sizes: &INFO, size: 0, col: 0 },
+        Spec { key: "net", title: "Сеть", sizes: &INFO, size: 0, col: 2 },
+        Spec { key: "uptime", title: "Аптайм", sizes: &INFO, size: 0, col: 4 },
+        Spec { key: "apps", title: "Топ приложений", sizes: &APPS_SIZES, size: 1, col: 6 },
+        Spec { key: "speed", title: "Скорость сети", sizes: &SPEED_SIZES, size: 1, col: 6 },
+    ],
+};
 
 #[derive(Default)]
 struct Sample {
@@ -246,64 +282,95 @@ impl Stats {
         self.prev_net = Some((now, rx, tx));
     }
 
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, w: f32) {
+    /// Рисует вкладку по сетке. `h` — высота панели без полосы правки.
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
+        let area = Rect::new(PAD, TOP, w - 2.0 * PAD, h - TOP - PAD);
+        grid.draw(ui, cv, area, 0, |ui, cv, it| match it.idx {
+            CPU | GPU | RAM => self.ring_card(cv, it.rect, it.size, it.idx),
+            DISK | NET | UPTIME => self.info_card(cv, it.rect, it.size, it.idx),
+            TOP_APPS => self.top_apps(ui, cv, it.rect),
+            SPEEDTEST => self.speed_card(ui, cv, it.rect, it.size),
+            _ => {}
+        });
+    }
+
+    /// Кольцо загрузки в трёх видах (`size` — индекс в `RING`): мини (кольцо и название), обычная
+    /// карточка и широкая (крупное кольцо, справа название, подробности и плашки).
+    unsafe fn ring_card(&self, cv: &Canvas, r: Rect, size: usize, i: usize) {
         let f = &cv.g.fonts;
         let c = &self.cur;
-        let gb = |v: f32| format!("{:.1}", v / GB);
-        let (cw, gap) = (120.0, 10.0);
-
-        // Кольца.
-        let mut cpu_chips = Vec::new();
-        if c.mhz > 0 {
-            cpu_chips.push(format!("{:.1} {}", c.mhz as f32 / 1000.0, crate::i18n::pick("ГГц", "GHz")));
-        }
-        cpu_chips.push(format!("{} {}", c.procs, crate::i18n::pick("проц.", "cores")));
         let h = &self.heavy;
-        let gpu_chip = if h.vram_total > 0.0 {
-            vec![format!("{:.1} / {:.1} {}", h.vram_used / GB as f64, h.vram_total / GB as f64, crate::i18n::pick("ГБ", "GB"))]
-        } else {
-            Vec::new()
-        };
-        let gpu_name = if h.gpu_name.is_empty() { "—".to_string() } else { short_gpu(&h.gpu_name) };
-        let cards: [(&str, String, Vec<String>, D2D1_COLOR_F); 3] = [
-            ("CPU", self.cpu_name.clone(), cpu_chips, cv.accent),
-            ("GPU", gpu_name, gpu_chip, VIOLET),
-            (
+        let gb = |v: f32| format!("{:.1}", v / GB);
+        let (name, sub, chips, col): (&str, String, Vec<String>, D2D1_COLOR_F) = match i {
+            CPU => {
+                let mut chips = Vec::new();
+                if c.mhz > 0 {
+                    chips.push(format!("{:.1} {}", c.mhz as f32 / 1000.0, crate::i18n::pick("ГГц", "GHz")));
+                }
+                chips.push(format!("{} {}", c.procs, crate::i18n::pick("проц.", "cores")));
+                ("CPU", self.cpu_name.clone(), chips, cv.accent)
+            }
+            GPU => {
+                let chips = if h.vram_total > 0.0 {
+                    vec![format!("{:.1} / {:.1} {}", h.vram_used / GB as f64, h.vram_total / GB as f64, crate::i18n::pick("ГБ", "GB"))]
+                } else {
+                    Vec::new()
+                };
+                ("GPU", if h.gpu_name.is_empty() { "—".to_string() } else { short_gpu(&h.gpu_name) }, chips, VIOLET)
+            }
+            _ => (
                 "RAM",
                 format!("{} / {} {}", gb(c.ram_used), gb(c.ram_total), crate::i18n::pick("ГБ", "GB")),
                 vec![format!("{} {}", gb((c.ram_total - c.ram_used).max(0.0)), crate::i18n::pick("ГБ своб.", "GB free"))],
                 GREEN,
             ),
-        ];
-        for (i, (name, sub, chips, col)) in cards.iter().enumerate() {
-            let r = Rect::new(PAD + i as f32 * (cw + gap), TOP, cw, 150.0);
-            cv.card(r);
-            let (rx, ry) = (r.cx(), r.y + 46.0);
-            cv.ring(rx, ry, 31.0, 5.0, self.rings[i].value, *col);
-            cv.text(&format!("{}%", (self.rings[i].value * 100.0).round() as i32), Rect::new(rx - 26.0, ry - 8.0, 52.0, 16.0), &f.body_c, txt());
-            cv.text(name, Rect::new(r.x, r.y + 88.0, r.w, 14.0), &f.body_c, txt());
-            cv.text(sub, Rect::new(r.x + 6.0, r.y + 106.0, r.w - 12.0, 12.0), &f.small_c, dim());
-            chips_row(cv, r.cx(), r.y + 126.0, chips);
+        };
+        cv.card(r);
+        let v = self.rings[i].value;
+        let pct = format!("{}%", (v * 100.0).round() as i32);
+        match size {
+            0 => {
+                let (rad, cx, cy) = (21.0, r.x + 12.0 + 21.0, r.cy());
+                cv.ring(cx, cy, rad, 4.0, v, col);
+                cv.text(&pct, Rect::new(cx - 19.0, cy - 7.0, 38.0, 14.0), &f.small_c, txt());
+                let tx = cx + rad + 8.0;
+                cv.text(name, Rect::new(tx, cy - 8.0, (r.right() - tx - 4.0).max(0.0), 16.0), &f.body, txt());
+            }
+            1 => {
+                let (rx, ry) = (r.cx(), r.y + 46.0);
+                cv.ring(rx, ry, 31.0, 5.0, v, col);
+                cv.text(&pct, Rect::new(rx - 26.0, ry - 8.0, 52.0, 16.0), &f.body_c, txt());
+                cv.text(name, Rect::new(r.x, r.y + 88.0, r.w, 14.0), &f.body_c, txt());
+                cv.text(&sub, Rect::new(r.x + 6.0, r.y + 106.0, r.w - 12.0, 12.0), &f.small_c, dim());
+                chips_row(cv, r.cx(), r.y + 126.0, &chips);
+            }
+            _ => {
+                let (rad, cx, cy) = (38.0, r.x + 16.0 + 38.0, r.cy());
+                cv.ring(cx, cy, rad, 6.0, v, col);
+                cv.text(&pct, Rect::new(cx - 30.0, cy - 9.0, 60.0, 18.0), &f.num_c, txt());
+                let tx = cx + rad + 18.0;
+                let tw = (r.right() - tx - 10.0).max(0.0);
+                let top = cy - 30.0;
+                cv.text(name, Rect::new(tx, top, tw, 18.0), &f.title, txt());
+                cv.text(&sub, Rect::new(tx, top + 22.0, tw, 14.0), &f.small, dim());
+                chips_from(cv, tx, top + 44.0, &chips);
+            }
         }
+    }
 
-        // Нижний ряд: диск, сеть, аптайм.
-        let y = TOP + 160.0;
-        let infos = [
-            ("ДИСК C:", format!("{:.0} / {:.0} {}", c.disk_used / GB, c.disk_total / GB, crate::i18n::pick("ГБ", "GB"))),
-            ("СЕТЬ", format!("↓{}  ↑{}", fmt_rate(c.rx_bps), fmt_rate(c.tx_bps))),
-            ("В РАБОТЕ", fmt_uptime(c.uptime_s)),
-        ];
-        for (i, (label, value)) in infos.iter().enumerate() {
-            let r = Rect::new(PAD + i as f32 * (cw + gap), y, cw, 70.0);
-            cv.card(r);
-            cv.text(label, Rect::new(r.x + 12.0, r.y + 15.0, r.w - 20.0, 11.0), &f.caps, dim());
-            cv.text(value, Rect::new(r.x + 12.0, r.y + 36.0, r.w - 18.0, 16.0), &f.body, txt());
-        }
-
-        let col_x = PAD + 3.0 * (cw + gap);
-        let col_w = (w - PAD - col_x).max(160.0);
-        self.top_apps(ui, cv, Rect::new(col_x, TOP, col_w, 142.0));
-        self.speed_card(ui, cv, Rect::new(col_x, TOP + 152.0, col_w, 78.0));
+    /// Диск, сеть и аптайм: подпись и значение; в широкой карточке значение крупнее.
+    unsafe fn info_card(&self, cv: &Canvas, r: Rect, size: usize, i: usize) {
+        let f = &cv.g.fonts;
+        let c = &self.cur;
+        let (label, value) = match i {
+            DISK => ("ДИСК C:", format!("{:.0} / {:.0} {}", c.disk_used / GB, c.disk_total / GB, crate::i18n::pick("ГБ", "GB"))),
+            NET => ("СЕТЬ", format!("↓{}  ↑{}", fmt_rate(c.rx_bps), fmt_rate(c.tx_bps))),
+            _ => ("В РАБОТЕ", fmt_uptime(c.uptime_s)),
+        };
+        cv.card(r);
+        cv.text(label, Rect::new(r.x + 12.0, r.y + 15.0, r.w - 20.0, 11.0), &f.caps, dim());
+        let font = if size == 0 { &f.body } else { &f.title };
+        cv.text(&value, Rect::new(r.x + 12.0, r.y + 36.0, r.w - 18.0, 18.0), font, txt());
     }
 
     unsafe fn top_apps(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect) {
@@ -320,7 +387,8 @@ impl Stats {
         }
         let list = if self.top_by_cpu { &self.heavy.top_cpu } else { &self.heavy.top_ram };
         let max = list.first().map(|x| x.1).unwrap_or(0.0).max(1e-9);
-        for (k, (name, v)) in list.iter().take(5).enumerate() {
+        let rows = (((r.h - 32.0) / 22.0).floor() as usize).clamp(1, 5);
+        for (k, (name, v)) in list.iter().take(rows).enumerate() {
             let y = r.y + 28.0 + k as f32 * 22.0;
             let tile = Rect::new(r.x + 12.0, y, 19.0, 19.0);
             let bmp = self.heavy.app_icons.get(name).and_then(|px| {
@@ -351,8 +419,11 @@ impl Stats {
         }
     }
 
-    unsafe fn speed_card(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect) {
+    /// `size` — индекс в `SPEED_SIZES`: в компактном виде кнопка запуска уменьшается до «▶» справа
+    /// от чисел, в остальных — во всю ширину под ними.
+    unsafe fn speed_card(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect, size: usize) {
         let f = &cv.g.fonts;
+        let compact = size == 0;
         cv.card(r);
         let sp = &self.online.speed;
         cv.text("Скорость сети", Rect::new(r.x + 12.0, r.y + 8.0, 90.0, 12.0), &f.small, dim());
@@ -369,32 +440,47 @@ impl Stats {
         let dw = digits(&d);
         cv.text(&d, Rect::new(r.x + 12.0, r.y + 21.0, dw + 4.0, 22.0), &f.num, txt());
         cv.text("Мбит/с ↓", Rect::new(r.x + 12.0 + dw, r.y + 28.0, 50.0, 12.0), &f.small, dim());
-        let ux = r.x + 12.0 + r.w / 2.0 - 8.0;
+        let nums_w = if compact { r.w - 46.0 } else { r.w };
+        let ux = r.x + 12.0 + nums_w / 2.0 - 8.0;
         let uw = digits(&u);
         cv.text(&u, Rect::new(ux, r.y + 21.0, uw + 4.0, 22.0), &f.num, txt());
         cv.text("Мбит/с ↑", Rect::new(ux + uw, r.y + 28.0, 50.0, 12.0), &f.small, dim());
-        let label = if sp.running {
-            "Идёт замер…"
-        } else if sp.failed {
-            "▶ Повторить замер"
+        let (label, btn) = if compact {
+            (if sp.running { "…" } else { "▶" }, Rect::new(r.right() - 46.0, r.y + 21.0, 34.0, 21.0))
         } else {
-            "▶ Замерить скорость"
+            let label = if sp.running {
+                "Идёт замер…"
+            } else if sp.failed {
+                "▶ Повторить замер"
+            } else {
+                "▶ Замерить скорость"
+            };
+            (label, Rect::new(r.x + 12.0, r.y + 49.0, r.w - 24.0, 21.0))
         };
         let bg = if sp.running { chip_bg() } else { cv.accent };
         let fg = if sp.running { dim() } else { ink() };
-        if ui.solid_button(cv, id(STATS, 11), Rect::new(r.x + 12.0, r.y + 49.0, r.w - 24.0, 21.0), label, bg, fg, 8.0) && !sp.running {
+        if ui.solid_button(cv, id(STATS, 11), btn, label, bg, fg, 8.0) && !sp.running {
             online::run_speedtest();
         }
         let _ = icon::PLAY;
     }
 }
 
+/// Ширина ряда плашек.
+unsafe fn chips_width(cv: &Canvas, labels: &[String]) -> f32 {
+    labels.iter().map(|l| cv.text_w(l, &cv.g.fonts.small_c) + 12.0).sum::<f32>() + 5.0 * labels.len().saturating_sub(1) as f32
+}
+
 /// Ряд маленьких плашек по центру (частота, «N ГБ своб.»).
 unsafe fn chips_row(cv: &Canvas, cx: f32, y: f32, labels: &[String]) {
-    let widths: Vec<f32> = labels.iter().map(|l| cv.text_w(l, &cv.g.fonts.small_c) + 12.0).collect();
-    let total = widths.iter().sum::<f32>() + 5.0 * labels.len().saturating_sub(1) as f32;
-    let mut x = cx - total / 2.0;
-    for (l, w) in labels.iter().zip(widths) {
+    chips_from(cv, cx - chips_width(cv, labels) / 2.0, y, labels);
+}
+
+/// Ряд плашек от левого края `x`.
+unsafe fn chips_from(cv: &Canvas, x: f32, y: f32, labels: &[String]) {
+    let mut x = x;
+    for l in labels {
+        let w = cv.text_w(l, &cv.g.fonts.small_c) + 12.0;
         let r = Rect::new(x, y, w, 15.0);
         cv.rr(r, 6.0, chip_bg());
         cv.text(l, r, &cv.g.fonts.small_c, txt());

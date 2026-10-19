@@ -14,7 +14,8 @@ impl App {
         let collapsed = self.collapsed();
         let (w, h) = if self.expanded {
             let id = self.cur_id();
-            (self.tab_w(id), App::tab_h(id))
+            // В режиме правки под сеткой появляется полоса с кнопками.
+            (self.tab_w(id), App::tab_h(id) + self.tabs.edit_extra(id))
         } else if self.stripped() {
             // Ширина прежняя: зона наведения не растёт, меняется только высота.
             (collapsed.0, STRIP_H)
@@ -351,6 +352,9 @@ impl App {
             let _ = ShowWindow(self.hwnd, show);
             for z in &self.hot {
                 let _ = ShowWindow(z.hwnd, show);
+            }
+            if game {
+                self.hide_glass();
             }
             if !game {
                 self.place_window(true);

@@ -40,7 +40,11 @@ impl App {
         let thin = ((collapsed_h * s - ah) / ((collapsed_h - STRIP_H) * s)).clamp(0.0, 1.0);
         let k = 1.0 - thin;
         let pal = theme::get();
-        g.brush.SetColor(&D2D1_COLOR_F { r: pal.bg.r * k, g: pal.bg.g * k, b: pal.bg.b * k, a: 1.0 });
+        // Матовость: 0 — почти прозрачное стекло, 100 — сплошной фон; в полоске фон всегда сплошной.
+        let matte = (self.cfg.glass / 100.0).clamp(0.0, 1.0);
+        let body_a = (0.12 + 0.88 * matte) + (1.0 - (0.12 + 0.88 * matte)) * thin;
+        g.brush.SetColor(&D2D1_COLOR_F { r: pal.bg.r * k, g: pal.bg.g * k, b: pal.bg.b * k, a: body_a });
+        self.apply_blur(x0, aw, ah, r, matte < 1.0);
         let body = self.body_path(g, x0, aw, ah, ear, r, false)?;
         g.dc.FillGeometry(&body, &g.brush, None);
 
@@ -118,9 +122,9 @@ impl App {
                 g.brush.SetColor(&c);
                 g.dc.FillEllipse(
                     &D2D1_ELLIPSE {
-                        point: Vector2 { X: x0 + 14.0 * s, Y: (TAB_TOP + TAB_H / 2.0) * s },
-                        radiusX: 2.5 * s,
-                        radiusY: 2.5 * s,
+                        point: Vector2 { X: x0 + 7.0 * s, Y: (TAB_TOP + TAB_H / 2.0) * s },
+                        radiusX: 2.2 * s,
+                        radiusY: 2.2 * s,
                     },
                     &g.brush,
                 );
@@ -175,6 +179,23 @@ impl App {
             g.dc.SetTransform(&ui::matrix_rot(s, gx, gy, 60.0 * gv));
             let gcol = if self.settings_open { accent } else { ui::mix(ui::dim(), ui::txt(), gv) };
             gcv.glyph(ui::icon::SETTINGS, ui::Rect::new(gx - GEAR_R, gy - GEAR_R, 2.0 * GEAR_R, 2.0 * GEAR_R), false, gcol);
+
+            // Карандаш слева: правка виджетов. Появляется только на вкладках с сеткой, в режиме правки залит акцентом.
+            let cur = self.normal_id();
+            let pv = ui.presence(0xF102, self.expanded && !self.settings_open && tabs.editable(cur));
+            if pv > 0.01 {
+                let (ex, ey) = self.pencil_center();
+                let ev = ui.presence(0xF103, tabs.editing(cur));
+                let hot = self.expanded && (cursor.0 - ex).hypot(cursor.1 - ey) <= GEAR_R + 3.0;
+                let hv = ui.hover_amount(0xF104, hot);
+                let pcv = Canvas { g, alpha: open * pv, accent };
+                g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
+                if ev > 0.01 {
+                    pcv.circle(ex, ey, GEAR_R, D2D1_COLOR_F { a: 0.26 * ev, ..accent });
+                }
+                let col = ui::mix(ui::mix(ui::dim(), ui::txt(), hv), accent, ev);
+                pcv.glyph(ui::icon::EDIT, ui::Rect::new(ex - 7.0, ey - 7.0, 14.0, 14.0), false, col);
+            }
 
             // Точка на шестерёнке: найдено обновление, его можно установить в Настройках.
             if crate::update::available() && !self.settings_open {
@@ -239,6 +260,37 @@ impl App {
         g.swapchain.Present(1, DXGI_PRESENT(0)).ok()?;
         ui.end_frame();
         Ok(())
+    }
+
+    /// Размытие того, что за островом: вспомогательное окно под островом с «blur behind»,
+    /// обрезанное регионом по скруглённому телу (ушки не размываются). Пересоздаётся только при смене формы.
+    unsafe fn apply_blur(&self, x0: f32, aw: f32, ah: f32, r: f32, on: bool) {
+        let key = if on {
+            (self.win_x + x0.floor() as i32, self.win_y, (aw.ceil() as i32) << 16 | ah.ceil() as i32, r.round() as i32, 0)
+        } else {
+            (0, 0, 0, 0, -1)
+        };
+        if self.blur_key.get() == key {
+            return;
+        }
+        self.blur_key.set(key);
+        if !on {
+            let _ = ShowWindow(self.glass_wnd, SW_HIDE);
+            return;
+        }
+        let (w, h) = (aw.ceil() as i32, ah.ceil() as i32);
+        // Верхние углы уезжают выше окна, остаются скруглены только нижние.
+        let d = (2 * key.3).max(1);
+        let rgn = CreateRoundRectRgn(0, -d, w + 1, h + 1, d, d);
+        // Система забирает регион себе, удалять его не нужно.
+        SetWindowRgn(self.glass_wnd, Some(rgn), false);
+        let _ = SetWindowPos(self.glass_wnd, Some(self.hwnd), key.0, key.1, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+
+    /// Прячет подложку стекла (остров скрыт); следующий кадр покажет её снова.
+    pub(crate) unsafe fn hide_glass(&self) {
+        self.blur_key.set((i32::MIN, 0, 0, 0, 0));
+        let _ = ShowWindow(self.glass_wnd, SW_HIDE);
     }
 
     /// Контур чёлки: плоский верх на уровне края экрана, вогнутые «ушки» по бокам,
