@@ -60,7 +60,9 @@ impl Today {
         self.sel = if self.view == (ty, tm) { today } else { days_from_civil(self.view.0, self.view.1, 1) };
     }
 
-    pub(super) unsafe fn week_card(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect, today: i64, dow: usize) {
+    /// Неделя. `size`: 0 — только дни недели, 1 и 2 — ещё и блок ближайшего события (2 шире:
+    /// дни расходятся по ширине карточки).
+    pub(super) unsafe fn week_card(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect, size: usize, today: i64, dow: usize) {
         let f = &cv.g.fonts;
         cv.card(wk);
         if self.cal_editing {
@@ -84,7 +86,7 @@ impl Today {
         );
         cv.text(&range, Rect::new(wk.right() - 111.0, wk.y + 10.0, 100.0, 14.0), &f.small_r, dim());
         for (i, (day, _)) in dates.iter().enumerate() {
-            let cx = wk.x + 23.0 + i as f32 * 30.7;
+            let cx = wk.x + 23.0 + i as f32 * (wk.w - 46.0) / 6.0;
             cv.text(crate::i18n::weekdays()[i], Rect::new(cx - 14.0, wk.y + 28.0, 28.0, 12.0), &f.small_c, dim());
             let b = Rect::new(cx - 12.5, wk.y + 43.0, 25.0, 23.0);
             let is_today = i == dow;
@@ -103,8 +105,11 @@ impl Today {
             }
         }
 
-        // Ближайшее событие календаря.
-        let ev = Rect::new(wk.x + 8.0, wk.y + 76.0, wk.w - 16.0, 38.0);
+        // Ближайшее событие календаря (в низкой карточке его нет).
+        if size == 0 {
+            return;
+        }
+        let ev = Rect::new(wk.x + 8.0, wk.bottom() - 46.0, wk.w - 16.0, 38.0);
         cv.rr(ev, 8.0, inset());
         cv.rr(Rect::new(ev.x + 8.0, ev.y + 8.0, 3.0, 20.0), 1.5, PINK);
         let (l1, l2) = match (&self.next, self.online.calendar_set) {
@@ -167,13 +172,18 @@ impl Today {
         } else {
             ("Enter — сохранить, пусто — отключить, Esc — отмена", dim())
         };
-        cv.text(msg, Rect::new(wk.x + 9.0, wk.y + 64.0, wk.w - 18.0, 13.0), &f.small, col);
-        cv.text(
-            "Google/Яндекс/Outlook: «секретный адрес в формате iCal»",
-            Rect::new(wk.x + 9.0, wk.y + 80.0, wk.w - 18.0, 13.0),
-            &f.small,
-            mix(dim(), crate::ui::card(), 0.35),
-        );
+        // В низкой карточке подсказкам нет места: остаётся только сообщение об ошибке.
+        if wk.h > 100.0 || self.cal_bad {
+            cv.text(msg, Rect::new(wk.x + 9.0, wk.y + 62.0, wk.w - 18.0, 13.0), &f.small, col);
+        }
+        if wk.h > 100.0 {
+            cv.text(
+                "Google/Яндекс/Outlook: «секретный адрес в формате iCal»",
+                Rect::new(wk.x + 9.0, wk.y + 80.0, wk.w - 18.0, 13.0),
+                &f.small,
+                mix(dim(), crate::ui::card(), 0.35),
+            );
+        }
     }
 
     /// Месячный календарь: дни с событиями помечены точками, клик по дню показывает его события.

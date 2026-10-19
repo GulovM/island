@@ -16,6 +16,8 @@ use crate::ui::{Canvas, Ui};
 pub mod apps;
 pub mod clipboard;
 pub mod controls;
+pub mod grid;
+pub mod layout;
 pub mod power;
 pub mod settings;
 pub mod stats;
@@ -48,6 +50,20 @@ pub enum Action {
     CopyImage(String),
     /// Свернуть остров (после запуска приложения и т. п.).
     Collapse,
+    /// Раскладка виджетов вкладки изменилась: записать строку в `config.toml`.
+    Layout(usize, String),
+    /// Режим правки закончился: пересчитать высоту острова.
+    Resize,
+}
+
+/// Описание виджетов вкладки для сетки (у остальных вкладок сетки нет).
+fn spec_of(tab: usize) -> &'static layout::TabSpec {
+    match tab {
+        CONTROLS => &controls::SPEC,
+        TODAY => &today::SPEC,
+        STATS => &stats::SPEC,
+        _ => &layout::EMPTY,
+    }
 }
 
 pub fn id(tab: usize, n: u32) -> u32 {
@@ -123,6 +139,8 @@ pub struct Tabs {
     wall: wallpaper::Wall,
     pub settings: settings::Settings,
     pub actions: Vec<Action>,
+    /// Сетки виджетов вкладок Controls, Today, Stats (индекс = номер вкладки).
+    grids: [grid::Grid; 3],
 }
 
 impl Tabs {
@@ -133,6 +151,9 @@ impl Tabs {
         self.clip.load();
         self.apps.configure(cfg);
         self.wall.configure(cfg);
+        for (tab, g) in self.grids.iter_mut().enumerate() {
+            g.configure(tab, spec_of(tab), &cfg.layouts[tab]);
+        }
     }
 
     pub fn apply_config(&mut self, cfg: &Config) {
@@ -140,15 +161,52 @@ impl Tabs {
         self.apps.configure(cfg);
         self.wall.configure(cfg);
         self.settings.set_config(cfg);
+        for (tab, g) in self.grids.iter_mut().enumerate() {
+            g.set_text(&cfg.layouts[tab]);
+        }
+    }
+
+    /// Можно ли настраивать виджеты вкладки (показывается карандаш).
+    pub fn editable(&self, tab: usize) -> bool {
+        self.grids.get(tab).is_some_and(grid::Grid::can_edit)
+    }
+
+    pub fn editing(&self, tab: usize) -> bool {
+        self.grids.get(tab).is_some_and(grid::Grid::is_editing)
+    }
+
+    /// Переключает режим правки. `true` — состояние изменилось.
+    pub fn toggle_edit(&mut self, tab: usize) -> bool {
+        let Some(g) = self.grids.get_mut(tab) else { return false };
+        if !g.can_edit() {
+            return false;
+        }
+        if g.is_editing() {
+            g.end_edit();
+        } else {
+            g.begin_edit();
+            // Выпадающие панели поверх виджетов в правке только мешают: закрываем.
+            match tab {
+                CONTROLS => self.controls.hide(),
+                TODAY => self.today.hide_overlays(),
+                _ => {}
+            }
+        }
+        true
+    }
+
+    /// На сколько остров выше, пока вкладку правят.
+    pub fn edit_extra(&self, tab: usize) -> f32 {
+        self.grids.get(tab).map_or(0.0, grid::Grid::extra)
     }
 
     /// Рисует содержимое вкладки `tab` в панели размером `w`×`h` (логические пиксели).
     pub unsafe fn draw(&mut self, tab: usize, ui: &mut Ui, cv: &Canvas, w: f32, h: f32) {
         let act = &mut self.actions;
         match tab {
-            CONTROLS => self.controls.draw(ui, cv, w),
-            TODAY => self.today.draw(ui, cv, w, h),
-            STATS => self.stats.draw(ui, cv, w),
+            CONTROLS => self.controls.draw(ui, cv, &mut self.grids[CONTROLS], w, h),
+            TODAY => self.today.draw(ui, cv, &mut self.grids[TODAY], w, h),
+            STATS => self.stats.draw(ui, cv, &mut self.grids[STATS], w, h),
             CLIPBOARD => self.clip.draw(ui, cv, w, h, act),
             APPS => self.apps.draw(ui, cv, w, h, act),
             WALLPAPER => self.wall.draw(ui, cv, w, h),
@@ -160,21 +218,42 @@ impl Tabs {
         if tab != CLIPBOARD && tab != APPS {
             let _ = ui.take_nav();
         }
+        // Правка сетки: новую раскладку надо записать, окончание правки — пересчитать высоту острова.
+        if let Some(g) = self.grids.get_mut(tab) {
+            if let Some(text) = g.take_saved() {
+                self.actions.push(Action::Layout(tab, text));
+            }
+            if g.take_resize() {
+                self.actions.push(Action::Resize);
+            }
+        }
     }
 
     pub fn step(&mut self, dt: f32) {
+        self.controls.step(dt);
         self.today.step(dt);
         self.stats.step(dt);
         self.wall.step(dt);
         self.settings.step(dt);
+        for g in &mut self.grids {
+            g.step(dt);
+        }
     }
 
     pub fn animating(&self) -> bool {
-        self.today.animating() || self.stats.animating() || self.wall.animating() || self.settings.animating()
+        self.controls.animating()
+            || self.today.animating()
+            || self.stats.animating()
+            || self.wall.animating()
+            || self.settings.animating()
+            || self.grids.iter().any(grid::Grid::animating)
     }
 
     /// Вкладка стала видимой. `true` — нужен кадр.
     pub fn show(&mut self, tab: usize) -> bool {
+        if let Some(g) = self.grids.get_mut(tab) {
+            g.show();
+        }
         match tab {
             CONTROLS => self.controls.show(),
             STATS => self.stats.show(),
@@ -186,6 +265,9 @@ impl Tabs {
     }
 
     pub fn hide(&mut self, tab: usize) {
+        if let Some(g) = self.grids.get_mut(tab) {
+            g.hide();
+        }
         if tab == POWER {
             self.power.reset();
         }

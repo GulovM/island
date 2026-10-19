@@ -270,6 +270,8 @@ const TABLE: &[(&str, &str)] = &[
     ("Над окнами на весь экран — полоска", "Thin strip over fullscreen windows"),
     ("Наведите на верхний край, чтобы раскрыть", "Hover the top edge to expand"),
     ("Радиус углов", "Corner radius"),
+    ("Стекло", "Glass"),
+    ("Капля вкладки цветом акцента", "Accent-coloured tab pill"),
     ("Масштаб интерфейса", "Interface scale"),
     ("ВКЛАДКИ — ВКЛЮЧЕНИЕ И ПОРЯДОК", "TABS — VISIBILITY AND ORDER"),
     ("Сбросить внешний вид", "Reset appearance"),
@@ -322,6 +324,25 @@ const TABLE: &[(&str, &str)] = &[
     ("Недавних обоев пока нет", "No recent wallpapers yet"),
     ("Выбрать папку…", "Choose folder…"),
     ("Обои Wallpaper Engine не найдены", "No Wallpaper Engine wallpapers found"),
+    // Режим правки виджетов
+    ("Готово", "Done"),
+    ("Сбросить", "Reset layout"),
+    ("Виджеты", "Widgets"),
+    ("Нет виджетов", "No widgets"),
+    ("Настроить", "Customize"),
+    ("Верните их из списка внизу", "Bring them back from the list below"),
+    ("Не хватает места", "Not enough room"),
+    // Названия виджетов (лоток скрытых)
+    ("Громкость", "Volume"),
+    ("Яркость", "Brightness"),
+    ("Плеер", "Player"),
+    ("Часы", "Clock"),
+    ("Погода", "Weather"),
+    ("Таймер", "Timer"),
+    ("Диск", "Disk"),
+    ("Сеть", "Network"),
+    ("Аптайм", "Uptime"),
+    ("Топ приложений", "Top apps"),
 ];
 
 #[cfg(test)]

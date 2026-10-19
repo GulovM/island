@@ -29,6 +29,13 @@ system_colors = 0
 # Скругление нижних углов острова, пиксели (0–30)
 corner_radius = 14
 
+# 1 — эффект стекла: блик на кромке и мягкое осветление сверху раскрытого острова,
+# подвижная «капля» выбранной вкладки. 0 — прежний плоский вид. Меняется и в Настройках.
+glass = 1
+
+# 1 — капля выбранной вкладки залита цветом акцента, 0 — нейтральная (по умолчанию).
+accent_pill = 0
+
 # Масштаб интерфейса: шрифты и панель увеличиваются вместе (0.9–2.0). Меняется и в Настройках.
 ui_scale = 1.2
 
@@ -79,6 +86,13 @@ clock_style = 0
 # Календарь: «секретный адрес в формате iCal» из настроек Google Calendar (или любой .ics)
 calendar_ics = ""
 
+# Раскладка виджетов вкладок. Меняется прямо в острове: кнопка с карандашом слева в ряду вкладок
+# (или долгое нажатие на пустом месте вкладки). Пусто — раскладка по умолчанию.
+# Формат: виджеты через пробел, «-» — скрыт, «:N» — размер, «@N» — колонка, например "wifi:0@0 -night".
+layout_controls = ""
+layout_today = ""
+layout_stats = ""
+
 # Индикаторы в свёрнутой форме (1 — включено, 0 — выключено):
 # мини-плеер при воспроизведении музыки и короткие уведомления (таймер, громкость, зарядка)
 live_media = 1
@@ -102,6 +116,10 @@ pub struct Config {
     pub system_colors: bool,
     /// Скругление нижних углов раскрытого острова, логические пиксели.
     pub corner_radius: f32,
+    /// Эффект стекла: блик на кромке, осветление сверху, подвижная капля вкладки.
+    pub glass: bool,
+    /// Капля выбранной вкладки залита акцентом (иначе нейтральная).
+    pub accent_pill: bool,
     /// Масштаб интерфейса (множитель к DPI монитора).
     pub ui_scale: f32,
     /// Над развёрнутыми окнами остров сжимается в тонкую полоску.
@@ -129,6 +147,8 @@ pub struct Config {
     pub clock_style: usize,
     /// Ссылка на календарь в формате iCal.
     pub calendar_ics: String,
+    /// Раскладка виджетов вкладок Controls, Today, Stats (пустая строка — по умолчанию).
+    pub layouts: [String; 3],
     /// Глобальная горячая клавиша («ctrl+alt+space»); пустая — отключена.
     pub hotkey: String,
     /// Мини-плеер в свёрнутой форме, пока играет музыка.
@@ -144,6 +164,8 @@ impl Default for Config {
             bg: theme::DEFAULT_BG,
             system_colors: false,
             corner_radius: DEFAULT_RADIUS,
+            glass: true,
+            accent_pill: false,
             ui_scale: DEFAULT_SCALE,
             strip_over_maximized: true,
             language: "auto".to_string(),
@@ -160,6 +182,7 @@ impl Default for Config {
             weather_city: String::new(),
             clock_style: 0,
             calendar_ics: String::new(),
+            layouts: Default::default(),
             hotkey: "ctrl+alt+space".into(),
             live_media: true,
             live_toasts: true,
@@ -219,6 +242,8 @@ pub fn save(cfg: &Config, names: &[&str]) {
         ("bg", fmt_str(&theme::to_hex(cfg.bg))),
         ("system_colors", (cfg.system_colors as u8).to_string()),
         ("corner_radius", format!("{}", cfg.corner_radius.round() as i32)),
+        ("glass", (cfg.glass as u8).to_string()),
+        ("accent_pill", (cfg.accent_pill as u8).to_string()),
         ("ui_scale", format!("{:.3}", cfg.ui_scale)),
         ("strip_over_maximized", (cfg.strip_over_maximized as u8).to_string()),
         ("language", fmt_str(&cfg.language)),
@@ -229,6 +254,9 @@ pub fn save(cfg: &Config, names: &[&str]) {
     ];
     write_updates(&updates);
 }
+
+/// Ключи раскладки виджетов в `config.toml` по номеру вкладки (Controls, Today, Stats).
+pub const LAYOUT_KEYS: [&str; 3] = ["layout_controls", "layout_today", "layout_stats"];
 
 /// Записывает одну строку верхнего уровня (`key = "value"`) в `config.toml` (город погоды из острова).
 pub fn save_str(key: &str, value: &str) {
@@ -387,6 +415,8 @@ pub fn parse(text: &str) -> Config {
             ("", "idle_face", Value::Num(v)) => cfg.idle_face = v != 0.0,
             ("", "auto_update", Value::Num(v)) => cfg.auto_update = v != 0.0,
             ("", "corner_radius", Value::Num(v)) => cfg.corner_radius = (v as f32).clamp(0.0, MAX_RADIUS),
+            ("", "glass", Value::Num(v)) => cfg.glass = v != 0.0,
+            ("", "accent_pill", Value::Num(v)) => cfg.accent_pill = v != 0.0,
             ("", "ui_scale", Value::Num(v)) => cfg.ui_scale = (v as f32).clamp(MIN_SCALE, MAX_SCALE),
             ("", "strip_over_maximized", Value::Num(v)) => cfg.strip_over_maximized = v != 0.0,
             ("", "language", Value::Str(s)) => {
@@ -406,6 +436,9 @@ pub fn parse(text: &str) -> Config {
             ("", "weather_city", Value::Str(s)) => cfg.weather_city = s,
             ("", "clock_style", Value::Num(v)) => cfg.clock_style = (v.max(0.0) as usize).min(4),
             ("", "calendar_ics", Value::Str(s)) => cfg.calendar_ics = s,
+            ("", "layout_controls", Value::Str(s)) => cfg.layouts[0] = s,
+            ("", "layout_today", Value::Str(s)) => cfg.layouts[1] = s,
+            ("", "layout_stats", Value::Str(s)) => cfg.layouts[2] = s,
             ("", "hotkey", Value::Str(s)) => {
                 if !s.is_empty() && parse_hotkey(&s).is_none() {
                     log::error(&format!("config.toml:{}: неверная горячая клавиша «{s}»", n + 1));
@@ -531,6 +564,8 @@ mod tests {
         assert_eq!(c.collapsed, (180.0, 24.0));
         assert_eq!(c.tabs.len(), 7);
         assert_eq!(c.key("weather"), None);
+        assert!(c.glass && !c.accent_pill);
+        assert_eq!((Config::default().glass, Config::default().accent_pill), (c.glass, c.accent_pill));
     }
 
     #[test]
@@ -639,6 +674,8 @@ gmail = \"https://mail.google.com\"
         c.bg = theme::parse_hex("#101820").unwrap();
         c.system_colors = true;
         c.corner_radius = 22.0;
+        c.glass = false;
+        c.accent_pill = true;
         c.ui_scale = 1.5;
         c.strip_over_maximized = false;
         c.hidden_tabs = vec!["Power".into(), "Wallpaper".into()];
@@ -650,6 +687,8 @@ gmail = \"https://mail.google.com\"
             ("bg", fmt_str(&theme::to_hex(c.bg))),
             ("system_colors", "1".to_string()),
             ("corner_radius", "22".to_string()),
+            ("glass", "0".to_string()),
+            ("accent_pill", "1".to_string()),
             ("ui_scale", format!("{:.3}", c.ui_scale)),
             ("strip_over_maximized", "0".to_string()),
             ("tabs", fmt_list(&c.tabs)),
@@ -659,6 +698,20 @@ gmail = \"https://mail.google.com\"
         ];
         let back = parse(&set_keys(DEFAULT_TEMPLATE, &updates));
         assert_eq!(back, c);
+    }
+
+    #[test]
+    fn layout_keys_parse_and_save() {
+        assert_eq!(Config::default().layouts, [String::new(), String::new(), String::new()]);
+        assert_eq!(parse(DEFAULT_TEMPLATE).layouts, Config::default().layouts);
+        let c = parse("layout_controls = \"-wifi night:1@2\"\nlayout_today = \"clock\"\nlayout_stats = \"\"\n");
+        assert_eq!(c.layouts[0], "-wifi night:1@2");
+        assert_eq!(c.layouts[1], "clock");
+        assert_eq!(c.layouts[2], "");
+        // Запись в шаблон и обратное чтение.
+        let out = set_keys(DEFAULT_TEMPLATE, &[("layout_today", fmt_str("-todo clock:2@1"))]);
+        assert_eq!(parse(&out).layouts[1], "-todo clock:2@1");
+        assert_eq!(out.matches("layout_today").count(), 1, "ключ заменён, а не продублирован");
     }
 
     #[test]

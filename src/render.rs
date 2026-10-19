@@ -44,6 +44,28 @@ impl App {
         let body = self.body_path(g, x0, aw, ah, ear, r, false)?;
         g.dc.FillGeometry(&body, &g.brush, None);
 
+        // Стекло раскрытого острова: осветление сверху и блик на кромке (слева-сверху). Свёрнутая «чёлка»
+        // и полоска остаются плоскими: множитель `open · k` гасит эффект вместе с раскрытием.
+        let glass = if self.cfg.glass { open * k } else { 0.0 };
+        if glass > 0.01 {
+            let fade = |c: D2D1_COLOR_F, a: f32| D2D1_COLOR_F { a: c.a * a, ..c };
+            if let Some(br) = gradient_brush(g, (0.0, 0.0), (0.0, ah * 0.45), &[(0.0, fade(pal.sheen, glass)), (1.0, fade(pal.sheen, 0.0))]) {
+                g.dc.FillGeometry(&body, &br, None);
+            }
+            // Линия идёт по центру контура, поэтому контур сдвинут внутрь на полтолщины.
+            let half = 0.6 * s;
+            let rim = self.body_path(g, x0 + half, aw - 2.0 * half, ah - half, ear, crate::ui::inner_radius(r, half), true)?;
+            let stops = [
+                (0.00, fade(pal.rim_hi, glass)),
+                (0.35, fade(pal.rim_mid, glass)),
+                (0.65, fade(pal.rim_mid, glass)),
+                (1.00, fade(pal.rim_lo, glass)),
+            ];
+            if let Some(br) = gradient_brush(g, (x0, 0.0), (x0 + aw, ah), &stops) {
+                g.dc.DrawGeometry(&rim, &br, 2.0 * half, None);
+            }
+        }
+
         // Пока тянут ползунок радиуса, остров «засвечивается»: заливка подкрашивается акцентом, а по бокам
         // и снизу идёт светящийся контур — по нему хорошо видно, как меняется скругление.
         let glow = self.glow.value.clamp(0.0, 1.0);
@@ -118,14 +140,35 @@ impl App {
                 g.brush.SetColor(&c);
                 g.dc.FillEllipse(
                     &D2D1_ELLIPSE {
-                        point: Vector2 { X: x0 + 14.0 * s, Y: (TAB_TOP + TAB_H / 2.0) * s },
-                        radiusX: 2.5 * s,
-                        radiusY: 2.5 * s,
+                        point: Vector2 { X: x0 + 7.0 * s, Y: (TAB_TOP + TAB_H / 2.0) * s },
+                        radiusX: 2.2 * s,
+                        radiusY: 2.2 * s,
                     },
                     &g.brush,
                 );
             }
             let rects = self.tab_rects();
+            let pill_a = self.pill_a.value.clamp(0.0, 1.0) * open;
+            if self.cfg.glass && pill_a > 0.01 {
+                let (px, pw) = (self.pill_x.value * s, self.pill_w.value.max(1.0) * s);
+                let (py, ph) = (TAB_TOP * s, TAB_H * s);
+                let rr = D2D1_ROUNDED_RECT { rect: D2D_RECT_F { left: px, top: py, right: px + pw, bottom: py + ph }, radiusX: ph / 2.0, radiusY: ph / 2.0 };
+                let mut c = if self.cfg.accent_pill { D2D1_COLOR_F { a: 0.26, ..accent } } else { pal.pill };
+                c.a *= pill_a;
+                g.brush.SetColor(&c);
+                g.dc.FillRoundedRectangle(&rr, &g.brush);
+                let fade = |c: D2D1_COLOR_F| D2D1_COLOR_F { a: c.a * pill_a * 0.6, ..c };
+                let stops = [(0.0, fade(pal.rim_hi)), (0.5, fade(pal.rim_mid)), (1.0, fade(pal.rim_lo))];
+                if let Some(br) = gradient_brush(g, (px, py), (px + pw, py + ph), &stops) {
+                    let h = 0.5 * s;
+                    let line = D2D1_ROUNDED_RECT {
+                        rect: D2D_RECT_F { left: px + h, top: py + h, right: px + pw - h, bottom: py + ph - h },
+                        radiusX: ph / 2.0 - h,
+                        radiusY: ph / 2.0 - h,
+                    };
+                    g.dc.DrawRoundedRectangle(&line, &br, 2.0 * h, None);
+                }
+            }
             for (i, (tx, tw)) in rects.iter().enumerate() {
                 let (px, pw) = (tx * s, tw * s);
                 let (py, ph) = (TAB_TOP * s, TAB_H * s);
@@ -145,7 +188,8 @@ impl App {
                         &g.brush,
                     );
                 }
-                if active {
+                // Со стеклом выбранную вкладку подсвечивает одна подвижная капля (ниже), без — плашка на вкладке.
+                if active && !self.cfg.glass {
                     let mut c = accent;
                     c.a = 0.26 * open;
                     g.brush.SetColor(&c);
@@ -175,6 +219,23 @@ impl App {
             g.dc.SetTransform(&ui::matrix_rot(s, gx, gy, 60.0 * gv));
             let gcol = if self.settings_open { accent } else { ui::mix(ui::dim(), ui::txt(), gv) };
             gcv.glyph(ui::icon::SETTINGS, ui::Rect::new(gx - GEAR_R, gy - GEAR_R, 2.0 * GEAR_R, 2.0 * GEAR_R), false, gcol);
+
+            // Карандаш слева: правка виджетов. Появляется только на вкладках с сеткой, в режиме правки залит акцентом.
+            let cur = self.normal_id();
+            let pv = ui.presence(0xF102, self.expanded && !self.settings_open && tabs.editable(cur));
+            if pv > 0.01 {
+                let (ex, ey) = self.pencil_center();
+                let ev = ui.presence(0xF103, tabs.editing(cur));
+                let hot = self.expanded && (cursor.0 - ex).hypot(cursor.1 - ey) <= GEAR_R + 3.0;
+                let hv = ui.hover_amount(0xF104, hot);
+                let pcv = Canvas { g, alpha: open * pv, accent };
+                g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
+                if ev > 0.01 {
+                    pcv.circle(ex, ey, GEAR_R, D2D1_COLOR_F { a: 0.26 * ev, ..accent });
+                }
+                let col = ui::mix(ui::mix(ui::dim(), ui::txt(), hv), accent, ev);
+                pcv.glyph(ui::icon::EDIT, ui::Rect::new(ex - 7.0, ey - 7.0, 14.0, 14.0), false, col);
+            }
 
             // Точка на шестерёнке: найдено обновление, его можно установить в Настройках.
             if crate::update::available() && !self.settings_open {
@@ -276,4 +337,12 @@ impl App {
         sink.Close()?;
         Ok(geo)
     }
+}
+
+/// Линейный градиент между двумя точками (физические пиксели окна); цвета уже с нужной прозрачностью.
+unsafe fn gradient_brush(g: &Gfx, a: (f32, f32), b: (f32, f32), stops: &[(f32, D2D1_COLOR_F)]) -> Option<ID2D1LinearGradientBrush> {
+    let list: Vec<D2D1_GRADIENT_STOP> = stops.iter().map(|&(position, color)| D2D1_GRADIENT_STOP { position, color }).collect();
+    let coll = ID2D1RenderTarget::CreateGradientStopCollection(&g.dc, &list, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP).ok()?;
+    let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: Vector2 { X: a.0, Y: a.1 }, endPoint: Vector2 { X: b.0, Y: b.1 } };
+    g.dc.CreateLinearGradientBrush(&props, None, &coll).ok()
 }

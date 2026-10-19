@@ -30,6 +30,14 @@ pub fn card() -> D2D1_COLOR_F {
 pub fn track() -> D2D1_COLOR_F {
     crate::theme::get().track
 }
+/// Волосяная граница карточек (прозрачная, когда стекло выключено).
+pub fn hairline() -> D2D1_COLOR_F {
+    let mut c = crate::theme::get().hairline;
+    if !crate::theme::glass() {
+        c.a = 0.0;
+    }
+    c
+}
 /// Надписи и значки на акцентной заливке.
 pub fn ink() -> D2D1_COLOR_F {
     crate::theme::get().ink

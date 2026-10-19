@@ -6,14 +6,68 @@ use std::time::{Duration, Instant};
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
+use crate::anim::Spring;
 use crate::bg::{self, Cmd, DevItem, ListKind, Media};
 use crate::sys;
 use crate::ui::{icon, mix, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink, txt, WHITE};
 
+use super::grid::{Grid, Item};
+use super::layout::{sz, Size, Spec, TabSpec, GAP};
 use super::{id, CONTROLS, PAD, TOP};
 
 /// Сколько после перетаскивания слайдера не принимать громкость из снимка (иначе ползунок дёргается).
 const HOLD: Duration = Duration::from_millis(700);
+
+// Номера виджетов в `SPEC` (они же биты маски недоступных виджетов).
+const WIFI: usize = 0;
+const BLUETOOTH: usize = 1;
+const AUDIO: usize = 2;
+const NIGHT: usize = 3;
+const DARK: usize = 4;
+const VOLUME: usize = 5;
+const BRIGHTNESS: usize = 6;
+const MEDIA: usize = 7;
+
+/// Высота выпадающего списка устройств.
+const LIST_H: f32 = 116.0;
+
+static TILE: [Size; 4] = [sz(1, 40.0), sz(2, 40.0), sz(3, 40.0), sz(6, 40.0)];
+static SLIDER: [Size; 2] = [sz(3, 24.0), sz(6, 24.0)];
+static PLAYER: [Size; 3] = [sz(6, 56.0), sz(3, 90.0), sz(6, 90.0)];
+
+/// Сетка вкладки: 6 колонок по ~59 px (402 px внутри полей); плитки по умолчанию занимают 2 или 3
+/// колонки, как в исходной раскладке. Колонок шесть, а не четыре, потому что 402 px не делятся на
+/// четыре «красивых» ширины плиток 127 и 196 px.
+pub static SPEC: TabSpec = TabSpec {
+    cols: 6,
+    specs: &[
+        Spec { key: "wifi", title: "Wi-Fi", sizes: &TILE, size: 1, col: 0 },
+        Spec { key: "bluetooth", title: "Bluetooth", sizes: &TILE, size: 1, col: 2 },
+        Spec { key: "audio", title: "Аудио", sizes: &TILE, size: 1, col: 4 },
+        Spec { key: "night", title: "Ночной свет", sizes: &TILE, size: 2, col: 0 },
+        Spec { key: "dark", title: "Тёмная тема", sizes: &TILE, size: 2, col: 3 },
+        Spec { key: "volume", title: "Громкость", sizes: &SLIDER, size: 1, col: 0 },
+        Spec { key: "brightness", title: "Яркость", sizes: &SLIDER, size: 1, col: 0 },
+        Spec { key: "media", title: "Плеер", sizes: &PLAYER, size: 2, col: 0 },
+    ],
+};
+
+/// Прозрачность выпадающего списка: пружина, которой у `Default` нет.
+struct Fade(Spring);
+
+impl Default for Fade {
+    fn default() -> Self {
+        Fade(Spring::unit(0.0, 420.0, 34.0))
+    }
+}
+
+fn state(on: bool) -> &'static str {
+    if on {
+        "Вкл"
+    } else {
+        "Выкл"
+    }
+}
 
 fn mmss(secs: f32) -> String {
     let s = secs.max(0.0) as u32;
@@ -45,21 +99,37 @@ pub struct Controls {
     join: Option<DevItem>,
     /// Последний введённый пароль короче 8 символов (подсказка под полем).
     short_key: bool,
+    /// Какой список рисуется (и пока гаснет после закрытия) и насколько он проявлен.
+    shown: Option<ListKind>,
+    list_t: Fade,
+    /// Низ самой нижней плитки в этом и прошлом кадре: под ней открывается список.
+    low: f32,
+    low_prev: f32,
 }
 
 impl Controls {
     pub fn show(&mut self) -> bool {
         self.dark = sys::dark_mode();
         self.night = sys::night_light();
+        self.list_t.0.target = 0.0;
+        self.list_t.0.snap();
         bg::send(Cmd::Refresh);
         self.sync();
         true
     }
 
-    /// Вкладка скрыта: список закрывается.
+    /// Вкладка скрыта или её начали править: список закрывается.
     pub fn hide(&mut self) {
         self.open = None;
         self.join = None;
+    }
+
+    pub fn step(&mut self, dt: f32) {
+        self.list_t.0.step(dt);
+    }
+
+    pub fn animating(&self) -> bool {
+        !self.list_t.0.settled()
     }
 
     /// Открывает/закрывает список устройств по стрелке плитки.
@@ -131,99 +201,150 @@ impl Controls {
         true
     }
 
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, w: f32) {
-        let gap = 10.0;
-        let th = 40.0;
-        let y1 = TOP;
-        let y2 = y1 + th + 10.0;
-        let w3 = (w - 2.0 * PAD - 2.0 * gap) / 3.0;
-        let w2 = (w - 2.0 * PAD - gap) / 2.0;
-        let state = |on: bool| if on { "Вкл" } else { "Выкл" };
-
-        // Ряд 1: Wi-Fi, Bluetooth, звук.
-        let sub = if self.wifi { self.ssid.clone().unwrap_or_else(|| "Вкл".into()) } else { "Выкл".into() };
-        let hit = ui.tile_wide(cv, id(CONTROLS, 0), Rect::new(PAD, y1, w3, th), icon::WIFI, "Wi-Fi", &sub, &mut self.wifi, Chevron::Plain);
-        if hit.toggled {
-            bg::send(Cmd::Wifi(self.wifi));
-        }
-        if hit.chevron {
-            self.toggle(ListKind::Wifi);
-        }
-        let r = Rect::new(PAD + w3 + gap, y1, w3, th);
-        let hit = ui.tile_wide(cv, id(CONTROLS, 1), r, icon::BLUETOOTH, "Bluetooth", state(self.bluetooth), &mut self.bluetooth, Chevron::Divided);
-        if hit.toggled {
-            bg::send(Cmd::Bluetooth(self.bluetooth));
-        }
-        if hit.chevron {
-            self.toggle(ListKind::Bluetooth);
-        }
-        let mut sound = !self.muted;
-        let device = self.audio.clone().unwrap_or_else(|| "Динамики".into());
-        let sub = if sound { device.clone() } else { "Без звука".into() };
-        let r = Rect::new(PAD + 2.0 * (w3 + gap), y1, w3, th);
-        let hit = ui.tile_wide(cv, id(CONTROLS, 3), r, icon::VOLUME, "Аудио", &sub, &mut sound, Chevron::Divided);
-        if hit.toggled {
-            self.muted = !sound;
-            bg::send(Cmd::Mute(self.muted));
-        }
-        if hit.chevron {
-            self.toggle(ListKind::Audio);
-        }
-
-        // Ряд 2: ночной свет (переключается через реестр, стрелка — Параметры), тёмная тема.
-        let mut night = self.night.unwrap_or(false);
-        let sub = match self.night {
-            Some(on) => state(on),
-            None => "Параметры",
-        };
-        let hit = ui.tile_wide(cv, id(CONTROLS, 4), Rect::new(PAD, y2, w2, th), icon::MOON, "Ночной свет", sub, &mut night, Chevron::Plain);
-        if hit.chevron || (hit.toggled && self.night.is_none()) {
-            sys::open("ms-settings:nightlight");
-        } else if hit.toggled {
-            if !sys::set_night_light(night) {
-                crate::log::error("не удалось переключить ночной свет");
-            }
-            self.night = sys::night_light();
-        }
-        let r = Rect::new(PAD + w2 + gap, y2, w2, th);
-        let hit = ui.tile_wide(cv, id(CONTROLS, 2), r, icon::CONTRAST, "Тёмная тема", state(self.dark), &mut self.dark, Chevron::None);
-        if hit.toggled {
-            let dark = self.dark;
-            // Рассылка WM_SETTINGCHANGE может занять время — не в потоке интерфейса.
-            std::thread::spawn(move || sys::set_dark_mode(dark));
-        }
-
+    /// Рисует вкладку: виджеты по сетке, а поверх них — выпадающий список устройств. `h` — высота
+    /// панели без полосы правки.
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
+        let area = Rect::new(PAD, TOP, w - 2.0 * PAD, h - TOP - PAD);
+        let skip = if crate::bright::available() { 0 } else { 1 << BRIGHTNESS };
         if let Some(kind) = self.open {
-            let area = Rect::new(PAD, y2 + th + 10.0, w - 2.0 * PAD, 116.0);
-            self.device_list(ui, cv, area, kind);
+            self.shown = Some(kind);
+        }
+        self.list_t.0.target = if self.open.is_some() { 1.0 } else { 0.0 };
+        self.low_prev = std::mem::take(&mut self.low);
+        // Виджеты под списком гаснут и не принимают нажатий (иначе они перехватят их у строк списка).
+        let cover = (self.list_t.0.value > 0.004).then(|| self.list_rect(area));
+        grid.draw(ui, cv, area, skip, |ui, cv, it| self.widget(ui, cv, it, cover));
+        self.overlay(ui, cv, area);
+    }
+
+    /// Где лежит список устройств: сразу под самой нижней плиткой (а если места не хватает —
+    /// прижат к низу области).
+    fn list_rect(&self, area: Rect) -> Rect {
+        let y = (self.low_prev + GAP).min(area.bottom() - LIST_H).max(area.y);
+        Rect::new(area.x, y, area.w, LIST_H)
+    }
+
+    unsafe fn overlay(&mut self, ui: &mut Ui, cv: &Canvas, area: Rect) {
+        let t = self.list_t.0.value.clamp(0.0, 1.0);
+        let Some(kind) = self.shown.filter(|_| t > 0.01) else { return };
+        let mut r = self.list_rect(area);
+        r.y += (1.0 - t) * 6.0;
+        let ocv = Canvas { g: cv.g, alpha: cv.alpha * t, accent: cv.accent };
+        // Закрывающийся список уже не принимает нажатий.
+        let prev = if self.open.is_none() { Some(ui.mute()) } else { None };
+        self.device_list(ui, &ocv, r, kind);
+        if let Some(p) = prev {
+            ui.unmute(p);
+        }
+    }
+
+    /// Один виджет сетки; если его закрывает открытый список, он гаснет и становится немым.
+    unsafe fn widget(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item, cover: Option<Rect>) {
+        if matches!(it.idx, WIFI | BLUETOOTH | AUDIO | NIGHT | DARK) {
+            self.low = self.low.max(it.rect.bottom());
+        }
+        let covered = cover.is_some_and(|c| c.intersects(&it.rect));
+        let k = if covered { 1.0 - self.list_t.0.value.clamp(0.0, 1.0) } else { 1.0 };
+        if k < 0.004 {
             return;
         }
-
-        // Громкость.
-        let g = match self.volume {
-            _ if self.muted => icon::MUTE,
-            v if v < 0.01 => icon::MUTE,
-            v if v < 0.34 => icon::VOLUME1,
-            v if v < 0.67 => icon::VOLUME2,
-            _ => icon::VOLUME3,
-        };
-        let bar = Rect::new(PAD, y2 + th + 10.0, w - 2.0 * PAD, 24.0);
-        if ui.slider_bar(cv, id(CONTROLS, 10), bar, g, &mut self.volume) {
-            self.hold_until = Some(Instant::now() + HOLD);
-            bg::send(Cmd::Volume(self.volume));
+        let sub = Canvas { g: cv.g, alpha: cv.alpha * k, accent: cv.accent };
+        let prev = if covered { Some(ui.mute()) } else { None };
+        self.paint(ui, &sub, it);
+        if let Some(p) = prev {
+            ui.unmute(p);
         }
+    }
 
-        let mut bottom = bar.bottom();
-        if crate::bright::available() {
-            let bar = Rect::new(PAD, bottom + 10.0, w - 2.0 * PAD, 24.0);
-            if ui.slider_bar(cv, id(CONTROLS, 11), bar, icon::BRIGHTNESS, &mut self.brightness) {
-                self.bright_hold = Some(Instant::now() + HOLD);
-                bg::send(Cmd::Brightness(self.brightness));
+    unsafe fn paint(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item) {
+        let r = it.rect;
+        match it.idx {
+            WIFI => {
+                let sub = if self.wifi { self.ssid.clone().unwrap_or_else(|| "Вкл".into()) } else { "Выкл".into() };
+                let hit = ui.tile_wide(cv, id(CONTROLS, 0), r, icon::WIFI, "Wi-Fi", &sub, &mut self.wifi, Chevron::Plain);
+                if hit.toggled {
+                    bg::send(Cmd::Wifi(self.wifi));
+                }
+                if hit.chevron {
+                    self.toggle(ListKind::Wifi);
+                }
             }
-            bottom = bar.bottom();
+            BLUETOOTH => {
+                let hit = ui.tile_wide(cv, id(CONTROLS, 1), r, icon::BLUETOOTH, "Bluetooth", state(self.bluetooth), &mut self.bluetooth, Chevron::Divided);
+                if hit.toggled {
+                    bg::send(Cmd::Bluetooth(self.bluetooth));
+                }
+                if hit.chevron {
+                    self.toggle(ListKind::Bluetooth);
+                }
+            }
+            AUDIO => {
+                let mut sound = !self.muted;
+                let sub = if sound { self.device() } else { "Без звука".into() };
+                let hit = ui.tile_wide(cv, id(CONTROLS, 3), r, icon::VOLUME, "Аудио", &sub, &mut sound, Chevron::Divided);
+                if hit.toggled {
+                    self.muted = !sound;
+                    bg::send(Cmd::Mute(self.muted));
+                }
+                if hit.chevron {
+                    self.toggle(ListKind::Audio);
+                }
+            }
+            NIGHT => {
+                // Ночной свет переключается через реестр, стрелка открывает Параметры.
+                let mut night = self.night.unwrap_or(false);
+                let sub = match self.night {
+                    Some(on) => state(on),
+                    None => "Параметры",
+                };
+                let hit = ui.tile_wide(cv, id(CONTROLS, 4), r, icon::MOON, "Ночной свет", sub, &mut night, Chevron::Plain);
+                if hit.chevron || (hit.toggled && self.night.is_none()) {
+                    sys::open("ms-settings:nightlight");
+                } else if hit.toggled {
+                    if !sys::set_night_light(night) {
+                        crate::log::error("не удалось переключить ночной свет");
+                    }
+                    self.night = sys::night_light();
+                }
+            }
+            DARK => {
+                let hit = ui.tile_wide(cv, id(CONTROLS, 2), r, icon::CONTRAST, "Тёмная тема", state(self.dark), &mut self.dark, Chevron::None);
+                if hit.toggled {
+                    let dark = self.dark;
+                    // Рассылка WM_SETTINGCHANGE может занять время — не в потоке интерфейса.
+                    std::thread::spawn(move || sys::set_dark_mode(dark));
+                }
+            }
+            VOLUME => {
+                let g = match self.volume {
+                    _ if self.muted => icon::MUTE,
+                    v if v < 0.01 => icon::MUTE,
+                    v if v < 0.34 => icon::VOLUME1,
+                    v if v < 0.67 => icon::VOLUME2,
+                    _ => icon::VOLUME3,
+                };
+                if ui.slider_bar(cv, id(CONTROLS, 10), r, g, &mut self.volume) {
+                    self.hold_until = Some(Instant::now() + HOLD);
+                    bg::send(Cmd::Volume(self.volume));
+                }
+            }
+            BRIGHTNESS => {
+                if ui.slider_bar(cv, id(CONTROLS, 11), r, icon::BRIGHTNESS, &mut self.brightness) {
+                    self.bright_hold = Some(Instant::now() + HOLD);
+                    bg::send(Cmd::Brightness(self.brightness));
+                }
+            }
+            MEDIA => {
+                let device = self.device();
+                self.media_card(ui, cv, r, it.size, &device);
+            }
+            _ => {}
         }
+    }
 
-        self.media_card(ui, cv, Rect::new(PAD, bottom + 10.0, w - 2.0 * PAD, 90.0), &device);
+    /// Устройство вывода звука для подписей.
+    fn device(&self) -> String {
+        self.audio.clone().unwrap_or_else(|| "Динамики".into())
     }
 
     /// Выпадающий список устройств вместо громкости и плеера.
@@ -375,13 +496,24 @@ impl Controls {
         clicked
     }
 
-    unsafe fn media_card(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect, device: &str) {
+    /// Плеер в трёх вариантах (`size` — индекс в `PLAYER`): 0 — низкая полоса без времени и имени
+    /// устройства, 1 — узкая карточка с кнопками во втором ряду, 2 — полная.
+    unsafe fn media_card(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect, size: usize, device: &str) {
+        let (compact, narrow) = (size == 0, size == 1);
         cv.card(r);
         let f = &cv.g.fonts;
-        cv.glyph(icon::VOLUME, Rect::new(r.x + 8.0, r.y + 4.0, 12.0, 14.0), false, dim());
-        cv.text(device, Rect::new(r.x + 21.0, r.y + 4.0, 150.0, 14.0), &f.small, dim());
+        if !compact && !narrow {
+            cv.glyph(icon::VOLUME, Rect::new(r.x + 8.0, r.y + 4.0, 12.0, 14.0), false, dim());
+            cv.text(device, Rect::new(r.x + 21.0, r.y + 4.0, 150.0, 14.0), &f.small, dim());
+        }
 
-        let art = Rect::new(r.x + 11.0, r.y + 24.0, 36.0, 36.0);
+        let art = if compact {
+            Rect::new(r.x + 10.0, r.cy() - 18.0, 36.0, 36.0)
+        } else if narrow {
+            Rect::new(r.x + 10.0, r.y + 9.0, 36.0, 36.0)
+        } else {
+            Rect::new(r.x + 11.0, r.y + 24.0, 36.0, 36.0)
+        };
         let cover = self.media.as_ref().and_then(|m| m.art.clone().map(|px| (m.key, px)));
         let mut has_cover = false;
         if let Some((key, px)) = cover {
@@ -403,27 +535,42 @@ impl Controls {
         if !has_cover {
             cv.glyph(icon::MUSIC, art, false, D2D1_COLOR_F { a: 0.7, ..WHITE });
         }
-        cv.text(title, Rect::new(r.x + 56.0, r.y + 25.0, r.w - 150.0, 20.0), &f.title, txt());
-        cv.text(artist, Rect::new(r.x + 56.0, r.y + 43.0, r.w - 150.0, 14.0), &f.small, dim());
+        let (tx, ty, tw) = if compact {
+            (r.x + 56.0, r.cy() - 17.0, r.w - 56.0 - 100.0)
+        } else if narrow {
+            (r.x + 56.0, r.y + 10.0, r.w - 66.0)
+        } else {
+            (r.x + 56.0, r.y + 25.0, r.w - 150.0)
+        };
+        cv.text(title, Rect::new(tx, ty, tw, 20.0), &f.title, txt());
+        cv.text(artist, Rect::new(tx, ty + 18.0, tw, 14.0), &f.small, dim());
 
-        // Кнопки: назад, играть/пауза (светлая), вперёд.
-        let cy = r.y + 40.0;
-        if Self::round_button(ui, cv, id(CONTROLS, 20), r.right() - 75.0, cy, 9.5, icon::PREV, chip_bg(), txt()) {
+        // Кнопки: назад, играть/пауза (светлая), вперёд. У узкой карточки — отдельным рядом.
+        let (cy, xs) = if narrow {
+            (r.y + 58.0, [r.cx() - 30.0, r.cx(), r.cx() + 30.0])
+        } else {
+            (if compact { r.cy() } else { r.y + 40.0 }, [r.right() - 75.0, r.right() - 45.0, r.right() - 16.0])
+        };
+        if Self::round_button(ui, cv, id(CONTROLS, 20), xs[0], cy, 9.5, icon::PREV, chip_bg(), txt()) {
             bg::send(Cmd::Prev);
         }
         let toggle = if playing { icon::PAUSE } else { icon::PLAY_SOLID };
-        if Self::round_button(ui, cv, id(CONTROLS, 21), r.right() - 45.0, cy, 14.0, toggle, cv.accent, ink()) {
+        if Self::round_button(ui, cv, id(CONTROLS, 21), xs[1], cy, 14.0, toggle, cv.accent, ink()) {
             bg::send(Cmd::PlayPause);
         }
-        if Self::round_button(ui, cv, id(CONTROLS, 22), r.right() - 16.0, cy, 9.5, icon::NEXT, chip_bg(), txt()) {
+        if Self::round_button(ui, cv, id(CONTROLS, 22), xs[2], cy, 9.5, icon::NEXT, chip_bg(), txt()) {
             bg::send(Cmd::Next);
         }
 
         // Прогресс и время.
+        let frac = if dur > 0.0 { pos / dur } else { 0.0 };
+        if compact {
+            cv.progress(Rect::new(r.x + 10.0, r.bottom() - 7.0, r.w - 20.0, 2.0), frac, cv.accent);
+            return;
+        }
         let py = r.y + 76.0;
         cv.text(&mmss(pos), Rect::new(r.x + 9.0, py - 6.0, 30.0, 12.0), &f.small, dim());
         cv.text(&mmss(dur), Rect::new(r.right() - 46.0, py - 6.0, 36.0, 12.0), &f.small_r, dim());
-        let frac = if dur > 0.0 { pos / dur } else { 0.0 };
         cv.progress(Rect::new(r.x + 37.0, py - 1.0, r.w - 37.0 - 36.0, 2.0), frac, cv.accent);
     }
 }

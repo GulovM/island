@@ -30,6 +30,8 @@ const N_STRIP: u32 = 12;
 const N_LANG: u32 = 13;
 const N_AUTOUPDATE: u32 = 16;
 const N_UPDATE: u32 = 17;
+const N_GLASS: u32 = 18;
+const N_PILL: u32 = 19;
 const N_PRESET: u32 = 20;
 const N_SWITCH: u32 = 40;
 const N_UP: u32 = 60;
@@ -213,6 +215,8 @@ impl Settings {
         self.cfg.bg = d.bg;
         self.cfg.system_colors = false;
         self.cfg.corner_radius = DEFAULT_RADIUS;
+        self.cfg.glass = d.glass;
+        self.cfg.accent_pill = d.accent_pill;
         self.cfg.ui_scale = DEFAULT_SCALE;
         self.scale_drag = None;
         self.cfg.hidden_tabs.clear();
@@ -426,6 +430,22 @@ impl Settings {
         }
         self.glow = ui.is_dragging(rid);
         y += 28.0;
+
+        // Стекло и капля вкладки.
+        cv.text("Стекло", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut glass = self.cfg.glass;
+        if ui.switch(cv, id(SETTINGS, N_GLASS), Rect::new(rc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut glass, true) {
+            self.cfg.glass = glass;
+            self.changed = true;
+        }
+        y += 24.0;
+        cv.text("Капля вкладки цветом акцента", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut pill = self.cfg.accent_pill;
+        if ui.switch(cv, id(SETTINGS, N_PILL), Rect::new(rc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut pill, true) {
+            self.cfg.accent_pill = pill;
+            self.changed = true;
+        }
+        y += 24.0;
 
         // Масштаб интерфейса (шаг 0.05): применяется, когда мышь отпущена.
         let shown = self.scale_drag.unwrap_or(self.cfg.ui_scale);
