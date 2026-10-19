@@ -8,7 +8,7 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use crate::bg::{self, Cmd, DevItem, ListKind, Media};
 use crate::sys;
-use crate::ui::{icon, mix, Canvas, Chevron, Rect, Submit, Ui, chip_bg, CREAM, dim, ink, txt, WHITE};
+use crate::ui::{icon, mix, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink, txt, WHITE};
 
 use super::{id, CONTROLS, PAD, TOP};
 
@@ -412,7 +412,7 @@ impl Controls {
             bg::send(Cmd::Prev);
         }
         let toggle = if playing { icon::PAUSE } else { icon::PLAY_SOLID };
-        if Self::round_button(ui, cv, id(CONTROLS, 21), r.right() - 45.0, cy, 14.0, toggle, CREAM, ink()) {
+        if Self::round_button(ui, cv, id(CONTROLS, 21), r.right() - 45.0, cy, 14.0, toggle, cv.accent, ink()) {
             bg::send(Cmd::PlayPause);
         }
         if Self::round_button(ui, cv, id(CONTROLS, 22), r.right() - 16.0, cy, 9.5, icon::NEXT, chip_bg(), txt()) {

@@ -33,7 +33,6 @@ pub const BAR_GREEN: D2D1_COLOR_F = rgb(0.55, 0.76, 0.29);
 pub const VIOLET: D2D1_COLOR_F = rgb(0.78, 0.61, 0.91);
 pub const ORANGE: D2D1_COLOR_F = rgb(0.95, 0.63, 0.14);
 pub const PINK: D2D1_COLOR_F = rgb(0.91, 0.42, 0.60);
-pub const CREAM: D2D1_COLOR_F = rgb(0.93, 0.89, 0.78);
 
 // Цвета темы (см. `theme`): меняются на лету, поэтому это функции, а не константы.
 
@@ -784,7 +783,14 @@ struct Scroll {
     content: f32,
     view: Rect,
     vis: Spring,
+    /// Курсор над полосой или она перетаскивается: полоса остаётся видимой.
+    hot: bool,
+    /// Расстояние от верха бегунка до курсора в момент захвата.
+    grab: f32,
 }
+
+/// Ширина зоны захвата полосы прокрутки у правого края области.
+const SCROLLBAR_GRAB_W: f32 = 12.0;
 
 /// Импульс прокрутки на одну «ступеньку» колеса (пикселей/с) и затухание инерции (1/с).
 const WHEEL_IMPULSE: f32 = 620.0;
@@ -1017,7 +1023,7 @@ impl Ui {
                 s.off = s.off.clamp(0.0, s.max);
                 s.vel = 0.0;
             }
-            s.vis.target = if s.vel != 0.0 { 1.0 } else { 0.0 };
+            s.vis.target = if s.vel != 0.0 || s.hot { 1.0 } else { 0.0 };
             s.vis.step(dt);
         }
     }
@@ -1447,11 +1453,40 @@ impl Ui {
             content: 0.0,
             view,
             vis: Spring::unit(0.0, 300.0, 30.0),
+            hot: false,
+            grab: 0.0,
         });
         s.max = (content_h - view.h).max(0.0);
         s.content = content_h;
         s.view = view;
         s.off = s.off.clamp(0.0, s.max);
+
+        // Перетаскивание полосы: нажатие в зоне у правого края захватывает мышь раньше
+        // содержимого (область рисуется до строк), дальше бегунок следует за курсором.
+        let (interactive, mouse, pressed, down) = (self.interactive, self.mouse, self.pressed, self.down);
+        let mut dragging = self.drag == Some(id) && down;
+        s.hot = dragging;
+        if s.max > 0.0 {
+            let th = (view.h * view.h / content_h).max(24.0).min(view.h);
+            let track = (view.h - th).max(1.0);
+            let zone = Rect::new(view.right() - SCROLLBAR_GRAB_W, view.y, SCROLLBAR_GRAB_W, view.h);
+            let over = interactive && zone.contains(mouse);
+            if over && self.drag.is_none() {
+                s.hot = true;
+                if pressed {
+                    let ty = view.y + track * (s.off / s.max);
+                    s.grab = if mouse.1 >= ty && mouse.1 <= ty + th { mouse.1 - ty } else { th / 2.0 };
+                    self.drag = Some(id);
+                    dragging = true;
+                }
+            }
+            if dragging {
+                s.off = ((mouse.1 - s.grab - view.y) / track).clamp(0.0, 1.0) * s.max;
+                s.vel = 0.0;
+                s.vis.target = 1.0;
+            }
+        }
+        let hov = hov && !dragging;
         if hov && wheel != 0.0 {
             s.vel -= wheel * WHEEL_IMPULSE;
             self.wheel = 0.0;

@@ -370,6 +370,14 @@ impl Apps {
                         e.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default()
                     };
                     let right = if selected { "↵ Открыть" } else { "Приложение" };
+                    // Звезда регистрирует нажатие раньше строки, иначе строка захватит мышь
+                    // и клик по звезде запустит приложение.
+                    let star = Rect::new(r.right() - 25.0, yy + 3.0, 18.0, 18.0);
+                    let sid_star = id(APPS, 5000 + p as u32);
+                    let show = e.fav || ui.hover_of(rid) > 0.3 || ui.hover_of(sid_star) > 0.3;
+                    if show {
+                        ui.click_area(sid_star, star);
+                    }
                     if ui.row_compact(cv, rid, r, &letter, false, &e.name, right, 26.0, selected, false) {
                         launch = Some(it);
                     }
@@ -388,9 +396,6 @@ impl Apps {
                         }
                     }
                     // Звезда видна у избранного и при наведении на строку.
-                    let star = Rect::new(r.right() - 25.0, yy + 3.0, 18.0, 18.0);
-                    let sid_star = id(APPS, 5000 + p as u32);
-                    let show = e.fav || ui.hover_of(rid) > 0.3 || ui.hover_of(sid_star) > 0.3;
                     if show {
                         let glyph = if e.fav { icon::STAR_FILL } else { icon::STAR };
                         if ui.icon_button(cv, sid_star, star, glyph, e.fav) {
