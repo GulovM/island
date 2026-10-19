@@ -28,6 +28,24 @@
 | Кадры анимации | vsync, без пропусков | 62–63 кадр/с на 60 Гц, отрисовка 0,6–2,5 мс/кадр, медленных кадров 0 (этап 5) |
 | Размер exe | ≤ 2 МБ | 0,96 МБ |
 
+## Структура кода
+
+Крупные модули разбиты на каталоги (рефакторинг по [REFACTORING.md](REFACTORING.md)): снаружи пути прежние (`crate::sys::…`, `crate::ui::…`), потому что `mod.rs` реэкспортирует нужное из подмодулей. В журнале этапов ниже пути вида `src/ui.rs`, `src/bg.rs`, `src/sys.rs`, `src/online.rs`, `src/tabs/today.rs`, `src/tabs/stats.rs` указаны на момент этапа и теперь означают одноимённые каталоги.
+
+| Путь | Назначение |
+|---|---|
+| `main.rs` | точка входа, `mod`-объявления, константы раскладки, `run` (окно, цикл сообщений) |
+| `app.rs` | `App`: состояние острова, тема, размеры вкладок, анимация |
+| `window.rs`, `events.rs`, `render.rs`, `input.rs`, `wnd.rs` | остальные `impl App`: геометрия окна, события, кадр, ввод; очередь сообщений и DPI |
+| `gfx.rs`, `anim.rs`, `theme.rs`, `face.rs`, `live.rs` | D3D11/Direct2D/DirectComposition, пружины, палитра, свёрнутый вид и индикатор |
+| `ui/` | UI-тулкит: `color`, `glyphs`, `geom`, `fonts`, `canvas`, `bitmap_cache`, `scroll`, `field` (текстовое поле), `widgets` |
+| `tabs/` | вкладки: `controls`, `power`, `clipboard`, `apps`, `wallpaper`, `settings`; `today/` (`alarm`, `clock`, `timer`, `calendar`, `todo`), `stats/` (`procs`, `gpu`, `hw`, `format`) |
+| `bg/` | фоновый поток для WinRT/COM: `net`, `devices`, `audio_policy`, `volume`, `wifi`, `bluetooth`, `media`, `winrt` |
+| `sys/` | системная интеграция: `shell`, `clipboard`, `registry`, `appearance`, `night_light`, `seal` (DPAPI), `paths` |
+| `online/` | сеть без сторонних библиотек: `http` (WinHTTP), `weather`, `calendar` (iCal), `datetime`, `speedtest` |
+| `config.rs`, `i18n.rs`, `log.rs`, `perf.rs`, `update.rs` | настройки (свой TOML), два языка, лог, замер кадров, обновление через GitHub Releases |
+| `icons.rs`, `img.rs`, `thumbs.rs`, `we.rs`, `bright.rs` | иконки приложений, изображения через WIC, миниатюры обоев, Wallpaper Engine, яркость |
+
 ---
 
 ## Этап 0. Каркас — СДЕЛАНО И ПРОВЕРЕНО
