@@ -21,67 +21,8 @@ use windows_numerics::{Matrix3x2, Vector2};
 use crate::anim::Spring;
 use crate::gfx::Gfx;
 
-// ---------- Цвета ----------
-
-const fn rgb(r: f32, g: f32, b: f32) -> D2D1_COLOR_F {
-    D2D1_COLOR_F { r, g, b, a: 1.0 }
-}
-
-pub const WHITE: D2D1_COLOR_F = rgb(1.0, 1.0, 1.0);
-pub const GREEN: D2D1_COLOR_F = rgb(0.61, 0.80, 0.40);
-pub const BAR_GREEN: D2D1_COLOR_F = rgb(0.55, 0.76, 0.29);
-pub const VIOLET: D2D1_COLOR_F = rgb(0.78, 0.61, 0.91);
-pub const ORANGE: D2D1_COLOR_F = rgb(0.95, 0.63, 0.14);
-pub const PINK: D2D1_COLOR_F = rgb(0.91, 0.42, 0.60);
-
-// Цвета темы (см. `theme`): меняются на лету, поэтому это функции, а не константы.
-
-/// Основной текст.
-pub fn txt() -> D2D1_COLOR_F {
-    crate::theme::get().text
-}
-/// Приглушённый текст и значки.
-pub fn dim() -> D2D1_COLOR_F {
-    crate::theme::get().dim
-}
-/// Карточки (нейтральная поверхность чуть светлее фона).
-pub fn card() -> D2D1_COLOR_F {
-    crate::theme::get().card
-}
-pub fn track() -> D2D1_COLOR_F {
-    crate::theme::get().track
-}
-/// Надписи и значки на акцентной заливке.
-pub fn ink() -> D2D1_COLOR_F {
-    crate::theme::get().ink
-}
-/// Фон мелких плашек (буква приложения, клавиша, бейдж плитки).
-pub fn chip_bg() -> D2D1_COLOR_F {
-    crate::theme::get().chip
-}
-/// Поля внутри карточек (ввод часов/минут, блок события).
-pub fn inset() -> D2D1_COLOR_F {
-    crate::theme::get().inset
-}
-/// Цвет подсветки при наведении: белый на тёмном фоне, чёрный на светлом.
-pub fn fg() -> D2D1_COLOR_F {
-    crate::theme::get().fg
-}
-
-/// Подсветка выбранной строки: акцент, приглушённый до тёмно-золотого.
-pub fn selection(accent: D2D1_COLOR_F) -> D2D1_COLOR_F {
-    D2D1_COLOR_F { a: 0.27, ..accent }
-}
-
-pub fn mix(a: D2D1_COLOR_F, b: D2D1_COLOR_F, t: f32) -> D2D1_COLOR_F {
-    let t = t.clamp(0.0, 1.0);
-    D2D1_COLOR_F {
-        r: a.r + (b.r - a.r) * t,
-        g: a.g + (b.g - a.g) * t,
-        b: a.b + (b.b - a.b) * t,
-        a: a.a + (b.a - a.a) * t,
-    }
-}
+mod color;
+pub use color::*;
 
 // ---------- Иконки (Segoe Fluent Icons / Segoe MDL2 Assets) ----------
 
@@ -1808,11 +1749,5 @@ mod tests {
         let r = Rect::new(10.0, 10.0, 20.0, 20.0);
         assert!(r.contains((10.0, 10.0)));
         assert!(!r.contains((30.0, 15.0)));
-    }
-
-    #[test]
-    fn mix_endpoints() {
-        let c = mix(track(), fg(), 1.0);
-        assert!((c.r - 1.0).abs() < 1e-6);
     }
 }
