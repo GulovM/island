@@ -14,12 +14,16 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{CreateIcon, HICON};
 
+mod appearance;
 mod clipboard;
 mod night_light;
 mod paths;
 mod registry;
 mod seal;
 
+pub use appearance::{
+    current_wallpaper, dark_mode, light_mode, set_dark_mode, set_wallpaper, system_colors,
+};
 pub use clipboard::{
     clipboard_excluded, clipboard_has_image, clipboard_has_text, clipboard_image, clipboard_owned_by,
     clipboard_text, send_paste, set_clipboard_dib, set_clipboard_text,
@@ -184,9 +188,6 @@ pub fn ime_set_position(hwnd: HWND, x: i32, y: i32) {
     }
 }
 
-// ---------- Тема, обои, ввод, запуск ----------
-
-const PERSONALIZE: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
 
 
 /// Запущен ли процесс с одним из имён `names` (без учёта регистра).
@@ -220,81 +221,6 @@ pub fn monitor_count() -> u32 {
     unsafe { GetSystemMetrics(SM_CMONITORS).max(1) as u32 }
 }
 
-/// Тёмная тема приложений включена.
-pub fn dark_mode() -> bool {
-    read_dword(PERSONALIZE, w!("AppsUseLightTheme")) == Some(0)
-}
-
-/// В Windows включена светлая тема приложений (если значения в реестре нет — считаем тёмной).
-pub fn light_mode() -> bool {
-    read_dword(PERSONALIZE, w!("AppsUseLightTheme")) == Some(1)
-}
-
-/// Переключает тему приложений и системы и сообщает всем окнам (`WM_SETTINGCHANGE`).
-pub fn set_dark_mode(dark: bool) {
-    use windows::Win32::Foundation::{LPARAM, WPARAM};
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
-    };
-    unsafe {
-        let v: u32 = if dark { 0 } else { 1 };
-        for name in [w!("AppsUseLightTheme"), w!("SystemUsesLightTheme")] {
-            let _ = RegSetKeyValueW(
-                HKEY_CURRENT_USER,
-                PERSONALIZE,
-                name,
-                windows::Win32::System::Registry::REG_DWORD.0,
-                Some(&v as *const u32 as *const c_void),
-                4,
-            );
-        }
-        let area = wz("ImmersiveColorSet");
-        let _ = SendMessageTimeoutW(
-            HWND_BROADCAST,
-            WM_SETTINGCHANGE,
-            WPARAM(0),
-            LPARAM(area.as_ptr() as isize),
-            SMTO_ABORTIFHUNG,
-            300,
-            None,
-        );
-    }
-}
-
-
-/// Ставит обои рабочего стола.
-pub fn set_wallpaper(path: &str) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SystemParametersInfoW, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SPI_SETDESKWALLPAPER,
-    };
-    unsafe {
-        let wide = wz(path);
-        SystemParametersInfoW(
-            SPI_SETDESKWALLPAPER,
-            0,
-            Some(wide.as_ptr() as *mut c_void),
-            SPIF_UPDATEINIFILE | SPIF_SENDCHANGE,
-        )
-        .is_ok()
-    }
-}
-
-/// Путь текущих обоев.
-pub fn current_wallpaper() -> Option<String> {
-    use windows::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETDESKWALLPAPER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS};
-    unsafe {
-        let mut buf = [0u16; 520];
-        SystemParametersInfoW(
-            SPI_GETDESKWALLPAPER,
-            buf.len() as u32,
-            Some(buf.as_mut_ptr() as *mut c_void),
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        )
-        .ok()?;
-        let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-        (n > 0).then(|| String::from_utf16_lossy(&buf[..n]))
-    }
-}
 
 /// Открывает файл, ярлык или ссылку программой по умолчанию.
 /// Открывает файл, ссылку или ярлык через Shell. `false` — Shell отказался (ShellExecute
@@ -309,23 +235,6 @@ pub fn open(target: &str) -> bool {
     }
 }
 
-// ---------- Цвета системы и раскладка клавиатуры ----------
-
-
-/// Акцентные цвета Windows. Их же подстраивает под обои Wallpaper Engine (и сама Windows при
-/// «автоматическом выборе цвета фона»): читаем палитру из реестра — это мгновенно и без WinRT.
-pub fn system_colors() -> Option<crate::theme::SystemColors> {
-    use crate::theme::{parse_accent_palette, SystemColors};
-    if let Some(p) = read_binary(w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent"), w!("AccentPalette"))
-        .and_then(|b| parse_accent_palette(&b))
-    {
-        return Some(p);
-    }
-    // Запасной путь: цвет акцента окон (ABGR).
-    let v = read_dword(w!("Software\\Microsoft\\Windows\\DWM"), w!("AccentColor"))?;
-    let ch = |shift: u32| ((v >> shift) & 0xFF) as f32 / 255.0;
-    Some(SystemColors::from_accent([ch(0), ch(8), ch(16)]))
-}
 
 
 /// Код языка (младшие 16 бит HKL) раскладки окна в фокусе: у каждого окна своя раскладка.
