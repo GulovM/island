@@ -63,17 +63,17 @@
 
 ### 4.2. `bg.rs` → `bg/`
 
-| Файл | Содержимое |
-|---|---|
-| `mod.rs` | `Cmd`, `Snapshot`, `start`, главный цикл потока, `notify`, `send`, `snapshot` |
-| `devices.rs` | `ListKind`, `DevItem`, `STATUS`/`LISTS`, `label_for` |
-| `net.rs` | `NetStatus`, `net_status` |
-| `audio_policy.rs` | `mod policy` (COM `IPolicyConfig`) |
-| `wifi.rs` | `join_params`, `profile_xml`, `wifi_spawn`, `wifi_disconnect` |
-| `bluetooth.rs` | сопряжённые устройства, `bt_spawn`, `KSPROPSETID_BT_AUDIO` |
-| `media.rs` | SMTC-сессия, подписки, `COVER`, `Media` |
-| `volume.rs` | `VolumeWatch`, `VOL_WATCH` |
-| `winrt.rs` | `wait`, `Handoff` — общие вспомогательные функции для WinRT |
+| Файл | Строк | Содержимое |
+|---|---|---|
+| `mod.rs` | 271 | `Cmd`, `Snapshot`, `start`, главный цикл потока, `notify`, `send`, `snapshot` |
+| `net.rs` | 86 | `NetStatus` плюс подписка на сетевые события |
+| `winrt.rs` | 34 | `wait`, `Handoff` — общие вспомогательные функции для WinRT |
+| `audio_policy.rs` | 46 | `mod policy` (COM `IPolicyConfig`) |
+| `volume.rs` | 63 | `VolumeWatch`, `VOL_WATCH` |
+| `wifi.rs` | 303 | `join_params`, `profile_xml`, `wifi_spawn`, `wifi_disconnect` |
+| `bluetooth.rs` | 254 | сопряжённые устройства, `bt_spawn`, `KSPROPSETID_BT_AUDIO` |
+| `devices.rs` | 211 | `ListKind`, `DevItem`, `STATUS`/`LISTS`, перечисление MMDevice |
+| `media.rs` | 245 | SMTC, `COVER`, обложка WIC |
 
 Осторожно: в `bg.rs` есть `thread_local!`-значения (`MEDIA_MGR`, `VOL_WATCH`, `SESSION_WATCH`) и `static`-мьютексы. Их нужно переносить вместе с кодом, который с ними работает, и не менять потоки доступа.
 
@@ -130,16 +130,16 @@
 5. **Документирующие комментарии и стиль сохранить**, комментарии на русском, как в окружающем коде.
 6. **`unsafe fn`**: не менять границы `unsafe`. Это касается и вызовов Win32/COM: переносим «как есть».
 7. **Порядок файлов:** от наименее связанного кода к наиболее связанному (см. раздел 6). Так каждый шаг проверяется независимо.
-8. **Допустимые отклонения от чистого переноса:** (а) блоки `//` в начале подмодуля можно превращать в `//!` документацию модуля; (б) тестовые модули можно объединять и переименовывать в `tests`; (в) импорты пересобираются под каждый подмодуль; (г) удалённые комментарии-заголовки разделов не считаются изменением. Всё остальное (тела функций, сигнатуры, логика) менять нельзя.
+8. **Допустимые отклонения от чистого переноса:** (а) блоки `//` в начале подмодуля можно превращать в `//!` документацию модуля; (б) тестовые модули можно объединять и переименовывать в `tests`; (в) импорты пересобираются под каждый подмодуль; (г) удалённые комментарии-заголовки разделов не считаются изменением; (д) сокращение путей типов в сигнатурах через `use` или `use ... as Алиас` (например `Mgr`, `Status`, `PathBuf`), если тип остаётся тем же; (е) повышение видимости приватных элементов до `pub(super)` там, где их теперь вызывает соседний подмодуль. Всё остальное (тела функций, сигнатуры, логика) менять нельзя.
 
 ## 6. План этапов
 
 | Этап | Что | Риск |
 |---|---|---|
 | 0 | Зафиксировать базовые показатели (раздел 7) | нет |
-| 1 | `online/`: `http` → `datetime` → `calendar` → `speedtest` → `weather` | низкий: чистая логика, много тестов |
-| 2 | `sys/`: `seal` → `night_light` → `paths` → `registry` → `clipboard` → `appearance` → `shell` | низкий |
-| 3 | `bg/`: `net`, `devices`, `audio_policy`, `wifi`, `bluetooth`, `media`, `volume`, `winrt` | средний: COM, потоки, `thread_local` |
+| 1 | `online/`: `http` → `datetime` → `calendar` → `speedtest` → `weather` (готово) | низкий: чистая логика, много тестов |
+| 2 | `sys/`: `seal` → `night_light` → `paths` → `registry` → `clipboard` → `appearance` → `shell` (готово) | низкий |
+| 3 | `bg/`: `net`, `devices`, `audio_policy`, `wifi`, `bluetooth`, `media`, `volume`, `winrt` (готово) | средний: COM, потоки, `thread_local` |
 | 4 | `ui/`: `color`, `glyphs`, `geom`, `bitmap_cache`, `fonts`, `canvas`, `scroll`, `field`, `widgets` | средний: сильно связаны поля `Ui` |
 | 5 | `tabs/today/` | средний: большая функция отрисовки |
 | 6 | Второй приоритет по необходимости | — |
