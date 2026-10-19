@@ -11,8 +11,9 @@ use windows::Win32::Media::Audio::{
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
 
 use super::audio_policy::audio_set_default;
+use super::devices::{audio_devices, device_id, set_status, store_list, DevItem, ListKind};
 use super::winrt::wait;
-use super::{audio_devices, send, set_radio, set_status, store_list, Cmd, DevItem, ListKind};
+use super::{send, set_radio, Cmd};
 use crate::log;
 
 // ---------- Bluetooth-аудио: подключение через драйвер (IKsControl) ----------
@@ -77,7 +78,7 @@ pub(super) unsafe fn audio_endpoints() -> Vec<AudioEp> {
     for i in 0..coll.GetCount().unwrap_or(0) {
         let Ok(dev) = coll.Item(i) else { continue };
         let state = dev.GetState().map(|s| s.0).unwrap_or(0);
-        let (Some(container), Some(endpoint)) = (container_id(&dev), super::device_id(&dev)) else { continue };
+        let (Some(container), Some(endpoint)) = (container_id(&dev), device_id(&dev)) else { continue };
         let bt_filter = if state & (DEVICE_STATE_ACTIVE.0 | DEVICE_STATE_UNPLUGGED.0) != 0 {
             filter_of(&dev).filter(|f| {
                 let up = f.to_uppercase();

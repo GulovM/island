@@ -6,7 +6,7 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::NetworkManagement::WiFi::*;
 
-use super::{set_status, store_list, DevItem, ListKind};
+use super::devices::{set_status, store_list, DevItem, ListKind};
 use super::{send, Cmd};
 use crate::log;
 

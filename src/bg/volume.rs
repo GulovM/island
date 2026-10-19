@@ -11,7 +11,8 @@ use windows::Win32::Media::Audio::AUDIO_VOLUME_NOTIFICATION_DATA;
 use windows::Win32::System::Com::CLSCTX_ALL;
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
-use super::{device, device_id, HWND_MAIN, WM_VOLUME};
+use super::devices::{device, device_id};
+use super::{HWND_MAIN, WM_VOLUME};
 use crate::log;
 
 /// Приёмник уведомлений об изменении громкости: вызывается системой в своём потоке, только
