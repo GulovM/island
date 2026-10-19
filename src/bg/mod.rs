@@ -10,12 +10,8 @@ use std::time::Instant;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::Media::Audio::Endpoints::{
-    IAudioEndpointVolume, IAudioEndpointVolumeCallback, IAudioEndpointVolumeCallback_Impl,
-};
-use windows::Win32::Media::Audio::{
-    eMultimedia, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, AUDIO_VOLUME_NOTIFICATION_DATA,
-};
+use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+use windows::Win32::Media::Audio::{eMultimedia, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator};
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
@@ -26,7 +22,7 @@ pub const WM_BG: u32 = WM_APP + 3;
 /// Громкость или «без звука» изменились (из любого источника): wparam — громкость в ‰, lparam — mute.
 pub const WM_VOLUME: u32 = WM_APP + 4;
 
-static HWND_MAIN: AtomicIsize = AtomicIsize::new(0);
+pub(super) static HWND_MAIN: AtomicIsize = AtomicIsize::new(0);
 
 /// Пробуждает главное окно из любого потока.
 pub fn notify() {
@@ -87,10 +83,12 @@ pub struct Snapshot {
 
 mod audio_policy;
 mod net;
+mod volume;
 mod winrt;
 
 pub use net::{net_status, NetStatus};
 use audio_policy::audio_set_default;
+use volume::watch_volume;
 use winrt::wait;
 
 /// Какой список устройств запрошен (выпадающие списки вкладки Controls).
@@ -263,7 +261,7 @@ pub fn start(hwnd: HWND) {
     }
 }
 
-unsafe fn device() -> Option<IMMDevice> {
+pub(super) unsafe fn device() -> Option<IMMDevice> {
     let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
     en.GetDefaultAudioEndpoint(eRender, eMultimedia).ok()
 }
@@ -325,7 +323,7 @@ unsafe fn device_full_name(dev: &IMMDevice) -> Option<String> {
     name
 }
 
-unsafe fn device_id(dev: &IMMDevice) -> Option<String> {
+pub(super) unsafe fn device_id(dev: &IMMDevice) -> Option<String> {
     let p = dev.GetId().ok()?;
     let s = p.to_string().ok();
     windows::Win32::System::Com::CoTaskMemFree(Some(p.0 as *const std::ffi::c_void));
@@ -970,56 +968,10 @@ fn media_manager() -> Option<windows::Media::Control::GlobalSystemMediaTransport
     })
 }
 
-// ---------- События громкости и медиасессии (индикатор в свёрнутой форме) ----------
-
-/// Приёмник уведомлений об изменении громкости: вызывается системой в своём потоке, только
-/// пересылает значения главному окну — тяжёлого здесь ничего нет.
-#[windows::core::implement(IAudioEndpointVolumeCallback)]
-struct VolumeWatch;
-
-#[allow(non_snake_case)]
-impl IAudioEndpointVolumeCallback_Impl for VolumeWatch_Impl {
-    fn OnNotify(&self, pnotify: *mut AUDIO_VOLUME_NOTIFICATION_DATA) -> windows::core::Result<()> {
-        let h = HWND_MAIN.load(Ordering::Relaxed);
-        if let (Some(n), true) = (unsafe { pnotify.as_ref() }, h != 0) {
-            let permille = (n.fMasterVolume.clamp(0.0, 1.0) * 1000.0).round() as usize;
-            unsafe {
-                let _ = PostMessageW(Some(HWND(h as *mut _)), WM_VOLUME, WPARAM(permille), LPARAM(n.bMuted.as_bool() as isize));
-            }
-        }
-        Ok(())
-    }
-}
-
 thread_local! {
-    /// Подписка на громкость устройства по умолчанию: (конечная точка, приёмник, id устройства).
-    static VOL_WATCH: RefCell<Option<(IAudioEndpointVolume, IAudioEndpointVolumeCallback, String)>> =
-        const { RefCell::new(None) };
     /// Подписка на события текущей медиасессии: (сессия, токены двух событий, AUMID приложения).
     static SESSION_WATCH: RefCell<Option<(windows::Media::Control::GlobalSystemMediaTransportControlsSession, i64, i64, String)>> =
         const { RefCell::new(None) };
-}
-
-/// Подписывается на изменения громкости устройства вывода по умолчанию (повторно — только если
-/// устройство сменилось). Событийная подписка: в простое потоку делать нечего.
-unsafe fn watch_volume() {
-    let Some(dev) = device() else { return };
-    let id = device_id(&dev).unwrap_or_default();
-    VOL_WATCH.with(|w| {
-        let mut w = w.borrow_mut();
-        if w.as_ref().is_some_and(|(_, _, old)| *old == id) {
-            return;
-        }
-        if let Some((ep, cb, _)) = w.take() {
-            let _ = ep.UnregisterControlChangeNotify(&cb);
-        }
-        let Ok(ep) = dev.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None) else { return };
-        let cb: IAudioEndpointVolumeCallback = VolumeWatch.into();
-        match ep.RegisterControlChangeNotify(&cb) {
-            Ok(()) => *w = Some((ep, cb, id)),
-            Err(e) => log::error(&format!("не удалось подписаться на громкость: {e}")),
-        }
-    });
 }
 
 /// Подписывается на изменения текущей медиасессии: смена трека и пауза/воспроизведение будят
