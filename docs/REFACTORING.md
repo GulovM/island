@@ -107,19 +107,22 @@
 
 ### 4.5. `tabs/today.rs` → `tabs/today/`
 
-| Файл | Содержимое |
-|---|---|
-| `mod.rs` | `Today`, `Default`, `load`/`save`/`show`/`sync`/`step` |
-| `timer.rs` | таймер: `remaining`, `toggle_run`, `set_time*`, пресеты, `poll`, дедлайн |
-| `alarm.rs` | `alarm_wav`, `play_alarm` |
-| `calendar.rs` | `week_dates`, `event_when`, `open_month`, `shift_month`, `valid_calendar_url` |
-| `view.rs` | отрисовка; сама функция `draw` занимает около 450 строк — внутри неё выделить `draw_timer`, `draw_calendar`, `draw_weather` |
+Делим по возможностям, а не на «логику» и «отрисовку»: в `today.rs` каждая карточка (часы, неделя, месяц, таймер, задачи) — это отдельный метод `*_card` с собственным состоянием, и логика с отрисовкой там сплетены. Сама `draw` занимает около 115 строк и только раскладывает карточки, поэтому остаётся в `mod.rs` без изменений. Первоначальная оценка «`draw` около 450 строк» была ошибкой замера.
+
+| Файл | Строк | Содержимое |
+|---|---|---|
+| `mod.rs` | 311 | `Today`, `Default`, `configure`/`show`/`sync`/`step`/`animating`/`take_fired`/`deadline`/`poll`, `draw` (раскладка карточек и карточка погоды), константы `CLOCK_*`, `SUN_COLOR` |
+| `alarm.rs` | 105 | `alarm_wav`, `play_alarm` |
+| `clock.rs` | 68 | `second_frac`, `clock_face` (5 циферблатов) |
+| `timer.rs` | 203 | `PRESETS`, `parse_num`, `remaining`, `toggle_run`, `set_time*`, `set_preset`, `timer_card` |
+| `calendar.rs` | 348 | `week_dates`, `event_when`, `valid_calendar_url`, `MonthCache`, `open_month`, `shift_month`, `week_card`, `calendar_form`, `month_card` |
+| `todo.rs` | 247 | `RowAnim`, `load`, `save`, `todo_card`, `MAX_TODO`, `TODO_FILE` |
 
 ### 4.6. Второй приоритет (только если первый этап прошёл гладко)
 
 - `tabs/stats.rs` → `tabs/stats/`: `mod.rs`, `sampler.rs` (`Sample`, `Heavy`, `poll`, `ProcSampler`), `gpu.rs` (`GpuQuery`), `format.rs` (`fmt_rate`, `fmt_bytes`, `fmt_uptime`, `cpu_name`), `view.rs`.
 - `main.rs`: `App` и методы в `app.rs`, `main.rs` оставить входной точкой (`main`, `run`, список `mod`).
-- `tabs/settings.rs`, `tabs/apps.rs`, `window.rs`: делить только если при просмотре найдутся самостоятельные блоки. По структуре видно большие функции отрисовки (в `settings.rs` около 300 строк, в `apps.rs` `launch` около 190, в `window.rs` `hit_rect` около 260), их можно разбить на подфункции, не создавая новых файлов.
+- `tabs/settings.rs`, `tabs/apps.rs`, `window.rs`: делить только если при просмотре найдутся самостоятельные блоки. Размеры функций в этом пункте получены грубым замером до следующей сигнатуры `fn` и могут быть завышены (так ошибочно получилось и с `draw` в `today.rs`), поэтому перед разбиением их нужно перемерить по телу функции.
 
 ## 5. Правила переноса
 
@@ -141,7 +144,7 @@
 | 2 | `sys/`: `seal` → `night_light` → `paths` → `registry` → `clipboard` → `appearance` → `shell` (готово) | низкий |
 | 3 | `bg/`: `net`, `devices`, `audio_policy`, `wifi`, `bluetooth`, `media`, `volume`, `winrt` (готово) | средний: COM, потоки, `thread_local` |
 | 4 | `ui/`: `color`, `glyphs`, `geom`, `bitmap_cache`, `fonts`, `canvas`, `scroll`, `field`, `widgets` (готово) | средний: сильно связаны поля `Ui` |
-| 5 | `tabs/today/` | средний: большая функция отрисовки |
+| 5 | `tabs/today/`: `alarm` → `clock` → `timer` → `calendar` → `todo` (готово) | средний: методы `*_card` разных карточек делят поля `Today` |
 | 6 | Второй приоритет по необходимости | — |
 | 7 | Обновить `docs/PLAN.md` (обзор структуры), `CHANGELOG.md` не трогать, если нет изменений для пользователя | нет |
 
