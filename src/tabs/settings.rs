@@ -380,6 +380,19 @@ impl Settings {
             self.cfg.auto_update = au;
             self.changed = true;
         }
+        y += 28.0;
+
+        // Радиус углов.
+        cv.text("Радиус углов", Rect::new(x, y, 140.0, 13.0), &f.body, txt());
+        cv.text(&format!("{} px", self.cfg.corner_radius.round() as i32), Rect::new(lc.right() - 70.0, y, 60.0, 13.0), &f.body_r, dim());
+        y += 21.0;
+        let mut frac = self.cfg.corner_radius / MAX_RADIUS;
+        let rid = id(SETTINGS, N_RADIUS);
+        if ui.slider_thin(cv, rid, Rect::new(x + 6.0, y, iw - 12.0, 14.0), &mut frac) {
+            self.cfg.corner_radius = (frac * MAX_RADIUS).round();
+            self.changed = true;
+        }
+        self.glow = ui.is_dragging(rid);
     }
 
     /// Строка «Версия … / Проверить»: ручная проверка обновлений и предложение установить найденное.
@@ -417,19 +430,6 @@ impl Settings {
         let x = rc.x + 10.0;
         let iw = rc.w - 20.0;
         let mut y = rc.y + 9.0;
-
-        // Радиус углов.
-        cv.text("Радиус углов", Rect::new(x, y, 140.0, 13.0), &f.body, txt());
-        cv.text(&format!("{} px", self.cfg.corner_radius.round() as i32), Rect::new(rc.right() - 70.0, y, 60.0, 13.0), &f.body_r, dim());
-        y += 21.0;
-        let mut frac = self.cfg.corner_radius / MAX_RADIUS;
-        let rid = id(SETTINGS, N_RADIUS);
-        if ui.slider_thin(cv, rid, Rect::new(x + 6.0, y, iw - 12.0, 14.0), &mut frac) {
-            self.cfg.corner_radius = (frac * MAX_RADIUS).round();
-            self.changed = true;
-        }
-        self.glow = ui.is_dragging(rid);
-        y += 28.0;
 
         // Стекло: выключатель и прозрачность (0 — почти прозрачное, 100 — сплошное).
         cv.text("Стекло", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
