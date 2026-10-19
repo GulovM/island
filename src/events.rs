@@ -162,7 +162,12 @@ impl App {
                 bg::send(bg::Cmd::Net);
                 true
             }
-            Ev::SysColors => self.cfg.system_colors && self.apply_theme(),
+            Ev::SysColors => {
+                // «Эффекты прозрачности» перечитываем здесь же: отдельного события для них нет.
+                let t = sys::transparency_enabled();
+                let flipped = std::mem::replace(&mut self.transparency, t) != t;
+                (self.cfg.system_colors && self.apply_theme()) || flipped
+            }
             Ev::Volume(level, muted) => {
                 if self.live.volume_changed(level, muted) {
                     self.show_toast(live::Toast::Volume { level, muted })

@@ -47,7 +47,7 @@ use windows::Win32::Graphics::DirectWrite::*;
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::Graphics::Dxgi::*;
 use windows::Win32::Graphics::Gdi::{
-    CreateRectRgn, EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, SetWindowRgn,
+    CreateRectRgn, CreateRoundRectRgn, EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, SetWindowRgn,
     HDC, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY,
 };
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
@@ -275,6 +275,10 @@ fn run() -> Result<()> {
                 app.trim_pending = false;
                 sys::trim_working_set();
             }
+        }
+        // Выход из трея сразу после правки: не теряем отложенное сохранение настроек.
+        if app.save_pending {
+            config::save(&app.cfg, &TABS);
         }
         for h in hooks {
             let _ = UnhookWinEvent(h);

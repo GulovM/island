@@ -40,7 +40,12 @@ impl App {
         let thin = ((collapsed_h * s - ah) / ((collapsed_h - STRIP_H) * s)).clamp(0.0, 1.0);
         let k = 1.0 - thin;
         let pal = theme::get();
-        g.brush.SetColor(&D2D1_COLOR_F { r: pal.bg.r * k, g: pal.bg.g * k, b: pal.bg.b * k, a: 1.0 });
+        // Прозрачность стекла: 0 — почти прозрачное (виден размытый фон), 100 — сплошное тело. Без размытия
+        // (выключены «Эффекты прозрачности», нет blur-behind), в свёрнутом виде и в полоске тело сплошное.
+        let real = self.cfg.glass && self.transparency && self.blur_ok;
+        let body_a = if real { 1.0 - (1.0 - (0.12 + 0.88 * self.cfg.glass_opacity / 100.0)) * open * k } else { 1.0 };
+        g.brush.SetColor(&D2D1_COLOR_F { r: pal.bg.r * k, g: pal.bg.g * k, b: pal.bg.b * k, a: body_a });
+        self.apply_blur(x0, aw, ah, r, real && open > 0.01 && k > 0.01);
         let body = self.body_path(g, x0, aw, ah, ear, r, false)?;
         g.dc.FillGeometry(&body, &g.brush, None);
 
@@ -153,7 +158,7 @@ impl App {
                 let (px, pw) = (self.pill_x.value * s, self.pill_w.value.max(1.0) * s);
                 let (py, ph) = (TAB_TOP * s, TAB_H * s);
                 let rr = D2D1_ROUNDED_RECT { rect: D2D_RECT_F { left: px, top: py, right: px + pw, bottom: py + ph }, radiusX: ph / 2.0, radiusY: ph / 2.0 };
-                let mut c = if self.cfg.accent_pill { D2D1_COLOR_F { a: 0.26, ..accent } } else { pal.pill };
+                let mut c = pal.pill;
                 c.a *= pill_a;
                 g.brush.SetColor(&c);
                 g.dc.FillRoundedRectangle(&rr, &g.brush);
@@ -300,6 +305,36 @@ impl App {
         g.swapchain.Present(1, DXGI_PRESENT(0)).ok()?;
         ui.end_frame();
         Ok(())
+    }
+
+    /// Подкладка стекла: окно с размытием фона точно под телом острова (по форме скруглённых нижних углов).
+    unsafe fn apply_blur(&self, x0: f32, aw: f32, ah: f32, r: f32, on: bool) {
+        let key = if on {
+            (self.win_x + x0.floor() as i32, self.win_y, (aw.ceil() as i32) << 16 | ah.ceil() as i32, r.round() as i32, 0)
+        } else {
+            (0, 0, 0, 0, -1)
+        };
+        if self.blur_key.get() == key {
+            return;
+        }
+        self.blur_key.set(key);
+        if !on {
+            let _ = ShowWindow(self.glass_wnd, SW_HIDE);
+            return;
+        }
+        let (w, h) = (aw.ceil() as i32, ah.ceil() as i32);
+        // Верхние углы уезжают выше окна, остаются скруглены только нижние.
+        let d = (2 * key.3).max(1);
+        let rgn = CreateRoundRectRgn(0, -d, w + 1, h + 1, d, d);
+        // Система забирает регион себе, удалять его не нужно.
+        SetWindowRgn(self.glass_wnd, Some(rgn), false);
+        let _ = SetWindowPos(self.glass_wnd, Some(self.hwnd), key.0, key.1, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+
+    /// Прячет подложку стекла (остров скрыт); следующий кадр покажет её снова.
+    pub(crate) unsafe fn hide_glass(&self) {
+        self.blur_key.set((i32::MIN, 0, 0, 0, 0));
+        let _ = ShowWindow(self.glass_wnd, SW_HIDE);
     }
 
     /// Контур чёлки: плоский верх на уровне края экрана, вогнутые «ушки» по бокам,

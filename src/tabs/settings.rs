@@ -31,7 +31,7 @@ const N_LANG: u32 = 13;
 const N_AUTOUPDATE: u32 = 16;
 const N_UPDATE: u32 = 17;
 const N_GLASS: u32 = 18;
-const N_PILL: u32 = 19;
+const N_OPACITY: u32 = 19;
 const N_PRESET: u32 = 20;
 const N_SWITCH: u32 = 40;
 const N_UP: u32 = 60;
@@ -216,7 +216,7 @@ impl Settings {
         self.cfg.system_colors = false;
         self.cfg.corner_radius = DEFAULT_RADIUS;
         self.cfg.glass = d.glass;
-        self.cfg.accent_pill = d.accent_pill;
+        self.cfg.glass_opacity = d.glass_opacity;
         self.cfg.ui_scale = DEFAULT_SCALE;
         self.scale_drag = None;
         self.cfg.hidden_tabs.clear();
@@ -431,7 +431,7 @@ impl Settings {
         self.glow = ui.is_dragging(rid);
         y += 28.0;
 
-        // Стекло и капля вкладки.
+        // Стекло: выключатель и прозрачность (0 — почти прозрачное, 100 — сплошное).
         cv.text("Стекло", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
         let mut glass = self.cfg.glass;
         if ui.switch(cv, id(SETTINGS, N_GLASS), Rect::new(rc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut glass, true) {
@@ -439,13 +439,15 @@ impl Settings {
             self.changed = true;
         }
         y += 24.0;
-        cv.text("Капля вкладки цветом акцента", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
-        let mut pill = self.cfg.accent_pill;
-        if ui.switch(cv, id(SETTINGS, N_PILL), Rect::new(rc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut pill, true) {
-            self.cfg.accent_pill = pill;
+        cv.text("Прозрачность", Rect::new(x, y, 170.0, 13.0), &f.body, if self.cfg.glass { txt() } else { dim() });
+        cv.text(&format!("{}%", self.cfg.glass_opacity.round() as i32), Rect::new(rc.right() - 70.0, y, 60.0, 13.0), &f.body_r, dim());
+        y += 21.0;
+        let mut frac = self.cfg.glass_opacity / 100.0;
+        if ui.slider_thin(cv, id(SETTINGS, N_OPACITY), Rect::new(x + 6.0, y, iw - 12.0, 14.0), &mut frac) && self.cfg.glass {
+            self.cfg.glass_opacity = (frac * 100.0).round();
             self.changed = true;
         }
-        y += 24.0;
+        y += 28.0;
 
         // Масштаб интерфейса (шаг 0.05): применяется, когда мышь отпущена.
         let shown = self.scale_drag.unwrap_or(self.cfg.ui_scale);

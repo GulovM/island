@@ -271,7 +271,7 @@ const TABLE: &[(&str, &str)] = &[
     ("Наведите на верхний край, чтобы раскрыть", "Hover the top edge to expand"),
     ("Радиус углов", "Corner radius"),
     ("Стекло", "Glass"),
-    ("Капля вкладки цветом акцента", "Accent-coloured tab pill"),
+    ("Прозрачность", "Transparency"),
     ("Масштаб интерфейса", "Interface scale"),
     ("ВКЛАДКИ — ВКЛЮЧЕНИЕ И ПОРЯДОК", "TABS — VISIBILITY AND ORDER"),
     ("Сбросить внешний вид", "Reset appearance"),

@@ -9,6 +9,8 @@ use crate::theme;
 /// Скругление нижних углов по умолчанию и допустимые пределы, логические пиксели.
 pub const DEFAULT_RADIUS: f32 = 14.0;
 pub const MAX_RADIUS: f32 = 30.0;
+/// Прозрачность стекла по умолчанию: 0 — почти прозрачное, 100 — сплошное тело.
+pub const DEFAULT_GLASS_OPACITY: f32 = 70.0;
 /// Масштаб интерфейса (шрифты и панель вместе): по умолчанию и пределы.
 pub const DEFAULT_SCALE: f32 = 1.2;
 pub const MIN_SCALE: f32 = 0.9;
@@ -29,12 +31,13 @@ system_colors = 0
 # Скругление нижних углов острова, пиксели (0–30)
 corner_radius = 14
 
-# 1 — эффект стекла: блик на кромке и мягкое осветление сверху раскрытого острова,
-# подвижная «капля» выбранной вкладки. 0 — прежний плоский вид. Меняется и в Настройках.
+# 1 — эффект стекла у раскрытого острова: размытый фон просвечивает сквозь тело, на кромке блик,
+# сверху мягкое осветление, у выбранной вкладки подвижная «капля». 0 — прежний плоский вид.
+# Без системных «Эффектов прозрачности» тело остаётся сплошным. Меняется и в Настройках.
 glass = 1
 
-# 1 — капля выбранной вкладки залита цветом акцента, 0 — нейтральная (по умолчанию).
-accent_pill = 0
+# Прозрачность стекла: 0 — почти прозрачное, 100 — сплошное тело (0–100). Меняется и в Настройках.
+glass_opacity = 70
 
 # Масштаб интерфейса: шрифты и панель увеличиваются вместе (0.9–2.0). Меняется и в Настройках.
 ui_scale = 1.2
@@ -118,8 +121,8 @@ pub struct Config {
     pub corner_radius: f32,
     /// Эффект стекла: блик на кромке, осветление сверху, подвижная капля вкладки.
     pub glass: bool,
-    /// Капля выбранной вкладки залита акцентом (иначе нейтральная).
-    pub accent_pill: bool,
+    /// Прозрачность стекла, 0–100: 0 — почти прозрачное, 100 — сплошное тело.
+    pub glass_opacity: f32,
     /// Масштаб интерфейса (множитель к DPI монитора).
     pub ui_scale: f32,
     /// Над развёрнутыми окнами остров сжимается в тонкую полоску.
@@ -165,7 +168,7 @@ impl Default for Config {
             system_colors: false,
             corner_radius: DEFAULT_RADIUS,
             glass: true,
-            accent_pill: false,
+            glass_opacity: DEFAULT_GLASS_OPACITY,
             ui_scale: DEFAULT_SCALE,
             strip_over_maximized: true,
             language: "auto".to_string(),
@@ -235,6 +238,10 @@ impl Config {
 
 /// Записывает настройки внешнего вида обратно в `config.toml`, не трогая остальные строки и комментарии.
 pub fn save(cfg: &Config, names: &[&str]) {
+    write_updates(&save_updates(cfg, names));
+}
+
+fn save_updates(cfg: &Config, names: &[&str]) -> Vec<(&'static str, String)> {
     let order: Vec<String> = cfg.tabs.iter().map(|t| t.to_string()).collect();
     let order = if order.is_empty() { names.iter().map(|n| n.to_string()).collect() } else { order };
     let updates = [
@@ -243,7 +250,7 @@ pub fn save(cfg: &Config, names: &[&str]) {
         ("system_colors", (cfg.system_colors as u8).to_string()),
         ("corner_radius", format!("{}", cfg.corner_radius.round() as i32)),
         ("glass", (cfg.glass as u8).to_string()),
-        ("accent_pill", (cfg.accent_pill as u8).to_string()),
+        ("glass_opacity", format!("{}", cfg.glass_opacity.round() as i32)),
         ("ui_scale", format!("{:.3}", cfg.ui_scale)),
         ("strip_over_maximized", (cfg.strip_over_maximized as u8).to_string()),
         ("language", fmt_str(&cfg.language)),
@@ -252,7 +259,7 @@ pub fn save(cfg: &Config, names: &[&str]) {
         ("idle_face", (cfg.idle_face as u8).to_string()),
         ("auto_update", (cfg.auto_update as u8).to_string()),
     ];
-    write_updates(&updates);
+    updates.to_vec()
 }
 
 /// Ключи раскладки виджетов в `config.toml` по номеру вкладки (Controls, Today, Stats).
@@ -269,11 +276,18 @@ pub fn save_num(key: &str, value: usize) {
 }
 
 fn write_updates(updates: &[(&str, String)]) {
+    if LOAD_FAILED.load(std::sync::atomic::Ordering::Relaxed) {
+        // Файл не читался при запуске: пробуем ещё раз, и только если прочитался — пишем.
+        match read_with_retry(&path()) {
+            Ok(_) => LOAD_FAILED.store(false, std::sync::atomic::Ordering::Relaxed),
+            Err(_) => return,
+        }
+    }
     let path = path();
     // Шаблон подставляем только если файла нет; любая другая ошибка чтения (файл открыт в редакторе,
     // антивирус) не должна приводить к перезаписи пользовательского конфига шаблоном.
-    let text = match std::fs::read(&path) {
-        Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+    let text = match read_with_retry(&path) {
+        Ok(b) => decode(&b),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DEFAULT_TEMPLATE.to_string(),
         Err(e) => {
             log::error(&format!("не удалось прочитать {} для сохранения: {e}", path.display()));
@@ -281,17 +295,25 @@ fn write_updates(updates: &[(&str, String)]) {
         }
     };
     let out = set_keys(&text, updates);
-    if out == text {
+    write_text(&path, &out, &text);
+}
+
+/// Атомарная запись: через временный файл; если переименование не вышло — прямая запись поверх.
+fn write_text(path: &std::path::Path, out: &str, old: &str) {
+    if out == old {
         return;
     }
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    // Через временный файл: обрыв записи не оставит пустой config.toml.
     let tmp = path.with_extension("toml.tmp");
-    if let Err(e) = std::fs::write(&tmp, out).and_then(|()| std::fs::rename(&tmp, &path)) {
+    let atomic = std::fs::write(&tmp, out).and_then(|()| std::fs::rename(&tmp, path));
+    if let Err(e) = atomic {
         let _ = std::fs::remove_file(&tmp);
-        log::error(&format!("не удалось записать {}: {e}", path.display()));
+        log::error(&format!("атомарная запись {} не удалась ({e}), пишу напрямую", path.display()));
+        if let Err(e) = std::fs::write(path, out) {
+            log::error(&format!("не удалось записать {}: {e}", path.display()));
+        }
     }
 }
 
@@ -346,24 +368,96 @@ pub fn path() -> PathBuf {
     crate::sys::data_dir().join("config.toml")
 }
 
-/// Читает конфиг; если файла нет — создаёт с шаблоном. Любые ошибки — в лог и значения по умолчанию.
+/// Конфиг не удалось прочитать (не «нет файла»): пока так, настройки не пишем — иначе значения по умолчанию
+/// затёрли бы пользовательский файл. Сбрасывается при успешном чтении.
+static LOAD_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Читает файл целиком; UTF-16 (Блокнот) приводит к UTF-8, остальное читает с заменой битых байтов.
+fn decode(b: &[u8]) -> String {
+    let utf16 = |b: &[u8], le: bool| {
+        let u: Vec<u16> = b.chunks_exact(2).map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) }).collect();
+        String::from_utf16_lossy(&u)
+    };
+    match b {
+        [0xff, 0xfe, rest @ ..] => utf16(rest, true),
+        [0xfe, 0xff, rest @ ..] => utf16(rest, false),
+        _ => String::from_utf8_lossy(b).into_owned(),
+    }
+}
+
+/// Чтение с повторами: при автозапуске файл может быть на секунды занят антивирусом или ещё не доступен.
+fn read_with_retry(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    let mut last = None;
+    for attempt in 0..6 {
+        match std::fs::read(path) {
+            Ok(b) => return Ok(b),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(e),
+            Err(e) => {
+                last = Some(e);
+                std::thread::sleep(std::time::Duration::from_millis(150 * (attempt + 1)));
+            }
+        }
+    }
+    Err(last.unwrap())
+}
+
+fn backup_path() -> PathBuf {
+    path().with_extension("toml.bak")
+}
+
+/// Читает конфиг; если файла нет — создаёт с шаблоном. Любые ошибки — в лог; нечитаемый файл не перезаписываем.
+/// Недостающие ключи (после обновления) дописываются в файл, так что `config.toml` всегда полный.
 pub fn load() -> Config {
+    use std::sync::atomic::Ordering::Relaxed;
     let path = path();
-    match std::fs::read_to_string(&path) {
-        Ok(text) => parse(&text),
+    match read_with_retry(&path) {
+        Ok(b) => {
+            LOAD_FAILED.store(false, Relaxed);
+            let text = decode(&b);
+            if !text.trim().is_empty() {
+                let _ = std::fs::write(backup_path(), &b);
+            }
+            let cfg = parse(&text);
+            migrate(&path, &text, &cfg);
+            cfg
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            LOAD_FAILED.store(false, Relaxed);
+            // Файл пропал — пробуем последнюю копию, иначе шаблон.
+            let text = std::fs::read(backup_path()).map(|b| decode(&b)).unwrap_or_else(|_| DEFAULT_TEMPLATE.to_string());
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
-            if let Err(e) = std::fs::write(&path, DEFAULT_TEMPLATE) {
+            if let Err(e) = std::fs::write(&path, &text) {
                 log::error(&format!("не удалось создать {}: {e}", path.display()));
             }
-            parse(DEFAULT_TEMPLATE)
+            parse(&text)
         }
         Err(e) => {
             log::error(&format!("не удалось прочитать {}: {e}", path.display()));
-            parse(DEFAULT_TEMPLATE)
+            LOAD_FAILED.store(true, Relaxed);
+            // Читаем копию, но файл не трогаем.
+            std::fs::read(backup_path()).map(|b| parse(&decode(&b))).unwrap_or_default()
         }
+    }
+}
+
+/// Дописывает в файл ключи, которых в нём нет (новые версии добавляют настройки), значениями из `cfg`.
+fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
+    let tmpl = DEFAULT_TEMPLATE.lines().filter_map(|l| {
+        let t = l.trim_start();
+        if t.starts_with('#') || t.starts_with('[') { None } else { t.split_once('=').map(|(k, _)| k.trim().to_string()) }
+    });
+    let top: Vec<&str> = text.lines().take_while(|l| !l.trim_start().starts_with('[')).collect();
+    let present = |k: &str| top.iter().any(|l| !l.trim_start().starts_with('#') && l.split_once('=').is_some_and(|(a, _)| a.trim() == k));
+    let appearance = ["accent", "bg", "system_colors", "corner_radius", "glass", "glass_opacity", "ui_scale", "strip_over_maximized", "language", "tabs", "hidden_tabs", "idle_face", "auto_update"];
+    if tmpl.filter(|k| appearance.contains(&k.as_str())).all(|k| present(&k)) {
+        return;
+    }
+    // Недостающие ключи берём из разобранных настроек (они уже учитывают значения по умолчанию).
+    let missing_only = save_updates(cfg, &[]).into_iter().filter(|(k, _)| !present(k)).collect::<Vec<_>>();
+    if !missing_only.is_empty() {
+        write_text(path, &set_keys(text, &missing_only), text);
     }
 }
 
@@ -416,7 +510,9 @@ pub fn parse(text: &str) -> Config {
             ("", "auto_update", Value::Num(v)) => cfg.auto_update = v != 0.0,
             ("", "corner_radius", Value::Num(v)) => cfg.corner_radius = (v as f32).clamp(0.0, MAX_RADIUS),
             ("", "glass", Value::Num(v)) => cfg.glass = v != 0.0,
-            ("", "accent_pill", Value::Num(v)) => cfg.accent_pill = v != 0.0,
+            ("", "glass_opacity", Value::Num(v)) => cfg.glass_opacity = (v as f32).clamp(0.0, 100.0),
+            // Ключ из 0.5.0: настройка капли убрана, строку в старых конфигах молча пропускаем.
+            ("", "accent_pill", _) => {}
             ("", "ui_scale", Value::Num(v)) => cfg.ui_scale = (v as f32).clamp(MIN_SCALE, MAX_SCALE),
             ("", "strip_over_maximized", Value::Num(v)) => cfg.strip_over_maximized = v != 0.0,
             ("", "language", Value::Str(s)) => {
@@ -564,8 +660,9 @@ mod tests {
         assert_eq!(c.collapsed, (180.0, 24.0));
         assert_eq!(c.tabs.len(), 7);
         assert_eq!(c.key("weather"), None);
-        assert!(c.glass && !c.accent_pill);
-        assert_eq!((Config::default().glass, Config::default().accent_pill), (c.glass, c.accent_pill));
+        assert!(c.glass);
+        assert_eq!((Config::default().glass, Config::default().glass_opacity), (c.glass, c.glass_opacity));
+        assert_eq!(c.glass_opacity, DEFAULT_GLASS_OPACITY);
     }
 
     #[test]
@@ -675,7 +772,7 @@ gmail = \"https://mail.google.com\"
         c.system_colors = true;
         c.corner_radius = 22.0;
         c.glass = false;
-        c.accent_pill = true;
+        c.glass_opacity = 35.0;
         c.ui_scale = 1.5;
         c.strip_over_maximized = false;
         c.hidden_tabs = vec!["Power".into(), "Wallpaper".into()];
@@ -688,7 +785,7 @@ gmail = \"https://mail.google.com\"
             ("system_colors", "1".to_string()),
             ("corner_radius", "22".to_string()),
             ("glass", "0".to_string()),
-            ("accent_pill", "1".to_string()),
+            ("glass_opacity", "35".to_string()),
             ("ui_scale", format!("{:.3}", c.ui_scale)),
             ("strip_over_maximized", "0".to_string()),
             ("tabs", fmt_list(&c.tabs)),
@@ -721,5 +818,22 @@ gmail = \"https://mail.google.com\"
         assert_eq!(c.resolve_order(&NAMES), [2, 0, 1, 3]);
         c.tabs.clear();
         assert_eq!(c.resolve_order(&NAMES), [0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn decode_reads_utf16_and_lossy_utf8() {
+        let mut b = vec![0xff, 0xfe];
+        for u in "glass = 0".encode_utf16() {
+            b.extend(u.to_le_bytes());
+        }
+        assert_eq!(super::decode(&b), "glass = 0");
+        assert!(!super::decode(&[b'a', b' ', 0xff, b'=']).is_empty());
+        assert!(!parse(&super::decode(&b)).glass);
+    }
+
+    #[test]
+    fn old_accent_pill_key_is_ignored() {
+        assert_eq!(parse("accent_pill = 1
+glass_opacity = 250").glass_opacity, 100.0);
     }
 }
