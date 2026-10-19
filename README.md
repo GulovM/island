@@ -100,6 +100,13 @@ powershell -ExecutionPolicy Bypass -File tools\package.ps1   # portable-архи
 - Остров не реагирует на верх экрана при включённом режиме «полоски» (точка слева в ряду вкладок) — выключите его
   правым кликом по раскрытому острову.
 
+## Происхождение проекта
+
+Island — независимая реализация, вдохновлённая приложением **Hitodama** (Mainak Deb Das, Otism). Код написан с нуля;
+поведение оригинала изучалось по его наблюдаемой работе (reverse engineering), исходный код и ресурсы оригинала
+**не копировались**. Проект не связан с авторами Hitodama и **не является коммерческим**: бесплатный, без рекламы
+и сбора данных. Подробнее — в [NOTICE.md](NOTICE.md).
+
 ## Лицензия
 
-[MIT](LICENSE). Участие в разработке — [CONTRIBUTING.md](CONTRIBUTING.md), история изменений — [CHANGELOG.md](CHANGELOG.md).
+[MIT](LICENSE) (о некоммерческом статусе проекта — [NOTICE.md](NOTICE.md)). Участие в разработке — [CONTRIBUTING.md](CONTRIBUTING.md), история изменений — [CHANGELOG.md](CHANGELOG.md).

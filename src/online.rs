@@ -14,7 +14,7 @@ use windows::Win32::System::SystemInformation::{GetLocalTime, GetSystemTime};
 use crate::{bg, log, sys};
 
 const WEATHER_TTL: Duration = Duration::from_secs(20 * 60);
-const CALENDAR_TTL: Duration = Duration::from_secs(15 * 60);
+const CALENDAR_TTL: Duration = Duration::from_secs(5 * 60);
 /// После ошибки повторяем раньше, чем через полный срок.
 const RETRY_AFTER: Duration = Duration::from_secs(2 * 60);
 const DOWN_URL: &str = "https://speed.cloudflare.com/__down?bytes=25000000";
@@ -243,12 +243,17 @@ pub fn weather_text(code: i32) -> &'static str {
 
 // ---------- Календарь ----------
 
-/// Обновляет события из iCal-ссылки (раз в 15 минут).
+/// Обновляет события из iCal-ссылки (раз в 5 минут).
 pub fn refresh_calendar(url: &str) {
+    refresh_calendar_age(url, CALENDAR_TTL);
+}
+
+/// То же, но обновляет, если данным больше `max_age` (при открытии вкладки — чаще обычного).
+pub fn refresh_calendar_age(url: &str, max_age: Duration) {
     let url = url.trim().to_string();
     let go = with(|s| {
         s.snap.calendar_set = !url.is_empty();
-        if s.cal_busy || (s.cal_key == url && !stale(s.cal_at, CALENDAR_TTL)) {
+        if s.cal_busy || (s.cal_key == url && !stale(s.cal_at, max_age)) {
             return false;
         }
         if s.cal_key != url && !s.snap.cal.is_empty() {

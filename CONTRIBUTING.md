@@ -27,4 +27,7 @@ cargo clippy --release
 2. Закоммитьте и поставьте тег: `git tag v0.2.0 && git push --tags`.
 3. GitHub Actions (`.github/workflows/release.yml`) соберёт установщик, portable-архив и `SHA256SUMS.txt` и приложит их к релизу.
 
+Не копируйте в проект код, графику и другие ресурсы Hitodama и иных приложений — только собственная реализация
+(см. [NOTICE.md](NOTICE.md)).
+
 Локально то же самое делает `powershell -ExecutionPolicy Bypass -File tools\package.ps1`.

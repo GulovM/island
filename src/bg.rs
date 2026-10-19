@@ -285,7 +285,36 @@ unsafe fn endpoint() -> Option<IAudioEndpointVolume> {
 unsafe fn device_name(dev: &IMMDevice) -> Option<String> {
     let name = device_full_name(dev)?;
     let short = name.split(" (").next().unwrap_or(&name).trim().to_string();
-    Some(if short.is_empty() { name } else { short })
+    let short = if short.is_empty() { name } else { short };
+    Some(label_for(&short, device_form_factor(dev)))
+}
+
+const PKEY_FORM_FACTOR: windows::Win32::Foundation::PROPERTYKEY = windows::Win32::Foundation::PROPERTYKEY {
+    fmtid: windows::core::GUID::from_u128(0x1da5d803_d492_4edd_8c23_e0c0ffee7f0e),
+    pid: 0,
+};
+
+/// Тип устройства по `PKEY_AudioEndpoint_FormFactor` (3 — наушники, 5 — гарнитура).
+unsafe fn device_form_factor(dev: &IMMDevice) -> Option<u32> {
+    use windows::Win32::System::Com::StructuredStorage::PropVariantClear;
+    use windows::Win32::System::Com::STGM_READ;
+    use windows::Win32::System::Variant::VT_UI4;
+    let store = dev.OpenPropertyStore(STGM_READ).ok()?;
+    let mut pv = store.GetValue(&PKEY_FORM_FACTOR).ok()?;
+    let v = (pv.Anonymous.Anonymous.vt == VT_UI4).then(|| pv.Anonymous.Anonymous.Anonymous.ulVal);
+    let _ = PropVariantClear(&mut pv);
+    v
+}
+
+/// Windows называет конечную точку наушников общим «Динамики»: по типу устройства подставляем «Наушники».
+fn label_for(name: &str, form: Option<u32>) -> String {
+    let lower = name.to_lowercase();
+    let already = ["науш", "headphone", "headset", "гарнитур"].iter().any(|w| lower.contains(w));
+    if matches!(form, Some(3 | 5)) && !already {
+        crate::i18n::tr("Наушники").to_string()
+    } else {
+        name.to_string()
+    }
 }
 
 /// Полное дружественное имя устройства: «Динамики (Realtek Audio)».
@@ -326,6 +355,7 @@ unsafe fn audio_devices() -> Vec<DevItem> {
             Some((n, rest)) => (n.trim().to_string(), rest.trim_end_matches(')').to_string()),
             None => (full.clone(), String::new()),
         };
+        let name = label_for(&name, device_form_factor(&dev));
         let active = default.as_deref() == Some(id.as_str());
         out.push(DevItem { id, name, sub, active, extra: String::new() });
     }
@@ -1334,6 +1364,15 @@ unsafe impl<T> Send for Handoff<T> {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn headphones_label() {
+        assert_eq!(label_for("Динамики", Some(3)), "Наушники");
+        assert_eq!(label_for("Динамики", Some(5)), "Наушники");
+        assert_eq!(label_for("Динамики", Some(1)), "Динамики");
+        assert_eq!(label_for("Динамики", None), "Динамики");
+        assert_eq!(label_for("Headset Earphone", Some(5)), "Headset Earphone");
+    }
 
     #[test]
     fn wifi_join_params() {

@@ -238,6 +238,7 @@ const TABLE: &[(&str, &str)] = &[
     ("РАНЕЕ", "EARLIER"),
     // Controls
     ("Динамики", "Speakers"),
+    ("Наушники", "Headphones"),
     ("Без звука", "Muted"),
     ("Аудио", "Audio"),
     ("Параметры", "Settings"),
@@ -297,7 +298,7 @@ const TABLE: &[(&str, &str)] = &[
     ("Событий нет", "No events"),
     ("Календарь пуст на ближайшее время", "The calendar is empty for now"),
     ("Календарь не подключён", "Calendar not connected"),
-    ("calendar_ics в config.toml", "calendar_ics in config.toml"),
+    ("Нажмите, чтобы добавить ссылку", "Click to add a link"),
     ("Ссылка на календарь (iCal)", "Calendar link (iCal)"),
     ("https://… или webcal://…", "https://… or webcal://…"),
     ("Нужна ссылка вида https:// или webcal://", "A link like https:// or webcal:// is required"),
