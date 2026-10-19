@@ -40,6 +40,11 @@ impl App {
                 if !switched && self.expanded {
                     self.ui.down = true;
                     self.ui.pressed = true;
+                    // Долгое нажатие на пустом месте вкладки с виджетами включает правку.
+                    if self.pencil_visible() && !self.tabs.editing(self.normal_id()) && y as f32 / self.scale > 31.0 {
+                        self.press_pos = Some((x, y));
+                        SetTimer(Some(self.hwnd), LONG_TIMER, LONG_MS, None);
+                    }
                 }
                 true
             }
@@ -47,7 +52,27 @@ impl App {
                 let was = self.ui.down;
                 self.ui.down = false;
                 self.ui.released = was;
+                self.press_pos = None;
+                let _ = KillTimer(Some(self.hwnd), LONG_TIMER);
                 self.check_hover();
+                true
+            }
+            Ev::LongPress => {
+                let _ = KillTimer(Some(self.hwnd), LONG_TIMER);
+                let Some((px, py)) = self.press_pos.take() else { return false };
+                if !self.expanded || !self.ui.down || !self.ui.press_free() || !self.pencil_visible() {
+                    return false;
+                }
+                // Рука не должна была сдвинуться: иначе это начало перетаскивания, а не удержание.
+                let mut p = POINT::default();
+                if GetCursorPos(&mut p).is_err() {
+                    return false;
+                }
+                let moved = ((p.x - self.win_x - px) as f32).hypot((p.y - self.win_y - py) as f32);
+                if moved > 6.0 * self.scale {
+                    return false;
+                }
+                self.toggle_edit();
                 true
             }
             Ev::Wheel(d) => {
@@ -312,6 +337,13 @@ impl App {
                     self.disarm_leave();
                     self.set_expanded(false);
                 }
+                tabs::Action::Layout(tab, text) => {
+                    if let (Some(slot), Some(key)) = (self.cfg.layouts.get_mut(tab), config::LAYOUT_KEYS.get(tab)) {
+                        config::save_str(key, &text);
+                        *slot = text;
+                    }
+                }
+                tabs::Action::Resize => self.retarget(),
             }
         }
         dirty

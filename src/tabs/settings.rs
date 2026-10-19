@@ -7,7 +7,7 @@
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use crate::anim::Spring;
-use crate::config::{Config, DEFAULT_RADIUS, DEFAULT_SCALE, MAX_RADIUS, MAX_SCALE, MIN_SCALE};
+use crate::config::{Config, DEFAULT_GLASS, DEFAULT_RADIUS, DEFAULT_SCALE, MAX_RADIUS, MAX_SCALE, MIN_SCALE};
 use crate::theme::{self, Rgb};
 use crate::ui::{chip_bg, dim, icon, ink, inset, txt, Canvas, Rect, Submit, Ui, WHITE};
 
@@ -30,6 +30,7 @@ const N_STRIP: u32 = 12;
 const N_LANG: u32 = 13;
 const N_AUTOUPDATE: u32 = 16;
 const N_UPDATE: u32 = 17;
+const N_GLASS: u32 = 18;
 const N_PRESET: u32 = 20;
 const N_SWITCH: u32 = 40;
 const N_UP: u32 = 60;
@@ -213,6 +214,7 @@ impl Settings {
         self.cfg.bg = d.bg;
         self.cfg.system_colors = false;
         self.cfg.corner_radius = DEFAULT_RADIUS;
+        self.cfg.glass = DEFAULT_GLASS;
         self.cfg.ui_scale = DEFAULT_SCALE;
         self.scale_drag = None;
         self.cfg.hidden_tabs.clear();
@@ -425,6 +427,17 @@ impl Settings {
             self.changed = true;
         }
         self.glow = ui.is_dragging(rid);
+        y += 28.0;
+
+        // Стекло: 0 — прозрачное, 100 — матовое.
+        cv.text("Стекло: прозрачность ↔ матовость", Rect::new(x, y, 230.0, 13.0), &f.body, txt());
+        cv.text(&format!("{}", self.cfg.glass.round() as i32), Rect::new(rc.right() - 70.0, y, 60.0, 13.0), &f.body_r, dim());
+        y += 21.0;
+        let mut frac = self.cfg.glass / 100.0;
+        if ui.slider_thin(cv, id(SETTINGS, N_GLASS), Rect::new(x + 6.0, y, iw - 12.0, 14.0), &mut frac) {
+            self.cfg.glass = (frac * 100.0).round();
+            self.changed = true;
+        }
         y += 28.0;
 
         // Масштаб интерфейса (шаг 0.05): применяется, когда мышь отпущена.

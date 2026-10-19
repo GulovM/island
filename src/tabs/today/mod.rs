@@ -7,17 +7,21 @@ mod calendar;
 mod clock;
 mod timer;
 mod todo;
+mod weather;
 
 use std::time::{Duration, Instant};
 
+use windows::Win32::Foundation::SYSTEMTIME;
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows::Win32::System::SystemInformation::GetLocalTime;
 
 use crate::anim::Spring;
 use crate::config::Config;
 use crate::online::{self, days_from_civil, Event, Online};
-use crate::ui::{icon, mix, Canvas, Rect, Submit, Ui, dim, txt, fg};
+use crate::ui::{dim, icon, Canvas, Rect, Ui};
 
+use super::grid::{Grid, Item};
+use super::layout::{sz, Size, Spec, TabSpec};
 use super::{id, PAD, TODAY, TOP};
 use alarm::play_alarm;
 use calendar::MonthCache;
@@ -28,8 +32,38 @@ const CLOCK_STYLES: usize = 5;
 /// Через сколько без действий выключается режим выбора циферблата.
 const CLOCK_PICK_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Дни недели с понедельника.
+/// Цвет солнца на карточке погоды.
 const SUN_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.96, g: 0.75, b: 0.19, a: 1.0 };
+
+// Номера виджетов в `SPEC`.
+const CLOCK: usize = 0;
+const WEATHER: usize = 1;
+const WEEK: usize = 2;
+const TIMER: usize = 3;
+const TODO: usize = 4;
+
+/// Месячный календарь раскрывается поверх сетки: минимальная ширина и высота.
+const MONTH_W: f32 = 230.0;
+const MONTH_H: f32 = 252.0;
+
+static CLOCK_SIZES: [Size; 2] = [sz(2, 76.0), sz(2, 140.0)];
+static WEATHER_SIZES: [Size; 3] = [sz(2, 62.0), sz(2, 102.0), sz(4, 62.0)];
+static WEEK_SIZES: [Size; 3] = [sz(4, 76.0), sz(4, 122.0), sz(6, 122.0)];
+static TIMER_SIZES: [Size; 3] = [sz(4, 64.0), sz(4, 120.0), sz(6, 120.0)];
+static TODO_SIZES: [Size; 3] = [sz(4, 122.0), sz(4, 252.0), sz(6, 252.0)];
+
+/// Сетка вкладки: 10 колонок по ~64 px (632 px внутри полей). Часы и погода занимают 2 колонки,
+/// неделя, таймер и задачи — по 4: исходные пропорции макета.
+pub static SPEC: TabSpec = TabSpec {
+    cols: 10,
+    specs: &[
+        Spec { key: "clock", title: "Часы", sizes: &CLOCK_SIZES, size: 1, col: 0 },
+        Spec { key: "weather", title: "Погода", sizes: &WEATHER_SIZES, size: 1, col: 0 },
+        Spec { key: "week", title: "Эта неделя", sizes: &WEEK_SIZES, size: 1, col: 2 },
+        Spec { key: "timer", title: "Таймер", sizes: &TIMER_SIZES, size: 1, col: 2 },
+        Spec { key: "todo", title: "Задачи", sizes: &TODO_SIZES, size: 1, col: 6 },
+    ],
+};
 
 pub struct Today {
     /// Выбранный пресет (индекс в `PRESETS`); `None` — время задано вручную.
@@ -79,6 +113,8 @@ pub struct Today {
     /// Какое поле времени (0 — часы, 1 — минуты, 2 — секунды) было в фокусе в прошлом кадре.
     time_focus: Option<usize>,
     seconds: u32,
+    /// Где в прошлом кадре лежала карточка недели: месячный календарь раскрывается на её месте.
+    week_rect: Rect,
 }
 
 impl Default for Today {
@@ -115,6 +151,7 @@ impl Default for Today {
             sec_ring: Spring::unit(0.0, 120.0, 20.0),
             time_focus: None,
             seconds: 0,
+            week_rect: Rect::new(0.0, 0.0, 0.0, 0.0),
         };
         t.set_preset(1);
         t
@@ -139,6 +176,17 @@ impl Today {
         self.cal_editing = false;
         self.edit = None;
         self.sync()
+    }
+
+    /// Вкладку начали править: месячный календарь и поля ввода закрываются.
+    pub fn hide_overlays(&mut self) {
+        self.month_open = false;
+        self.month_t.target = 0.0;
+        self.month_t.snap();
+        self.editing = false;
+        self.cal_editing = false;
+        self.edit = None;
+        self.clock_pick = None;
     }
 
     pub fn sync(&mut self) -> bool {
@@ -190,14 +238,73 @@ impl Today {
         true
     }
 
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, w: f32, _h: f32) {
-        let t = GetLocalTime();
-        let f = &cv.g.fonts;
-        let dow = (t.wDayOfWeek as usize + 6) % 7;
 
-        // Часы: 5 циферблатов. Двойной клик включает режим выбора (подсветка и стрелки по бокам),
-        // стрелки и колесо мыши листают по кругу; клик мимо или бездействие выключают режим.
-        let c = Rect::new(PAD, TOP, 116.0, 140.0);
+    /// Рисует вкладку по сетке; месячный календарь раскрывается поверх неё. `h` — высота панели
+    /// без полосы правки.
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
+        let area = Rect::new(PAD, TOP, w - 2.0 * PAD, h - TOP - PAD);
+        let t = GetLocalTime();
+        let dow = (t.wDayOfWeek as usize + 6) % 7;
+        let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
+        self.month_t.target = if self.month_open { 1.0 } else { 0.0 };
+        // Виджеты под календарём гаснут и не принимают нажатий (иначе они перехватят их у дней месяца).
+        let cover = (self.month_t.value > 0.004).then(|| self.month_rect(area));
+        grid.draw(ui, cv, area, 0, |ui, cv, it| self.widget(ui, cv, it, cover, &t, today, dow));
+        let mt = self.month_t.value.clamp(0.0, 1.0);
+        if mt > 0.01 {
+            let mut r = self.month_rect(area);
+            r.y += (1.0 - mt) * 6.0;
+            let mcv = Canvas { g: cv.g, alpha: cv.alpha * mt, accent: cv.accent };
+            // Закрывающийся календарь уже не принимает нажатий.
+            let prev = if self.month_open { None } else { Some(ui.mute()) };
+            self.month_card(ui, &mcv, r, today);
+            if let Some(p) = prev {
+                ui.unmute(p);
+            }
+        }
+    }
+
+    /// Где раскрывается месячный календарь: на месте карточки недели (она не меньше нужной
+    /// ширины), но не выходя за область вкладки.
+    fn month_rect(&self, area: Rect) -> Rect {
+        let wk = self.week_rect;
+        let w = wk.w.max(MONTH_W).min(area.w);
+        let h = MONTH_H.min(area.h);
+        Rect::new(wk.x.min(area.right() - w).max(area.x), wk.y.min(area.bottom() - h).max(area.y), w, h)
+    }
+
+    /// Один виджет сетки; если его закрывает месячный календарь, он гаснет и становится немым.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn widget(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item, cover: Option<Rect>, t: &SYSTEMTIME, today: i64, dow: usize) {
+        if it.idx == WEEK {
+            self.week_rect = it.rect;
+        }
+        let covered = cover.is_some_and(|c| c.intersects(&it.rect));
+        let k = if covered { 1.0 - self.month_t.value.clamp(0.0, 1.0) } else { 1.0 };
+        if k < 0.004 {
+            return;
+        }
+        let sub = Canvas { g: cv.g, alpha: cv.alpha * k, accent: cv.accent };
+        let prev = if covered { Some(ui.mute()) } else { None };
+        let r = it.rect;
+        match it.idx {
+            CLOCK => self.clock_card(ui, &sub, r, it.size, t, dow),
+            WEATHER => self.weather_card(ui, &sub, r, it.size),
+            WEEK => self.week_card(ui, &sub, r, it.size, today, dow),
+            TIMER => self.timer_card(ui, &sub, r, it.size),
+            TODO => self.todo_card(ui, &sub, r),
+            _ => {}
+        }
+        if let Some(p) = prev {
+            ui.unmute(p);
+        }
+    }
+
+    /// Часы: 5 циферблатов. Двойной клик включает режим выбора (подсветка и стрелки по бокам),
+    /// стрелки и колесо мыши листают по кругу; клик мимо или бездействие выключают режим.
+    /// `size` 0 — компактная карточка (время в одну строку).
+    unsafe fn clock_card(&mut self, ui: &mut Ui, cv: &Canvas, c: Rect, size: usize, t: &SYSTEMTIME, dow: usize) {
+        let f = &cv.g.fonts;
         cv.card(c);
         if self.clock_pick.is_some_and(|at| at.elapsed() >= CLOCK_PICK_TIMEOUT) || (ui.pressed && !ui.hovering(c)) {
             self.clock_pick = None;
@@ -234,78 +341,8 @@ impl Today {
                 self.clock_pick = Some(Instant::now());
             }
         }
-        self.clock_face(cv, c, &t);
+        self.clock_face(cv, c, t, size == 0);
         let foot = format!("{} • {} {}", crate::i18n::weekdays()[dow], t.wDay, crate::i18n::months_short()[(t.wMonth as usize).clamp(1, 12) - 1]);
-        cv.text(&foot, Rect::new(c.x, c.y + 120.0, c.w, 13.0), &f.small_c, dim());
-
-        // Погода. Клик по карточке — поле для города (пусто — определить по IP).
-        let wc = Rect::new(PAD, TOP + 150.0, 116.0, 102.0);
-        cv.card(wc);
-        let field = id(TODAY, 61);
-        if self.editing {
-            if let Some(city) = ui.take_submitted(field) {
-                self.city = city.trim().to_string();
-                crate::config::save_str("weather_city", &self.city);
-                online::refresh_weather(&self.city);
-                self.online = online::snapshot();
-                self.editing = false;
-                ui.blur();
-            } else if !ui.has_focus(field) {
-                // Esc или клик мимо — без изменений.
-                self.editing = false;
-            }
-        }
-        if self.editing {
-            cv.text("Город", Rect::new(wc.x + 9.0, wc.y + 8.0, wc.w - 18.0, 12.0), &f.small_b, dim());
-            ui.text_field_ex(cv, field, Rect::new(wc.x + 5.0, wc.y + 24.0, wc.w - 10.0, 24.0), "по IP", icon::SEARCH, Submit::Keep);
-            cv.text("Enter — сохранить", Rect::new(wc.x + 4.0, wc.y + 53.0, wc.w - 8.0, 12.0), &f.small_c, dim());
-            cv.text("пусто — по IP", Rect::new(wc.x + 4.0, wc.y + 66.0, wc.w - 8.0, 12.0), &f.small_c, mix(dim(), crate::ui::card(), 0.35));
-        } else {
-            let (hover, clicked) = ui.click_area(id(TODAY, 60), wc);
-            if clicked {
-                self.editing = true;
-                ui.set_field_text(field, &self.city);
-                ui.focus = Some(field);
-                ui.caret_on = true;
-            }
-            let hv = ui.hover_of(id(TODAY, 60));
-            if hover || hv > 0.01 {
-                cv.rr(wc, 11.0, D2D1_COLOR_F { a: 0.04 * hv, ..fg() });
-                cv.glyph(icon::EDIT, Rect::new(wc.right() - 22.0, wc.y + 5.0, 16.0, 16.0), false, D2D1_COLOR_F { a: hv, ..dim() });
-            }
-        }
-        match &self.online.weather {
-            _ if self.editing => {}
-            Some(wt) => {
-                let (g, col) = if wt.code <= 1 { (icon::SUN, SUN_COLOR) } else { (icon::CLOUD, mix(dim(), txt(), 0.5)) };
-                cv.glyph(g, Rect::new(wc.x, wc.y + 15.0, wc.w, 20.0), true, col);
-                cv.text(&format!("{}°C", wt.temp.round() as i32), Rect::new(wc.x, wc.y + 40.0, wc.w, 22.0), &f.num_c, txt());
-                cv.text(online::weather_text(wt.code), Rect::new(wc.x + 4.0, wc.y + 65.0, wc.w - 8.0, 12.0), &f.small_c, dim());
-                cv.text(&wt.city, Rect::new(wc.x + 4.0, wc.y + 79.0, wc.w - 8.0, 12.0), &f.small_c, mix(dim(), crate::ui::card(), 0.35));
-            }
-            None => {
-                cv.glyph(icon::CLOUD, Rect::new(wc.x, wc.y + 15.0, wc.w, 20.0), true, dim());
-                cv.text("—", Rect::new(wc.x, wc.y + 40.0, wc.w, 22.0), &f.num_c, dim());
-                let note = self.online.weather_note.as_deref().unwrap_or("Загрузка…");
-                cv.text(note, Rect::new(wc.x + 4.0, wc.y + 65.0, wc.w - 8.0, 12.0), &f.small_c, dim());
-            }
-        }
-
-        let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
-        self.month_t.target = if self.month_open { 1.0 } else { 0.0 };
-        let mt = self.month_t.value.clamp(0.0, 1.0);
-        // Во время смены обе раскладки видны с обратной прозрачностью.
-        let faded = |a: f32| Canvas { g: cv.g, alpha: cv.alpha * a, accent: cv.accent };
-        if mt > 0.01 {
-            self.month_card(ui, &faded(mt), Rect::new(PAD + 126.0, TOP, 230.0, 252.0), today);
-        }
-        if mt < 0.99 {
-            let wcv = faded(1.0 - mt);
-            self.week_card(ui, &wcv, Rect::new(PAD + 126.0, TOP, 230.0, 122.0), today, dow);
-            self.timer_card(ui, &wcv, Rect::new(PAD + 126.0, TOP + 132.0, 230.0, 120.0));
-        }
-        let tx = PAD + 126.0 + 230.0 + 10.0;
-        self.todo_card(ui, cv, Rect::new(tx, TOP, (w - PAD - tx).max(120.0), 252.0));
+        cv.text(&foot, Rect::new(c.x, c.bottom() - 20.0, c.w, 13.0), &f.small_c, dim());
     }
-
 }

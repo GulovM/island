@@ -23,6 +23,10 @@ pub struct App {
     pub(crate) win_h: i32,
     /// Последние применённые x, y, w, h окна — чтобы не дёргать `SetWindowPos` зря.
     pub(crate) placed: (i32, i32, i32, i32),
+    /// Последний применённый регион размытия (left, top, right, bottom, радиус) — чтобы не пересоздавать зря.
+    pub(crate) blur_key: std::cell::Cell<(i32, i32, i32, i32, i32)>,
+    /// Вспомогательное окно под островом: на нём размытие (у основного окна без битмапа оно не обрезается регионом).
+    pub(crate) glass_wnd: HWND,
 
     pub(crate) dwrite: IDWriteFactory,
     /// `None` — графика потеряна и ждёт пересоздания (рисовать нечем).
@@ -81,6 +85,8 @@ pub struct App {
     pub(crate) prev_fg: HWND,
     /// Ожидающая вторая половина суррогатной пары из `WM_CHAR`.
     pub(crate) high_surrogate: u32,
+    /// Где нажали кнопку мыши (пиксели окна), пока ждём долгого нажатия.
+    pub(crate) press_pos: Option<(i32, i32)>,
 }
 
 impl App {
@@ -122,6 +128,28 @@ impl App {
                 Some(hinst),
                 None,
             )?;
+            RegisterClassExW(&WNDCLASSEXW {
+                cbSize: size_of::<WNDCLASSEXW>() as u32,
+                lpfnWndProc: Some(glass_proc),
+                hInstance: hinst,
+                lpszClassName: w!("IslandGlass"),
+                ..Default::default()
+            });
+            let glass_wnd = CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+                w!("IslandGlass"),
+                w!(""),
+                WS_POPUP,
+                0,
+                0,
+                16,
+                16,
+                None,
+                None,
+                Some(hinst),
+                None,
+            )?;
+            crate::wnd::enable_blur_behind(glass_wnd);
             MAIN_WND.with(|w| w.set(hwnd));
             TASKBAR_MSG.with(|c| c.set(RegisterWindowMessageW(w!("TaskbarCreated"))));
 
@@ -150,6 +178,8 @@ impl App {
                 win_w: cw,
                 win_h: ch,
                 placed: (i32::MIN, 0, 0, 0),
+                blur_key: std::cell::Cell::new((i32::MIN, 0, 0, 0, 0)),
+                glass_wnd,
                 dwrite,
                 gfx: Some(gfx),
                 tab_widths,
@@ -183,6 +213,7 @@ impl App {
                 kbd: false,
                 prev_fg: HWND(std::ptr::null_mut()),
                 high_surrogate: 0,
+                press_pos: None,
                 cfg,
             };
             app.apply_theme();
@@ -269,6 +300,7 @@ impl App {
         self.cfg.bg = new.bg;
         self.cfg.system_colors = new.system_colors;
         self.cfg.corner_radius = new.corner_radius;
+        self.cfg.glass = new.glass;
         if (self.cfg.ui_scale - new.ui_scale).abs() > 0.001 {
             self.cfg.ui_scale = new.ui_scale;
             set_ui_scale(new.ui_scale);
