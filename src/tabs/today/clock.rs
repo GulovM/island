@@ -13,7 +13,8 @@ fn second_frac(sec: u16) -> f32 {
 impl Today {
     /// Циферблат: 0 — столбик ЧЧ/ММ; 1 — столбик с секундами; 2 — «ЧЧ:ММ»; 3 — «ЧЧ:ММ» с полоской секунд;
     /// 4 — круг секунд (полный оборот — +1 минута) вокруг «ЧЧ:ММ».
-    pub(super) unsafe fn clock_face(&mut self, cv: &Canvas, c: Rect, t: &SYSTEMTIME) {
+    /// В компактной карточке (`compact`) любой циферблат сводится к «ЧЧ:ММ», а секунды — к полоске.
+    pub(super) unsafe fn clock_face(&mut self, cv: &Canvas, c: Rect, t: &SYSTEMTIME, compact: bool) {
         let f = &cv.g.fonts;
         let hm = format!("{:02}:{:02}", t.wHour, t.wMinute);
         let (hh, mm) = (format!("{:02}", t.wHour), format!("{:02}", t.wMinute));
@@ -25,6 +26,15 @@ impl Today {
                 self.sec_ring.value = 0.0;
             }
             self.sec_ring.target = frac;
+        }
+        if compact {
+            cv.text(&hm, Rect::new(c.x, c.y + 10.0, c.w, 36.0), &f.big_c, txt());
+            if self.clock_style >= 3 {
+                let bar = Rect::new(c.x + 18.0, c.y + 47.0, c.w - 36.0, 3.0);
+                cv.rr(bar, 1.5, track());
+                cv.rr(Rect::new(bar.x, bar.y, (bar.w * self.sec_ring.value.clamp(0.0, 1.0)).max(3.0), bar.h), 1.5, cv.accent);
+            }
+            return;
         }
         match self.clock_style {
             0 => {

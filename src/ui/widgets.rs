@@ -4,6 +4,11 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use super::{card, chip_bg, dim, fg, icon, ink, mix, rgb, selection, track, txt, Canvas, Rect, Ui};
 
+/// Плитка не шире этого рисуется без текста (только значок); к `NARROW_TILE + TILE_FADE` текст
+/// проявляется целиком.
+const NARROW_TILE: f32 = 84.0;
+const TILE_FADE: f32 = 28.0;
+
 /// Стрелка справа на широкой плитке.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Chevron {
@@ -30,6 +35,7 @@ impl Ui {
         let (hv, pr) = (w.hover.value, w.press.value);
         let rect = r.inset(1.0 * pr);
         cv.rr(rect, 10.0, mix(card(), fg(), 0.055 * hv + 0.03 * pr));
+        cv.hairline(rect, 10.0);
         if label.is_empty() {
             cv.glyph(glyph, rect, false, txt());
         } else if glyph.is_empty() {
@@ -43,7 +49,8 @@ impl Ui {
 
     /// Широкая плитка-тоггл как в макете: круглый бейдж с иконкой слева, заголовок и подпись по
     /// центру, справа может быть стрелка «⌄» (с разделителем или без). При «вкл» плитка залита
-    /// акцентом с тёмным текстом.
+    /// акцентом с тёмным текстом. Узкая плитка (одна колонка сетки) — только бейдж по центру и
+    /// узкая стрелка; длинный заголовок уменьшается до мелкого шрифта.
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn tile_wide(
         &mut self,
@@ -56,7 +63,9 @@ impl Ui {
         on: &mut bool,
         chevron: Chevron,
     ) -> TileHit {
-        let chev_w = if chevron == Chevron::None { 0.0 } else { 24.0 };
+        // Доля «полной» плитки: при перетекании сетки ширина меняется плавно, текст гаснет вместе с ней.
+        let full = ((r.w - NARROW_TILE) / TILE_FADE).clamp(0.0, 1.0);
+        let chev_w = if chevron == Chevron::None { 0.0 } else { 16.0 + 8.0 * full };
         let body = Rect::new(r.x, r.y, r.w - chev_w, r.h);
         let chev = Rect::new(r.right() - chev_w, r.y, chev_w, r.h);
         let mut hit = TileHit::default();
@@ -76,17 +85,24 @@ impl Ui {
         let rect = r.inset(0.8 * pr);
         let fill = mix(mix(card(), fg(), 0.05 * hv.max(chev_hv)), mix(cv.accent, fg(), 0.06 * hv), ov);
         cv.rr(rect, 10.0, fill);
+        cv.hairline(rect, 10.0);
         let fg = mix(txt(), ink(), ov);
         let sub_c = mix(dim(), D2D1_COLOR_F { a: 1.0, ..mix(ink(), cv.accent, 0.35) }, ov);
-        // Бейдж.
-        let (bx, by) = (rect.x + 19.0, rect.cy());
+        // Бейдж: у узкой плитки по центру свободного места, у широкой слева.
+        let centered = rect.x + (rect.w - chev_w) / 2.0;
+        let (bx, by) = (centered + (rect.x + 19.0 - centered) * full, rect.cy());
         cv.circle(bx, by, 11.0, mix(chip_bg(), mix(cv.accent, ink(), 0.16), ov));
         cv.glyph(glyph, Rect::new(bx - 11.0, by - 11.0, 22.0, 22.0), false, fg);
         // Текст по центру между бейджем и стрелкой.
-        let tx = rect.x + 32.0;
-        let tw = (rect.w - 32.0 - chev_w - 4.0).max(10.0);
-        cv.text(title, Rect::new(tx, rect.cy() - 12.0, tw, 13.0), &cv.g.fonts.body_c, fg);
-        cv.text(sub, Rect::new(tx, rect.cy() + 1.0, tw, 11.0), &cv.g.fonts.small_c, sub_c);
+        if full > 0.02 {
+            let tcv = Canvas { g: cv.g, alpha: cv.alpha * full, accent: cv.accent };
+            let tx = rect.x + 32.0;
+            let tw = (rect.w - 32.0 - chev_w - 4.0).max(10.0);
+            let fonts = &cv.g.fonts;
+            let tf = if cv.text_w(title, &fonts.body_c) > tw { &fonts.small_c } else { &fonts.body_c };
+            tcv.text(title, Rect::new(tx, rect.cy() - 12.0, tw, 13.0), tf, fg);
+            tcv.text(sub, Rect::new(tx, rect.cy() + 1.0, tw, 11.0), &fonts.small_c, sub_c);
+        }
         if chevron != Chevron::None {
             if chevron == Chevron::Divided {
                 let mut c = fg;
@@ -117,8 +133,15 @@ impl Ui {
         let hv = w.hover.value;
         let v = value.clamp(0.0, 1.0);
         cv.rr(r, r.h / 2.0, mix(card(), fg(), 0.04 * hv));
+        cv.hairline(r, r.h / 2.0);
         if v > 0.0 {
-            cv.rr(Rect::new(r.x, r.y, (r.w * v).max(r.h), r.h), r.h / 2.0, cv.accent);
+            let fill = Rect::new(r.x, r.y, (r.w * v).max(r.h), r.h);
+            cv.rr(fill, r.h / 2.0, cv.accent);
+            if crate::theme::glass() {
+                // Мягкий блик сверху заполненной части.
+                let top = D2D1_COLOR_F { a: 0.10, ..crate::theme::get().rim_hi };
+                cv.gradient_stops(fill, r.h / 2.0, &[(0.0, top), (0.6, D2D1_COLOR_F { a: 0.0, ..top })], false);
+            }
         }
         cv.glyph(glyph, Rect::new(r.x + 6.0, r.y, 18.0, r.h), false, if v > 0.04 { ink() } else { txt() });
         let col = if v > 0.93 { ink() } else { txt() };

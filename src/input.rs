@@ -33,6 +33,25 @@ impl App {
         out
     }
 
+    /// Карандаш показан, когда на экране вкладка, виджеты которой можно настраивать.
+    pub(crate) fn pencil_visible(&self) -> bool {
+        self.expanded && !self.settings_open && self.tabs.editable(self.normal_id())
+    }
+
+    /// Центр карандаша — зеркально шестерёнке, у левого края острова.
+    pub(crate) fn pencil_center(&self) -> (f32, f32) {
+        let half = self.w.value / self.scale / 2.0;
+        (self.win_w as f32 / self.scale / 2.0 - half + 16.0, TAB_TOP + TAB_H / 2.0)
+    }
+
+    /// Включает или выключает режим правки текущей вкладки; остров подстраивает высоту под полосу кнопок.
+    pub(crate) fn toggle_edit(&mut self) {
+        if self.tabs.toggle_edit(self.normal_id()) {
+            self.ui.blur();
+            self.retarget();
+        }
+    }
+
     /// Клик по ряду вкладок. `true` — клик пришёлся на ряд (вкладка сменилась или та же).
     pub(crate) fn click(&mut self, px: i32, py: i32) -> bool {
         if !self.expanded || self.open.value < 0.5 {
@@ -45,6 +64,14 @@ impl App {
         if (x - gx).hypot(y - gy) <= GEAR_R + 3.0 {
             self.toggle_settings();
             return true;
+        }
+        // Карандаш слева: режим правки виджетов (только на вкладках с виджетами).
+        if self.pencil_visible() {
+            let (ex, ey) = self.pencil_center();
+            if (x - ex).hypot(y - ey) <= GEAR_R + 3.0 {
+                self.toggle_edit();
+                return true;
+            }
         }
         if y < TAB_TOP || y > TAB_TOP + TAB_H {
             return false;

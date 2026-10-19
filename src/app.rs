@@ -68,6 +68,11 @@ pub struct App {
     /// Предыдущая вкладка (индекс в `TABS`) на время кроссфейда и прогресс перехода 0..1.
     pub(crate) tab_prev: Option<usize>,
     pub(crate) tab_t: Spring,
+    /// Капля под выбранной вкладкой: левый край, ширина (логические пиксели) и прозрачность; `pill_sig` — отпечаток ряда вкладок, при смене которого капля прыгает без анимации.
+    pub(crate) pill_x: Spring,
+    pub(crate) pill_w: Spring,
+    pub(crate) pill_a: Spring,
+    pub(crate) pill_sig: (usize, i32, i32),
     /// Направление сдвига при смене вкладки: +1 — новая справа.
     pub(crate) tab_dir: f32,
     /// Индикатор в свёрнутой форме: мини-плеер и уведомления.
@@ -81,6 +86,8 @@ pub struct App {
     pub(crate) prev_fg: HWND,
     /// Ожидающая вторая половина суррогатной пары из `WM_CHAR`.
     pub(crate) high_surrogate: u32,
+    /// Где нажали кнопку мыши (пиксели окна), пока ждём долгого нажатия.
+    pub(crate) press_pos: Option<(i32, i32)>,
 }
 
 impl App {
@@ -177,14 +184,20 @@ impl App {
                 alarm_at: None,
                 tab_prev: None,
                 tab_t: Spring::unit(1.0, 260.0, 30.0),
+                pill_x: Spring::new(0.0, 420.0, 30.0),
+                pill_w: Spring::new(0.0, 420.0, 30.0),
+                pill_a: Spring::unit(1.0, 420.0, 30.0),
+                pill_sig: (0, 0, 0),
                 tab_dir: 1.0,
                 live: live::Live::new(cfg.live_media),
                 live_tick_on: false,
                 kbd: false,
                 prev_fg: HWND(std::ptr::null_mut()),
                 high_surrogate: 0,
+                press_pos: None,
                 cfg,
             };
+            theme::set_glass(app.cfg.glass);
             app.apply_theme();
             app.apply_monitor(mon, true);
             // Стартовое состояние сразу, без анимации.
@@ -269,6 +282,9 @@ impl App {
         self.cfg.bg = new.bg;
         self.cfg.system_colors = new.system_colors;
         self.cfg.corner_radius = new.corner_radius;
+        self.cfg.glass = new.glass;
+        theme::set_glass(new.glass);
+        self.cfg.accent_pill = new.accent_pill;
         if (self.cfg.ui_scale - new.ui_scale).abs() > 0.001 {
             self.cfg.ui_scale = new.ui_scale;
             set_ui_scale(new.ui_scale);
@@ -342,6 +358,7 @@ impl App {
         let (w, h) = self.target_size();
         self.w.target = w;
         self.h.target = h;
+        self.retarget_pill();
         let form = self.live_form();
         self.live.set_form(form);
         // Часы, раскладка и Wi-Fi — только когда свёрнутому острову больше нечего показывать.
@@ -349,8 +366,26 @@ impl App {
         self.face.set_visible(idle);
     }
 
+    /// Наводит каплю на выбранную вкладку; при свёрнутом острове или смене набора вкладок — без анимации.
+    fn retarget_pill(&mut self) {
+        let rects = self.tab_rects();
+        let Some(&(x, w)) = rects.get(self.tab) else { return };
+        let sig = (rects.len(), (self.tab_row_width() * 100.0) as i32, self.win_w);
+        let jump = !self.expanded || sig != self.pill_sig;
+        self.pill_sig = sig;
+        self.pill_x.target = x;
+        self.pill_w.target = w;
+        self.pill_a.target = if self.settings_open { 0.0 } else { 1.0 };
+        if jump {
+            self.pill_x.snap();
+            self.pill_w.snap();
+            self.pill_a.snap();
+        }
+    }
+
     pub(crate) fn animating(&self) -> bool {
         !(self.w.settled() && self.h.settled() && self.open.settled())
+            || !(self.pill_x.settled() && self.pill_w.settled() && self.pill_a.settled())
             || !self.tab_t.settled()
             || !self.glow.settled()
             || self.face.animating()
@@ -370,6 +405,12 @@ impl App {
         self.glow.step(dt);
         if self.glow.settled() {
             self.glow.snap();
+        }
+        for p in [&mut self.pill_x, &mut self.pill_w, &mut self.pill_a] {
+            p.step(dt);
+            if p.settled() {
+                p.snap();
+            }
         }
         self.tab_t.step(dt);
         if self.tab_t.settled() {

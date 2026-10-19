@@ -65,6 +65,8 @@ pub(crate) enum Ev {
     UpdateTimer,
     /// Системные цвета (акцент Windows, светлая/тёмная тема) изменились.
     SysColors,
+    /// Кнопку удерживают дольше `LONG_MS`.
+    LongPress,
 }
 
 thread_local! {
@@ -216,6 +218,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_TIMER if wp.0 == FACE_TIMER => {
             push(Ev::FaceTick);
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == LONG_TIMER => {
+            push(Ev::LongPress);
             LRESULT(0)
         }
         WM_DWMCOLORIZATIONCOLORCHANGED => {

@@ -56,13 +56,18 @@ impl Today {
         self.set_time(0, PRESETS[i]);
     }
 
-    pub(super) unsafe fn timer_card(&mut self, ui: &mut Ui, cv: &Canvas, tm: Rect) {
+    /// Таймер. `size`: 0 — низкая карточка (круг, Старт/Сброс, без ввода времени и пресетов),
+    /// 1 и 2 — полная; в широкой содержимое центрируется по ширине.
+    pub(super) unsafe fn timer_card(&mut self, ui: &mut Ui, cv: &Canvas, tm: Rect, size: usize) {
         let f = &cv.g.fonts;
         cv.card(tm);
+        let compact = size == 0;
+        // Содержимое рассчитано на 230 px по ширине; лишнее место делим пополам.
+        let ox = ((tm.w - 230.0) / 2.0).max(0.0);
         let rem = self.remaining();
         let frac = if self.total.is_zero() { 0.0 } else { rem.as_secs_f32() / self.total.as_secs_f32() };
         self.ring.target = frac.clamp(0.0, 1.0);
-        let (cx, cy) = (tm.x + 40.0, tm.y + 62.0);
+        let (cx, cy) = if compact { (tm.x + ox + 42.0, tm.cy()) } else { (tm.x + ox + 40.0, tm.y + 62.0) };
         // Поля времени (ч, мин, с): ввод цифр, Enter или уход из поля применяет.
         let tf = [id(TODAY, 110), id(TODAY, 111), id(TODAY, 112)];
         let focused = (0..3).find(|&k| ui.has_focus(tf[k]));
@@ -86,7 +91,12 @@ impl Today {
             ui.select_all(tf[k]);
         }
         self.time_focus = focused;
-        cv.ring(cx, cy, 24.0, 3.0, self.ring.value, ORANGE);
+        if compact && focused.is_some() {
+            // Полей времени в этом виде нет: ввод завершается (значение применится в следующем кадре).
+            ui.blur();
+        }
+        let radius = if compact { 22.0 } else { 24.0 };
+        cv.ring(cx, cy, radius, 3.0, self.ring.value, ORANGE);
         let secs = rem.as_secs_f32().ceil() as u64;
         let label = if secs >= 3600 {
             format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
@@ -94,12 +104,26 @@ impl Today {
             format!("{:02}:{:02}", secs / 60, secs % 60)
         };
         cv.text(&label, Rect::new(cx - 24.0, cy - 8.0, 48.0, 16.0), &f.body_c, txt());
-        if ui.icon_button(cv, id(TODAY, 21), Rect::new(tm.x + 5.0, tm.y + 5.0, 16.0, 16.0), icon::RINGER, self.sound) {
+        if ui.icon_button(cv, id(TODAY, 21), Rect::new(tm.x + ox + 5.0, tm.y + 5.0, 16.0, 16.0), icon::RINGER, self.sound) {
             self.sound = !self.sound;
         }
 
+        if compact {
+            let by = tm.cy() - 13.0;
+            let bx = tm.x + ox + 78.0;
+            let start = if self.deadline.is_some() { "Пауза" } else { "Старт" };
+            if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, by, 68.0, 26.0), start, ORANGE, ink(), 6.0) {
+                self.toggle_run();
+            }
+            if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + 74.0, by, 68.0, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
+                self.left = self.total;
+                self.deadline = None;
+            }
+            return;
+        }
+
         // Часы, минуты, секунды: поле ввода; колесо мыши меняет значение.
-        let bx = tm.x + 82.0;
+        let bx = tm.x + ox + 82.0;
         let vals = [self.hours, self.minutes, self.seconds];
         let units = [crate::i18n::pick("ч", "h"), crate::i18n::pick("м", "m"), crate::i18n::pick("с", "s")];
         for k in 0..3 {

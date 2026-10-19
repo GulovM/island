@@ -73,7 +73,7 @@ pub(crate) const TAB_SIZES: [(f32, f32); 8] = [
     (480.0, 420.0),
     (700.0, 236.0),
     (420.0, 112.0),
-    (620.0, 428.0),
+    (620.0, 476.0),
 ];
 /// Высота «тонкой полоски», в которую остров сворачивается поверх развёрнутого на весь экран окна.
 pub(crate) const STRIP_H: f32 = 3.0;
@@ -133,6 +133,9 @@ pub(crate) const STRIP_FILE: &str = "strip.txt";
 /// Раз в час проверяет, не прошли ли сутки с последней проверки обновлений.
 pub(crate) const UPDATE_TIMER: usize = 11;
 pub(crate) const UPDATE_TICK_MS: u32 = 60 * 60 * 1000;
+/// Долгое нажатие на пустом месте вкладки включает режим правки виджетов.
+pub(crate) const LONG_TIMER: usize = 12;
+pub(crate) const LONG_MS: u32 = 520;
 pub(crate) const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 pub(crate) const WM_HOTKEY: u32 = 0x0312;
 pub(crate) const HOTKEY_ID: i32 = 1;

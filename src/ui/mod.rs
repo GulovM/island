@@ -184,6 +184,18 @@ impl Ui {
         w.hover.value
     }
 
+    /// Пружина «присутствия» (появление и исчезновение) для элемента, который рисует сам вызывающий.
+    pub fn presence(&mut self, id: u32, on: bool) -> f32 {
+        let w = self.widget(id);
+        w.on.target = if on { 1.0 } else { 0.0 };
+        w.on.value
+    }
+
+    /// Нажатая кнопка мыши не досталась ни одному виджету (долгое нажатие по пустому месту).
+    pub fn press_free(&self) -> bool {
+        self.drag.is_none()
+    }
+
     /// Hit-testing: (наведён, клик). Клик — отпускание над тем же элементом, где нажали.
     pub(super) fn interact(&mut self, id: u32, r: Rect) -> (bool, bool) {
         let inside = self.interactive
@@ -204,5 +216,20 @@ impl Ui {
 
     pub fn is_dragging(&self, id: u32) -> bool {
         self.drag == Some(id) && self.down
+    }
+
+    /// Курсор в координатах текущего слоя (как у `Rect` виджетов этого слоя).
+    pub fn pointer(&self) -> (f32, f32) {
+        self.mouse
+    }
+
+    /// Выключает ввод для всего, что рисуется дальше (режим правки: виджеты только смотрят).
+    /// Возвращает прежнее состояние для [`Ui::unmute`].
+    pub fn mute(&mut self) -> bool {
+        std::mem::replace(&mut self.interactive, false)
+    }
+
+    pub fn unmute(&mut self, prev: bool) {
+        self.interactive = prev;
     }
 }

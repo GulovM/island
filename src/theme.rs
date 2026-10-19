@@ -12,6 +12,7 @@ pub type Rgb = [f32; 3];
 /// Стандартные цвета: золотой акцент на почти чёрном.
 pub const DEFAULT_ACCENT: Rgb = [0.83, 0.69, 0.37];
 pub const DEFAULT_BG: Rgb = [0.05, 0.05, 0.05];
+const WHITE: Rgb = [1.0; 3];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
@@ -27,10 +28,24 @@ pub struct Palette {
     pub inset: D2D1_COLOR_F,
     /// Надписи и значки на заливке акцентом.
     pub ink: D2D1_COLOR_F,
+    /// Кромка стекла: блик слева-сверху, середина, правый-нижний край. Блик белый в обеих темах.
+    pub rim_hi: D2D1_COLOR_F,
+    pub rim_mid: D2D1_COLOR_F,
+    pub rim_lo: D2D1_COLOR_F,
+    /// Осветление сверху тела острова.
+    pub sheen: D2D1_COLOR_F,
+    /// Нейтральная капля выбранной вкладки.
+    pub pill: D2D1_COLOR_F,
+    /// Волосяная граница карточек.
+    pub hairline: D2D1_COLOR_F,
 }
 
 fn col(c: Rgb) -> D2D1_COLOR_F {
     D2D1_COLOR_F { r: c[0], g: c[1], b: c[2], a: 1.0 }
+}
+
+fn rgba(c: Rgb, a: f32) -> D2D1_COLOR_F {
+    D2D1_COLOR_F { r: c[0], g: c[1], b: c[2], a }
 }
 
 pub fn mix3(a: Rgb, b: Rgb, t: f32) -> Rgb {
@@ -116,6 +131,12 @@ pub fn derive(bg: Rgb, accent: Rgb) -> Palette {
         chip: on(0.105),
         inset: on(0.095),
         ink: col(ink),
+        rim_hi: rgba(WHITE, if light { 0.70 } else { 0.50 }),
+        rim_mid: rgba(WHITE, if light { 0.08 } else { 0.05 }),
+        rim_lo: if light { rgba([0.0; 3], 0.10) } else { rgba(WHITE, 0.22) },
+        sheen: rgba(WHITE, if light { 0.30 } else { 0.07 }),
+        pill: on(if light { 0.08 } else { 0.16 }),
+        hairline: D2D1_COLOR_F { a: if light { 0.08 } else { 0.07 }, ..col(fg) },
     }
 }
 
@@ -160,6 +181,16 @@ pub fn parse_accent_palette(bytes: &[u8]) -> Option<SystemColors> {
 
 thread_local! {
     static PALETTE: Cell<Palette> = Cell::new(derive(DEFAULT_BG, DEFAULT_ACCENT));
+    static GLASS: Cell<bool> = const { Cell::new(true) };
+}
+
+/// Эффект стекла включён (ключ `glass`): виджеты рисуют волосяные границы и блики.
+pub fn set_glass(on: bool) {
+    GLASS.with(|c| c.set(on));
+}
+
+pub fn glass() -> bool {
+    GLASS.with(|c| c.get())
 }
 
 pub fn set(p: Palette) {
@@ -183,6 +214,27 @@ mod tests {
         }
         // Тёмная надпись на золотом акценте.
         assert!(p.ink.r < 0.2);
+    }
+
+    #[test]
+    fn glass_tokens_are_sane_on_any_background() {
+        for bg in [DEFAULT_BG, [0.95, 0.95, 0.96], [0.8, 0.1, 0.1], [0.1, 0.2, 0.9], [0.1, 0.6, 0.2], [0.5, 0.5, 0.5]] {
+            let p = derive(bg, DEFAULT_ACCENT);
+            for c in [p.rim_hi, p.rim_mid, p.rim_lo, p.sheen, p.hairline] {
+                assert!((0.0..=1.0).contains(&c.a), "{bg:?}: alpha {}", c.a);
+            }
+            // Блик сильнее середины кромки; граница карточек едва заметна.
+            assert!(p.rim_hi.a > p.rim_mid.a && p.hairline.a < 0.15);
+            // Блик белый в обеих темах.
+            assert!(p.rim_hi.r == 1.0 && p.rim_hi.g == 1.0 && p.rim_hi.b == 1.0);
+            // Капля отличается от фона в сторону текста: светлее на тёмном, темнее на светлом.
+            let (pl, bl) = (luminance([p.pill.r, p.pill.g, p.pill.b]), luminance(bg));
+            if is_light(bg) {
+                assert!(pl < bl, "{bg:?}");
+            } else {
+                assert!(pl > bl, "{bg:?}");
+            }
+        }
     }
 
     #[test]

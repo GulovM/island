@@ -6,7 +6,7 @@ use windows::Win32::Graphics::DirectWrite::*;
 use windows_numerics::Matrix3x2;
 
 use crate::gfx::Gfx;
-use super::color::{card, chip_bg, dim, track, txt};
+use super::color::{card, chip_bg, dim, hairline, track, txt};
 use super::fonts::{cover_transform, ellipsize_units};
 use super::geom::{pt, Rect};
 
@@ -275,6 +275,14 @@ impl Canvas<'_> {
 
     pub unsafe fn card(&self, r: Rect) {
         self.rr(r, 11.0, card());
+        self.hairline(r, 11.0);
+    }
+
+    /// Волосяная граница 1 px: рисуется только при включённом стекле.
+    pub unsafe fn hairline(&self, r: Rect, radius: f32) {
+        if crate::theme::glass() {
+            self.rr_line(r, radius, hairline(), 1.0);
+        }
     }
 
     /// Обводка дуги окружности: углы в градусах от верхней точки по часовой стрелке
