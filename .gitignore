@@ -17,3 +17,6 @@ desktop.ini
 # Локальные скриншоты и черновики
 /scratch/
 /screenshots-local/
+
+# Локальные файлы
+/docs/REFACTORING.md
