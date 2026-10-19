@@ -16,10 +16,13 @@ use windows::Win32::UI::WindowsAndMessaging::{CreateIcon, HICON};
 
 mod night_light;
 mod paths;
+mod registry;
 mod seal;
 
 pub use night_light::{night_light, set_night_light};
 pub use paths::{pictures_dir, system_drive_root, windows_dir};
+pub use registry::reg_str;
+pub(in crate::sys) use registry::{read_binary, read_dword};
 pub use seal::{is_sealed, seal, unseal};
 
 /// `%APPDATA%\island` — конфиг, лог, позже кэши.
@@ -256,51 +259,6 @@ pub fn ime_set_position(hwnd: HWND, x: i32, y: i32) {
 
 const PERSONALIZE: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
 
-fn read_dword(key: PCWSTR, name: PCWSTR) -> Option<u32> {
-    use windows::Win32::System::Registry::RRF_RT_REG_DWORD;
-    unsafe {
-        let (mut v, mut size) = (0u32, 4u32);
-        let r = RegGetValueW(
-            HKEY_CURRENT_USER,
-            key,
-            name,
-            RRF_RT_REG_DWORD,
-            None,
-            Some(&mut v as *mut u32 as *mut c_void),
-            Some(&mut size),
-        );
-        (r == ERROR_SUCCESS).then_some(v)
-    }
-}
-
-/// Строковое значение реестра (`REG_SZ`/`REG_EXPAND_SZ`). `machine` — HKLM, иначе HKCU.
-pub fn reg_str(machine: bool, key: &str, name: &str) -> Option<String> {
-    use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_EXPAND_SZ};
-    let root = if machine { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER };
-    let (k, n) = (wz(key), wz(name));
-    unsafe {
-        let mut size = 0u32;
-        let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ;
-        if RegGetValueW(root, PCWSTR(k.as_ptr()), PCWSTR(n.as_ptr()), flags, None, None, Some(&mut size)) != ERROR_SUCCESS {
-            return None;
-        }
-        let mut buf = vec![0u16; (size as usize).div_ceil(2)];
-        let r = RegGetValueW(
-            root,
-            PCWSTR(k.as_ptr()),
-            PCWSTR(n.as_ptr()),
-            flags,
-            None,
-            Some(buf.as_mut_ptr() as *mut c_void),
-            Some(&mut size),
-        );
-        if r != ERROR_SUCCESS {
-            return None;
-        }
-        let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-        Some(String::from_utf16_lossy(&buf[..end])).filter(|s| !s.is_empty())
-    }
-}
 
 /// Запущен ли процесс с одним из имён `names` (без учёта регистра).
 pub fn process_running(names: &[&str]) -> bool {
@@ -468,29 +426,6 @@ pub fn open(target: &str) -> bool {
 
 // ---------- Цвета системы и раскладка клавиатуры ----------
 
-pub(super) fn read_binary(key: PCWSTR, name: PCWSTR) -> Option<Vec<u8>> {
-    use windows::Win32::System::Registry::RRF_RT_REG_BINARY;
-    unsafe {
-        let mut size = 0u32;
-        if RegGetValueW(HKEY_CURRENT_USER, key, name, RRF_RT_REG_BINARY, None, None, Some(&mut size)) != ERROR_SUCCESS {
-            return None;
-        }
-        let mut buf = vec![0u8; size as usize];
-        let r = RegGetValueW(
-            HKEY_CURRENT_USER,
-            key,
-            name,
-            RRF_RT_REG_BINARY,
-            None,
-            Some(buf.as_mut_ptr() as *mut c_void),
-            Some(&mut size),
-        );
-        (r == ERROR_SUCCESS).then(|| {
-            buf.truncate(size as usize);
-            buf
-        })
-    }
-}
 
 /// Акцентные цвета Windows. Их же подстраивает под обои Wallpaper Engine (и сама Windows при
 /// «автоматическом выборе цвета фона»): читаем палитру из реестра — это мгновенно и без WinRT.
