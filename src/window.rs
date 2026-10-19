@@ -348,6 +348,7 @@ impl App {
             if game {
                 self.disarm_leave();
                 self.set_expanded(false);
+                self.hide_glass();
             }
             let _ = ShowWindow(self.hwnd, show);
             for z in &self.hot {

@@ -26,6 +26,11 @@ pub fn light_mode() -> bool {
     read_dword(PERSONALIZE, w!("AppsUseLightTheme")) == Some(1)
 }
 
+/// В Windows включены «Эффекты прозрачности» (без значения в реестре — включены).
+pub fn transparency_enabled() -> bool {
+    read_dword(PERSONALIZE, w!("EnableTransparency")) != Some(0)
+}
+
 /// Переключает тему приложений и системы и сообщает всем окнам (`WM_SETTINGCHANGE`).
 pub fn set_dark_mode(dark: bool) {
     unsafe {

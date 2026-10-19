@@ -261,6 +261,15 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
 }
 
 /// Окно горячей зоны на верхнем краю другого монитора: почти невидимое, но ловит мышь.
+/// Окно-подложка под стекло: ничего не рисует и не принимает ввод.
+pub(crate) unsafe extern "system" fn glass_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    match msg {
+        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
+        _ => DefWindowProcW(hwnd, msg, wp, lp),
+    }
+}
+
 pub(crate) unsafe extern "system" fn hot_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_MOUSEMOVE => {
@@ -381,4 +390,31 @@ pub(crate) unsafe fn measure_tabs(dwrite: &IDWriteFactory, scale: f32) -> Result
         *width = m.widthIncludingTrailingWhitespace / scale + TAB_PAD * 2.0;
     }
     Ok(widths)
+}
+
+/// Включает размытие фона за окном (акцент «blur behind» через `SetWindowCompositionAttribute`).
+/// Размывается вся область окна — форму задаёт `SetWindowRgn`.
+/// `false` — вызова нет или он не удался: стекла не будет.
+pub(crate) unsafe fn enable_blur_behind(hwnd: HWND) -> bool {
+    #[repr(C)]
+    struct Accent {
+        state: u32,
+        flags: u32,
+        color: u32,
+        anim: u32,
+    }
+    #[repr(C)]
+    struct Wca {
+        attr: u32,
+        data: *mut Accent,
+        size: usize,
+    }
+    type F = unsafe extern "system" fn(HWND, *mut Wca) -> i32;
+    let Ok(user32) = GetModuleHandleW(w!("user32.dll")) else { return false };
+    let Some(f) = windows::Win32::System::LibraryLoader::GetProcAddress(user32, windows::core::s!("SetWindowCompositionAttribute")) else { return false };
+    // SAFETY: сигнатура недокументированной функции user32 (WINCOMPATTRDATA) стабильна с Windows 10.
+    let f: F = std::mem::transmute(f);
+    let mut acc = Accent { state: 3, flags: 0, color: 0, anim: 0 };
+    let mut d = Wca { attr: 19, data: &mut acc, size: size_of::<Accent>() };
+    f(hwnd, &mut d) != 0
 }
