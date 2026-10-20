@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use crate::anim::Spring;
-use crate::bg::{self, Cmd, DevItem, ListKind, Media};
+use crate::bg::{self, Cmd, DevItem, ListKind, Media, Timeline};
 use crate::sys;
 use crate::ui::{icon, mix, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink, txt, WHITE};
 
@@ -69,9 +69,33 @@ fn state(on: bool) -> &'static str {
     }
 }
 
-fn mmss(secs: f32) -> String {
-    let s = secs.max(0.0) as u32;
-    format!("{}:{:02}", s / 60, s % 60)
+/// Форматирует время в секундах в строку «M:SS» или «H:MM:SS».
+fn format_time(secs: f32) -> String {
+    if !secs.is_finite() || secs <= 0.0 {
+        return "0:00".into();
+    }
+    let s = secs as u32;
+    let h = s / 3600;
+    let m = (s % 3600) / 60;
+    let s = s % 60;
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+/// Пересчитывает координату курсора `click_x` вдоль прогресс-бара шириной `bar_w` от `bar_x`
+/// в позицию трека (в секундах) с зажимом в границы `min_seek` и `max_seek`.
+#[cfg(test)]
+fn seek_position(click_x: f32, bar_x: f32, bar_w: f32, dur: f32, min_seek: f32, max_seek: f32) -> f32 {
+    Timeline { pos: 0.0, dur, min_seek, max_seek, can_seek: true }.seek_to(click_x, bar_x, bar_w)
+}
+
+/// Смещает позицию трека на `offset` секунд (например, −10.0 или +10.0) с зажимом в допустимые границы.
+#[cfg(test)]
+fn seek_relative(current_pos: f32, offset: f32, dur: f32, min_seek: f32, max_seek: f32) -> f32 {
+    Timeline { pos: current_pos, dur, min_seek, max_seek, can_seek: true }.relative(offset)
 }
 
 #[derive(Default)]
@@ -88,6 +112,10 @@ pub struct Controls {
     bright_hold: Option<Instant>,
     rev: u64,
     media: Option<Media>,
+    /// Защита от возврата ползунка трека назад сразу после перемотки.
+    seek_hold: Option<Instant>,
+    /// Время последней отправки Cmd::Seek во время перетаскивания (для троттлинга).
+    last_seek_send: Option<Instant>,
     ssid: Option<String>,
     audio: Option<String>,
     /// Раскрытый выпадающий список (занимает место громкости и плеера).
@@ -111,6 +139,8 @@ impl Controls {
     pub fn show(&mut self) -> bool {
         self.dark = sys::dark_mode();
         self.night = sys::night_light();
+        self.seek_hold = None;
+        self.last_seek_send = None;
         self.list_t.0.target = 0.0;
         self.list_t.0.snap();
         bg::send(Cmd::Refresh);
@@ -122,6 +152,8 @@ impl Controls {
     pub fn hide(&mut self) {
         self.open = None;
         self.join = None;
+        self.seek_hold = None;
+        self.last_seek_send = None;
     }
 
     pub fn step(&mut self, dt: f32) {
@@ -183,9 +215,11 @@ impl Controls {
         }
         // Позиция трека у приложений приходит неточной: пока трек тот же и расхождение мало,
         // оставляем свой отсчёт, иначе время дёргается назад-вперёд.
+        // Если только что была перемотка — удерживаем установленную позицию, пока плеер применяет её.
+        let seeking = self.seek_hold.is_some_and(|t| Instant::now() < t);
         self.media = match (s.media, self.media.take()) {
-            (Some(mut new), Some(old)) if new.key == old.key && new.playing && old.playing => {
-                if (new.position_now() - old.position_now()).abs() < 2.0 {
+            (Some(mut new), Some(old)) if new.key == old.key => {
+                if seeking || (new.playing && old.playing && (new.position_now() - old.position_now()).abs() < 2.0) {
                     new.pos = old.pos;
                     new.at = old.at;
                 }
@@ -528,49 +562,248 @@ impl Controls {
             cv.gradient_rr(art, 6.0, top, bottom);
         }
 
-        let (title, artist, pos, dur, playing) = match &self.media {
-            Some(m) => (m.title.as_str(), m.artist.as_str(), m.position_now(), m.dur, m.playing),
-            None => ("Ничего не играет", "", 0.0, 0.0, false),
+        let (title, artist, playing) = match &self.media {
+            Some(m) => (m.title.as_str(), m.artist.as_str(), m.playing),
+            None => ("Ничего не играет", "", false),
         };
+        let mut tl = self.media.as_ref().map_or(Timeline::empty(), |m| m.timeline());
+        if self.seek_hold.is_some_and(|t| Instant::now() < t) {
+            if let Some(m) = &self.media {
+                tl.pos = m.pos;
+            }
+        }
         if !has_cover {
             cv.glyph(icon::MUSIC, art, false, D2D1_COLOR_F { a: 0.7, ..WHITE });
         }
         let (tx, ty, tw) = if compact {
-            (r.x + 56.0, r.cy() - 17.0, r.w - 56.0 - 100.0)
+            let right_limit = if tl.can_seek { r.right() - 142.0 } else { r.right() - 95.0 };
+            (r.x + 56.0, r.cy() - 17.0, (right_limit - (r.x + 56.0)).max(40.0))
         } else if narrow {
             (r.x + 56.0, r.y + 10.0, r.w - 66.0)
         } else {
-            (r.x + 56.0, r.y + 25.0, r.w - 150.0)
+            let right_limit = if tl.can_seek { r.right() - 142.0 } else { r.right() - 95.0 };
+            (r.x + 56.0, r.y + 25.0, (right_limit - (r.x + 56.0)).max(40.0))
         };
         cv.text(title, Rect::new(tx, ty, tw, 20.0), &f.title, txt());
         cv.text(artist, Rect::new(tx, ty + 18.0, tw, 14.0), &f.small, dim());
 
-        // Кнопки: назад, играть/пауза (светлая), вперёд. У узкой карточки — отдельным рядом.
+        // Кнопки плеера:
+        // Без перемотки: prev, play/pause, next
+        // С перемоткой: prev, -10 с, play/pause, +10 с, next
         let (cy, xs) = if narrow {
-            (r.y + 58.0, [r.cx() - 30.0, r.cx(), r.cx() + 30.0])
+            let row_y = r.y + 57.0;
+            if tl.can_seek {
+                (row_y, [r.cx() - 52.0, r.cx() - 27.0, r.cx(), r.cx() + 27.0, r.cx() + 52.0])
+            } else {
+                (row_y, [r.cx() - 30.0, 0.0, r.cx(), 0.0, r.cx() + 30.0])
+            }
         } else {
-            (if compact { r.cy() } else { r.y + 40.0 }, [r.right() - 75.0, r.right() - 45.0, r.right() - 16.0])
+            let row_y = if compact { r.cy() } else { r.y + 40.0 };
+            if tl.can_seek {
+                (row_y, [r.right() - 122.0, r.right() - 97.0, r.right() - 69.0, r.right() - 41.0, r.right() - 16.0])
+            } else {
+                (row_y, [r.right() - 75.0, 0.0, r.right() - 45.0, 0.0, r.right() - 16.0])
+            }
         };
-        if Self::round_button(ui, cv, id(CONTROLS, 20), xs[0], cy, 9.5, icon::PREV, chip_bg(), txt()) {
+
+        let btn_rad = if narrow { 9.0 } else { 9.5 };
+        let play_rad = if narrow { 13.0 } else { 14.0 };
+
+        if Self::round_button(ui, cv, id(CONTROLS, 20), xs[0], cy, btn_rad, icon::PREV, chip_bg(), txt()) {
             bg::send(Cmd::Prev);
         }
+        if tl.can_seek
+            && Self::round_button(ui, cv, id(CONTROLS, 24), xs[1], cy, btn_rad, icon::REWIND, chip_bg(), txt())
+        {
+            self.apply_seek(tl.relative(-10.0), true);
+        }
         let toggle = if playing { icon::PAUSE } else { icon::PLAY_SOLID };
-        if Self::round_button(ui, cv, id(CONTROLS, 21), xs[1], cy, 14.0, toggle, cv.accent, ink()) {
+        if Self::round_button(ui, cv, id(CONTROLS, 21), xs[2], cy, play_rad, toggle, cv.accent, ink()) {
             bg::send(Cmd::PlayPause);
         }
-        if Self::round_button(ui, cv, id(CONTROLS, 22), xs[2], cy, 9.5, icon::NEXT, chip_bg(), txt()) {
+        if tl.can_seek
+            && Self::round_button(ui, cv, id(CONTROLS, 25), xs[3], cy, btn_rad, icon::FAST_FORWARD, chip_bg(), txt())
+        {
+            self.apply_seek(tl.relative(10.0), true);
+        }
+        if Self::round_button(ui, cv, id(CONTROLS, 22), xs[4], cy, btn_rad, icon::NEXT, chip_bg(), txt()) {
             bg::send(Cmd::Next);
         }
 
         // Прогресс и время.
-        let frac = if dur > 0.0 { pos / dur } else { 0.0 };
         if compact {
-            cv.progress(Rect::new(r.x + 10.0, r.bottom() - 7.0, r.w - 20.0, 2.0), frac, cv.accent);
+            let bar_r = Rect::new(r.x + 10.0, r.bottom() - 7.0, r.w - 20.0, 2.0);
+            self.draw_seek_bar(ui, cv, id(CONTROLS, 23), bar_r, tl);
             return;
         }
+
         let py = r.y + 76.0;
-        cv.text(&mmss(pos), Rect::new(r.x + 9.0, py - 6.0, 30.0, 12.0), &f.small, dim());
-        cv.text(&mmss(dur), Rect::new(r.right() - 46.0, py - 6.0, 36.0, 12.0), &f.small_r, dim());
-        cv.progress(Rect::new(r.x + 37.0, py - 1.0, r.w - 37.0 - 36.0, 2.0), frac, cv.accent);
+        let time_w = if tl.dur >= 3600.0 { 44.0 } else { 32.0 };
+        let left_rect = Rect::new(r.x + 9.0, py - 6.0, time_w, 12.0);
+        let right_rect = Rect::new(r.right() - 9.0 - time_w, py - 6.0, time_w, 12.0);
+        let bar_x = left_rect.right() + 5.0;
+        let bar_w = (right_rect.x - 5.0 - bar_x).max(10.0);
+        let bar_r = Rect::new(bar_x, py - 1.0, bar_w, 2.0);
+
+        cv.text(&format_time(tl.pos), left_rect, &f.small, dim());
+        cv.text(&format_time(tl.dur), right_rect, &f.small_r, dim());
+
+        self.draw_seek_bar(ui, cv, id(CONTROLS, 23), bar_r, tl);
+    }
+
+    fn apply_seek(&mut self, target_pos: f32, force: bool) {
+        if let Some(m) = &mut self.media {
+            m.pos = target_pos;
+            m.at = Instant::now();
+        }
+        self.seek_hold = Some(Instant::now() + HOLD);
+        let now = Instant::now();
+        let should_send = force
+            || self
+                .last_seek_send
+                .is_none_or(|t| now.duration_since(t) >= Duration::from_millis(100));
+        if should_send {
+            self.last_seek_send = Some(now);
+            bg::send(Cmd::Seek(target_pos));
+        }
+    }
+
+    /// Интерактивный прогресс-бар: клик, перетаскивание ползунка, колесо мыши над дорожкой.
+    unsafe fn draw_seek_bar(
+        &mut self,
+        ui: &mut Ui,
+        cv: &Canvas,
+        id: u32,
+        bar: Rect,
+        tl: Timeline,
+    ) {
+        if !tl.can_seek || tl.dur <= 0.0 {
+            // Сессия не поддерживает перемотку — безопасная деградация в статический прогресс-бар.
+            cv.progress(bar, tl.frac(), if tl.dur > 0.0 { cv.accent } else { dim() });
+            return;
+        }
+
+        let hit = Rect::new(bar.x, bar.cy() - 7.0, bar.w, 14.0);
+        let (hover, clicked) = ui.click_area(id, hit);
+        let dragging = ui.is_dragging(id);
+        let hv = ui.hover_of(id);
+
+        let mut frac = tl.frac();
+        if dragging || clicked {
+            let target = tl.seek_to(ui.pointer().0, bar.x, bar.w);
+            let final_drop = dragging && ui.released;
+            let force = clicked || final_drop;
+            self.apply_seek(target, force);
+            if tl.dur > 0.0 {
+                frac = (target / tl.dur).clamp(0.0, 1.0);
+            }
+        } else if hover && ui.wheel.abs() > 0.01 {
+            let delta = ui.wheel.signum() * 10.0;
+            let target = tl.relative(delta);
+            self.apply_seek(target, true);
+            if tl.dur > 0.0 {
+                frac = (target / tl.dur).clamp(0.0, 1.0);
+            }
+        }
+
+        let h = 2.0 + 1.0 * hv;
+        let track_rect = Rect::new(bar.x, bar.cy() - h / 2.0, bar.w, h);
+        cv.rr(track_rect, h / 2.0, mix(crate::ui::track(), crate::ui::fg(), 0.04 * hv));
+
+        let fw = (bar.w * frac).max(h);
+        let fill_rect = Rect::new(bar.x, bar.cy() - h / 2.0, fw, h);
+        cv.rr(fill_rect, h / 2.0, cv.accent);
+
+        let active = hv.max(if dragging { 1.0 } else { 0.0 });
+        if active > 0.01 {
+            let thumb_r = 3.2 + 1.6 * active;
+            let thumb_x = (bar.x + bar.w * frac).clamp(bar.x, bar.right());
+            cv.circle(thumb_x, bar.cy(), thumb_r, cv.accent);
+            if crate::theme::glass() {
+                cv.circle(thumb_x, bar.cy(), thumb_r * 0.4, WHITE);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_time_zero_and_negative() {
+        assert_eq!(format_time(0.0), "0:00");
+        assert_eq!(format_time(-15.0), "0:00");
+        assert_eq!(format_time(f32::NAN), "0:00");
+        assert_eq!(format_time(f32::INFINITY), "0:00");
+    }
+
+    #[test]
+    fn format_time_seconds_and_minutes() {
+        assert_eq!(format_time(5.0), "0:05");
+        assert_eq!(format_time(59.0), "0:59");
+        assert_eq!(format_time(60.0), "1:00");
+        assert_eq!(format_time(75.0), "1:15");
+        assert_eq!(format_time(599.0), "9:59");
+        assert_eq!(format_time(600.0), "10:00");
+        assert_eq!(format_time(3599.0), "59:59");
+    }
+
+    #[test]
+    fn format_time_hours() {
+        assert_eq!(format_time(3600.0), "1:00:00");
+        assert_eq!(format_time(3665.0), "1:01:05");
+        assert_eq!(format_time(7325.0), "2:02:05");
+    }
+
+    #[test]
+    fn seek_position_within_bounds() {
+        assert_eq!(seek_position(100.0, 100.0, 200.0, 100.0, 0.0, 100.0), 0.0);
+        assert_eq!(seek_position(200.0, 100.0, 200.0, 100.0, 0.0, 100.0), 50.0);
+        assert_eq!(seek_position(300.0, 100.0, 200.0, 100.0, 0.0, 100.0), 100.0);
+        assert_eq!(seek_position(150.0, 100.0, 200.0, 100.0, 0.0, 100.0), 25.0);
+    }
+
+    #[test]
+    fn seek_position_clamps_outside_range() {
+        assert_eq!(seek_position(50.0, 100.0, 200.0, 100.0, 0.0, 100.0), 0.0);
+        assert_eq!(seek_position(350.0, 100.0, 200.0, 100.0, 0.0, 100.0), 100.0);
+    }
+
+    #[test]
+    fn seek_position_respects_min_max_seek() {
+        assert_eq!(seek_position(100.0, 100.0, 200.0, 100.0, 20.0, 80.0), 20.0);
+        assert_eq!(seek_position(120.0, 100.0, 200.0, 100.0, 20.0, 80.0), 20.0);
+        assert_eq!(seek_position(200.0, 100.0, 200.0, 100.0, 20.0, 80.0), 50.0);
+        assert_eq!(seek_position(280.0, 100.0, 200.0, 100.0, 20.0, 80.0), 80.0);
+        assert_eq!(seek_position(300.0, 100.0, 200.0, 100.0, 20.0, 80.0), 80.0);
+    }
+
+    #[test]
+    fn seek_position_invalid_inputs() {
+        assert_eq!(seek_position(150.0, 100.0, 0.0, 100.0, 0.0, 100.0), 0.0);
+        assert_eq!(seek_position(150.0, 100.0, 200.0, 0.0, 0.0, 0.0), 0.0);
+        assert_eq!(seek_position(150.0, 100.0, 200.0, -10.0, 0.0, 0.0), 0.0);
+        assert_eq!(seek_position(f32::NAN, 100.0, 200.0, 100.0, 0.0, 100.0), 0.0);
+    }
+
+    #[test]
+    fn seek_relative_forward_backward() {
+        assert_eq!(seek_relative(50.0, 10.0, 100.0, 0.0, 100.0), 60.0);
+        assert_eq!(seek_relative(50.0, -10.0, 100.0, 0.0, 100.0), 40.0);
+    }
+
+    #[test]
+    fn seek_relative_clamps_to_boundaries() {
+        assert_eq!(seek_relative(5.0, -10.0, 100.0, 0.0, 100.0), 0.0);
+        assert_eq!(seek_relative(95.0, 10.0, 100.0, 0.0, 100.0), 100.0);
+        assert_eq!(seek_relative(25.0, -10.0, 100.0, 20.0, 80.0), 20.0);
+        assert_eq!(seek_relative(75.0, 10.0, 100.0, 20.0, 80.0), 80.0);
+    }
+
+    #[test]
+    fn seek_relative_invalid_inputs() {
+        assert_eq!(seek_relative(10.0, 10.0, 0.0, 0.0, 0.0), 0.0);
+        assert_eq!(seek_relative(10.0, 10.0, -50.0, 0.0, 0.0), 0.0);
     }
 }

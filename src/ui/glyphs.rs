@@ -32,6 +32,8 @@ pub mod icon {
     pub const APPS: &str = "\u{E71D}";
     pub const PREV: &str = "\u{E892}";
     pub const NEXT: &str = "\u{E893}";
+    pub const REWIND: &str = "\u{EB9E}";
+    pub const FAST_FORWARD: &str = "\u{EB9D}";
     pub const MUSIC: &str = "\u{E8D6}";
     pub const CLOSE: &str = "\u{E711}";
     pub const PASTE: &str = "\u{E77F}";

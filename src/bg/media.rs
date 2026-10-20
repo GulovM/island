@@ -37,6 +37,11 @@ pub struct Media {
     pub art: Option<Arc<Vec<u8>>>,
     /// Ключ трека (хэш названия и исполнителя), по нему кэшируется битмап и сверяется смена трека.
     pub key: u64,
+    /// Поддерживает ли сессия перемотку позиции.
+    pub can_seek: bool,
+    /// Допустимые границы перемотки в секундах от начала трека.
+    pub min_seek: f32,
+    pub max_seek: f32,
 }
 
 impl Media {
@@ -47,6 +52,100 @@ impl Media {
             p.min(self.dur)
         } else {
             p
+        }
+    }
+
+    /// Срез дорожки воспроизведения на текущий момент.
+    pub fn timeline(&self) -> Timeline {
+        Timeline {
+            pos: self.position_now(),
+            dur: self.dur,
+            min_seek: self.min_seek,
+            max_seek: self.max_seek,
+            can_seek: self.can_seek,
+        }
+    }
+}
+
+/// Вычисляет допустимый диапазон перемотки `(min_s, max_s)` в секундах от начала трека.
+pub(super) fn seek_bounds(dur: f32, min_seek: f32, max_seek: f32) -> (f32, f32) {
+    if !dur.is_finite() || dur <= 0.0 {
+        return (0.0, 0.0);
+    }
+    if max_seek > min_seek {
+        let min_s = min_seek.clamp(0.0, dur);
+        let max_s = max_seek.clamp(min_s, dur);
+        (min_s, max_s)
+    } else {
+        (0.0, dur)
+    }
+}
+
+/// Состояние дорожки воспроизведения: текущая позиция, длительность и границы перемотки.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Timeline {
+    pub pos: f32,
+    pub dur: f32,
+    pub min_seek: f32,
+    pub max_seek: f32,
+    pub can_seek: bool,
+}
+
+impl Timeline {
+    pub const fn empty() -> Self {
+        Self {
+            pos: 0.0,
+            dur: 0.0,
+            min_seek: 0.0,
+            max_seek: 0.0,
+            can_seek: false,
+        }
+    }
+
+    /// Допустимые границы перемотки (в секундах от начала трека).
+    pub fn bounds(&self) -> (f32, f32) {
+        seek_bounds(self.dur, self.min_seek, self.max_seek)
+    }
+
+    /// Зажимает целевую позицию в допустимые границы трека.
+    pub fn clamp(&self, target: f32) -> f32 {
+        let (min_s, max_s) = self.bounds();
+        if !target.is_finite() {
+            min_s
+        } else {
+            target.clamp(min_s, max_s)
+        }
+    }
+
+    /// Пересчитывает координату курсора `click_x` вдоль прогресс-бара шириной `bar_w` от `bar_x`
+    /// в позицию трека (в секундах) с зажимом в границы.
+    pub fn seek_to(&self, click_x: f32, bar_x: f32, bar_w: f32) -> f32 {
+        if !self.dur.is_finite() || self.dur <= 0.0 || !bar_w.is_finite() || bar_w <= 0.0 {
+            return 0.0;
+        }
+        let frac = if click_x.is_finite() {
+            ((click_x - bar_x) / bar_w).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        self.clamp(frac * self.dur)
+    }
+
+    /// Смещает текущую позицию `pos` на `offset` секунд с зажимом в границы.
+    pub fn relative(&self, offset: f32) -> f32 {
+        if !self.dur.is_finite() || self.dur <= 0.0 {
+            return 0.0;
+        }
+        let cur = if self.pos.is_finite() { self.pos } else { 0.0 };
+        self.clamp(cur + offset)
+    }
+
+    /// Доля воспроизведения `0.0..=1.0` для отображения прогресс-бара.
+    pub fn frac(&self) -> f32 {
+        if self.dur > 0.0 {
+            (self.pos / self.dur).clamp(0.0, 1.0)
+        } else {
+            0.0
         }
     }
 }
@@ -86,14 +185,21 @@ fn media_manager() -> Option<Mgr> {
     })
 }
 
-thread_local! {
-    /// Подписка на события текущей медиасессии: (сессия, токены двух событий, AUMID приложения).
-    static SESSION_WATCH: RefCell<Option<(GlobalSystemMediaTransportControlsSession, i64, i64, String)>> =
-        const { RefCell::new(None) };
+struct SessionWatch {
+    session: GlobalSystemMediaTransportControlsSession,
+    prop_token: i64,
+    info_token: i64,
+    timeline_token: Option<i64>,
+    aumid: String,
 }
 
-/// Подписывается на изменения текущей медиасессии: смена трека и пауза/воспроизведение будят
-/// фоновый поток, поэтому опрашивать медиа по таймеру не нужно.
+thread_local! {
+    /// Подписка на события текущей медиасессии: сессия, токены событий и AUMID приложения.
+    static SESSION_WATCH: RefCell<Option<SessionWatch>> = const { RefCell::new(None) };
+}
+
+/// Подписывается на изменения текущей медиасессии: смена трека, пауза/воспроизведение и перемотка
+/// будят фоновый поток, поэтому опрашивать медиа по таймеру не нужно.
 unsafe fn watch_media() {
     let Some(mgr) = media_manager() else { return };
     let cur = mgr.GetCurrentSession().ok();
@@ -106,13 +212,16 @@ unsafe fn watch_media() {
     SESSION_WATCH.with(|w| {
         let mut w = w.borrow_mut();
         match (w.as_ref(), &cur) {
-            (Some((_, _, _, old)), Some(_)) if *old == id && !resub => return,
+            (Some(old), Some(_)) if old.aumid == id && !resub => return,
             (None, None) => return,
             _ => {}
         }
-        if let Some((old, t1, t2, _)) = w.take() {
-            let _ = old.RemoveMediaPropertiesChanged(t1);
-            let _ = old.RemovePlaybackInfoChanged(t2);
+        if let Some(old) = w.take() {
+            let _ = old.session.RemoveMediaPropertiesChanged(old.prop_token);
+            let _ = old.session.RemovePlaybackInfoChanged(old.info_token);
+            if let Some(t3) = old.timeline_token {
+                let _ = old.session.RemoveTimelinePropertiesChanged(t3);
+            }
         }
         let Some(s) = cur else { return };
         let t1 = s.MediaPropertiesChanged(&TypedEventHandler::new(|_, _| {
@@ -123,8 +232,18 @@ unsafe fn watch_media() {
             send(Cmd::Media);
             Ok(())
         }));
-        if let (Ok(t1), Ok(t2)) = (t1, t2) {
-            *w = Some((s, t1, t2, id));
+        let t3 = s.TimelinePropertiesChanged(&TypedEventHandler::new(|_, _| {
+            send(Cmd::Media);
+            Ok(())
+        })).ok();
+        if let (Ok(prop_token), Ok(info_token)) = (t1, t2) {
+            *w = Some(SessionWatch {
+                session: s,
+                prop_token,
+                info_token,
+                timeline_token: t3,
+                aumid: id,
+            });
         }
     });
 }
@@ -143,12 +262,46 @@ pub(super) unsafe fn refresh_media() {
 pub(super) unsafe fn media_command(cmd: Cmd) {
     let Some(mgr) = media_manager() else { return };
     let Ok(s) = mgr.GetCurrentSession() else { return };
-    let _ = match cmd {
-        Cmd::PlayPause => wait(s.TryTogglePlayPauseAsync()),
-        Cmd::Next => wait(s.TrySkipNextAsync()),
-        Cmd::Prev => wait(s.TrySkipPreviousAsync()),
-        _ => return,
-    };
+    match cmd {
+        Cmd::PlayPause => {
+            let _ = wait(s.TryTogglePlayPauseAsync());
+        }
+        Cmd::Next => {
+            let _ = wait(s.TrySkipNextAsync());
+        }
+        Cmd::Prev => {
+            let _ = wait(s.TrySkipPreviousAsync());
+        }
+        Cmd::Seek(pos) => {
+            seek_session(&s, pos);
+        }
+        _ => {}
+    }
+}
+
+/// Перематывает трек текущей сессии на позицию в секундах от начала, если поддерживается.
+unsafe fn seek_session(s: &GlobalSystemMediaTransportControlsSession, target_secs: f32) -> Option<()> {
+    let info = s.GetPlaybackInfo().ok()?;
+    let ctrls = info.Controls().ok()?;
+    if !ctrls.IsPlaybackPositionEnabled().unwrap_or(false) {
+        return None;
+    }
+    let tl = s.GetTimelineProperties().ok()?;
+    let secs = |t: windows::Foundation::TimeSpan| t.Duration as f64 / 1e7;
+    let start = tl.StartTime().map(secs).unwrap_or(0.0);
+    let end = tl.EndTime().map(secs).unwrap_or(0.0);
+    let dur = (end - start).max(0.0) as f32;
+    if dur <= 0.0 {
+        return None;
+    }
+    let min_s = tl.MinSeekTime().map(secs).unwrap_or(start) - start;
+    let max_s = tl.MaxSeekTime().map(secs).unwrap_or(end) - start;
+    let (min_seek, max_seek) = seek_bounds(dur, min_s as f32, max_s as f32);
+    let clamped = target_secs.clamp(min_seek, max_seek);
+    let abs_pos = start + clamped as f64;
+    let hns = (abs_pos * 1e7).round() as i64;
+    let _ = wait(s.TryChangePlaybackPositionAsync(hns));
+    Some(())
 }
 
 /// Обложка последнего трека: повторно не декодируем, пока трек тот же.
@@ -164,13 +317,29 @@ pub(super) unsafe fn read_media() -> Option<Media> {
     if title.is_empty() && artist.is_empty() {
         return None;
     }
-    let playing = s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).ok() == Some(Status::Playing);
+    let playback_info = s.GetPlaybackInfo().ok();
+    let playing = playback_info
+        .as_ref()
+        .and_then(|i| i.PlaybackStatus().ok())
+        == Some(Status::Playing);
+    let can_seek_ctrl = playback_info
+        .as_ref()
+        .and_then(|i| i.Controls().ok())
+        .and_then(|c| c.IsPlaybackPositionEnabled().ok())
+        .unwrap_or(false);
     let (mut pos, mut dur) = (0.0f32, 0.0f32);
+    let (mut min_seek, mut max_seek) = (0.0f32, 0.0f32);
     if let Ok(tl) = s.GetTimelineProperties() {
         let secs = |t: windows::Foundation::TimeSpan| t.Duration as f64 / 1e7;
         let start = tl.StartTime().map(secs).unwrap_or(0.0);
+        let end = tl.EndTime().map(secs).unwrap_or(0.0);
         let mut p = tl.Position().map(secs).unwrap_or(0.0) - start;
-        dur = (tl.EndTime().map(secs).unwrap_or(0.0) - start).max(0.0) as f32;
+        dur = (end - start).max(0.0) as f32;
+        let min_s = tl.MinSeekTime().map(secs).unwrap_or(start) - start;
+        let max_s = tl.MaxSeekTime().map(secs).unwrap_or(end) - start;
+        let (min_b, max_b) = seek_bounds(dur, min_s as f32, max_s as f32);
+        min_seek = min_b;
+        max_seek = max_b;
         // Позиция относится к моменту `LastUpdatedTime`, а не к «сейчас»: добавляем прошедшее.
         if playing {
             if let Ok(t) = tl.LastUpdatedTime() {
@@ -192,6 +361,7 @@ pub(super) unsafe fn read_media() -> Option<Media> {
     if dur > 0.0 {
         pos = pos.min(dur);
     }
+    let can_seek = can_seek_ctrl && dur > 0.0;
 
     let mut h = DefaultHasher::new();
     (&title, &artist).hash(&mut h);
@@ -204,7 +374,19 @@ pub(super) unsafe fn read_media() -> Option<Media> {
         }
         Some(px)
     });
-    Some(Media { title, artist, playing, pos: pos.max(0.0), dur, at: Instant::now(), art, key })
+    Some(Media {
+        title,
+        artist,
+        playing,
+        pos: pos.max(0.0),
+        dur,
+        at: Instant::now(),
+        art,
+        key,
+        can_seek,
+        min_seek,
+        max_seek,
+    })
 }
 
 /// Обложка из миниатюры медиасессии → квадрат `ART`×`ART` (обрезка по центру).
@@ -241,5 +423,62 @@ unsafe fn read_cover(props: &GlobalSystemMediaTransportControlsSessionMediaPrope
     let mut buf = vec![0u8; (ART * ART * 4) as usize];
     conv.CopyPixels(&rect, ART * 4, &mut buf).ok()?;
     Some(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_seek_bounds_normal() {
+        assert_eq!(seek_bounds(100.0, 0.0, 100.0), (0.0, 100.0));
+        assert_eq!(seek_bounds(100.0, 10.0, 90.0), (10.0, 90.0));
+    }
+
+    #[test]
+    fn test_seek_bounds_clamps_to_dur() {
+        assert_eq!(seek_bounds(100.0, -10.0, 150.0), (0.0, 100.0));
+    }
+
+    #[test]
+    fn test_seek_bounds_inverted_or_zero() {
+        // max <= min falls back to full dur
+        assert_eq!(seek_bounds(100.0, 0.0, 0.0), (0.0, 100.0));
+        assert_eq!(seek_bounds(100.0, 80.0, 20.0), (0.0, 100.0));
+    }
+
+    #[test]
+    fn test_seek_bounds_invalid_dur() {
+        assert_eq!(seek_bounds(0.0, 0.0, 0.0), (0.0, 0.0));
+        assert_eq!(seek_bounds(-10.0, 0.0, 10.0), (0.0, 0.0));
+        assert_eq!(seek_bounds(f32::NAN, 0.0, 10.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn test_timeline_clamp_and_relative() {
+        let tl = Timeline { pos: 50.0, dur: 100.0, min_seek: 20.0, max_seek: 80.0, can_seek: true };
+        assert_eq!(tl.clamp(10.0), 20.0);
+        assert_eq!(tl.clamp(90.0), 80.0);
+        assert_eq!(tl.clamp(50.0), 50.0);
+        assert_eq!(tl.relative(10.0), 60.0);
+        assert_eq!(tl.relative(-40.0), 20.0);
+        assert_eq!(tl.relative(50.0), 80.0);
+    }
+
+    #[test]
+    fn test_timeline_seek_to() {
+        let tl = Timeline { pos: 0.0, dur: 100.0, min_seek: 0.0, max_seek: 100.0, can_seek: true };
+        assert_eq!(tl.seek_to(100.0, 100.0, 200.0), 0.0);
+        assert_eq!(tl.seek_to(200.0, 100.0, 200.0), 50.0);
+        assert_eq!(tl.seek_to(300.0, 100.0, 200.0), 100.0);
+    }
+
+    #[test]
+    fn test_timeline_frac() {
+        let tl = Timeline { pos: 25.0, dur: 100.0, min_seek: 0.0, max_seek: 100.0, can_seek: true };
+        assert_eq!(tl.frac(), 0.25);
+        let tl_zero = Timeline { pos: 0.0, dur: 0.0, min_seek: 0.0, max_seek: 0.0, can_seek: false };
+        assert_eq!(tl_zero.frac(), 0.0);
+    }
 }
 
