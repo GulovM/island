@@ -8,7 +8,8 @@ use super::http::get_text;
 use super::{spawn, stale, with, RETRY_AFTER};
 
 const CALENDAR_TTL: Duration = Duration::from_secs(5 * 60);
-const CALENDAR_CACHE_FILE: &str = "calendar_cache.ics";
+const CALENDAR_CACHE_PREFIX: &str = "calendar_cache_";
+const LEGACY_CALENDAR_CACHE_FILE: &str = "calendar_cache.ics";
 
 fn hash_url(url: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
@@ -16,6 +17,10 @@ fn hash_url(url: &str) -> String {
     let mut h = DefaultHasher::new();
     url.trim().hash(&mut h);
     format!("{:016x}", h.finish())
+}
+
+fn cache_filename(url: &str) -> String {
+    format!("{CALENDAR_CACHE_PREFIX}{}.ics", hash_url(url))
 }
 
 /// Упаковывает кэш календаря: заголовок с хэшем ссылки и шифрование через DPAPI (`sys::seal`).
@@ -53,37 +58,79 @@ fn save_cached_calendar(url: &str, ics: &str) {
         log::error("DPAPI недоступен или пустая ссылка, кэш календаря не сохранён");
         return;
     };
-    crate::tabs::write_bytes(CALENDAR_CACHE_FILE, &sealed);
+    let file = cache_filename(url);
+    crate::tabs::write_bytes(&file, &sealed);
 }
 
 fn load_cached_calendar(url: &str) -> Option<String> {
-    if url.trim().is_empty() {
+    let url = url.trim();
+    if url.is_empty() {
         return None;
     }
-    let p = crate::sys::data_dir().join(CALENDAR_CACHE_FILE);
-    let bytes = std::fs::read(&p).ok()?;
-    unpack_cached_calendar(url, &bytes)
+    let data_dir = crate::sys::data_dir();
+    let path = data_dir.join(cache_filename(url));
+    if let Ok(bytes) = std::fs::read(&path) {
+        if let Some(ics) = unpack_cached_calendar(url, &bytes) {
+            return Some(ics);
+        }
+    }
+    // Обратная совместимость с единым файлом calendar_cache.ics из T8
+    let legacy_path = data_dir.join(LEGACY_CALENDAR_CACHE_FILE);
+    if let Ok(bytes) = std::fs::read(&legacy_path) {
+        if let Some(ics) = unpack_cached_calendar(url, &bytes) {
+            save_cached_calendar(url, &ics);
+            return Some(ics);
+        }
+    }
+    None
+}
+
+/// Удаляет файлы кэша, хэши которых не соответствуют ни одной из настроенных ссылок.
+pub fn clean_orphan_caches(urls: &[String]) {
+    let valid_hashes: std::collections::HashSet<String> = urls.iter().map(|u| hash_url(u)).collect();
+    let data_dir = crate::sys::data_dir();
+    let Ok(entries) = std::fs::read_dir(&data_dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if let Some(hash) = name_str.strip_prefix(CALENDAR_CACHE_PREFIX).and_then(|s| s.strip_suffix(".ics")) {
+            if !valid_hashes.contains(hash) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    if urls.is_empty() {
+        let _ = std::fs::remove_file(data_dir.join(LEGACY_CALENDAR_CACHE_FILE));
+    }
 }
 
 /// Инициализирует снимок календаря сохранённым зашифрованным кэшем с диска (до первого сетевого ответа).
-/// При пустой ссылке (календарь отключён) или несовпадении хэша кэш не используется.
-pub fn init_cached_calendar(url: &str) {
-    let url = url.trim();
-    if url.is_empty() {
+/// Загружает кэш только для тех ссылок, которые сейчас настроены; кэши удалённых ссылок удаляются.
+pub fn init_cached_calendar(urls: &[String]) {
+    let active_urls: Vec<String> = urls.iter().map(|u| u.trim().to_string()).filter(|u| !u.is_empty()).collect();
+    clean_orphan_caches(&active_urls);
+    if active_urls.is_empty() {
         return;
     }
-    if let Some(ics) = load_cached_calendar(url) {
-        let raws = parse_ics(&ics, SYSTEM_TZ);
-        if !raws.is_empty() {
-            with(|s| {
-                if s.snap.cal.is_empty() {
-                    s.snap.cal = Arc::new(raws);
-                    s.snap.cal_ver = 1;
-                    s.snap.calendar_set = true;
-                    s.cal_key = url.to_string();
-                }
-            });
+    let mut cached_lists = Vec::new();
+    for url in &active_urls {
+        if let Some(ics) = load_cached_calendar(url) {
+            let raws = parse_ics(&ics, SYSTEM_TZ);
+            if !raws.is_empty() {
+                cached_lists.push(raws);
+            }
         }
+    }
+    let merged = merge_raw_events(cached_lists);
+    if !merged.is_empty() {
+        with(|s| {
+            if s.snap.cal.is_empty() {
+                s.snap.cal = Arc::new(merged);
+                s.snap.cal_ver = 1;
+                s.snap.calendar_set = true;
+                s.cal_key = active_urls.join("\n");
+            }
+        });
     }
 }
 
@@ -104,9 +151,33 @@ pub struct RawEvent {
     pub end: i64,
     pub all_day: bool,
     pub title: String,
-    rrule: Option<String>,
+    pub rrule: Option<String>,
     /// Исключённые повторы (минуты; для событий на весь день важен только день).
-    exdates: Vec<i64>,
+    pub exdates: Vec<i64>,
+    /// Идентификатор события (UID) для дедупликации между календарями.
+    pub uid: String,
+}
+
+/// Объединяет списки событий из нескольких календарей с дедупликацией:
+/// события с одинаковым непустым UID и одинаковым временем начала считаются дубликатами.
+/// Если UID пустой, дедупликация производится по названию и времени начала.
+pub fn merge_raw_events(lists: impl IntoIterator<Item = Vec<RawEvent>>) -> Vec<RawEvent> {
+    let mut out = Vec::new();
+    let mut seen_uid = std::collections::HashSet::new();
+    let mut seen_title = std::collections::HashSet::new();
+    for list in lists {
+        for ev in list {
+            if !ev.uid.is_empty() {
+                if !seen_uid.insert((ev.uid.clone(), ev.start)) {
+                    continue;
+                }
+            } else if !seen_title.insert((ev.title.clone(), ev.start)) {
+                continue;
+            }
+            out.push(ev);
+        }
+    }
+    out
 }
 
 /// Событие в списке выбранного дня.
@@ -117,28 +188,34 @@ pub struct DayEvent {
     pub title: String,
 }
 
-/// Обновляет события из iCal-ссылки (раз в 5 минут).
-pub fn refresh_calendar(url: &str) {
-    refresh_calendar_age(url, CALENDAR_TTL);
+/// Обновляет события из настроенных iCal-ссылок (раз в 5 минут).
+pub fn refresh_calendar(urls: &[String]) {
+    refresh_calendar_age(urls, CALENDAR_TTL);
 }
 
 /// То же, но обновляет, если данным больше `max_age` (при открытии вкладки — чаще обычного).
-pub fn refresh_calendar_age(url: &str, max_age: Duration) {
-    let url = url.trim().to_string();
+pub fn refresh_calendar_age(urls: &[String], max_age: Duration) {
+    let clean_urls: Vec<String> = urls
+        .iter()
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty())
+        .collect();
+    let key = clean_urls.join("\n");
     let go = with(|s| {
-        s.snap.calendar_set = !url.is_empty();
-        if s.cal_busy || (s.cal_key == url && !stale(s.cal_at, max_age)) {
+        s.snap.calendar_set = !clean_urls.is_empty();
+        if s.cal_busy || (s.cal_key == key && !stale(s.cal_at, max_age)) {
             return false;
         }
-        if s.cal_key != url && !s.snap.cal.is_empty() {
-            // Ссылку сменили: чужие события не показываем, пока грузятся новые.
+        if s.cal_key != key && !s.snap.cal.is_empty() {
+            // Список ссылок сменился: сбрасываем старые события
             s.snap.cal = Arc::default();
             s.snap.cal_ver += 1;
         }
         s.snap.calendar_failed = false;
-        if url.is_empty() {
+        if clean_urls.is_empty() {
             s.cal_key.clear();
             s.cal_at = Some(Instant::now());
+            clean_orphan_caches(&[]);
             return false;
         }
         s.cal_busy = true;
@@ -148,25 +225,63 @@ pub fn refresh_calendar_age(url: &str, max_age: Duration) {
         return;
     }
     spawn("island-calendar", move || {
-        let r = get_text(&url).map(|ics| {
-            save_cached_calendar(&url, &ics);
-            parse_ics(&ics, SYSTEM_TZ)
-        });
-        with(|s| {
-            s.cal_busy = false;
-            s.cal_key = url.clone();
-            match r {
-                Ok(raws) => {
-                    s.snap.cal = Arc::new(raws);
-                    s.snap.cal_ver += 1;
-                    s.snap.calendar_failed = false;
-                    s.cal_at = Some(Instant::now());
+        let mut fetched = Vec::with_capacity(clean_urls.len());
+        if clean_urls.len() <= 1 {
+            for url in &clean_urls {
+                fetched.push((url.clone(), get_text(url)));
+            }
+        } else {
+            std::thread::scope(|scope| {
+                let mut handles = Vec::with_capacity(clean_urls.len());
+                for url in &clean_urls {
+                    handles.push(scope.spawn(move || (url.clone(), get_text(url))));
+                }
+                for h in handles {
+                    if let Ok(res) = h.join() {
+                        fetched.push(res);
+                    }
+                }
+            });
+        }
+
+        let mut all_events = Vec::new();
+        let mut any_success = false;
+        let mut any_failed = false;
+
+        for (url, res) in fetched {
+            match res {
+                Ok(ics) => {
+                    save_cached_calendar(&url, &ics);
+                    let raws = parse_ics(&ics, SYSTEM_TZ);
+                    all_events.push(raws);
+                    any_success = true;
                 }
                 Err(e) => {
-                    log::error(&format!("календарь: {e}"));
-                    s.snap.calendar_failed = true;
-                    s.cal_at = Instant::now().checked_sub(CALENDAR_TTL - RETRY_AFTER).or_else(|| Some(Instant::now()));
+                    log::error(&format!("календарь {url}: {e}"));
+                    any_failed = true;
+                    if let Some(cached_ics) = load_cached_calendar(&url) {
+                        let raws = parse_ics(&cached_ics, SYSTEM_TZ);
+                        if !raws.is_empty() {
+                            all_events.push(raws);
+                        }
+                    }
                 }
+            }
+        }
+
+        let merged = merge_raw_events(all_events);
+        with(|s| {
+            s.cal_busy = false;
+            s.cal_key = key.clone();
+            if any_success || !merged.is_empty() {
+                s.snap.cal = Arc::new(merged);
+                s.snap.cal_ver += 1;
+            }
+            s.snap.calendar_failed = any_failed;
+            if any_failed {
+                s.cal_at = Instant::now().checked_sub(CALENDAR_TTL - RETRY_AFTER).or_else(|| Some(Instant::now()));
+            } else {
+                s.cal_at = Some(Instant::now());
             }
         });
         bg::notify();
@@ -320,7 +435,15 @@ pub fn parse_ics(ics: &str, offset: i64) -> Vec<RawEvent> {
                 if let (Some((start, all_day)), false) = (c.start, c.cancelled) {
                     // Конец: у даты без времени `DTEND` — первый день после события.
                     let end = c.end.filter(|&e| e > start).unwrap_or(0);
-                    let ev = RawEvent { start, end, all_day, title: unescape_ics(&c.title), rrule: c.rrule, exdates: c.exdates };
+                    let ev = RawEvent {
+                        start,
+                        end,
+                        all_day,
+                        title: unescape_ics(&c.title),
+                        rrule: c.rrule,
+                        exdates: c.exdates,
+                        uid: c.uid.clone(),
+                    };
                     found.push((c.uid, c.rid, ev));
                 }
             }
@@ -533,5 +656,75 @@ END:VEVENT
 
         // Старый незашифрованный ICS без заголовка с хэшем ссылки игнорируется.
         assert_eq!(unpack_cached_calendar(url, ics.as_bytes()), None);
+    }
+
+    #[test]
+    fn merge_raw_events_deduplication() {
+        let ev = |uid: &str, title: &str, start: i64| RawEvent {
+            start,
+            end: start + 60,
+            all_day: false,
+            title: title.to_string(),
+            rrule: None,
+            exdates: Vec::new(),
+            uid: uid.to_string(),
+        };
+
+        // Календарь 1: события A, B, C
+        let cal1 = vec![
+            ev("uid-1", "Meeting 1", 1000),
+            ev("uid-2", "Recurring Master", 2000),
+            ev("", "No UID Event", 3000),
+        ];
+
+        // Календарь 2:
+        // - дубликат uid-1 в то же время (должен отсечься)
+        // - то же uid-2, но другое время (изменённое вхождение — должно остаться)
+        // - другое событие в то же время 1000 (должно остаться)
+        // - дубликат события без UID (должен отсечься)
+        // - другое событие без UID в то же время (должно остаться)
+        let cal2 = vec![
+            ev("uid-1", "Meeting 1 (copy)", 1000),
+            ev("uid-2", "Recurring Moved", 2500),
+            ev("uid-3", "Other Meeting", 1000),
+            ev("", "No UID Event", 3000),
+            ev("", "Another No UID", 3000),
+        ];
+
+        let merged = merge_raw_events(vec![cal1, cal2]);
+        assert_eq!(merged.len(), 6);
+
+        assert_eq!(merged[0].uid, "uid-1");
+        assert_eq!(merged[0].title, "Meeting 1");
+
+        assert_eq!(merged[1].uid, "uid-2");
+        assert_eq!(merged[1].start, 2000);
+
+        assert_eq!(merged[2].title, "No UID Event");
+
+        assert_eq!(merged[3].uid, "uid-2");
+        assert_eq!(merged[3].start, 2500);
+
+        assert_eq!(merged[4].uid, "uid-3");
+        assert_eq!(merged[5].title, "Another No UID");
+    }
+
+    #[test]
+    fn parse_ics_preserves_uid() {
+        let ics = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:unique-event-id-999\nDTSTART:20261015T100000Z\nSUMMARY:Test UID\nEND:VEVENT\nEND:VCALENDAR\n";
+        let raws = parse_ics(ics, 0);
+        assert_eq!(raws.len(), 1);
+        assert_eq!(raws[0].uid, "unique-event-id-999");
+        assert_eq!(raws[0].title, "Test UID");
+    }
+
+    #[test]
+    fn calendar_cache_filename_is_deterministic() {
+        let u1 = "https://a.com/basic.ics";
+        let u2 = "https://b.com/basic.ics";
+        assert_eq!(cache_filename(u1), cache_filename(u1));
+        assert_ne!(cache_filename(u1), cache_filename(u2));
+        assert!(cache_filename(u1).starts_with(CALENDAR_CACHE_PREFIX));
+        assert!(cache_filename(u1).ends_with(".ics"));
     }
 }

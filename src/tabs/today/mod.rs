@@ -86,7 +86,7 @@ pub struct Today {
     city: String,
     /// Карточка погоды в режиме ввода города.
     editing: bool,
-    ics: String,
+    ics: Vec<String>,
     /// Карточка недели в режиме ввода ссылки на календарь; `cal_bad` — введён не адрес.
     cal_editing: bool,
     cal_bad: bool,
@@ -134,7 +134,7 @@ impl Default for Today {
             month_t: Spring::unit(0.0, 240.0, 26.0),
             city: String::new(),
             editing: false,
-            ics: String::new(),
+            ics: Vec::new(),
             cal_editing: false,
             cal_bad: false,
             online: Online::default(),
