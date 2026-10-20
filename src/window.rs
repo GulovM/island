@@ -81,8 +81,7 @@ impl App {
         let collapsed = self.collapsed();
         let (w, h) = if self.expanded {
             let id = self.cur_id();
-            // В режиме правки под сеткой появляется полоса с кнопками.
-            (self.tab_w(id), App::tab_h(id) + self.tabs.edit_extra(id))
+            (self.tab_w(id), self.tab_h(id))
         } else if self.stripped() {
             // Ширина прежняя: зона наведения не растёт, меняется только высота.
             (collapsed.0, STRIP_H)

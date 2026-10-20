@@ -11,8 +11,8 @@ use std::f32::consts::TAU;
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows_numerics::Matrix3x2;
 
-use super::layout::{Layout, Placed, TabSpec, GAP};
-use super::{id as tab_id, layout};
+use super::layout::{self, Layout, Placed, TabSpec, CELL};
+use super::{id as tab_id};
 use crate::anim::Spring;
 use crate::i18n::tr;
 use crate::ui::{self, Canvas, Rect, Ui};
@@ -21,8 +21,6 @@ use crate::ui::{self, Canvas, Rect, Ui};
 pub const EXTRA: f32 = 32.0;
 
 const BAR_H: f32 = 22.0;
-/// Расстояние (в квадрате) между ценой нового места и текущего, после которого виджет «перескакивает».
-const HYST: f32 = 180.0;
 /// Сдвиг курсора с нажатой кнопкой, после которого нажатие становится перетаскиванием.
 const MOVE_MIN: f32 = 4.0;
 const NOTE_SECS: f32 = 2.4;
@@ -112,6 +110,8 @@ struct Drag {
     live: bool,
     /// Где сейчас «плавающий» прямоугольник виджета (левый верх).
     float: (f32, f32),
+    /// Целевая ячейка сетки (тень-приёмник).
+    target: Option<(u8, u8)>,
 }
 
 /// Нажатие на угловой ручке: короткое — смена размера по кругу, с движением — подбор размера.
@@ -396,7 +396,7 @@ impl Grid {
 
     /// Опрашивает кнопки и тела виджетов. Порядок — приоритет: что опрошено раньше, то и получит
     /// нажатие (лоток, потом значки на углах, потом сами виджеты).
-    fn input(&mut self, ui: &mut Ui, area: Rect, skip: u32, pitch: f32, hidden: &[usize], tray: &Tray) {
+    fn input(&mut self, ui: &mut Ui, area: Rect, skip: u32, hidden: &[usize], tray: &Tray) {
         let spec = self.spec;
         let ptr = ui.pointer();
         let vis = self.visible(skip);
@@ -447,12 +447,13 @@ impl Grid {
             let r = self.slots[idx].rect();
             let _ = ui.click_area(id, r);
             if self.drag.is_none() && ui.is_dragging(id) {
-                self.drag = Some(Drag { idx, press: ptr, grab: (ptr.0 - r.x, ptr.1 - r.y), live: false, float: (r.x, r.y) });
+                let target = self.lay.entry(idx).map(|e| (e.col, e.row));
+                self.drag = Some(Drag { idx, press: ptr, grab: (ptr.0 - r.x, ptr.1 - r.y), live: false, float: (r.x, r.y), target });
             }
         }
 
         if let Some(idx) = shown {
-            if self.lay.show(spec, skip, idx, area.h) {
+            if self.lay.place_new(spec, skip, idx) {
                 self.commit();
                 if self.lay.hidden_list(spec, skip).is_empty() {
                     self.tray_open = false;
@@ -476,8 +477,8 @@ impl Grid {
             }
         }
 
-        self.resize_step(ui, area, skip, pitch);
-        self.drag_step(ui, area, skip, pitch);
+        self.resize_step(ui, skip);
+        self.drag_step(ui, area, skip);
 
         // Нажатие мимо лотка закрывает его (кроме случая, когда на вкладке ничего не осталось).
         if self.tray_open && ui.pressed && self.lay.visible_count(skip) > 0 {
@@ -488,9 +489,9 @@ impl Grid {
         }
     }
 
-    /// Угловая ручка: пока кнопка зажата и курсор двигается, виджет примагничивается к ближайшему
-    /// допустимому размеру, остальные плавно перетекают (пружины слотов).
-    fn resize_step(&mut self, ui: &mut Ui, area: Rect, skip: u32, pitch: f32) {
+    /// Угловая ручка: пока кнопка зажата и курсор двигается, виджет выбирает ближайший
+    /// допустимый размер из `Spec::sizes`.
+    fn resize_step(&mut self, ui: &mut Ui, skip: u32) {
         let spec = self.spec;
         let Some(mut rs) = self.resizing.take() else { return };
         if !ui.is_dragging(self.wid(rs.idx, 1)) {
@@ -506,23 +507,34 @@ impl Grid {
         }
         if rs.live {
             let (w, h) = (rs.from.0 + px - rs.press.0, rs.from.1 + py - rs.press.1);
-            if let Some(lay) = self.lay.resized_to(spec, skip, rs.idx, w, h, pitch, area.h) {
+            if let Some(lay) = self.lay.resized_to(spec, skip, rs.idx, w, h) {
                 self.lay = lay;
             }
         }
         self.resizing = Some(rs);
     }
 
-    fn drag_step(&mut self, ui: &mut Ui, area: Rect, skip: u32, pitch: f32) {
+    fn drag_step(&mut self, ui: &mut Ui, area: Rect, skip: u32) {
         let spec = self.spec;
         let Some(mut d) = self.drag.take() else { return };
         if !ui.is_dragging(self.wid(d.idx, 2)) {
-            // Кнопку отпустили: виджет встаёт на место тени.
+            // Кнопку отпустили: виджет встаёт на место цели тени-приёмника.
             self.slots[d.idx].follow(false);
             self.lift.target = 0.0;
-            if let Some(before) = self.before.take() {
-                if before != self.lay {
-                    self.commit();
+            if d.live {
+                if let Some((col, row)) = d.target {
+                    if let Some(e) = self.lay.entry_mut(d.idx) {
+                        e.col = col;
+                        e.row = row;
+                    }
+                    if let Some(before) = self.before.take() {
+                        if before != self.lay {
+                            self.commit();
+                        }
+                    }
+                } else {
+                    self.abort_drag();
+                    self.say("Не хватает места");
                 }
             }
             return;
@@ -548,11 +560,19 @@ impl Grid {
             let fx = (px - d.grab.0).clamp(area.x - 8.0, (area.right() - w + 8.0).max(area.x - 8.0));
             let fy = (py - d.grab.1).clamp(area.y - 8.0, (area.bottom() - h + 8.0).max(area.y - 8.0));
             d.float = (fx, fy);
-            let (left, top) = (fx - area.x, fy - area.y);
-            let cur = self.lay.drop_cost(spec, skip, d.idx, left, top, pitch).unwrap_or(f32::MAX);
-            if let Some((cand, cost)) = self.lay.best_drop(spec, skip, d.idx, left, top, pitch, area.h) {
-                if cand != self.lay && cost + HYST < cur {
-                    self.lay = cand;
+            let want_col = ((fx - area.x + CELL / 2.0) / CELL).floor().max(0.0) as u8;
+            let want_row = ((fy - area.y + CELL / 2.0) / CELL).floor().max(0.0) as u8;
+            let cur_size = self.lay.entry(d.idx).map_or(0, |e| e.size);
+            let target = layout::nearest_free(spec, skip, &self.lay.entries, d.idx, cur_size, want_col, want_row);
+            d.target = target;
+            if let Some((tc, tr)) = target {
+                let sz = spec.specs[d.idx].sizes[cur_size];
+                let gx = area.x + tc as f32 * CELL;
+                let gy = area.y + tr as f32 * CELL;
+                let gw = sz.pixel_w();
+                let gh = sz.pixel_h();
+                for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
+                    g.target = v;
                 }
             }
         }
@@ -575,36 +595,30 @@ impl Grid {
         if self.editing && ui.focus.is_some() {
             ui.blur();
         }
-        let pitch = (area.w + GAP) / spec.cols as f32;
 
         if self.editing {
             self.tray.target = if self.tray_open { 1.0 } else { 0.0 };
             let hidden = self.lay.hidden_list(spec, skip);
             let bar = self.bar(cv, area, hidden.len());
             let tray = self.tray_layout(cv, area, &bar, &hidden);
-            self.input(ui, area, skip, pitch, &hidden, &tray);
+            self.input(ui, area, skip, &hidden, &tray);
         }
         self.tray.target = if self.editing && self.tray_open { 1.0 } else { 0.0 };
 
-        // Раскладка → цели пружин. Сменившийся набор доступных виджетов (появилась яркость) мог
-        // не вместить сохранённую раскладку: тогда временно показываем раскладку по умолчанию.
+        // Раскладка → цели пружин.
         let mut placed = self.lay.pack(spec, skip);
-        if !self.editing && self.drag.is_none() && !self.lay.is_default(spec) {
-            let bottom = placed.iter().map(Placed::bottom).fold(0.0, f32::max);
-            if bottom > area.h + 0.5 {
-                self.lay = Layout::default_for(spec);
-                placed = self.lay.pack(spec, skip);
-            }
+        if !self.editing && self.drag.is_none() && !self.lay.is_default(spec) && !self.lay.fits(spec, skip, area.h) {
+            self.lay = Layout::default_for(spec);
+            placed = self.lay.pack(spec, skip);
         }
-        self.retarget(area, pitch, &placed);
+        self.retarget(area, &placed);
         let live = self.drag.as_ref().filter(|d| d.live).map(|d| d.idx);
         self.empty.target = if placed.is_empty() { 1.0 } else { 0.0 };
 
         // Тень-приёмник под поднятым виджетом.
-        if let (Some(idx), true) = (live, self.lift.value > 0.01) {
+        if let (Some(_idx), true) = (live, self.lift.value > 0.01) {
             let r = Rect::new(self.ghost[0].value, self.ghost[1].value, self.ghost[2].value.max(0.0), self.ghost[3].value.max(0.0));
             let k = self.lift.value.clamp(0.0, 1.0);
-            let _ = idx;
             cv.rr(r, 11.0, fade(cv.accent, 0.12 * k));
             cv.rr_line(r, 11.0, fade(cv.accent, 0.55 * k), 1.2);
         }
@@ -626,13 +640,13 @@ impl Grid {
     }
 
     /// Выставляет цели пружин по упакованной раскладке.
-    fn retarget(&mut self, area: Rect, pitch: f32, placed: &[Placed]) {
+    fn retarget(&mut self, area: Rect, placed: &[Placed]) {
         let snap = std::mem::take(&mut self.snap);
         let float = self.drag.as_ref().filter(|d| d.live).map(|d| (d.idx, d.float));
         let mut present = vec![false; self.slots.len()];
         for p in placed {
             present[p.idx] = true;
-            let r = Rect::new(area.x + p.col as f32 * pitch, area.y + p.y, p.cols as f32 * pitch - GAP, p.h);
+            let r = Rect::new(area.x + p.x, area.y + p.y, p.w_px, p.h_px);
             let s = &mut self.slots[p.idx];
             // Виджет, который только что вернули, появляется на новом месте, а не прилетает со старого.
             let fresh = !s.init || (s.a.target < 0.5 && s.a.value < 0.02);
@@ -646,9 +660,6 @@ impl Grid {
                 if fi == p.idx {
                     s.x.target = fx;
                     s.y.target = fy;
-                    for (g, v) in self.ghost.iter_mut().zip([r.x, r.y, r.w, r.h]) {
-                        g.target = v;
-                    }
                 }
             }
         }

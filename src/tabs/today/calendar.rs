@@ -972,16 +972,16 @@ mod tests {
         use crate::tabs::today::SPEC;
         use crate::tabs::layout::{sz, Layout};
 
-        // Проверяем, что список размеров виджета "week" расширен до 4 размеров
+        // Проверяем, что список размеров виджета "week" расширен до 4 размеров (в ячейках)
         let week_spec = &SPEC.specs[2];
         assert_eq!(week_spec.key, "week");
         assert_eq!(week_spec.sizes.len(), 4);
-        assert_eq!(week_spec.sizes[0], sz(4, 76.0));
-        assert_eq!(week_spec.sizes[1], sz(4, 122.0));
-        assert_eq!(week_spec.sizes[2], sz(6, 122.0));
-        assert_eq!(week_spec.sizes[3], sz(4, 252.0));
+        assert_eq!(week_spec.sizes[0], sz(16, 6));
+        assert_eq!(week_spec.sizes[1], sz(16, 8));
+        assert_eq!(week_spec.sizes[2], sz(24, 8));
+        assert_eq!(week_spec.sizes[3], sz(16, 16));
 
-        // Размер по умолчанию остался прежним — индекс 1 (122.0)
+        // Размер по умолчанию остался прежним — индекс 1 (120 px)
         assert_eq!(week_spec.size, 1);
 
         // Раскладка по умолчанию не сломалась

@@ -55,26 +55,27 @@ const TOP_APPS: usize = 6;
 const SPEEDTEST: usize = 7;
 
 /// Кольцо: мини (кольцо и название), карточка, широкая карточка с подробностями.
-static RING: [Size; 3] = [sz(2, 64.0), sz(2, 150.0), sz(4, 104.0)];
-static INFO: [Size; 2] = [sz(2, 70.0), sz(4, 70.0)];
+static RING: [Size; 3] = [sz(8, 4), sz(8, 10), sz(16, 6)];
+static INFO: [Size; 2] = [sz(8, 5), sz(16, 5)];
 /// Топ приложений: три, четыре или пять строк.
-static APPS_SIZES: [Size; 3] = [sz(4, 98.0), sz(4, 142.0), sz(6, 142.0)];
+static APPS_SIZES: [Size; 3] = [sz(16, 6), sz(16, 10), sz(24, 10)];
 /// Замер скорости: компактный (кнопка «▶» в строке с числами) и обычный.
-static SPEED_SIZES: [Size; 3] = [sz(4, 52.0), sz(4, 78.0), sz(6, 78.0)];
+static SPEED_SIZES: [Size; 3] = [sz(8, 5), sz(16, 5), sz(24, 5)];
 
-/// Сетка вкладки: 10 колонок по ~62 px (612 px внутри полей). Кольца и карточки занимают по
-/// 2 колонки, топ приложений и замер скорости — 4: так получаются исходные пропорции макета.
+/// Сетка вкладки: 40 колонок по 16 px (шаг CELL=16, зазор GAP=8), 15 рядов. Кольца и карточки занимают
+/// по 8 колонок, топ приложений и замер скорости — по 16.
 pub static SPEC: TabSpec = TabSpec {
-    cols: 10,
+    cols: 40,
+    rows: 15,
     specs: &[
-        Spec { key: "cpu", title: "CPU", sizes: &RING, size: 1, col: 0 },
-        Spec { key: "gpu", title: "GPU", sizes: &RING, size: 1, col: 2 },
-        Spec { key: "ram", title: "RAM", sizes: &RING, size: 1, col: 4 },
-        Spec { key: "disk", title: "Диск", sizes: &INFO, size: 0, col: 0 },
-        Spec { key: "net", title: "Сеть", sizes: &INFO, size: 0, col: 2 },
-        Spec { key: "uptime", title: "Аптайм", sizes: &INFO, size: 0, col: 4 },
-        Spec { key: "apps", title: "Топ приложений", sizes: &APPS_SIZES, size: 1, col: 6 },
-        Spec { key: "speed", title: "Скорость сети", sizes: &SPEED_SIZES, size: 1, col: 6 },
+        Spec { key: "cpu", title: "CPU", sizes: &RING, size: 1, col: 0, row: 0 },
+        Spec { key: "gpu", title: "GPU", sizes: &RING, size: 1, col: 8, row: 0 },
+        Spec { key: "ram", title: "RAM", sizes: &RING, size: 1, col: 16, row: 0 },
+        Spec { key: "disk", title: "Диск", sizes: &INFO, size: 0, col: 0, row: 10 },
+        Spec { key: "net", title: "Сеть", sizes: &INFO, size: 0, col: 8, row: 10 },
+        Spec { key: "uptime", title: "Аптайм", sizes: &INFO, size: 0, col: 16, row: 10 },
+        Spec { key: "apps", title: "Топ приложений", sizes: &APPS_SIZES, size: 1, col: 24, row: 0 },
+        Spec { key: "speed", title: "Скорость сети", sizes: &SPEED_SIZES, size: 1, col: 24, row: 10 },
     ],
 };
 
@@ -431,27 +432,31 @@ impl Stats {
         let compact = size == 0;
         cv.card(r);
         let sp = &self.online.speed;
-        cv.text("Скорость сети", Rect::new(r.x + 12.0, r.y + 8.0, 90.0, 12.0), &f.small, dim());
+        let tight_y = r.h < 70.0;
+        let title_y = if tight_y { r.y + 5.0 } else { r.y + 8.0 };
+        cv.text("Скорость сети", Rect::new(r.x + 12.0, title_y, 90.0, 12.0), &f.small, dim());
         let info = if sp.at > 0 {
             let when = ago(sys::now_secs(), sp.at);
             if sp.place.is_empty() { when } else { format!("{when} • {}", sp.place) }
         } else {
             "ещё не замеряли".into()
         };
-        cv.text(&info, Rect::new(r.right() - 112.0, r.y + 8.0, 100.0, 12.0), &f.small_r, dim());
+        cv.text(&info, Rect::new(r.right() - 112.0, title_y, 100.0, 12.0), &f.small_r, dim());
         let num = |v: f32| if sp.at > 0 { format!("{:.0}", v) } else { "—".into() };
         let (d, u) = (num(sp.down), num(sp.up));
         let digits = |t: &str| if sp.at > 0 { t.chars().count() as f32 * 8.6 + 3.0 } else { 22.0 };
         let dw = digits(&d);
-        cv.text(&d, Rect::new(r.x + 12.0, r.y + 21.0, dw + 4.0, 22.0), &f.num, txt());
-        cv.text("Мбит/с ↓", Rect::new(r.x + 12.0 + dw, r.y + 28.0, 50.0, 12.0), &f.small, dim());
+        let num_y = if tight_y { r.y + 16.0 } else { r.y + 21.0 };
+        let sub_y = if tight_y { r.y + 22.0 } else { r.y + 28.0 };
+        cv.text(&d, Rect::new(r.x + 12.0, num_y, dw + 4.0, 22.0), &f.num, txt());
+        cv.text("Мбит/с ↓", Rect::new(r.x + 12.0 + dw, sub_y, 50.0, 12.0), &f.small, dim());
         let nums_w = if compact { r.w - 46.0 } else { r.w };
         let ux = r.x + 12.0 + nums_w / 2.0 - 8.0;
         let uw = digits(&u);
-        cv.text(&u, Rect::new(ux, r.y + 21.0, uw + 4.0, 22.0), &f.num, txt());
-        cv.text("Мбит/с ↑", Rect::new(ux + uw, r.y + 28.0, 50.0, 12.0), &f.small, dim());
+        cv.text(&u, Rect::new(ux, num_y, uw + 4.0, 22.0), &f.num, txt());
+        cv.text("Мбит/с ↑", Rect::new(ux + uw, sub_y, 50.0, 12.0), &f.small, dim());
         let (label, btn) = if compact {
-            (if sp.running { "…" } else { "▶" }, Rect::new(r.right() - 46.0, r.y + 21.0, 34.0, 21.0))
+            (if sp.running { "…" } else { "▶" }, Rect::new(r.right() - 44.0, num_y, 32.0, 20.0))
         } else {
             let label = if sp.running {
                 "Идёт замер…"
@@ -460,7 +465,8 @@ impl Stats {
             } else {
                 "▶ Замерить скорость"
             };
-            (label, Rect::new(r.x + 12.0, r.y + 49.0, r.w - 24.0, 21.0))
+            let (by, bh) = if tight_y { (r.y + 35.0, 18.0) } else { (r.y + 49.0, 21.0) };
+            (label, Rect::new(r.x + 12.0, by, r.w - 24.0, bh))
         };
         let bg = if sp.running { chip_bg() } else { cv.accent };
         let fg = if sp.running { dim() } else { ink() };

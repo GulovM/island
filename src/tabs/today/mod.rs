@@ -46,22 +46,23 @@ const TODO: usize = 4;
 const MONTH_W: f32 = 230.0;
 const MONTH_H: f32 = 252.0;
 
-static CLOCK_SIZES: [Size; 2] = [sz(2, 76.0), sz(2, 140.0)];
-static WEATHER_SIZES: [Size; 3] = [sz(2, 62.0), sz(2, 102.0), sz(4, 62.0)];
-static WEEK_SIZES: [Size; 4] = [sz(4, 76.0), sz(4, 122.0), sz(6, 122.0), sz(4, 252.0)];
-static TIMER_SIZES: [Size; 3] = [sz(4, 64.0), sz(4, 120.0), sz(6, 120.0)];
-static TODO_SIZES: [Size; 3] = [sz(4, 122.0), sz(4, 252.0), sz(6, 252.0)];
+static CLOCK_SIZES: [Size; 2] = [sz(8, 6), sz(8, 10)];
+static WEATHER_SIZES: [Size; 3] = [sz(8, 4), sz(8, 6), sz(16, 4)];
+static WEEK_SIZES: [Size; 4] = [sz(16, 6), sz(16, 8), sz(24, 8), sz(16, 16)];
+static TIMER_SIZES: [Size; 3] = [sz(16, 4), sz(16, 8), sz(24, 8)];
+static TODO_SIZES: [Size; 3] = [sz(16, 8), sz(16, 16), sz(24, 16)];
 
-/// Сетка вкладки: 10 колонок по ~64 px (632 px внутри полей). Часы и погода занимают 2 колонки,
-/// неделя, таймер и задачи — по 4: исходные пропорции макета.
+/// Сетка вкладки: 40 колонок по 16 px (шаг CELL=16, зазор GAP=8), 16 рядов. Часы и погода занимают
+/// 8 колонок, неделя, таймер и задачи — по 16: исходные пропорции макета.
 pub static SPEC: TabSpec = TabSpec {
-    cols: 10,
+    cols: 40,
+    rows: 16,
     specs: &[
-        Spec { key: "clock", title: "Часы", sizes: &CLOCK_SIZES, size: 1, col: 0 },
-        Spec { key: "weather", title: "Погода", sizes: &WEATHER_SIZES, size: 1, col: 0 },
-        Spec { key: "week", title: "Эта неделя", sizes: &WEEK_SIZES, size: 1, col: 2 },
-        Spec { key: "timer", title: "Таймер", sizes: &TIMER_SIZES, size: 1, col: 2 },
-        Spec { key: "todo", title: "Задачи", sizes: &TODO_SIZES, size: 1, col: 6 },
+        Spec { key: "clock", title: "Часы", sizes: &CLOCK_SIZES, size: 1, col: 0, row: 0 },
+        Spec { key: "weather", title: "Погода", sizes: &WEATHER_SIZES, size: 1, col: 0, row: 10 },
+        Spec { key: "week", title: "Эта неделя", sizes: &WEEK_SIZES, size: 1, col: 8, row: 0 },
+        Spec { key: "timer", title: "Таймер", sizes: &TIMER_SIZES, size: 1, col: 8, row: 8 },
+        Spec { key: "todo", title: "Задачи", sizes: &TODO_SIZES, size: 1, col: 24, row: 0 },
     ],
 };
 

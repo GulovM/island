@@ -143,6 +143,16 @@ pub struct Tabs {
     grids: [grid::Grid; 3],
 }
 
+/// Фиксированные размеры вкладок без сетки и страницы настроек: (ширина, высота).
+/// Для вкладок с сеткой (Controls, Today, Stats) размеры вычисляются из `TabSpec`.
+const NON_GRID_SIZES: [(f32, f32); 5] = [
+    (590.0, 300.0), // CLIPBOARD
+    (480.0, 420.0), // APPS
+    (700.0, 236.0), // WALLPAPER
+    (420.0, 112.0), // POWER
+    (620.0, 476.0), // SETTINGS
+];
+
 impl Tabs {
     /// Загружает сохранённые данные (один раз при старте).
     pub fn load(&mut self, cfg: &Config, state: &crate::state::State) {
@@ -201,6 +211,26 @@ impl Tabs {
     /// На сколько остров выше, пока вкладку правят.
     pub fn edit_extra(&self, tab: usize) -> f32 {
         self.grids.get(tab).map_or(0.0, grid::Grid::extra)
+    }
+
+    /// Размер острова для вкладки `tab`: (ширина, высота) с учётом `edit_extra` в режиме правки.
+    /// Для вкладок с сеткой (Controls, Today, Stats) вычисляется строго из параметров сетки:
+    /// `ширина = cols * CELL - GAP + 2 * PAD`, `высота = TOP + rows * CELL - GAP + PAD`.
+    /// Для остальных вкладок берутся их фиксированные размеры.
+    pub fn island_size(&self, tab: usize) -> (f32, f32) {
+        let (w, mut h) = match tab {
+            CONTROLS | TODAY | STATS => {
+                let spec = spec_of(tab);
+                (
+                    spec.cols as f32 * layout::CELL - layout::GAP + 2.0 * PAD,
+                    TOP + spec.rows as f32 * layout::CELL - layout::GAP + PAD,
+                )
+            }
+            CLIPBOARD..=SETTINGS => NON_GRID_SIZES[tab - CLIPBOARD],
+            _ => (400.0, 200.0),
+        };
+        h += self.edit_extra(tab);
+        (w, h)
     }
 
     /// Рисует содержимое вкладки `tab` в панели размером `w`×`h` (логические пиксели).
@@ -372,5 +402,65 @@ pub fn write_bytes(name: &str, bytes: &[u8]) {
     if let Err(e) = res {
         let _ = std::fs::remove_file(&tmp);
         crate::log::error(&format!("не удалось записать {name}: {e}"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tabs::layout::Layout;
+
+    #[test]
+    fn test_island_sizes() {
+        let tabs = Tabs::default();
+
+        // Вкладки с сеткой: вычисляются строго из формулы cols*16-8+2*PAD и TOP+rows*16-8+PAD
+        // Controls: cols=24, rows=16 -> (376+28, 38+248+14) = (404.0, 300.0)
+        assert_eq!(tabs.island_size(CONTROLS), (404.0, 300.0));
+        // Today: cols=40, rows=16 -> (632+28, 38+248+14) = (660.0, 300.0)
+        assert_eq!(tabs.island_size(TODAY), (660.0, 300.0));
+        // Stats: cols=40, rows=15 -> (632+28, 38+232+14) = (660.0, 284.0)
+        assert_eq!(tabs.island_size(STATS), (660.0, 284.0));
+
+        // Вкладки без сетки:
+        assert_eq!(tabs.island_size(CLIPBOARD), (590.0, 300.0));
+        assert_eq!(tabs.island_size(APPS), (480.0, 420.0));
+        assert_eq!(tabs.island_size(WALLPAPER), (700.0, 236.0));
+        assert_eq!(tabs.island_size(POWER), (420.0, 112.0));
+        assert_eq!(tabs.island_size(SETTINGS), (620.0, 476.0));
+    }
+
+    #[test]
+    fn test_all_grid_tabs_no_overlap_and_fit() {
+        for tab in [CONTROLS, TODAY, STATS] {
+            let spec = spec_of(tab);
+            let lay = Layout::default_for(spec);
+            let placed = lay.pack(spec, 0);
+
+            // Проверяем, что все виджеты на месте
+            assert_eq!(placed.len(), spec.specs.len(), "вкладка {tab}: не все виджеты упакованы");
+
+            // Проверяем, что нет пересечений
+            for (i, a) in placed.iter().enumerate() {
+                for b in &placed[i + 1..] {
+                    let cols = a.col < b.col + b.w && b.col < a.col + a.w;
+                    let rows = a.row < b.row + b.h && b.row < a.row + a.h;
+                    assert!(
+                        !(cols && rows),
+                        "вкладка {tab}: виджеты {} ({}@{},{}) и {} ({}@{},{}) пересекаются",
+                        a.idx, spec.specs[a.idx].key, a.col, a.row,
+                        b.idx, spec.specs[b.idx].key, b.col, b.row
+                    );
+                }
+            }
+
+            // Проверяем, что все виджеты помещаются в границы сетки
+            assert!(
+                lay.fits(spec, 0, 1000.0),
+                "вкладка {tab}: виджеты выходят за границы сетки cols={}, rows={}",
+                spec.cols,
+                spec.rows
+            );
+        }
     }
 }

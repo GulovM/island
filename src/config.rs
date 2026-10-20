@@ -98,7 +98,7 @@ calendar_ics = []
 
 # Раскладка виджетов вкладок. Меняется прямо в острове: кнопка с карандашом справа в ряду вкладок
 # (рядом с шестерёнкой, или долгое нажатие на пустом месте вкладки). Пусто — раскладка по умолчанию.
-# Формат: виджеты через пробел, «-» — скрыт, «:N» — размер, «@N» — колонка, например "wifi:0@0 -night".
+# Формат: виджеты через пробел, «-» — скрыт, «:N» — размер, «@col,row» — ячейка сетки, например "wifi:0@0,0 -night". Старый формат (@col) сбрасывается к раскладке по умолчанию.
 layout_controls = ""
 layout_today = ""
 layout_stats = ""
@@ -950,13 +950,13 @@ gmail = \"https://mail.google.com\"
     fn layout_keys_parse_and_save() {
         assert_eq!(Config::default().layouts, [String::new(), String::new(), String::new()]);
         assert_eq!(parse(DEFAULT_TEMPLATE).layouts, Config::default().layouts);
-        let c = parse("layout_controls = \"-wifi night:1@2\"\nlayout_today = \"clock\"\nlayout_stats = \"\"\n");
-        assert_eq!(c.layouts[0], "-wifi night:1@2");
+        let c = parse("layout_controls = \"-wifi night:1@0,1\"\nlayout_today = \"clock\"\nlayout_stats = \"\"\n");
+        assert_eq!(c.layouts[0], "-wifi night:1@0,1");
         assert_eq!(c.layouts[1], "clock");
         assert_eq!(c.layouts[2], "");
         // Запись в шаблон и обратное чтение.
-        let out = set_keys(DEFAULT_TEMPLATE, &[("layout_today", fmt_str("-todo clock:2@1"))]);
-        assert_eq!(parse(&out).layouts[1], "-todo clock:2@1");
+        let out = set_keys(DEFAULT_TEMPLATE, &[("layout_today", fmt_str("-todo clock:1@0,0"))]);
+        assert_eq!(parse(&out).layouts[1], "-todo clock:1@0,0");
         assert_eq!(out.matches("layout_today").count(), 1, "ключ заменён, а не продублирован");
     }
 

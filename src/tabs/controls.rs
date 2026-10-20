@@ -31,24 +31,24 @@ const MEDIA: usize = 7;
 /// Высота выпадающего списка устройств.
 const LIST_H: f32 = 116.0;
 
-static TILE: [Size; 4] = [sz(1, 40.0), sz(2, 40.0), sz(3, 40.0), sz(6, 40.0)];
-static SLIDER: [Size; 2] = [sz(3, 24.0), sz(6, 24.0)];
-static PLAYER: [Size; 3] = [sz(6, 56.0), sz(3, 90.0), sz(6, 90.0)];
+static TILE: [Size; 4] = [sz(4, 3), sz(8, 3), sz(12, 3), sz(24, 3)];
+static SLIDER: [Size; 2] = [sz(12, 2), sz(24, 2)];
+static PLAYER: [Size; 3] = [sz(24, 4), sz(12, 6), sz(24, 6)];
 
-/// Сетка вкладки: 6 колонок по ~59 px (402 px внутри полей); плитки по умолчанию занимают 2 или 3
-/// колонки, как в исходной раскладке. Колонок шесть, а не четыре, потому что 402 px не делятся на
-/// четыре «красивых» ширины плиток 127 и 196 px.
+/// Сетка вкладки: 24 колонки по 16 px (шаг CELL=16, зазор GAP=8), 16 рядов. Плитки по умолчанию занимают
+/// 8 ячеек (1/3 ширины) или 12 ячеек (1/2 ширины) при высоте 3 ячейки (40 px).
 pub static SPEC: TabSpec = TabSpec {
-    cols: 6,
+    cols: 24,
+    rows: 16,
     specs: &[
-        Spec { key: "wifi", title: "Wi-Fi", sizes: &TILE, size: 1, col: 0 },
-        Spec { key: "bluetooth", title: "Bluetooth", sizes: &TILE, size: 1, col: 2 },
-        Spec { key: "audio", title: "Аудио", sizes: &TILE, size: 1, col: 4 },
-        Spec { key: "night", title: "Ночной свет", sizes: &TILE, size: 2, col: 0 },
-        Spec { key: "dark", title: "Тёмная тема", sizes: &TILE, size: 2, col: 3 },
-        Spec { key: "volume", title: "Громкость", sizes: &SLIDER, size: 1, col: 0 },
-        Spec { key: "brightness", title: "Яркость", sizes: &SLIDER, size: 1, col: 0 },
-        Spec { key: "media", title: "Плеер", sizes: &PLAYER, size: 2, col: 0 },
+        Spec { key: "wifi", title: "Wi-Fi", sizes: &TILE, size: 1, col: 0, row: 0 },
+        Spec { key: "bluetooth", title: "Bluetooth", sizes: &TILE, size: 1, col: 8, row: 0 },
+        Spec { key: "audio", title: "Аудио", sizes: &TILE, size: 1, col: 16, row: 0 },
+        Spec { key: "night", title: "Ночной свет", sizes: &TILE, size: 2, col: 0, row: 3 },
+        Spec { key: "dark", title: "Тёмная тема", sizes: &TILE, size: 2, col: 12, row: 3 },
+        Spec { key: "volume", title: "Громкость", sizes: &SLIDER, size: 1, col: 0, row: 6 },
+        Spec { key: "brightness", title: "Яркость", sizes: &SLIDER, size: 1, col: 0, row: 14 },
+        Spec { key: "media", title: "Плеер", sizes: &PLAYER, size: 2, col: 0, row: 8 },
     ],
 };
 
@@ -805,5 +805,43 @@ mod tests {
     fn seek_relative_invalid_inputs() {
         assert_eq!(seek_relative(10.0, 10.0, 0.0, 0.0, 0.0), 0.0);
         assert_eq!(seek_relative(10.0, 10.0, -50.0, 0.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn controls_default_layout_and_device_list_fit() {
+        use crate::tabs::layout::{CELL, GAP, Layout};
+        let lay = Layout::default_for(&SPEC);
+        let p = lay.pack(&SPEC, 0);
+        assert_eq!(p.len(), 8);
+
+        // Проверяем отсутствие пересечений
+        for (i, a) in p.iter().enumerate() {
+            for b in &p[i + 1..] {
+                let cols = a.col < b.col + b.w && b.col < a.col + a.w;
+                let rows = a.row < b.row + b.h && b.row < a.row + a.h;
+                assert!(!(cols && rows), "виджеты {} и {} пересекаются", a.idx, b.idx);
+            }
+        }
+
+        // Проверяем размеры плитки: 8 ячеек = 120 px ширина, 3 ячейки = 40 px высота
+        let wifi = lay.entry(WIFI).unwrap();
+        let wifi_sz = SPEC.specs[WIFI].sizes[wifi.size];
+        assert_eq!(wifi_sz.pixel_w(), 120.0);
+        assert_eq!(wifi_sz.pixel_h(), 40.0);
+
+        // Проверяем выпадающий список устройств: LIST_H=116 px
+        // Низ самой нижней плитки (Night/Dark): row 3 + h 3 = row 6 -> y = 6 * 16 = 96 px.
+        // y + GAP = 96.0 + 8.0 = 104.0 px (или от area.y).
+        // Высота области сетки: 16 * 16 - 8 = 248 px.
+        let low_tiles = 6.0 * CELL; // row 6 top / row 3 bottom
+        let list_top = low_tiles + GAP;
+        let list_bottom = list_top + LIST_H;
+        let area_h = SPEC.rows as f32 * CELL - GAP;
+        assert!(
+            list_bottom <= area_h,
+            "список устройств не помещается: bottom {} > area_h {}",
+            list_bottom,
+            area_h
+        );
     }
 }

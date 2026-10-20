@@ -45,12 +45,12 @@ impl App {
         let base_h = collapsed_h * s;
         // Эталон раскрытия — самая маленькая вкладка: размер текущей менялся бы при смене вкладки,
         // и содержимое с размытием мигали бы на каждом переключении.
-        let content_h = TAB_SIZES.iter().map(|t| t.1).fold(f32::MAX, f32::min) * s;
+        let content_h = (0..=tabs::SETTINGS).map(|t| tabs.island_size(t).1).fold(f32::MAX, f32::min) * s;
         let span_h = (content_h - base_h).max(1.0);
         let h_prog = ((ah - base_h) / span_h).clamp(0.0, 1.0);
 
         let base_w = self.collapsed().0 * s;
-        let content_w = TAB_SIZES.iter().map(|t| t.0).fold(f32::MAX, f32::min).max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT) * s;
+        let content_w = (0..=tabs::SETTINGS).map(|t| tabs.island_size(t).0).fold(f32::MAX, f32::min).max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT) * s;
         let span_w = (content_w - base_w).max(1.0);
         let w_prog = ((aw - base_w) / span_w).clamp(0.0, 1.0);
 
@@ -310,7 +310,7 @@ impl App {
                 if alpha < 0.01 {
                     return;
                 }
-                let (w, h) = (self.tab_w(id), App::tab_h(id));
+                let (w, h) = (self.tab_w(id), self.tab_h(id));
                 let ox = centre - w / 2.0 + dx;
                 g.dc.SetTransform(&ui::matrix(s, ox * s, 0.0));
                 ui.begin_content(ox, interactive);

@@ -371,15 +371,14 @@ impl App {
         self.save_pending = true;
     }
 
-    /// Ширина панели вкладки: не уже ряда вкладок, иначе они обрезаются.
-    /// Высота панели вкладки: у «Управления» прибавляется полоска яркости, если она поддерживается.
-    pub(crate) fn tab_h(id: usize) -> f32 {
-        let extra = if id == tabs::CONTROLS && bright::available() { 34.0 } else { 0.0 };
-        TAB_SIZES[id].1 + extra
+    /// Высота панели вкладки: берётся через `Tabs::island_size`.
+    pub(crate) fn tab_h(&self, id: usize) -> f32 {
+        self.tabs.island_size(id).1
     }
 
+    /// Ширина панели вкладки: не уже ряда вкладок, иначе они обрезаются.
     pub(crate) fn tab_w(&self, id: usize) -> f32 {
-        TAB_SIZES[id].0.max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT)
+        self.tabs.island_size(id).0.max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT)
     }
 
     /// Применяет язык из конфига: подписи вкладок меняют ширину, поэтому ряд измеряется заново.

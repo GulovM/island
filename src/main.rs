@@ -66,17 +66,6 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 pub(crate) const TAB_COUNT: usize = 7;
 pub(crate) const TABS: [&str; TAB_COUNT] = ["Controls", "Today", "Stats", "Clipboard", "Apps", "Wallpaper", "Power"];
-/// Размер панели для каждой вкладки (ширина, высота) — как на скриншотах; последний — страница настроек.
-pub(crate) const TAB_SIZES: [(f32, f32); 8] = [
-    (430.0, 282.0),
-    (660.0, 304.0),
-    (640.0, 282.0),
-    (590.0, 300.0),
-    (480.0, 420.0),
-    (700.0, 236.0),
-    (420.0, 112.0),
-    (620.0, 476.0),
-];
 /// Высота «тонкой полоски», в которую остров сворачивается поверх развёрнутого на весь экран окна.
 pub(crate) const STRIP_H: f32 = 3.0;
 pub(crate) const TAB_H: f32 = 17.0;
