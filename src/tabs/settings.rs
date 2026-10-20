@@ -36,6 +36,7 @@ const N_LANG: u32 = 13;
 const N_AUTOUPDATE: u32 = 16;
 const N_UPDATE: u32 = 17;
 const N_GLASS: u32 = 18;
+#[allow(dead_code)] // слайдер скрыт, пока стекло на доработке; номер зарезервирован
 const N_OPACITY: u32 = 19;
 /// Занимает шесть номеров подряд (20–25) — по числу `PRESETS`.
 const N_PRESET: u32 = 20;
