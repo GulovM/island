@@ -27,6 +27,7 @@ mod window;
 mod wnd;
 mod we;
 mod update;
+mod state;
 mod app;
 
 pub use app::{App, HotZone};
@@ -177,7 +178,17 @@ fn run() -> Result<()> {
     }
     i18n::set(i18n::from_config(&cfg.language));
     log::info("запуск");
-    let mut app = App::new(cfg)?;
+    let state = state::load();
+    let now = sys::now_secs();
+    let weather_fresh = state.weather.time > 0 && now.saturating_sub(state.weather.time) < 24 * 3600;
+    if weather_fresh
+        && !state.weather.city.is_empty()
+        && (cfg.weather_city.is_empty() || cfg.weather_city.eq_ignore_ascii_case(&state.weather.city))
+    {
+        online::init_cached_weather(state.weather.temp, state.weather.code, state.weather.city.clone());
+    }
+    online::init_cached_calendar(&cfg.calendar_ics);
+    let mut app = App::new(cfg, &state)?;
     let mut last = Instant::now();
     let mut dirty = true;
     let mut perf = perf::Perf::new();
@@ -189,7 +200,7 @@ fn run() -> Result<()> {
         // Мини-плееру нужно знать о музыке и при свёрнутом острове: подписка на события сессии.
         bg::send(bg::Cmd::Media);
         let cfg = app.cfg.clone();
-        app.tabs.load(&cfg);
+        app.tabs.load(&cfg, &state);
         if let Err(e) = AddClipboardFormatListener(app.hwnd) {
             log::error(&format!("не удалось подписаться на буфер обмена: {e}"));
         }
@@ -296,6 +307,7 @@ fn run() -> Result<()> {
         if app.save_pending {
             config::save(&app.cfg, &TABS);
         }
+        state::flush();
         for h in hooks {
             let _ = UnhookWinEvent(h);
         }

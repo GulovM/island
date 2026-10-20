@@ -151,6 +151,10 @@ fn scan(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 impl Wall {
+    pub fn load(&mut self, filter: usize) {
+        self.filter = filter.min(WE);
+    }
+
     pub fn configure(&mut self, cfg: &Config) {
         if self.cfg_dir != cfg.wallpaper_dir {
             self.cfg_dir = cfg.wallpaper_dir.clone();
@@ -337,6 +341,7 @@ impl Wall {
             let bw = name.chars().count() as f32 * 5.0 + 16.0;
             if ui.chip(cv, id(WALLPAPER, 1 + i as u32), Rect::new(x, y, bw, 17.0), name, self.filter == filt) && self.filter != filt {
                 self.filter = filt;
+                crate::state::set_wallpaper_filter(self.filter);
                 self.offset.target = 0.0;
                 // Переход между папкой и WE пересобирает список (миниатюры берутся из кэша на диске).
                 self.show();

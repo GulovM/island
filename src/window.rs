@@ -149,6 +149,7 @@ impl App {
             self.apply_theme();
         }
         if !expanded {
+            crate::state::flush();
             self.trim_pending = true;
             self.ui.blur();
             self.sync_focus();

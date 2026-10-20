@@ -268,7 +268,15 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             LRESULT(0)
         }
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_QUERYENDSESSION => LRESULT(1),
+        WM_ENDSESSION => {
+            if wp.0 != 0 {
+                crate::state::flush();
+            }
+            LRESULT(0)
+        }
         WM_DESTROY => {
+            crate::state::flush();
             PostQuitMessage(0);
             LRESULT(0)
         }

@@ -245,3 +245,28 @@ impl Today {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_todo_lines() {
+        let lines = [
+            "0|Купить молоко".to_string(),
+            "1|Сдать отчёт".to_string(),
+            "invalid_line".to_string(),
+            "".to_string(),
+        ];
+        let items: Vec<(bool, String)> = lines
+            .iter()
+            .filter_map(|l| l.split_once('|'))
+            .map(|(d, t)| (d == "1", t.to_string()))
+            .take(MAX_TODO)
+            .collect();
+        assert_eq!(items, vec![
+            (false, "Купить молоко".to_string()),
+            (true, "Сдать отчёт".to_string()),
+        ]);
+    }
+}

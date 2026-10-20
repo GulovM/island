@@ -102,7 +102,7 @@ pub struct App {
 }
 
 impl App {
-    pub(crate) fn new(cfg: Config) -> Result<Self> {
+    pub(crate) fn new(cfg: Config, state: &crate::state::State) -> Result<Self> {
         unsafe {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -178,6 +178,11 @@ impl App {
             let gfx = Gfx::new(hwnd, cw, ch, scale, &dwrite)?;
             let tab_widths = measure_tabs(&dwrite, scale)?;
             let order = cfg.resolve_visible(&TABS);
+            let initial_tab = if !state.last_tab.is_empty() {
+                order.iter().position(|&idx| TABS[idx].eq_ignore_ascii_case(&state.last_tab)).unwrap_or(0)
+            } else {
+                0
+            };
 
             let icon = sys::make_icon(hinst, cfg.accent)
                 .or_else(|| LoadIconW(None, IDI_APPLICATION).ok());
@@ -208,7 +213,7 @@ impl App {
                 leave_armed: false,
                 trim_pending: true,
                 rgn: (-1, -1, -1),
-                tab: 0,
+                tab: initial_tab,
                 settings_open: false,
                 glow: Spring::unit(0.0, 220.0, 26.0),
                 face: face::Face::new(cfg.idle_face),

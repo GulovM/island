@@ -159,6 +159,10 @@ pub(super) fn ft(f: FILETIME) -> u64 {
 }
 
 impl Stats {
+    pub fn load(&mut self, top_by_cpu: bool) {
+        self.top_by_cpu = top_by_cpu;
+    }
+
     pub fn show(&mut self) -> bool {
         // Первая выборка «с нуля»: нагрузка и скорость считаются между двумя опросами.
         self.prev_cpu = None;
@@ -384,6 +388,7 @@ impl Stats {
         cv.text(other, sw, &f.body_r, cv.accent);
         if clicked {
             self.top_by_cpu = !self.top_by_cpu;
+            crate::state::set_stats_top_by_cpu(self.top_by_cpu);
         }
         let list = if self.top_by_cpu { &self.heavy.top_cpu } else { &self.heavy.top_ram };
         let max = list.first().map(|x| x.1).unwrap_or(0.0).max(1e-9);

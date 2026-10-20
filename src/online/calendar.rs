@@ -8,6 +8,84 @@ use super::http::get_text;
 use super::{spawn, stale, with, RETRY_AFTER};
 
 const CALENDAR_TTL: Duration = Duration::from_secs(5 * 60);
+const CALENDAR_CACHE_FILE: &str = "calendar_cache.ics";
+
+fn hash_url(url: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    url.trim().hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+
+/// Упаковывает кэш календаря: заголовок с хэшем ссылки и шифрование через DPAPI (`sys::seal`).
+fn pack_cached_calendar(url: &str, ics: &str) -> Option<Vec<u8>> {
+    let url = url.trim();
+    if url.is_empty() {
+        return None;
+    }
+    let header = format!("URL_HASH:{}\n", hash_url(url));
+    let mut payload = Vec::with_capacity(header.len() + ics.len());
+    payload.extend_from_slice(header.as_bytes());
+    payload.extend_from_slice(ics.as_bytes());
+    crate::sys::seal(&payload)
+}
+
+/// Расшифровывает кэш календаря и проверяет соответствие хэша ссылки.
+/// Возвращает `None` при битом кэше, несовпадении ссылки или пустом URL (без паник).
+fn unpack_cached_calendar(url: &str, bytes: &[u8]) -> Option<String> {
+    let url = url.trim();
+    if url.is_empty() || bytes.is_empty() {
+        return None;
+    }
+    let unsealed = crate::sys::unseal(bytes)?;
+    let text = String::from_utf8_lossy(&unsealed);
+    let (header, ics) = text.split_once('\n')?;
+    let hash = header.trim().strip_prefix("URL_HASH:")?;
+    if hash != hash_url(url) {
+        return None;
+    }
+    Some(ics.to_string())
+}
+
+fn save_cached_calendar(url: &str, ics: &str) {
+    let Some(sealed) = pack_cached_calendar(url, ics) else {
+        log::error("DPAPI недоступен или пустая ссылка, кэш календаря не сохранён");
+        return;
+    };
+    crate::tabs::write_bytes(CALENDAR_CACHE_FILE, &sealed);
+}
+
+fn load_cached_calendar(url: &str) -> Option<String> {
+    if url.trim().is_empty() {
+        return None;
+    }
+    let p = crate::sys::data_dir().join(CALENDAR_CACHE_FILE);
+    let bytes = std::fs::read(&p).ok()?;
+    unpack_cached_calendar(url, &bytes)
+}
+
+/// Инициализирует снимок календаря сохранённым зашифрованным кэшем с диска (до первого сетевого ответа).
+/// При пустой ссылке (календарь отключён) или несовпадении хэша кэш не используется.
+pub fn init_cached_calendar(url: &str) {
+    let url = url.trim();
+    if url.is_empty() {
+        return;
+    }
+    if let Some(ics) = load_cached_calendar(url) {
+        let raws = parse_ics(&ics, SYSTEM_TZ);
+        if !raws.is_empty() {
+            with(|s| {
+                if s.snap.cal.is_empty() {
+                    s.snap.cal = Arc::new(raws);
+                    s.snap.cal_ver = 1;
+                    s.snap.calendar_set = true;
+                    s.cal_key = url.to_string();
+                }
+            });
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Event {
@@ -70,7 +148,10 @@ pub fn refresh_calendar_age(url: &str, max_age: Duration) {
         return;
     }
     spawn("island-calendar", move || {
-        let r = get_text(&url).map(|ics| parse_ics(&ics, SYSTEM_TZ));
+        let r = get_text(&url).map(|ics| {
+            save_cached_calendar(&url, &ics);
+            parse_ics(&ics, SYSTEM_TZ)
+        });
         with(|s| {
             s.cal_busy = false;
             s.cal_key = url.clone();
@@ -423,5 +504,34 @@ END:VEVENT
 ");
         assert!(next_event(&monthly(2), now, 0).is_none());
         assert_eq!(next_event(&monthly(3), now, 0).unwrap().start, at(2026, 11, 1, 10, 0));
+    }
+
+    #[test]
+    fn calendar_cache_sealing_and_url_binding() {
+        let url = "https://calendar.google.com/calendar/ical/test%40gmail.com/private-1234/basic.ics";
+        let other_url = "https://calendar.google.com/calendar/ical/other%40gmail.com/private-5678/basic.ics";
+        let ics = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Приватная встреча\nEND:VEVENT\nEND:VCALENDAR";
+
+        let sealed = pack_cached_calendar(url, ics).expect("seal");
+        assert!(crate::sys::is_sealed(&sealed));
+
+        // При совпадении ссылки кэш успешно расшифровывается и отдаёт оригинальный ICS.
+        let unpacked = unpack_cached_calendar(url, &sealed);
+        assert_eq!(unpacked.as_deref(), Some(ics));
+
+        // При смене ссылки кэш игнорируется (защита от показа чужого кэша).
+        assert_eq!(unpack_cached_calendar(other_url, &sealed), None);
+
+        // При пустой ссылке (календарь отключён) кэш не используется.
+        assert_eq!(unpack_cached_calendar("", &sealed), None);
+        assert_eq!(unpack_cached_calendar("   ", &sealed), None);
+
+        // Повреждённые байты и мусор не приводят к панике и игнорируются.
+        assert_eq!(unpack_cached_calendar(url, b"ISL1corruptedgarbage"), None);
+        assert_eq!(unpack_cached_calendar(url, b"random bytes"), None);
+        assert_eq!(unpack_cached_calendar(url, b""), None);
+
+        // Старый незашифрованный ICS без заголовка с хэшем ссылки игнорируется.
+        assert_eq!(unpack_cached_calendar(url, ics.as_bytes()), None);
     }
 }

@@ -15,6 +15,20 @@ pub struct Weather {
     pub city: String,
 }
 
+/// Инициализирует снимок погоды сохранённым кэшем (до первого сетевого ответа).
+pub fn init_cached_weather(temp: f32, code: i32, city: String) {
+    if city.is_empty() {
+        return;
+    }
+    with(|s| {
+        if s.snap.weather.is_none() {
+            s.snap.weather = Some(Weather { temp, code, city: city.clone() });
+            s.weather_key = city;
+            s.snap.weather_note = None;
+        }
+    });
+}
+
 /// Обновляет погоду, если она устарела или сменился город. Пустой город — место определяется по IP.
 pub fn refresh_weather(city: &str) {
     let city = city.trim().to_string();
@@ -43,6 +57,7 @@ pub fn refresh_weather(city: &str) {
             s.weather_key = city.clone();
             match r {
                 Ok(w) => {
+                    crate::state::save_weather(w.temp, w.code, &w.city);
                     s.snap.weather = Some(w);
                     s.snap.weather_note = None;
                     s.weather_at = Some(Instant::now());

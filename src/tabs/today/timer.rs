@@ -14,6 +14,52 @@ fn parse_num(s: &str) -> u32 {
 }
 
 impl Today {
+    pub(super) fn save_timer(&self) {
+        let finish = self.deadline.map(|d| {
+            let rem = d.saturating_duration_since(Instant::now()).as_secs();
+            crate::sys::now_secs().saturating_add(rem)
+        }).unwrap_or(0);
+        crate::state::set_timer(crate::state::TimerState {
+            duration: self.total.as_secs(),
+            left: self.left.as_secs(),
+            finish,
+            preset: self.preset,
+            sound: self.sound,
+        });
+    }
+
+    pub fn load_timer(&mut self, state: &crate::state::State) {
+        let now_unix = crate::sys::now_secs();
+        let duration = state.timer.duration.max(1);
+        self.total = Duration::from_secs(duration);
+        self.preset = state.timer.preset;
+        self.sound = state.timer.sound;
+
+        let finish = state.timer.finish;
+        if finish > 0 {
+            if now_unix < finish {
+                let rem = Duration::from_secs(finish - now_unix);
+                self.left = rem;
+                self.deadline = Some(Instant::now() + rem);
+                self.fired = false;
+            } else {
+                self.left = self.total;
+                self.deadline = None;
+                self.fired = true;
+            }
+        } else {
+            let left = state.timer.left.min(duration).max(1);
+            self.left = Duration::from_secs(left);
+            self.deadline = None;
+            self.fired = false;
+        }
+
+        let total_secs = self.total.as_secs() as u32;
+        self.hours = total_secs / 3600;
+        self.minutes = total_secs / 60 % 60;
+        self.seconds = total_secs % 60;
+    }
+
     fn remaining(&self) -> Duration {
         match self.deadline {
             Some(d) => d.saturating_duration_since(Instant::now()),
@@ -30,6 +76,7 @@ impl Today {
             }
             self.deadline = Some(Instant::now() + self.left);
         }
+        self.save_timer();
     }
 
     /// Новое время таймера (останавливает его).
@@ -49,6 +96,7 @@ impl Today {
         self.total = Duration::from_secs(u64::from(total));
         self.left = self.total;
         self.deadline = None;
+        self.save_timer();
     }
 
     pub(super) fn set_preset(&mut self, i: usize) {
@@ -106,6 +154,7 @@ impl Today {
         cv.text(&label, Rect::new(cx - 24.0, cy - 8.0, 48.0, 16.0), &f.body_c, txt());
         if ui.icon_button(cv, id(TODAY, 21), Rect::new(tm.x + ox + 5.0, tm.y + 5.0, 16.0, 16.0), icon::RINGER, self.sound) {
             self.sound = !self.sound;
+            self.save_timer();
         }
 
         if compact {
@@ -118,6 +167,7 @@ impl Today {
             if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + 74.0, by, 68.0, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
                 self.left = self.total;
                 self.deadline = None;
+                self.save_timer();
             }
             return;
         }
@@ -159,6 +209,7 @@ impl Today {
         if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + 74.0, tm.y + 76.0, 68.0, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
             self.left = self.total;
             self.deadline = None;
+            self.save_timer();
         }
     }
 }
@@ -223,5 +274,73 @@ mod tests {
         assert_eq!(t.left, t.total);
         assert!(t.take_fired());
         assert!(!t.take_fired());
+    }
+
+    #[test]
+    fn timer_load_active_countdown() {
+        let mut t = Today::default();
+        let now = crate::sys::now_secs();
+        let state = crate::state::State {
+            timer: crate::state::TimerState {
+                duration: 600,
+                left: 300,
+                finish: now + 200,
+                preset: Some(2),
+                sound: false,
+            },
+            ..Default::default()
+        };
+        t.load_timer(&state);
+        assert!(t.deadline.is_some());
+        assert!(!t.fired);
+        assert!(!t.take_fired());
+        assert!(!t.sound);
+        assert_eq!(t.preset, Some(2));
+        assert_eq!(t.total, Duration::from_secs(600));
+        assert!(t.remaining() <= Duration::from_secs(200) && t.remaining() > Duration::from_secs(195));
+    }
+
+    #[test]
+    fn timer_load_expired_shows_fired_once() {
+        let mut t = Today::default();
+        let now = crate::sys::now_secs();
+        let state = crate::state::State {
+            timer: crate::state::TimerState {
+                duration: 300,
+                left: 100,
+                finish: now.saturating_sub(60), // закончился 60 секунд назад
+                preset: Some(1),
+                sound: true,
+            },
+            ..Default::default()
+        };
+        t.load_timer(&state);
+        assert!(t.deadline.is_none());
+        assert_eq!(t.left, Duration::from_secs(300));
+        assert!(t.take_fired());
+        assert!(!t.take_fired());
+    }
+
+    #[test]
+    fn timer_load_paused() {
+        let mut t = Today::default();
+        let state = crate::state::State {
+            timer: crate::state::TimerState {
+                duration: 900,
+                left: 450,
+                finish: 0,
+                preset: None,
+                sound: true,
+            },
+            ..Default::default()
+        };
+        t.load_timer(&state);
+        assert!(t.deadline.is_none());
+        assert!(!t.fired);
+        assert!(!t.take_fired());
+        assert_eq!(t.total, Duration::from_secs(900));
+        assert_eq!(t.left, Duration::from_secs(450));
+        assert_eq!(t.preset, None);
+        assert_eq!((t.hours, t.minutes, t.seconds), (0, 15, 0));
     }
 }

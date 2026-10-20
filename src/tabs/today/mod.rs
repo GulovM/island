@@ -159,7 +159,6 @@ impl Default for Today {
 }
 
 impl Today {
-
     pub fn configure(&mut self, cfg: &Config) {
         self.city = cfg.weather_city.clone();
         self.ics = cfg.calendar_ics.clone();
@@ -227,6 +226,7 @@ impl Today {
             if self.sound {
                 play_alarm();
             }
+            self.save_timer();
         }
         // Проверки «устарело ли» дешёвые: сеть дёргается раз в 15–20 минут.
         online::refresh_weather(&self.city);

@@ -11,6 +11,9 @@ impl App {
         self.tab = i;
         self.settings_open = false;
         self.ui.blur();
+        if let Some(&id) = self.order.get(i) {
+            crate::state::set_last_tab(TABS[id]);
+        }
         // В буфере обмена клавиатура сразу управляет списком: фокус в поиске.
         if self.order.get(i) == Some(&tabs::CLIPBOARD) {
             self.ui.focus = Some(tabs::id(tabs::CLIPBOARD, 0));

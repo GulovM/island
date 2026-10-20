@@ -145,10 +145,13 @@ pub struct Tabs {
 
 impl Tabs {
     /// Загружает сохранённые данные (один раз при старте).
-    pub fn load(&mut self, cfg: &Config) {
+    pub fn load(&mut self, cfg: &Config, state: &crate::state::State) {
         self.today.load();
+        self.today.load_timer(state);
         self.today.configure(cfg);
-        self.clip.load();
+        self.clip.load(state.clipboard_paused);
+        self.stats.load(state.stats_top_by_cpu);
+        self.wall.load(state.wallpaper_filter);
         self.apps.configure(cfg);
         self.wall.configure(cfg);
         for (tab, g) in self.grids.iter_mut().enumerate() {
