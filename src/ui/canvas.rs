@@ -6,7 +6,7 @@ use windows::Win32::Graphics::DirectWrite::*;
 use windows_numerics::Matrix3x2;
 
 use crate::gfx::Gfx;
-use super::color::{card, chip_bg, dim, hairline, track, txt};
+use super::color::{bare, card, chip_bg, hairline, track, txt};
 use super::fonts::{cover_transform, ellipsize_units};
 use super::geom::{pt, Rect};
 
@@ -163,7 +163,8 @@ impl Canvas<'_> {
         self.rr(k, 3.5, chip_bg());
         self.text(key, k, &self.g.fonts.small_c, txt());
         let lw = self.text_w(label, &self.g.fonts.small) + 4.0;
-        self.text(label, Rect::new(k.right() + 4.0, cy - 7.0, lw + 10.0, 14.0), &self.g.fonts.small, dim());
+        // Подпись без плашки, прямо на теле острова.
+        self.text(label, Rect::new(k.right() + 4.0, cy - 7.0, lw + 10.0, 14.0), &self.g.fonts.small, bare());
         kw + 4.0 + lw
     }
 

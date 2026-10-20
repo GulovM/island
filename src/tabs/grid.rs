@@ -739,7 +739,7 @@ impl Grid {
             return;
         }
         if self.editing {
-            ecv.text(&tr("Верните их из списка внизу"), Rect::new(area.x, cy + 4.0, area.w, 14.0), &f.small_c, ui::dim());
+            ecv.text(&tr("Верните их из списка внизу"), Rect::new(area.x, cy + 4.0, area.w, 14.0), &f.small_c, ui::bare());
         } else if ui.solid_button(&ecv, self.bid(0x60), Rect::new(area.cx() - 46.0, cy + 6.0, 92.0, 22.0), &tr("Настроить"), ui::chip_bg(), ui::txt(), 11.0) {
             self.begin_edit();
         }

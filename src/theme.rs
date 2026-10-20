@@ -217,6 +217,20 @@ mod tests {
     }
 
     #[test]
+    fn pill_is_darker_in_light_theme_and_lighter_in_dark_theme() {
+        // Тёмная тема: капля светлее фона острова.
+        let dark = derive(DEFAULT_BG, DEFAULT_ACCENT);
+        assert!(!is_light(DEFAULT_BG));
+        assert!(luminance([dark.pill.r, dark.pill.g, dark.pill.b]) > luminance(DEFAULT_BG));
+
+        // Светлая тема: капля темнее фона острова.
+        let light_bg = [0.95, 0.95, 0.96];
+        let light = derive(light_bg, DEFAULT_ACCENT);
+        assert!(is_light(light_bg));
+        assert!(luminance([light.pill.r, light.pill.g, light.pill.b]) < luminance(light_bg));
+    }
+
+    #[test]
     fn glass_tokens_are_sane_on_any_background() {
         for bg in [DEFAULT_BG, [0.95, 0.95, 0.96], [0.8, 0.1, 0.1], [0.1, 0.2, 0.9], [0.1, 0.6, 0.2], [0.5, 0.5, 0.5]] {
             let p = derive(bg, DEFAULT_ACCENT);

@@ -163,7 +163,8 @@ impl App {
                 true
             }
             Ev::SysColors => {
-                // «Эффекты прозрачности» перечитываем здесь же: отдельного события для них нет.
+                // «Эффекты прозрачности» перечитываем здесь же: отдельного события для них нет. При смене
+                // нужен кадр: он покажет или спрячет подложку (`apply_blur`) и пересчитает альфу тела.
                 let t = sys::transparency_enabled();
                 let flipped = std::mem::replace(&mut self.transparency, t) != t;
                 (self.cfg.system_colors && self.apply_theme()) || flipped

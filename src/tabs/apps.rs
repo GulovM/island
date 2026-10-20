@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::config::Config;
 use crate::icons;
 use crate::sys;
-use crate::ui::{icon, mix, Canvas, Nav, Rect, Submit, Ui, card, dim, fg, txt};
+use crate::ui::{icon, mix, Canvas, Nav, Rect, Submit, Ui, bare, card, fg, txt};
 
 use super::{id, read_lines, write_lines, Action, APPS, PAD, TOP};
 
@@ -354,7 +354,7 @@ impl Apps {
                 continue;
             }
             if let Some(title) = head {
-                cv.text(title, Rect::new(view.x + 6.0, yy + 4.0, view.w, 12.0), &f.caps, dim());
+                cv.text(title, Rect::new(view.x + 6.0, yy + 4.0, view.w, 12.0), &f.caps, bare());
                 continue;
             }
             let (it, _) = items[p];
@@ -415,7 +415,7 @@ impl Apps {
         ui.scroll_end(cv, sid);
         if items.is_empty() {
             let msg = if self.entries.is_empty() { "Ярлыки меню «Пуск» не найдены" } else { "Ничего не найдено" };
-            cv.text(msg, Rect::new(view.x + 6.0, view.y + 6.0, view.w, 18.0), &f.small, dim());
+            cv.text(msg, Rect::new(view.x + 6.0, view.y + 6.0, view.w, 18.0), &f.small, bare());
         }
         if let Some(i) = fav {
             self.entries[i].fav = !self.entries[i].fav;

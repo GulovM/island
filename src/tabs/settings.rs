@@ -1,8 +1,13 @@
-//! Страница настроек внутри острова (шестерёнка в ряду вкладок). Слева — цвета: переключатель
-//! «Цвет системы», готовые темы и полная палитра (квадрат насыщенности/яркости, полоса оттенка, hex);
-//! справа — радиус углов (пока ползунок тянут, остров «засвечивается» — см. `glowing`) и список
-//! вкладок: включение/выключение и порядок. Страница правит рабочую копию `Config` и отдаёт её
-//! наружу через `take_change`; применяет и сохраняет изменения главное окно.
+//! Страница настроек внутри острова (шестерёнка в ряду вкладок). Сверху — ряд чипов-разделов,
+//! под ним только настройки выбранного раздела:
+//! - «Внешний вид»: слева цвета (переключатель «Цвет системы», готовые темы, палитра — квадрат
+//!   насыщенности/яркости, полоса оттенка, hex) и радиус углов (пока ползунок тянут, остров
+//!   «засвечивается» — см. `glowing`); справа стекло, прозрачность, акцентная капля, масштаб, плашка
+//!   о выключенных «Эффектах прозрачности» Windows и «Сбросить внешний вид»;
+//! - «Вкладки»: включение/выключение и порядок;
+//! - «Система»: автозапуск, «лицо» свёрнутого острова, полоска над развёрнутыми окнами, язык, обновления.
+//! Выбранный раздел помнится до выхода из программы. Страница правит рабочую копию `Config` и отдаёт
+//! её наружу через `take_change`; применяет и сохраняет изменения главное окно.
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
@@ -32,10 +37,28 @@ const N_AUTOUPDATE: u32 = 16;
 const N_UPDATE: u32 = 17;
 const N_GLASS: u32 = 18;
 const N_OPACITY: u32 = 19;
+/// Занимает шесть номеров подряд (20–25) — по числу `PRESETS`.
 const N_PRESET: u32 = 20;
+const N_ACCENT_PILL: u32 = 26;
+/// Занимает три номера подряд (30–32) — по числу `SECTIONS`.
+const N_SECTION: u32 = 30;
+/// Три группы по номеру вкладки (+0..6): переключатель, «вверх», «вниз».
 const N_SWITCH: u32 = 40;
 const N_UP: u32 = 60;
 const N_DOWN: u32 = 80;
+
+/// Раздел страницы настроек.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Section {
+    Look,
+    Tabs,
+    System,
+}
+
+const SECTIONS: [(Section, &str); 3] = [(Section::Look, "Внешний вид"), (Section::Tabs, "Вкладки"), (Section::System, "Система")];
+
+/// Ширина левой карточки в двухколоночных разделах.
+const LEFT_W: f32 = 290.0;
 
 const ROW_H: f32 = 23.0;
 const ROW_PITCH: f32 = 26.0;
@@ -75,6 +98,8 @@ pub struct Settings {
     /// Вертикальные позиции строк вкладок по их номеру (плавная перестановка).
     rows: [Spring; 7],
     rows_ready: bool,
+    /// Выбранный раздел: помнится, пока программа работает (в конфиг не пишется).
+    section: Section,
 }
 
 impl Default for Settings {
@@ -89,8 +114,16 @@ impl Default for Settings {
             autostart: false,
             rows: std::array::from_fn(|_| Spring::new(0.0, 520.0, 38.0)),
             rows_ready: false,
+            section: Section::Look,
         }
     }
+}
+
+/// Двухколоночный раздел: левая карточка фиксированной ширины, правая — остаток.
+fn split(r: Rect) -> (Rect, Rect) {
+    let lc = Rect::new(r.x, r.y, LEFT_W, r.h);
+    let rx = lc.right() + 10.0;
+    (lc, Rect::new(rx, r.y, r.right() - rx, r.h))
 }
 
 fn col(c: Rgb) -> D2D1_COLOR_F {
@@ -144,7 +177,6 @@ impl Settings {
     pub fn glowing(&self) -> bool {
         self.glow
     }
-
     pub fn step(&mut self, dt: f32) {
         for r in &mut self.rows {
             r.step(dt);
@@ -217,6 +249,7 @@ impl Settings {
         self.cfg.corner_radius = DEFAULT_RADIUS;
         self.cfg.glass = d.glass;
         self.cfg.glass_opacity = d.glass_opacity;
+        self.cfg.accent_pill = d.accent_pill;
         self.cfg.ui_scale = DEFAULT_SCALE;
         self.scale_drag = None;
         self.cfg.hidden_tabs.clear();
@@ -235,15 +268,57 @@ impl Settings {
             self.hsv = if n[1] < 0.01 || n[2] < 0.01 { [self.hsv[0], n[1], n[2]] } else { n };
         }
 
-        let lc = Rect::new(PAD, TOP, 290.0, h - TOP - PAD);
-        let rc = Rect::new(lc.right() + 10.0, TOP, w - PAD - (lc.right() + 10.0), lc.h);
-        cv.card(lc);
-        cv.card(rc);
-        self.colors(ui, cv, lc);
-        self.right(ui, cv, rc);
+        // Разделы: ряд чипов над карточками, выбранный залит акцентом.
+        let mut cx = PAD;
+        for (k, (sec, label)) in SECTIONS.iter().enumerate() {
+            let cw = cv.text_w(label, &cv.g.fonts.small_c) + 24.0;
+            if ui.chip(cv, id(SETTINGS, N_SECTION + k as u32), Rect::new(cx, TOP, cw, 20.0), label, self.section == *sec)
+                && self.section != *sec
+            {
+                self.section = *sec;
+                // Строки вкладок встают на место без анимации из старых позиций.
+                self.rows_ready = false;
+            }
+            cx += cw + 6.0;
+        }
+        let top = TOP + 28.0;
+        let body = Rect::new(PAD, top, w - 2.0 * PAD, h - top - PAD);
+        if self.section != Section::Look {
+            self.glow = false;
+        }
+        match self.section {
+            Section::Look => {
+                let (lc, rc) = split(body);
+                cv.card(lc);
+                cv.card(rc);
+                self.colors(ui, cv, lc);
+                self.look(ui, cv, rc);
+            }
+            Section::Tabs => {
+                cv.card(body);
+                self.tab_list(ui, cv, body);
+            }
+            Section::System => {
+                let (lc, rc) = split(body);
+                cv.card(lc);
+                cv.card(rc);
+                self.behaviour(ui, cv, lc);
+                self.updates(ui, cv, rc);
+            }
+        }
+
+        // Масштаб, выбранный ползунком, применяется, когда мышь отпущена.
+        if !ui.down {
+            if let Some(v) = self.scale_drag.take() {
+                if (v - self.cfg.ui_scale).abs() > 0.001 {
+                    self.cfg.ui_scale = v;
+                    self.changed = true;
+                }
+            }
+        }
     }
 
-    // ---------- Левая карточка: цвета ----------
+    // ---------- «Внешний вид», левая карточка: цвета и радиус ----------
 
     unsafe fn colors(&mut self, ui: &mut Ui, cv: &Canvas, lc: Rect) {
         let f = &cv.g.fonts;
@@ -285,7 +360,7 @@ impl Settings {
 
         // Полная палитра. При «Цвет системы» она только показывает текущие цвета.
         let dimmed = Canvas { g: cv.g, alpha: cv.alpha * if sys { 0.4 } else { 1.0 }, accent: cv.accent };
-        let sv = Rect::new(x, y, iw, 92.0);
+        let sv = Rect::new(x, y, iw, 116.0);
         let hue_c = theme::hsv_to_rgb([self.hsv[0], 1.0, 1.0]);
         dimmed.gradient_stops(sv, 6.0, &[(0.0, WHITE), (1.0, col(hue_c))], true);
         dimmed.gradient_stops(sv, 6.0, &[(0.0, CLEAR_BLACK), (1.0, BLACK)], false);
@@ -297,7 +372,7 @@ impl Settings {
         let (mx, my) = (sv.x + sv.w * self.hsv[1], sv.y + sv.h * (1.0 - self.hsv[2]));
         dimmed.circle(mx, my, 6.2, WHITE);
         dimmed.circle(mx, my, 4.8, col(self.current()));
-        y += 100.0;
+        y += 124.0;
 
         let hue = Rect::new(x, y, iw, 12.0);
         let stops: Vec<(f32, D2D1_COLOR_F)> =
@@ -331,56 +406,7 @@ impl Settings {
         ui.text_field_ex(cv, hex_id, Rect::new(x, y, iw - 30.0, 24.0), "#RRGGBB", icon::CONTRAST, Submit::None);
         cv.circle(lc.right() - 10.0 - 11.0, y + 12.0, 10.0, chip_bg());
         cv.circle(lc.right() - 10.0 - 11.0, y + 12.0, 8.6, col(self.current()));
-        y += 32.0;
-
-        // Системное поведение.
-        cv.text("Автозапуск", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
-        let mut auto = self.autostart;
-        if ui.switch(cv, id(SETTINGS, N_AUTOSTART), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut auto, true) {
-            if !crate::sys::set_autostart(auto) {
-                crate::log::error("не удалось изменить автозапуск");
-            }
-            self.autostart = crate::sys::autostart_enabled();
-        }
-        y += 24.0;
-        cv.text("Время и Wi-Fi на свёрнутом острове", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
-        let mut face = self.cfg.idle_face;
-        if ui.switch(cv, id(SETTINGS, N_FACE), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut face, true) {
-            self.cfg.idle_face = face;
-            self.changed = true;
-        }
-        y += 24.0;
-        cv.text("Над окнами на весь экран — полоска", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
-        let mut strip = self.cfg.strip_over_maximized;
-        if ui.switch(cv, id(SETTINGS, N_STRIP), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut strip, true) {
-            self.cfg.strip_over_maximized = strip;
-            self.changed = true;
-        }
-        y += 18.0;
-        cv.text("Наведите на верхний край, чтобы раскрыть", Rect::new(x, y, iw, 13.0), &f.small, dim());
-        y += 24.0;
-
-        // Язык интерфейса: применяется сразу.
-        cv.text("Язык", Rect::new(x, y, 80.0, 18.0), &f.body, txt());
-        let langs = [("auto", "Авто", 46.0), ("ru", "RU", 34.0), ("en", "EN", 34.0)];
-        let mut cx = lc.right() - 10.0 - (46.0 + 34.0 + 34.0 + 8.0);
-        for (k, (code, label, w)) in langs.iter().enumerate() {
-            if ui.chip(cv, id(SETTINGS, N_LANG + k as u32), Rect::new(cx, y, *w, 18.0), label, self.cfg.language == *code) {
-                self.cfg.language = code.to_string();
-                self.changed = true;
-            }
-            cx += w + 4.0;
-        }
-        y += 28.0;
-
-        // Автообновление: раз в сутки остров проверяет сам и ставит найденное без вопросов.
-        cv.text("Автообновление", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
-        let mut au = self.cfg.auto_update;
-        if ui.switch(cv, id(SETTINGS, N_AUTOUPDATE), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut au, true) {
-            self.cfg.auto_update = au;
-            self.changed = true;
-        }
-        y += 28.0;
+        y += 36.0;
 
         // Радиус углов.
         cv.text("Радиус углов", Rect::new(x, y, 140.0, 13.0), &f.body, txt());
@@ -423,31 +449,35 @@ impl Settings {
         }
     }
 
-    // ---------- Правая карточка: радиус и вкладки ----------
+    // ---------- «Внешний вид», правая карточка: стекло, масштаб, сброс ----------
 
-    unsafe fn right(&mut self, ui: &mut Ui, cv: &Canvas, rc: Rect) {
+    unsafe fn look(&mut self, ui: &mut Ui, cv: &Canvas, rc: Rect) {
         let f = &cv.g.fonts;
         let x = rc.x + 10.0;
         let iw = rc.w - 20.0;
         let mut y = rc.y + 9.0;
 
-        // Стекло: выключатель и прозрачность (0 — почти прозрачное, 100 — сплошное).
-        cv.text("Стекло", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
-        let mut glass = self.cfg.glass;
-        if ui.switch(cv, id(SETTINGS, N_GLASS), Rect::new(rc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut glass, true) {
-            self.cfg.glass = glass;
-            self.changed = true;
-        }
+        // Стекло и акцентная капля: компактные переключатели в одной строке
+        cv.text("Стекло", Rect::new(x, y, 48.0, 20.0), &f.body, dim());
+        let mut glass = false;
+        ui.switch(cv, id(SETTINGS, N_GLASS), Rect::new(x + 50.0, y + 2.0, 30.0, 16.0), &mut glass, false);
+
+        let pill_x = x + 92.0;
+        let pill_sw_x = rc.right() - 40.0;
+        cv.text("Акцентная капля", Rect::new(pill_x, y, pill_sw_x - pill_x - 6.0, 20.0), &f.body, dim());
+        let mut accent_pill = self.cfg.accent_pill;
+        ui.switch(cv, id(SETTINGS, N_ACCENT_PILL), Rect::new(pill_sw_x, y + 2.0, 30.0, 16.0), &mut accent_pill, false);
         y += 24.0;
-        cv.text("Прозрачность", Rect::new(x, y, 170.0, 13.0), &f.body, if self.cfg.glass { txt() } else { dim() });
+        // Прозрачность тела: 0% — самое прозрачное из допустимого (`glass::MIN_BODY_ALPHA`), 100% — сплошное.
+        cv.text("Прозрачность", Rect::new(x, y, 170.0, 13.0), &f.body, dim());
         cv.text(&format!("{}%", self.cfg.glass_opacity.round() as i32), Rect::new(rc.right() - 70.0, y, 60.0, 13.0), &f.body_r, dim());
         y += 21.0;
-        let mut frac = self.cfg.glass_opacity / 100.0;
-        if ui.slider_thin(cv, id(SETTINGS, N_OPACITY), Rect::new(x + 6.0, y, iw - 12.0, 14.0), &mut frac) && self.cfg.glass {
-            self.cfg.glass_opacity = (frac * 100.0).round();
-            self.changed = true;
-        }
+        let frac = self.cfg.glass_opacity / 100.0;
+        let slider = Rect::new(x + 6.0, y, iw - 12.0, 14.0);
+        ui.slider_thin_disabled(cv, slider, frac);
+        let tip_on = ui.hovering(Rect::new(slider.x - 8.0, slider.y - 8.0, slider.w + 16.0, slider.h + 16.0));
         y += 28.0;
+        let tip_rect = Rect::new(slider.cx() - 55.0, slider.y - 30.0, 110.0, 22.0);
 
         // Масштаб интерфейса (шаг 0.05): применяется, когда мышь отпущена.
         let shown = self.scale_drag.unwrap_or(self.cfg.ui_scale);
@@ -460,17 +490,27 @@ impl Settings {
         if ui.slider_thin(cv, sid, Rect::new(x + 6.0, y, iw - 12.0, 14.0), &mut frac) {
             self.scale_drag = Some(snap_scale(frac, dpi));
         }
-        if !ui.down {
-            if let Some(v) = self.scale_drag.take() {
-                if (v - self.cfg.ui_scale).abs() > 0.001 {
-                    self.cfg.ui_scale = v;
-                    self.changed = true;
-                }
-            }
-        }
-        y += 28.0;
 
-        // Вкладки.
+        let reset = Rect::new(x, rc.bottom() - 10.0 - 22.0, iw, 22.0);
+        if ui.solid_button(cv, id(SETTINGS, N_RESET), reset, "Сбросить внешний вид", chip_bg(), txt(), 7.0) {
+            self.reset();
+        }
+
+        // Подсказка поверх всего: стекло пока недоступно.
+        if tip_on {
+            cv.rr(tip_rect, 6.0, D2D1_COLOR_F { r: 0.1, g: 0.1, b: 0.11, a: 0.98 });
+            cv.hairline(tip_rect, 6.0);
+            cv.text("На доработке", tip_rect, &f.small_c, txt());
+        }
+    }
+
+    // ---------- «Вкладки»: включение и порядок ----------
+
+    unsafe fn tab_list(&mut self, ui: &mut Ui, cv: &Canvas, rc: Rect) {
+        let f = &cv.g.fonts;
+        let x = rc.x + 10.0;
+        let iw = rc.w - 20.0;
+        let mut y = rc.y + 9.0;
         cv.text("ВКЛАДКИ — ВКЛЮЧЕНИЕ И ПОРЯДОК", Rect::new(x, y, iw, 11.0), &f.caps, dim());
         y += 15.0;
         let order = self.order();
@@ -515,12 +555,76 @@ impl Settings {
         if let Some((pos, d)) = action {
             self.move_tab(pos, (pos as i32 + d) as usize);
         }
+    }
 
-        let reset = Rect::new(x, rc.bottom() - 10.0 - 22.0, iw, 22.0);
-        self.update_row(ui, cv, x, reset.y - 30.0, iw);
-        if ui.solid_button(cv, id(SETTINGS, N_RESET), reset, "Сбросить внешний вид", chip_bg(), txt(), 7.0) {
-            self.reset();
+    // ---------- «Система», левая карточка: поведение острова ----------
+
+    unsafe fn behaviour(&mut self, ui: &mut Ui, cv: &Canvas, lc: Rect) {
+        let f = &cv.g.fonts;
+        let x = lc.x + 10.0;
+        let iw = lc.w - 20.0;
+        let mut y = lc.y + 9.0;
+        cv.text("ПОВЕДЕНИЕ", Rect::new(x, y, iw, 11.0), &f.caps, dim());
+        y += 17.0;
+
+        cv.text("Автозапуск", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut auto = self.autostart;
+        if ui.switch(cv, id(SETTINGS, N_AUTOSTART), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut auto, true) {
+            if !crate::sys::set_autostart(auto) {
+                crate::log::error("не удалось изменить автозапуск");
+            }
+            self.autostart = crate::sys::autostart_enabled();
         }
+        y += 24.0;
+        cv.text("Время и Wi-Fi на свёрнутом острове", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut face = self.cfg.idle_face;
+        if ui.switch(cv, id(SETTINGS, N_FACE), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut face, true) {
+            self.cfg.idle_face = face;
+            self.changed = true;
+        }
+        y += 24.0;
+        cv.text("Над окнами на весь экран — полоска", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut strip = self.cfg.strip_over_maximized;
+        if ui.switch(cv, id(SETTINGS, N_STRIP), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut strip, true) {
+            self.cfg.strip_over_maximized = strip;
+            self.changed = true;
+        }
+        y += 18.0;
+        cv.text("Наведите на верхний край, чтобы раскрыть", Rect::new(x, y, iw, 13.0), &f.small, dim());
+        y += 24.0;
+
+        // Язык интерфейса: применяется сразу.
+        cv.text("Язык", Rect::new(x, y, 80.0, 18.0), &f.body, txt());
+        let langs = [("auto", "Авто", 46.0), ("ru", "RU", 34.0), ("en", "EN", 34.0)];
+        let mut cx = lc.right() - 10.0 - (46.0 + 34.0 + 34.0 + 8.0);
+        for (k, (code, label, w)) in langs.iter().enumerate() {
+            if ui.chip(cv, id(SETTINGS, N_LANG + k as u32), Rect::new(cx, y, *w, 18.0), label, self.cfg.language == *code) {
+                self.cfg.language = code.to_string();
+                self.changed = true;
+            }
+            cx += w + 4.0;
+        }
+    }
+
+    // ---------- «Система», правая карточка: обновления ----------
+
+    unsafe fn updates(&mut self, ui: &mut Ui, cv: &Canvas, rc: Rect) {
+        let f = &cv.g.fonts;
+        let x = rc.x + 10.0;
+        let iw = rc.w - 20.0;
+        let mut y = rc.y + 9.0;
+        cv.text("ОБНОВЛЕНИЯ", Rect::new(x, y, iw, 11.0), &f.caps, dim());
+        y += 17.0;
+
+        // Автообновление: раз в сутки остров проверяет сам и ставит найденное без вопросов.
+        cv.text("Автообновление", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut au = self.cfg.auto_update;
+        if ui.switch(cv, id(SETTINGS, N_AUTOUPDATE), Rect::new(rc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut au, true) {
+            self.cfg.auto_update = au;
+            self.changed = true;
+        }
+        y += 28.0;
+        self.update_row(ui, cv, x, y, iw);
     }
 }
 
@@ -595,5 +699,52 @@ mod tests {
         assert_eq!(s.cfg.ui_scale, DEFAULT_SCALE);
         assert!(s.cfg.hidden_tabs.is_empty() && s.cfg.idle_face);
         assert_eq!(s.cfg.resolve_visible(&crate::TABS).len(), 7);
+    }
+
+    #[test]
+    fn widget_ids_do_not_overlap() {
+        let tabs = crate::TABS.len() as u32;
+        let groups = [
+            (N_SYSTEM, 1),
+            (N_CHIP_ACCENT, 1),
+            (N_CHIP_BG, 1),
+            (N_SV, 1),
+            (N_HUE, 1),
+            (N_HEX, 1),
+            (N_RADIUS, 1),
+            (N_AUTOSTART, 1),
+            (N_FACE, 1),
+            (N_RESET, 1),
+            (N_SCALE, 1),
+            (N_STRIP, 1),
+            (N_LANG, 3),
+            (N_AUTOUPDATE, 1),
+            (N_UPDATE, 1),
+            (N_GLASS, 1),
+            (N_OPACITY, 1),
+            (N_PRESET, PRESETS.len() as u32),
+            (N_ACCENT_PILL, 1),
+            (N_SECTION, SECTIONS.len() as u32),
+            (N_SWITCH, tabs),
+            (N_UP, tabs),
+            (N_DOWN, tabs),
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for (start, len) in groups {
+            for n in start..start + len {
+                assert!(seen.insert(n), "номер {n} занят дважды");
+            }
+        }
+        // Старший бит номера занят у широких плиток (`id | 0x8000`), выше — номер вкладки.
+        assert!(seen.iter().all(|&n| n < 0x8000));
+    }
+
+    #[test]
+    fn section_survives_reopening() {
+        let mut s = settings();
+        assert_eq!(s.section, Section::Look, "по умолчанию — «Внешний вид»");
+        s.section = Section::System;
+        s.load(&Config::default());
+        assert_eq!(s.section, Section::System, "раздел помнится, пока программа работает");
     }
 }

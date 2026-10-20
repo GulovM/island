@@ -260,7 +260,6 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
     }
 }
 
-/// Окно горячей зоны на верхнем краю другого монитора: почти невидимое, но ловит мышь.
 /// Окно-подложка под стекло: ничего не рисует и не принимает ввод.
 pub(crate) unsafe extern "system" fn glass_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
@@ -270,6 +269,7 @@ pub(crate) unsafe extern "system" fn glass_proc(hwnd: HWND, msg: u32, wp: WPARAM
     }
 }
 
+/// Окно горячей зоны на верхнем краю другого монитора: почти невидимое, но ловит мышь.
 pub(crate) unsafe extern "system" fn hot_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_MOUSEMOVE => {
@@ -394,7 +394,7 @@ pub(crate) unsafe fn measure_tabs(dwrite: &IDWriteFactory, scale: f32) -> Result
 
 /// Включает размытие фона за окном (акцент «blur behind» через `SetWindowCompositionAttribute`).
 /// Размывается вся область окна — форму задаёт `SetWindowRgn`.
-/// `false` — вызова нет или он не удался: стекла не будет.
+/// `false` — вызова нет или он не удался: размытия не будет.
 pub(crate) unsafe fn enable_blur_behind(hwnd: HWND) -> bool {
     #[repr(C)]
     struct Accent {

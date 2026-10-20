@@ -40,18 +40,41 @@ impl App {
         let thin = ((collapsed_h * s - ah) / ((collapsed_h - STRIP_H) * s)).clamp(0.0, 1.0);
         let k = 1.0 - thin;
         let pal = theme::get();
-        // Прозрачность стекла: 0 — почти прозрачное (виден размытый фон), 100 — сплошное тело. Без размытия
-        // (выключены «Эффекты прозрачности», нет blur-behind), в свёрнутом виде и в полоске тело сплошное.
-        let real = self.cfg.glass && self.transparency && self.blur_ok;
-        let body_a = if real { 1.0 - (1.0 - (0.12 + 0.88 * self.cfg.glass_opacity / 100.0)) * open * k } else { 1.0 };
+
+        // Прогресс раскрытия острова: согласует пружину open и фактические размеры w/h.
+        let base_h = collapsed_h * s;
+        // Эталон раскрытия — самая маленькая вкладка: размер текущей менялся бы при смене вкладки,
+        // и содержимое с размытием мигали бы на каждом переключении.
+        let content_h = TAB_SIZES.iter().map(|t| t.1).fold(f32::MAX, f32::min) * s;
+        let span_h = (content_h - base_h).max(1.0);
+        let h_prog = ((ah - base_h) / span_h).clamp(0.0, 1.0);
+
+        let base_w = self.collapsed().0 * s;
+        let content_w = TAB_SIZES.iter().map(|t| t.0).fold(f32::MAX, f32::min).max(self.tab_row_width() + 2.0 * TAB_SIDE) * s;
+        let span_w = (content_w - base_w).max(1.0);
+        let w_prog = ((aw - base_w) / span_w).clamp(0.0, 1.0);
+
+        let raw_prog = open.min(h_prog).min(w_prog);
+        const EXPAND_THRESHOLD: f32 = 0.08;
+        let p = if raw_prog > EXPAND_THRESHOLD {
+            ((raw_prog - EXPAND_THRESHOLD) / (1.0 - EXPAND_THRESHOLD)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        // Тело — подкладка цвета фона поверх размытия (как материал iOS 26: blur + тёмная заливка 41%).
+        // Ползунок: 0 — самая прозрачная подкладка (MIN_BODY_ALPHA), 100 — сплошное тело. Без размытия
+        // подложка скрыта, а подкладка плотнее. Свёрнутый остров и полоска сплошные.
+        let real = self.real_glass();
+        let body_a = crate::glass::body_alpha(self.cfg.glass, real, self.cfg.glass_opacity, p, k);
         g.brush.SetColor(&D2D1_COLOR_F { r: pal.bg.r * k, g: pal.bg.g * k, b: pal.bg.b * k, a: body_a });
-        self.apply_blur(x0, aw, ah, r, real && open > 0.01 && k > 0.01);
+        self.apply_blur(x0, aw, ah, ear, r, real && p > 0.001 && k > 0.01);
         let body = self.body_path(g, x0, aw, ah, ear, r, false)?;
         g.dc.FillGeometry(&body, &g.brush, None);
 
         // Стекло раскрытого острова: осветление сверху и блик на кромке (слева-сверху). Свёрнутая «чёлка»
-        // и полоска остаются плоскими: множитель `open · k` гасит эффект вместе с раскрытием.
-        let glass = if self.cfg.glass { open * k } else { 0.0 };
+        // и полоска остаются плоскими: множитель `p · k` гасит эффект вместе со сворачиванием.
+        let glass = if self.cfg.glass { p * k } else { 0.0 };
         if glass > 0.01 {
             let fade = |c: D2D1_COLOR_F, a: f32| D2D1_COLOR_F { a: c.a * a, ..c };
             if let Some(br) = gradient_brush(g, (0.0, 0.0), (0.0, ah * 0.45), &[(0.0, fade(pal.sheen, glass)), (1.0, fade(pal.sheen, 0.0))]) {
@@ -136,12 +159,12 @@ impl App {
             g.dc.PopAxisAlignedClip();
         }
 
-        if open > 0.02 {
+        if p > 0.001 {
             // Точка слева в ряду вкладок: режим полоски включён.
             if self.cfg.strip_over_maximized {
                 g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
                 let mut c = accent;
-                c.a = open;
+                c.a = p;
                 g.brush.SetColor(&c);
                 g.dc.FillEllipse(
                     &D2D1_ELLIPSE {
@@ -153,12 +176,16 @@ impl App {
                 );
             }
             let rects = self.tab_rects();
-            let pill_a = self.pill_a.value.clamp(0.0, 1.0) * open;
+            let pill_a = self.pill_a.value.clamp(0.0, 1.0) * p;
             if self.cfg.glass && pill_a > 0.01 {
                 let (px, pw) = (self.pill_x.value * s, self.pill_w.value.max(1.0) * s);
                 let (py, ph) = (TAB_TOP * s, TAB_H * s);
                 let rr = D2D1_ROUNDED_RECT { rect: D2D_RECT_F { left: px, top: py, right: px + pw, bottom: py + ph }, radiusX: ph / 2.0, radiusY: ph / 2.0 };
-                let mut c = pal.pill;
+                let mut c = if self.cfg.accent_pill {
+                    D2D1_COLOR_F { a: 0.26, ..accent }
+                } else {
+                    pal.pill
+                };
                 c.a *= pill_a;
                 g.brush.SetColor(&c);
                 g.dc.FillRoundedRectangle(&rr, &g.brush);
@@ -182,7 +209,7 @@ impl App {
                 let hv = ui.hover_amount(0xF000 + i as u32, hot && self.expanded);
                 if !active && hv > 0.01 {
                     let mut c = ui::fg();
-                    c.a = 0.08 * hv * open;
+                    c.a = 0.08 * hv * p;
                     g.brush.SetColor(&c);
                     g.dc.FillRoundedRectangle(
                         &D2D1_ROUNDED_RECT {
@@ -196,7 +223,7 @@ impl App {
                 // Со стеклом выбранную вкладку подсвечивает одна подвижная капля (ниже), без — плашка на вкладке.
                 if active && !self.cfg.glass {
                     let mut c = accent;
-                    c.a = 0.26 * open;
+                    c.a = 0.26 * p;
                     g.brush.SetColor(&c);
                     g.dc.FillRoundedRectangle(
                         &D2D1_ROUNDED_RECT {
@@ -207,8 +234,9 @@ impl App {
                         &g.brush,
                     );
                 }
-                let mut c = if active { accent } else { ui::dim() };
-                c.a *= open;
+                // Подписи вкладок лежат прямо на теле острова: невыбранные белые (`bare`), а не серые.
+                let mut c = if active { accent } else { ui::bare() };
+                c.a *= p;
                 g.draw_text(crate::i18n::tab_name(self.order[i]), px, py, pw, ph, c);
             }
 
@@ -216,7 +244,7 @@ impl App {
             let (gx, gy) = self.gear_center();
             let gear_hot = self.expanded && (cursor.0 - gx).hypot(cursor.1 - gy) <= GEAR_R + 3.0;
             let gv = ui.hover_amount(0xF100, gear_hot);
-            let gcv = Canvas { g, alpha: open, accent };
+            let gcv = Canvas { g, alpha: p, accent };
             if self.settings_open {
                 g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
                 gcv.circle(gx, gy, GEAR_R, D2D1_COLOR_F { a: 0.26, ..accent });
@@ -233,7 +261,7 @@ impl App {
                 let ev = ui.presence(0xF103, tabs.editing(cur));
                 let hot = self.expanded && (cursor.0 - ex).hypot(cursor.1 - ey) <= GEAR_R + 3.0;
                 let hv = ui.hover_amount(0xF104, hot);
-                let pcv = Canvas { g, alpha: open * pv, accent };
+                let pcv = Canvas { g, alpha: p * pv, accent };
                 g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
                 if ev > 0.01 {
                     pcv.circle(ex, ey, GEAR_R, D2D1_COLOR_F { a: 0.26 * ev, ..accent });
@@ -250,8 +278,9 @@ impl App {
 
             // Содержимое вкладок: клип по текущему телу острова, кроссфейд старой и новой.
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
-            // При большом радиусе нижние углы карточек вылезли бы за скругление острова: обрезаем по его форме.
-            let mask = if r > 16.0 * s {
+            // Со стеклом маска тела нужна всегда (если r > 0), чтобы содержимое не вылезало за
+            // скруглённые углы полупрозрачного тела; без стекла — только при большом радиусе (> 16 px).
+            let mask = if (self.cfg.glass && r > 0.0) || r > 16.0 * s {
                 let params = D2D1_LAYER_PARAMETERS1 {
                     contentBounds: D2D_RECT_F { left: f32::MIN, top: f32::MIN, right: f32::MAX, bottom: f32::MAX },
                     geometricMask: std::mem::ManuallyDrop::new(Some(body.cast::<ID2D1Geometry>()?)),
@@ -289,9 +318,9 @@ impl App {
                 tabs.draw(id, ui, &cv, w, h);
             };
             if let Some(prev) = self.tab_prev {
-                layer(prev, open * (1.0 - fade), -self.tab_dir * SLIDE * fade, false, ui, tabs);
+                layer(prev, p * (1.0 - fade), -self.tab_dir * SLIDE * fade, false, ui, tabs);
             }
-            layer(self.cur_id(), open * fade, self.tab_dir * SLIDE * (1.0 - fade), true, ui, tabs);
+            layer(self.cur_id(), p * fade, self.tab_dir * SLIDE * (1.0 - fade), true, ui, tabs);
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
             g.dc.PopAxisAlignedClip();
             if let Some(params) = mask {
@@ -307,28 +336,29 @@ impl App {
         Ok(())
     }
 
-    /// Подкладка стекла: окно с размытием фона точно под телом острова (по форме скруглённых нижних углов).
-    unsafe fn apply_blur(&self, x0: f32, aw: f32, ah: f32, r: f32, on: bool) {
-        let key = if on {
-            (self.win_x + x0.floor() as i32, self.win_y, (aw.ceil() as i32) << 16 | ah.ceil() as i32, r.round() as i32, 0)
-        } else {
-            (0, 0, 0, 0, -1)
-        };
+    /// Подложка стекла: окно с размытием фона под телом острова. Регион окна строится по самому контуру
+    /// тела (`glass::body_outline`: плоский верх, «ушки», скруглённые нижние углы), сдвинутому внутрь на
+    /// 1 физический px, чтобы сглаженный край тела целиком закрывал несглаженный край региона.
+    unsafe fn apply_blur(&self, x0: f32, aw: f32, ah: f32, ear: f32, r: f32, on: bool) {
+        let shape = crate::glass::BlurShape::from_outline(&crate::glass::body_outline(x0, aw, ah, ear, r, 1.0));
+        let (gx, gy) = (self.win_x + shape.left, self.win_y + shape.top);
+        let key = if on { (gx, gy, shape.width, shape.height, shape.signature()) } else { (0, 0, 0, 0, -1) };
         if self.blur_key.get() == key {
             return;
         }
         self.blur_key.set(key);
-        if !on {
+        if !on || shape.points.len() < 3 {
             let _ = ShowWindow(self.glass_wnd, SW_HIDE);
             return;
         }
-        let (w, h) = (aw.ceil() as i32, ah.ceil() as i32);
-        // Верхние углы уезжают выше окна, остаются скруглены только нижние.
-        let d = (2 * key.3).max(1);
-        let rgn = CreateRoundRectRgn(0, -d, w + 1, h + 1, d, d);
-        // Система забирает регион себе, удалять его не нужно.
-        SetWindowRgn(self.glass_wnd, Some(rgn), false);
-        let _ = SetWindowPos(self.glass_wnd, Some(self.hwnd), key.0, key.1, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+
+        // Позиционируем окно подложки СТРОГО ДО SetWindowRgn, чтобы SetWindowPos не сбрасывал форму окна в DWM.
+        let _ = SetWindowPos(self.glass_wnd, Some(self.hwnd), gx, gy, shape.width, shape.height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+
+        let pts: Vec<POINT> = shape.points.iter().map(|&(x, y)| POINT { x, y }).collect();
+        let rgn = windows::Win32::Graphics::Gdi::CreatePolygonRgn(&pts, windows::Win32::Graphics::Gdi::ALTERNATE);
+        // bRedraw = true сообщает DWM о перерасчёте формы окна; система забирает владение регионом себе.
+        SetWindowRgn(self.glass_wnd, Some(rgn), true);
     }
 
     /// Прячет подложку стекла (остров скрыт); следующий кадр покажет её снова.
