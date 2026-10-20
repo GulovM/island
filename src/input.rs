@@ -132,6 +132,7 @@ impl App {
             self.prev_fg = GetForegroundWindow();
             let ex = GetWindowLongW(self.hwnd, GWL_EXSTYLE) as u32 & !WS_EX_NOACTIVATE.0;
             SetWindowLongW(self.hwnd, GWL_EXSTYLE, ex as i32);
+            self.ensure_topmost(true);
             let _ = SetForegroundWindow(self.hwnd);
             let _ = SetFocus(Some(self.hwnd));
             self.ui.caret_on = true;
@@ -149,6 +150,7 @@ impl App {
         let _ = KillTimer(Some(self.hwnd), CARET_TIMER);
         let ex = GetWindowLongW(self.hwnd, GWL_EXSTYLE) as u32 | WS_EX_NOACTIVATE.0;
         SetWindowLongW(self.hwnd, GWL_EXSTYLE, ex as i32);
+        self.ensure_topmost(true);
     }
 
     /// Окно IME (подсказки раскладки/кандидаты) рядом с курсором поля.

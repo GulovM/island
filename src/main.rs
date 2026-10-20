@@ -58,7 +58,7 @@ use windows::Win32::System::RemoteDesktop::WTSRegisterSessionNotification;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::HiDpi::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::UI::Shell::{SHQueryUserNotificationState, ShellExecuteW, QUNS_RUNNING_D3D_FULL_SCREEN};
+use windows::Win32::UI::Shell::{SHQueryUserNotificationState, ShellExecuteW};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 // ---------- Раскладка (логические пиксели, умножаются на DPI-масштаб) ----------
@@ -194,8 +194,8 @@ fn run() -> Result<()> {
         if let Err(e) = WTSRegisterSessionNotification(app.hwnd, 0) {
             log::error(&format!("не удалось подписаться на блокировку сессии: {e}"));
         }
-        // Смена активного окна и сворачивание/разворачивание — мгновенная реакция;
-        // развернуть окно без смены фокуса ловит редкий опрос.
+        // Смена активного окна, сворачивание/разворачивание и окончание перетаскивания окна — мгновенная реакция;
+        // развернуть окно без смены фокуса ловит редкий опрос (400 мс).
         let hooks = [
             SetWinEventHook(
                 EVENT_SYSTEM_FOREGROUND,
@@ -209,6 +209,15 @@ fn run() -> Result<()> {
             SetWinEventHook(
                 EVENT_SYSTEM_MINIMIZESTART,
                 EVENT_SYSTEM_MINIMIZEEND,
+                None,
+                Some(on_win_event),
+                0,
+                0,
+                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+            ),
+            SetWinEventHook(
+                EVENT_SYSTEM_MOVESIZEEND,
+                EVENT_SYSTEM_MOVESIZEEND,
                 None,
                 Some(on_win_event),
                 0,
