@@ -446,7 +446,7 @@ impl Grid {
             let id = self.wid(idx, 2);
             let r = self.slots[idx].rect();
             let _ = ui.click_area(id, r);
-            if self.drag.is_none() && ui.is_dragging(id) {
+            if self.drag.is_none() && self.resizing.is_none() && ui.is_dragging(id) {
                 let target = self.lay.entry(idx).map(|e| (e.col, e.row));
                 self.drag = Some(Drag { idx, press: ptr, grab: (ptr.0 - r.x, ptr.1 - r.y), live: false, float: (r.x, r.y), target });
             }
@@ -477,7 +477,7 @@ impl Grid {
             }
         }
 
-        self.resize_step(ui, skip);
+        self.resize_step(ui, area, skip);
         self.drag_step(ui, area, skip);
 
         // Нажатие мимо лотка закрывает его (кроме случая, когда на вкладке ничего не осталось).
@@ -491,7 +491,7 @@ impl Grid {
 
     /// Угловая ручка: пока кнопка зажата и курсор двигается, виджет выбирает ближайший
     /// допустимый размер из `Spec::sizes`.
-    fn resize_step(&mut self, ui: &mut Ui, skip: u32) {
+    fn resize_step(&mut self, ui: &mut Ui, area: Rect, skip: u32) {
         let spec = self.spec;
         let Some(mut rs) = self.resizing.take() else { return };
         if !ui.is_dragging(self.wid(rs.idx, 1)) {
@@ -504,11 +504,33 @@ impl Grid {
         if !rs.live && (px - rs.press.0).hypot(py - rs.press.1) > MOVE_MIN {
             rs.live = true;
             self.tray_open = false;
+            if let Some(e) = self.lay.entry(rs.idx) {
+                let sz = spec.specs[rs.idx].sizes[e.size];
+                let gx = area.x + e.col as f32 * CELL;
+                let gy = area.y + e.row as f32 * CELL;
+                let gw = sz.pixel_w();
+                let gh = sz.pixel_h();
+                for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
+                    g.value = v;
+                    g.target = v;
+                    g.snap();
+                }
+            }
         }
         if rs.live {
             let (w, h) = (rs.from.0 + px - rs.press.0, rs.from.1 + py - rs.press.1);
             if let Some(lay) = self.lay.resized_to(spec, skip, rs.idx, w, h) {
                 self.lay = lay;
+            }
+            if let Some(e) = self.lay.entry(rs.idx) {
+                let sz = spec.specs[rs.idx].sizes[e.size];
+                let gx = area.x + e.col as f32 * CELL;
+                let gy = area.y + e.row as f32 * CELL;
+                let gw = sz.pixel_w();
+                let gh = sz.pixel_h();
+                for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
+                    g.target = v;
+                }
             }
         }
         self.resizing = Some(rs);
@@ -560,17 +582,29 @@ impl Grid {
             let fx = (px - d.grab.0).clamp(area.x - 8.0, (area.right() - w + 8.0).max(area.x - 8.0));
             let fy = (py - d.grab.1).clamp(area.y - 8.0, (area.bottom() - h + 8.0).max(area.y - 8.0));
             d.float = (fx, fy);
-            let want_col = ((fx - area.x + CELL / 2.0) / CELL).floor().max(0.0) as u8;
-            let want_row = ((fy - area.y + CELL / 2.0) / CELL).floor().max(0.0) as u8;
+            let want_col = (((fx - area.x + CELL / 2.0) / CELL).floor().max(0.0) as u32).min(255) as u8;
+            let want_row = (((fy - area.y + CELL / 2.0) / CELL).floor().max(0.0) as u32).min(255) as u8;
             let cur_size = self.lay.entry(d.idx).map_or(0, |e| e.size);
-            let target = layout::nearest_free(spec, skip, &self.lay.entries, d.idx, cur_size, want_col, want_row);
+            let target = if layout::can_place(spec, skip, &self.lay.entries, d.idx, cur_size, want_col, want_row) {
+                Some((want_col, want_row))
+            } else {
+                None
+            };
             d.target = target;
+            let sz = spec.specs[d.idx].sizes[cur_size];
+            let gw = sz.pixel_w();
+            let gh = sz.pixel_h();
             if let Some((tc, tr)) = target {
-                let sz = spec.specs[d.idx].sizes[cur_size];
                 let gx = area.x + tc as f32 * CELL;
                 let gy = area.y + tr as f32 * CELL;
-                let gw = sz.pixel_w();
-                let gh = sz.pixel_h();
+                for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
+                    g.target = v;
+                }
+            } else {
+                let max_c = spec.cols.saturating_sub(sz.w);
+                let max_r = spec.rows.saturating_sub(sz.h);
+                let gx = area.x + want_col.min(max_c) as f32 * CELL;
+                let gy = area.y + want_row.min(max_r) as f32 * CELL;
                 for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
                     g.target = v;
                 }
@@ -615,12 +649,39 @@ impl Grid {
         let live = self.drag.as_ref().filter(|d| d.live).map(|d| d.idx);
         self.empty.target = if placed.is_empty() { 1.0 } else { 0.0 };
 
-        // Тень-приёмник под поднятым виджетом.
+        // Вершины сетки и подсветка узлов в режиме правки (рисуются под виджетами).
+        let focus = if let Some(d) = self.drag.as_ref().filter(|d| d.live) {
+            if let Some((tc, tr)) = d.target {
+                let cur_size = self.lay.entry(d.idx).map_or(0, |e| e.size);
+                let sz = spec.specs[d.idx].sizes[cur_size];
+                Some((tc, tr, sz.w, sz.h))
+            } else {
+                None
+            }
+        } else if let Some(rs) = self.resizing.as_ref().filter(|rs| rs.live) {
+            if let Some(e) = self.lay.entry(rs.idx) {
+                let sz = spec.specs[rs.idx].sizes[e.size];
+                Some((e.col + sz.w, e.row + sz.h, 0, 0))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        self.draw_grid_vertices(cv, area, focus);
+
+        // Тень-приёмник под поднятым виджетом или тень будущего размера при ресайзе.
         if let (Some(_idx), true) = (live, self.lift.value > 0.01) {
             let r = Rect::new(self.ghost[0].value, self.ghost[1].value, self.ghost[2].value.max(0.0), self.ghost[3].value.max(0.0));
             let k = self.lift.value.clamp(0.0, 1.0);
-            cv.rr(r, 11.0, fade(cv.accent, 0.12 * k));
-            cv.rr_line(r, 11.0, fade(cv.accent, 0.55 * k), 1.2);
+            let valid = self.drag.as_ref().is_some_and(|d| d.target.is_some());
+            let ghost_color = if valid { cv.accent } else { RED };
+            cv.rr(r, 11.0, fade(ghost_color, 0.12 * k));
+            cv.rr_line(r, 11.0, fade(ghost_color, 0.55 * k), 1.2);
+        } else if self.resizing.as_ref().is_some_and(|rs| rs.live) {
+            let r = Rect::new(self.ghost[0].value, self.ghost[1].value, self.ghost[2].value.max(0.0), self.ghost[3].value.max(0.0));
+            cv.rr(r, 11.0, fade(cv.accent, 0.12));
+            cv.rr_line(r, 11.0, fade(cv.accent, 0.55), 1.2);
         }
 
         // Порядок рисования: как в раскладке, а поднятый (и летящий на место) виджет — последним.
@@ -806,6 +867,59 @@ impl Grid {
             }
         }
     }
+
+    /// Рисует вершины сетки точками и «+» на углах под виджетами в режиме правки.
+    unsafe fn draw_grid_vertices(&self, cv: &Canvas, area: Rect, focus: Option<(u8, u8, u8, u8)>) {
+        let e = self.edit.value.clamp(0.0, 1.0);
+        if e < 0.002 {
+            return;
+        }
+        let spec = self.spec;
+        let fg = ui::fg();
+        let base_inner = fade(fg, 0.22 * e);
+        let base_edge = fade(fg, 0.38 * e);
+        let base_corner = fade(fg, 0.45 * e);
+        let max_dist = 2.5;
+
+        for r in 0..=spec.rows {
+            for c in 0..=spec.cols {
+                let (nx, ny) = node_pos(area, c, r);
+                let kind = classify_node(c, r, spec.cols, spec.rows);
+                let att = highlight_factor(c, r, focus, max_dist);
+
+                match kind {
+                    NodeKind::Corner => {
+                        let col = if att > 0.0 {
+                            ui::mix(base_corner, fade(cv.accent, 0.85 * e), att)
+                        } else {
+                            base_corner
+                        };
+                        let arm = 3.2;
+                        cv.stroke_line((nx - arm, ny), (nx + arm, ny), 1.2, col);
+                        cv.stroke_line((nx, ny - arm), (nx, ny + arm), 1.2, col);
+                    }
+                    NodeKind::Perimeter => {
+                        let col = if att > 0.0 {
+                            ui::mix(base_edge, fade(cv.accent, 0.85 * e), att)
+                        } else {
+                            base_edge
+                        };
+                        let rad = 1.1 + 0.5 * att;
+                        cv.circle(nx, ny, rad, col);
+                    }
+                    NodeKind::Interior => {
+                        let col = if att > 0.0 {
+                            ui::mix(base_inner, fade(cv.accent, 0.85 * e), att)
+                        } else {
+                            base_inner
+                        };
+                        let rad = 1.0 + 0.6 * att;
+                        cv.circle(nx, ny, rad, col);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Область нажатия на значок «−» в левом верхнем углу виджета.
@@ -845,9 +959,161 @@ fn flow(widths: &[f32], max_w: f32, row_h: f32, gap: f32) -> (Vec<(f32, f32)>, f
     (pos, total_w, h)
 }
 
+/// Классификация узла сетки по его положению на поле.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NodeKind {
+    /// Один из четырёх внешних углов области сетки (рисуется как «+»).
+    Corner,
+    /// Внешний периметр сетки (рисуется чуть заметнее внутренних узлов).
+    Perimeter,
+    /// Внутренний узел между ячейками.
+    Interior,
+}
+
+/// Определяет категорию узла сетки `(c, r)` для поля размером `cols × rows`.
+#[inline]
+pub fn classify_node(c: u8, r: u8, cols: u8, rows: u8) -> NodeKind {
+    let on_col = c == 0 || c == cols;
+    let on_row = r == 0 || r == rows;
+    if on_col && on_row {
+        NodeKind::Corner
+    } else if on_col || on_row {
+        NodeKind::Perimeter
+    } else {
+        NodeKind::Interior
+    }
+}
+
+/// Позиция узла сетки `(c, r)` в пиксельных координатах слоя.
+/// Узел находится в центре зазора между ячейками: `c * CELL - GAP / 2`.
+#[inline]
+pub fn node_pos(area: Rect, c: u8, r: u8) -> (f32, f32) {
+    (
+        area.x + c as f32 * CELL - layout::GAP / 2.0,
+        area.y + r as f32 * CELL - layout::GAP / 2.0,
+    )
+}
+
+/// Евклидово расстояние (в ячейках) от узла `(c, r)` до прямоугольника ячеек
+/// `[box_c .. box_c + box_w, box_r .. box_r + box_h]`.
+/// Для отдельной точки (например, угла виджета при ресайзе) передаётся `box_w = 0, box_h = 0`.
+pub fn dist_to_box(c: u8, r: u8, box_c: u8, box_r: u8, box_w: u8, box_h: u8) -> f32 {
+    let dc = if c < box_c {
+        (box_c - c) as f32
+    } else if c > box_c + box_w {
+        (c - (box_c + box_w)) as f32
+    } else {
+        0.0
+    };
+    let dr = if r < box_r {
+        (box_r - r) as f32
+    } else if r > box_r + box_h {
+        (r - (box_r + box_h)) as f32
+    } else {
+        0.0
+    };
+    dc.hypot(dr)
+}
+
+/// Мягкое затухание подсветки по расстоянию `dist` в ячейках (гладкий переход smoothstep).
+/// При `dist == 0` возвращает 1.0, при `dist >= max_dist` — 0.0.
+pub fn node_attenuation(dist: f32, max_dist: f32) -> f32 {
+    if dist >= max_dist || max_dist <= 0.0 {
+        0.0
+    } else {
+        let t = 1.0 - dist / max_dist;
+        t * t * (3.0 - 2.0 * t)
+    }
+}
+
+/// Коэффициент подсветки узла `(c, r)` относительно прямоугольника фокуса сетки.
+pub fn highlight_factor(
+    c: u8,
+    r: u8,
+    focus: Option<(u8, u8, u8, u8)>,
+    max_dist: f32,
+) -> f32 {
+    let Some((bc, br, bw, bh)) = focus else { return 0.0 };
+    let dist = dist_to_box(c, r, bc, br, bw, bh);
+    node_attenuation(dist, max_dist)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_position_and_gap_centering() {
+        let area = Rect::new(14.0, 38.0, 376.0, 248.0);
+        let p00 = node_pos(area, 0, 0);
+        assert_eq!(p00, (14.0 - 4.0, 38.0 - 4.0));
+
+        let p10 = node_pos(area, 1, 0);
+        assert_eq!(p10, (14.0 + 16.0 - 4.0, 38.0 - 4.0));
+        assert_eq!(p10.0 - p00.0, CELL);
+
+        let p01 = node_pos(area, 0, 1);
+        assert_eq!(p01.1 - p00.1, CELL);
+
+        // Узел между виджетом w=8 (x: 14..134) и виджетом w=8 (x: 142..262):
+        // Зазор между 134 и 142 px, середина зазора — 138 px.
+        let p80 = node_pos(area, 8, 0);
+        assert_eq!(p80.0, 138.0);
+    }
+
+    #[test]
+    fn classify_nodes_perimeter_and_corners() {
+        let (cols, rows) = (24, 16);
+        assert_eq!(classify_node(0, 0, cols, rows), NodeKind::Corner);
+        assert_eq!(classify_node(cols, 0, cols, rows), NodeKind::Corner);
+        assert_eq!(classify_node(0, rows, cols, rows), NodeKind::Corner);
+        assert_eq!(classify_node(cols, rows, cols, rows), NodeKind::Corner);
+
+        assert_eq!(classify_node(5, 0, cols, rows), NodeKind::Perimeter);
+        assert_eq!(classify_node(0, 5, cols, rows), NodeKind::Perimeter);
+        assert_eq!(classify_node(cols, 5, cols, rows), NodeKind::Perimeter);
+        assert_eq!(classify_node(5, rows, cols, rows), NodeKind::Perimeter);
+
+        assert_eq!(classify_node(5, 5, cols, rows), NodeKind::Interior);
+    }
+
+    #[test]
+    fn distance_to_box_and_corner() {
+        // Прямоугольник 8x3 в ячейках (0,0) .. (8,3)
+        assert_eq!(dist_to_box(0, 0, 0, 0, 8, 3), 0.0);
+        assert_eq!(dist_to_box(4, 2, 0, 0, 8, 3), 0.0);
+        assert_eq!(dist_to_box(8, 3, 0, 0, 8, 3), 0.0);
+
+        // На 1 ячейку вправо от правого края: (9, 2)
+        assert_eq!(dist_to_box(9, 2, 0, 0, 8, 3), 1.0);
+        // На 2 ячейки ниже: (4, 5)
+        assert_eq!(dist_to_box(4, 5, 0, 0, 8, 3), 2.0);
+        // По диагонали на 1 ячейку: (9, 4)
+        let d = dist_to_box(9, 4, 0, 0, 8, 3);
+        assert!((d - std::f32::consts::SQRT_2).abs() < 1e-5);
+
+        // Отдельная точка-угол (bw = 0, bh = 0): расстояние до (10, 10)
+        assert_eq!(dist_to_box(10, 10, 10, 10, 0, 0), 0.0);
+        assert_eq!(dist_to_box(13, 14, 10, 10, 0, 0), 5.0); // 3-4-5 треугольник
+    }
+
+    #[test]
+    fn attenuation_and_highlight_falloff() {
+        assert_eq!(node_attenuation(0.0, 2.5), 1.0);
+        assert_eq!(node_attenuation(2.5, 2.5), 0.0);
+        assert_eq!(node_attenuation(3.0, 2.5), 0.0);
+
+        let mid = node_attenuation(1.0, 2.5);
+        assert!(mid > 0.5 && mid < 1.0);
+
+        let far = node_attenuation(2.0, 2.5);
+        assert!(far > 0.0 && far < mid);
+
+        // Без фокуса подсветка нулевая
+        assert_eq!(highlight_factor(0, 0, None, 2.5), 0.0);
+        // С фокусом
+        assert_eq!(highlight_factor(4, 4, Some((4, 4, 0, 0)), 2.5), 1.0);
+    }
 
     #[test]
     fn flow_wraps_rows() {
