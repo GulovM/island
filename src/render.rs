@@ -43,7 +43,7 @@ impl App {
         // Прозрачность стекла: 0 — почти прозрачное (виден размытый фон), 100 — сплошное тело. Без размытия
         // (выключены «Эффекты прозрачности», нет blur-behind), в свёрнутом виде и в полоске тело сплошное.
         let real = self.cfg.glass && self.transparency && self.blur_ok;
-        let body_a = if real { 1.0 - (1.0 - (0.12 + 0.88 * self.cfg.glass_opacity / 100.0)) * open * k } else { 1.0 };
+        let body_a = if real { 1.0 - (1.0 - (0.20 + 0.80 * self.cfg.glass_opacity / 100.0)) * open * k } else { 1.0 };
         g.brush.SetColor(&D2D1_COLOR_F { r: pal.bg.r * k, g: pal.bg.g * k, b: pal.bg.b * k, a: body_a });
         self.apply_blur(x0, aw, ah, r, real && open > 0.01 && k > 0.01);
         let body = self.body_path(g, x0, aw, ah, ear, r, false)?;
