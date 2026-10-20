@@ -57,7 +57,7 @@ mod wifi;
 mod winrt;
 
 pub use devices::{list, status, DevItem, ListKind};
-pub use media::{Media, ART};
+pub use media::{Media, Timeline, ART};
 pub use net::{net_status, NetStatus};
 
 use audio_policy::audio_set_default;
@@ -97,6 +97,8 @@ pub enum Cmd {
     PlayPause,
     Next,
     Prev,
+    /// Перемотка трека на позицию в секундах от начала.
+    Seek(f32),
 }
 
 static SNAPSHOT: Mutex<Option<Snapshot>> = Mutex::new(None);
@@ -140,10 +142,12 @@ pub fn start(hwnd: HWND) {
             let only_net = batch.iter().all(|c| matches!(c, Cmd::Net));
             let last_volume = batch.iter().rposition(|c| matches!(c, Cmd::Volume(_)));
             let last_bright = batch.iter().rposition(|c| matches!(c, Cmd::Brightness(_)));
+            let last_seek = batch.iter().rposition(|c| matches!(c, Cmd::Seek(_)));
             for (i, cmd) in batch.into_iter().enumerate() {
                 match cmd {
                     Cmd::Volume(_) if Some(i) != last_volume => {}
                     Cmd::Brightness(_) if Some(i) != last_bright => {}
+                    Cmd::Seek(_) if Some(i) != last_seek => {}
                     cmd => unsafe { run(cmd, &mut radio_access) },
                 }
             }
@@ -208,7 +212,7 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool) {
                 let _ = ep.SetMute(m, std::ptr::null());
             }
         }
-        Cmd::PlayPause | Cmd::Next | Cmd::Prev => media_command(cmd),
+        Cmd::PlayPause | Cmd::Next | Cmd::Prev | Cmd::Seek(_) => media_command(cmd),
     }
 }
 

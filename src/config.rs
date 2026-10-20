@@ -91,12 +91,15 @@ weather_city = ""
 # Циферблат часов на вкладке Today, 0–4 (переключается стрелками на карточке часов).
 clock_style = 0
 
-# Календарь: «секретный адрес в формате iCal» из настроек Google Calendar (или любой .ics)
-calendar_ics = ""
+# Календарь: «секретный адрес в формате iCal» из настроек Google Calendar (или любой .ics).
+# Поддерживается одна ссылка: calendar_ics = "https://..."
+# или список ссылок: calendar_ics = ["https://...", "https://..."]
+calendar_ics = []
 
-# Раскладка виджетов вкладок. Меняется прямо в острове: кнопка с карандашом слева в ряду вкладок
-# (или долгое нажатие на пустом месте вкладки). Пусто — раскладка по умолчанию.
-# Формат: виджеты через пробел, «-» — скрыт, «:N» — размер, «@N» — колонка, например "wifi:0@0 -night".
+# Раскладка виджетов вкладок. Меняется прямо в острове: кнопка с карандашом справа в ряду вкладок
+# (рядом с шестерёнкой, или долгое нажатие на пустом месте вкладки). Пусто — раскладка по умолчанию.
+# Формат: виджеты через пробел, «-» — скрыт, «:N» — размер, «@col,row» — ячейка сетки, например "wifi:0@0,0 -night". Старый формат (@col) сбрасывается к раскладке по умолчанию.
+# Остров автоматически подгоняется под видимые виджеты по «Готово»; в режиме правки ручки по краям позволяют растянуть сетку обратно.
 layout_controls = ""
 layout_today = ""
 layout_stats = ""
@@ -155,8 +158,8 @@ pub struct Config {
     pub weather_city: String,
     /// Номер циферблата часов на вкладке Today.
     pub clock_style: usize,
-    /// Ссылка на календарь в формате iCal.
-    pub calendar_ics: String,
+    /// Ссылки на календари в формате iCal (до 8 штук).
+    pub calendar_ics: Vec<String>,
     /// Раскладка виджетов вкладок Controls, Today, Stats (пустая строка — по умолчанию).
     pub layouts: [String; 3],
     /// Глобальная горячая клавиша («ctrl+alt+space»); пустая — отключена.
@@ -192,7 +195,7 @@ impl Default for Config {
             snippets: Vec::new(),
             weather_city: String::new(),
             clock_style: 0,
-            calendar_ics: String::new(),
+            calendar_ics: Vec::new(),
             layouts: Default::default(),
             hotkey: "ctrl+alt+space".into(),
             live_media: true,
@@ -282,6 +285,41 @@ pub fn save_str(key: &str, value: &str) {
 /// Записывает одно число верхнего уровня (`key = 3`) в `config.toml`.
 pub fn save_num(key: &str, value: usize) {
     write_updates(&[(key, value.to_string())]);
+}
+
+/// Максимальное число ссылок на календари.
+pub const MAX_CALENDAR_URLS: usize = 8;
+
+/// Проверяет, является ли строка корректным адресом календаря (http://, https:// или webcal://).
+pub fn valid_calendar_url(url: &str) -> bool {
+    let u = url.trim();
+    if u.is_empty() || u.contains(char::is_whitespace) {
+        return false;
+    }
+    ["https://", "http://", "webcal://"].iter().any(|p| u.starts_with(p))
+}
+
+/// Нормализует список адресов: убирает недопустимые, удаляет дубликаты, ограничивает лимитом `MAX_CALENDAR_URLS`.
+pub fn normalize_calendar_urls(raw_urls: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for u in raw_urls {
+        let trimmed = u.trim();
+        if !valid_calendar_url(trimmed) {
+            continue;
+        }
+        if !out.iter().any(|existing: &String| existing == trimmed) {
+            out.push(trimmed.to_string());
+            if out.len() >= MAX_CALENDAR_URLS {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Записывает список ссылок на календари в `config.toml`.
+pub fn save_calendar_ics(urls: &[String]) {
+    write_updates(&[("calendar_ics", fmt_list(urls))]);
 }
 
 fn write_updates(updates: &[(&str, String)]) {
@@ -541,7 +579,13 @@ pub fn parse(text: &str) -> Config {
             ("", "tabs", Value::List(l)) => cfg.tabs = l,
             ("", "weather_city", Value::Str(s)) => cfg.weather_city = s,
             ("", "clock_style", Value::Num(v)) => cfg.clock_style = (v.max(0.0) as usize).min(4),
-            ("", "calendar_ics", Value::Str(s)) => cfg.calendar_ics = s,
+            ("", "calendar_ics", Value::Str(s)) => {
+                let urls: Vec<String> = s.split_whitespace().map(|x| x.to_string()).collect();
+                cfg.calendar_ics = normalize_calendar_urls(&urls);
+            }
+            ("", "calendar_ics", Value::List(l)) => {
+                cfg.calendar_ics = normalize_calendar_urls(&l);
+            }
             ("", "layout_controls", Value::Str(s)) => cfg.layouts[0] = s,
             ("", "layout_today", Value::Str(s)) => cfg.layouts[1] = s,
             ("", "layout_stats", Value::Str(s)) => cfg.layouts[2] = s,
@@ -723,10 +767,92 @@ gmail = \"https://mail.google.com\"
     #[test]
     fn top_level_keys_under_keys_section_still_apply() {
         let c = parse("[keys]\nweather = \"x\"\n\ncalendar_ics = \"https://a.b/c.ics\"\nweather_city = \"Душанбе\"\n");
-        assert_eq!(c.calendar_ics, "https://a.b/c.ics");
+        assert_eq!(c.calendar_ics, vec!["https://a.b/c.ics".to_string()]);
         assert_eq!(c.weather_city, "Душанбе");
         assert_eq!(c.key("weather"), Some("x"));
         assert_eq!(c.key("calendar_ics"), None);
+    }
+
+    #[test]
+    fn calendar_url_validation() {
+        assert!(valid_calendar_url("https://calendar.google.com/x.ics"));
+        assert!(valid_calendar_url("http://example.com/cal.ics"));
+        assert!(valid_calendar_url("webcal://example.com/feed.ics"));
+        assert!(!valid_calendar_url(""));
+        assert!(!valid_calendar_url("   "));
+        assert!(!valid_calendar_url("ftp://example.com/cal.ics"));
+        assert!(!valid_calendar_url("file:///C:/test.ics"));
+        assert!(!valid_calendar_url("not-a-url"));
+        assert!(!valid_calendar_url("https://cal.com/a.ics https://cal.com/b.ics"));
+    }
+
+    #[test]
+    fn calendar_ics_normalization_and_limits() {
+        let raw = vec![
+            "https://a.com/1.ics".to_string(),
+            "  https://a.com/1.ics  ".to_string(), // дубликат после trim
+            "invalid-url".to_string(),
+            "".to_string(),
+            "webcal://b.com/2.ics".to_string(),
+            "http://c.com/3.ics".to_string(),
+            "https://d.com/4.ics".to_string(),
+            "https://e.com/5.ics".to_string(),
+            "https://f.com/6.ics".to_string(),
+            "https://g.com/7.ics".to_string(),
+            "https://h.com/8.ics".to_string(),
+            "https://i.com/9.ics".to_string(), // превышение лимита MAX_CALENDAR_URLS (8)
+        ];
+        let norm = normalize_calendar_urls(&raw);
+        assert_eq!(norm.len(), 8);
+        assert_eq!(norm[0], "https://a.com/1.ics");
+        assert_eq!(norm[1], "webcal://b.com/2.ics");
+        assert_eq!(norm[2], "http://c.com/3.ics");
+        assert_eq!(norm[7], "https://h.com/8.ics");
+    }
+
+    #[test]
+    fn calendar_ics_parsing_legacy_and_new_formats() {
+        // Старый формат: одна строка
+        let c1 = parse("calendar_ics = \"https://google.com/cal.ics\"\n");
+        assert_eq!(c1.calendar_ics, vec!["https://google.com/cal.ics".to_string()]);
+
+        // Пустая строка
+        let c2 = parse("calendar_ics = \"\"\n");
+        assert!(c2.calendar_ics.is_empty());
+
+        // Новый формат: массив строк
+        let c3 = parse("calendar_ics = [\"https://a.com/1.ics\", \"webcal://b.com/2.ics\"]\n");
+        assert_eq!(
+            c3.calendar_ics,
+            vec!["https://a.com/1.ics".to_string(), "webcal://b.com/2.ics".to_string()]
+        );
+
+        // Строка с несколькими ссылками через пробел/перевод строки
+        let c4 = parse("calendar_ics = \"https://a.com/1.ics   webcal://b.com/2.ics\"\n");
+        assert_eq!(
+            c4.calendar_ics,
+            vec!["https://a.com/1.ics".to_string(), "webcal://b.com/2.ics".to_string()]
+        );
+
+        // Пустой массив
+        let c5 = parse("calendar_ics = []\n");
+        assert!(c5.calendar_ics.is_empty());
+    }
+
+    #[test]
+    fn calendar_ics_saving_and_set_keys_roundtrip() {
+        let base = "accent = \"#D4AF5E\"\ncalendar_ics = \"https://old.com/old.ics\"\n\n[keys]\n";
+        let urls = vec!["https://new.com/1.ics".to_string(), "webcal://new.com/2.ics".to_string()];
+        let updated = set_keys(base, &[("calendar_ics", fmt_list(&urls))]);
+        assert!(updated.contains("calendar_ics = [\"https://new.com/1.ics\", \"webcal://new.com/2.ics\"]"));
+        let parsed = parse(&updated);
+        assert_eq!(parsed.calendar_ics, urls);
+
+        // Сохранение пустого списка
+        let empty_updated = set_keys(base, &[("calendar_ics", fmt_list(&[]))]);
+        assert!(empty_updated.contains("calendar_ics = []"));
+        let parsed_empty = parse(&empty_updated);
+        assert!(parsed_empty.calendar_ics.is_empty());
     }
 
     #[test]
@@ -825,13 +951,13 @@ gmail = \"https://mail.google.com\"
     fn layout_keys_parse_and_save() {
         assert_eq!(Config::default().layouts, [String::new(), String::new(), String::new()]);
         assert_eq!(parse(DEFAULT_TEMPLATE).layouts, Config::default().layouts);
-        let c = parse("layout_controls = \"-wifi night:1@2\"\nlayout_today = \"clock\"\nlayout_stats = \"\"\n");
-        assert_eq!(c.layouts[0], "-wifi night:1@2");
+        let c = parse("layout_controls = \"-wifi night:1@0,1\"\nlayout_today = \"clock\"\nlayout_stats = \"\"\n");
+        assert_eq!(c.layouts[0], "-wifi night:1@0,1");
         assert_eq!(c.layouts[1], "clock");
         assert_eq!(c.layouts[2], "");
         // Запись в шаблон и обратное чтение.
-        let out = set_keys(DEFAULT_TEMPLATE, &[("layout_today", fmt_str("-todo clock:2@1"))]);
-        assert_eq!(parse(&out).layouts[1], "-todo clock:2@1");
+        let out = set_keys(DEFAULT_TEMPLATE, &[("layout_today", fmt_str("-todo clock:1@0,0"))]);
+        assert_eq!(parse(&out).layouts[1], "-todo clock:1@0,0");
         assert_eq!(out.matches("layout_today").count(), 1, "ключ заменён, а не продублирован");
     }
 

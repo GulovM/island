@@ -65,6 +65,8 @@ pub(crate) enum Ev {
     UpdateTimer,
     /// Системные цвета (акцент Windows, светлая/тёмная тема) изменились.
     SysColors,
+    /// Повторная проверка системных цветов (отложенный опрос реестра после смены темы/обоев).
+    SysColorsRetry,
     /// Кнопку удерживают дольше `LONG_MS`.
     LongPress,
 }
@@ -90,6 +92,20 @@ pub(crate) unsafe extern "system" fn on_win_event(
 ) {
     let main = MAIN_WND.with(|w| w.get());
     let _ = PostMessageW(Some(main), WM_RECHECK, WPARAM(0), LPARAM(0));
+}
+
+/// Проверяет, относится ли сообщение `WM_SETTINGCHANGE` к смене обоев или системного оформления.
+pub(crate) unsafe fn is_theme_setting_change(wp: WPARAM, lp: LPARAM) -> bool {
+    if wp.0 == windows::Win32::UI::WindowsAndMessaging::SPI_SETDESKWALLPAPER.0 as usize {
+        return true;
+    }
+    if lp.0 == 0 {
+        return wp.0 == 0;
+    }
+    let Ok(s) = PCWSTR(lp.0 as *const u16).to_string() else {
+        return false;
+    };
+    sys::is_theme_setting_str(&s)
 }
 
 pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -224,13 +240,17 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             push(Ev::LongPress);
             LRESULT(0)
         }
-        WM_DWMCOLORIZATIONCOLORCHANGED => {
+        WM_TIMER if wp.0 == SYS_COLOR_TIMER => {
+            push(Ev::SysColorsRetry);
+            LRESULT(0)
+        }
+        WM_THEMECHANGED | WM_SYSCOLORCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
             push(Ev::SysColors);
             LRESULT(0)
         }
         WM_SETTINGCHANGE => {
-            // Тема и акцент приходят как «ImmersiveColorSet»; остальные настройки не интересуют.
-            if lp.0 != 0 && PCWSTR(lp.0 as *const u16).to_string().is_ok_and(|s| s == "ImmersiveColorSet") {
+            // Тема, акцент и обои рабочего стола (в т. ч. Wallpaper Engine).
+            if is_theme_setting_change(wp, lp) {
                 push(Ev::SysColors);
             }
             LRESULT(0)
@@ -248,7 +268,15 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             LRESULT(0)
         }
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_QUERYENDSESSION => LRESULT(1),
+        WM_ENDSESSION => {
+            if wp.0 != 0 {
+                crate::state::flush();
+            }
+            LRESULT(0)
+        }
         WM_DESTROY => {
+            crate::state::flush();
             PostQuitMessage(0);
             LRESULT(0)
         }

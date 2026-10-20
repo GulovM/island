@@ -10,12 +10,78 @@ impl App {
         let _ = SetWindowPos(self.hwnd, Some(HWND_TOPMOST), now.0, now.1, now.2, now.3, SWP_NOACTIVATE);
     }
 
+    /// Переутверждает HWND_TOPMOST для окна острова, подложки стекла и зон наведения.
+    /// Вызывается при смене активного окна, развороте окна, смене монитора или потере WS_EX_TOPMOST.
+    /// В простое не делает лишних вызовов Win32 (0% CPU).
+    pub(crate) unsafe fn ensure_topmost(&mut self, force: bool) {
+        if self.hidden {
+            return;
+        }
+        let ex = GetWindowLongW(self.hwnd, GWL_EXSTYLE) as u32;
+        let lost_topmost = (ex & WS_EX_TOPMOST.0) == 0;
+
+        // Проверяем, находится ли окно острова на вершине Z-порядка.
+        // GetWindow(hwnd, GW_HWNDPREV) возвращает окно, находящееся выше нашего в Z-порядке.
+        let not_on_top = GetWindow(self.hwnd, GW_HWNDPREV)
+            .is_ok_and(|prev| !prev.0.is_null() && prev != self.glass_wnd);
+
+        if force || lost_topmost || not_on_top {
+            let _ = SetWindowPos(
+                self.hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+            // Подложка стекла должна иметь WS_EX_TOPMOST и стоять сразу за основным окном.
+            let g_ex = GetWindowLongW(self.glass_wnd, GWL_EXSTYLE) as u32;
+            if (g_ex & WS_EX_TOPMOST.0) == 0 {
+                let _ = SetWindowPos(
+                    self.glass_wnd,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
+            if IsWindowVisible(self.glass_wnd).as_bool() {
+                let _ = SetWindowPos(
+                    self.glass_wnd,
+                    Some(self.hwnd),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
+            // Горячие зоны на других мониторах тоже должны оставаться поверх окон.
+            for z in &self.hot {
+                let z_ex = GetWindowLongW(z.hwnd, GWL_EXSTYLE) as u32;
+                if force || (z_ex & WS_EX_TOPMOST.0) == 0 {
+                    let _ = SetWindowPos(
+                        z.hwnd,
+                        Some(HWND_TOPMOST),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    );
+                }
+            }
+        }
+    }
+
     pub(crate) fn target_size(&self) -> (f32, f32) {
         let collapsed = self.collapsed();
         let (w, h) = if self.expanded {
             let id = self.cur_id();
-            // В режиме правки под сеткой появляется полоса с кнопками.
-            (self.tab_w(id), App::tab_h(id) + self.tabs.edit_extra(id))
+            (self.tab_w(id), self.tab_h(id))
         } else if self.stripped() {
             // Ширина прежняя: зона наведения не растёт, меняется только высота.
             (collapsed.0, STRIP_H)
@@ -70,6 +136,9 @@ impl App {
     }
 
     pub(crate) unsafe fn set_expanded(&mut self, expanded: bool) {
+        if expanded && !self.expanded {
+            self.ensure_topmost(true);
+        }
         self.expanded = expanded;
         if expanded && self.live.clear_toast() {
             let _ = KillTimer(Some(self.hwnd), TOAST_TIMER);
@@ -79,6 +148,7 @@ impl App {
             self.apply_theme();
         }
         if !expanded {
+            crate::state::flush();
             self.trim_pending = true;
             self.ui.blur();
             self.sync_focus();
@@ -311,20 +381,51 @@ impl App {
         false
     }
 
-    /// Что сейчас на экране: (окно развёрнуто на весь экран, активна D3D-игра на весь экран).
+    /// Что сейчас на экране: (окно развёрнуто на весь экран, активна настоящая полноэкранная игра).
     /// Развёрнутость определяется самым верхним реальным окном монитора острова, а не окном
     /// в фокусе: после сворачивания фокус может уйти на панель задач или рабочий стол,
     /// и по нему состояние не восстановить.
+    /// Скрытие острова разрешено только для эксклюзивных D3D-игр; обычные приложения и браузеры
+    /// в F11 или развёрнутом виде остров не прячут.
     pub(crate) unsafe fn probe(&self) -> Option<(bool, bool)> {
-        let game = matches!(
-            SHQueryUserNotificationState(),
-            Ok(s) if s == QUNS_RUNNING_D3D_FULL_SCREEN
-        );
-        let mon = MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST);
+        let quns = SHQueryUserNotificationState().ok().map(|s| s.0 as u32);
+        let mon = if !self.mon.0.is_null() {
+            self.mon
+        } else {
+            MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST)
+        };
         let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
         if !GetMonitorInfoW(mon, &mut mi).as_bool() {
-            return Some((false, game));
+            return Some((false, false));
         }
+
+        let mut game = false;
+        let fg = GetForegroundWindow();
+        if !fg.0.is_null() && IsWindow(Some(fg)).as_bool() && IsWindowVisible(fg).as_bool() && !IsIconic(fg).as_bool() {
+            let mut cloaked = 0u32;
+            let _ = DwmGetWindowAttribute(
+                fg,
+                DWMWA_CLOAKED,
+                &mut cloaked as *mut u32 as *mut std::ffi::c_void,
+                size_of::<u32>() as u32,
+            );
+            if cloaked == 0 && fg != self.hwnd && fg != self.glass_wnd {
+                let fg_mon = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
+                let fg_on_island_mon = fg_mon == mon;
+                let mut rc = RECT::default();
+                let has_rc = GetWindowRect(fg, &mut rc).is_ok();
+                let m = mi.rcMonitor;
+                let covers = has_rc && rc.left <= m.left && rc.top <= m.top && rc.right >= m.right && rc.bottom >= m.bottom;
+                let zoomed = IsZoomed(fg).as_bool();
+                let style = GetWindowLongW(fg, GWL_STYLE) as u32;
+                let has_caption = (style & WS_CAPTION.0) == WS_CAPTION.0;
+                let mut buf = [0u16; 64];
+                let n = GetClassNameW(fg, &mut buf).max(0) as usize;
+                let class_name = String::from_utf16_lossy(&buf[..n]);
+                game = is_fullscreen_game(quns, fg_on_island_mon, covers, zoomed, has_caption, &class_name);
+            }
+        }
+
         let mut ctx = ScanCtx { own: self.hwnd, mon: mi.rcMonitor, covered: false };
         // EnumWindows идёт сверху вниз по Z-порядку; колбэк останавливает перебор на первом подходящем окне.
         let _ = EnumWindows(Some(scan_window), LPARAM(&mut ctx as *mut _ as isize));
@@ -359,11 +460,20 @@ impl App {
             }
             changed = true;
         }
-        if covered != self.covered {
+        let covered_changed = covered != self.covered;
+        if covered_changed {
             self.covered = covered;
             self.retarget();
             changed = true;
         }
+
+        // Переутверждаем HWND_TOPMOST при смене разворота или потере Z-порядка/стиля.
+        self.ensure_topmost(covered_changed);
+
+        // Если остров был развёрнут, но курсор уже вне его (например, после перетаскивания окна),
+        // запускаем задержку сворачивания.
+        self.check_hover();
+
         changed
     }
 
@@ -486,5 +596,175 @@ impl App {
         if let Err(e) = RegisterHotKey(Some(self.hwnd), HOTKEY_ID, HOT_KEY_MODIFIERS(mods) | MOD_NOREPEAT, vk) {
             log::error(&format!("не удалось занять горячую клавишу «{}»: {e}", self.cfg.hotkey));
         }
+    }
+}
+
+/// Проверяет, принадлежит ли класс окна известным не-игровым приложениям
+/// (браузеры, системные окна, офисные программы, медиаплееры).
+pub(crate) fn is_known_non_game_class(class: &str) -> bool {
+    if class.starts_with("Qt") {
+        return true;
+    }
+    matches!(
+        class,
+        // Chromium / Electron (Chrome, Edge, Brave, Opera, Vivaldi, VS Code, Discord, Slack, Spotify и др.)
+        "Chrome_WidgetWin_1"
+        | "Chrome_WidgetWin_0"
+        // Mozilla Firefox, Thunderbird
+        | "MozillaWindowClass"
+        // Проводник Windows и системные окна
+        | "CabinetWClass"
+        | "ExploreWClass"
+        | "Progman"
+        | "WorkerW"
+        | "Shell_TrayWnd"
+        | "Shell_SecondaryTrayWnd"
+        // UWP-приложения
+        | "ApplicationFrameWindow"
+        | "Windows.UI.Core.CoreWindow"
+        // PowerPoint и презентации
+        | "screenClass"
+        | "PP12FrameClass"
+        | "PPTFrameClass"
+        // Медиаплееры
+        | "mpv"
+        | "vlc"
+        | "MediaPlayerClassicW"
+    )
+}
+
+/// Чистая логика определения полноэкранной игры: проверяет, нужно ли скрывать остров (`SW_HIDE`).
+///
+/// Остров скрывается ТОЛЬКО при эксклюзивном Direct3D полноэкранном режиме (QUNS_RUNNING_D3D_FULL_SCREEN = 3)
+/// для настоящего игрового окна на том же мониторе.
+/// Обычные приложения, развёрнутые на весь экран, браузеры в F11, плееры и презентации остров не скрывают.
+pub(crate) fn is_fullscreen_game(
+    quns_state: Option<u32>,
+    fg_on_island_monitor: bool,
+    fg_covers_monitor: bool,
+    fg_is_zoomed: bool,
+    fg_has_caption: bool,
+    fg_class: &str,
+) -> bool {
+    // Скрываемся ТОЛЬКО при Direct3D эксклюзивном полноэкранном режиме (QUNS_RUNNING_D3D_FULL_SCREEN = 3).
+    // Состояния вроде QUNS_BUSY (2), QUNS_PRESENTATION_MODE (4), QUNS_ACCEPTS_NOTIFICATIONS (5)
+    // не являются эксклюзивной игрой и не должны прятать остров.
+    const QUNS_D3D_FULL_SCREEN: u32 = 3;
+    if quns_state != Some(QUNS_D3D_FULL_SCREEN) {
+        return false;
+    }
+
+    // Окно должно быть на том же мониторе, где расположен остров.
+    if !fg_on_island_monitor {
+        return false;
+    }
+
+    // Окно должно полностью закрывать монитор острова.
+    if !fg_covers_monitor {
+        return false;
+    }
+
+    // Обычные развёрнутые окна со стилем WS_MAXIMIZE (IsZoomed) — это приложения, а не эксклюзивные игры.
+    if fg_is_zoomed {
+        return false;
+    }
+
+    // Окна со стандартным заголовком (WS_CAPTION) не являются эксклюзивными играми на весь экран.
+    if fg_has_caption {
+        return false;
+    }
+
+    // Браузеры в полноэкранном режиме (F11/видео), системный интерфейс, плееры и презентации не прячут остров.
+    if is_known_non_game_class(fg_class) {
+        return false;
+    }
+
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quns_non_d3d_states_do_not_hide_island() {
+        // Никакие другие состояния (включая QUNS_BUSY и презентации) не должны скрывать остров.
+        for state in [None, Some(1), Some(2), Some(4), Some(5), Some(6), Some(7)] {
+            assert!(
+                !is_fullscreen_game(state, true, true, false, false, "UnrealWindow"),
+                "state {state:?} should not hide island"
+            );
+        }
+    }
+
+    #[test]
+    fn browsers_in_f11_do_not_hide_island() {
+        const QUNS_D3D: Option<u32> = Some(3);
+        // Браузеры на базе Chromium / Electron (Chrome, Edge, Brave, VS Code и т.д.)
+        assert!(!is_fullscreen_game(QUNS_D3D, true, true, false, false, "Chrome_WidgetWin_1"));
+        assert!(!is_fullscreen_game(QUNS_D3D, true, true, false, false, "Chrome_WidgetWin_0"));
+        // Mozilla Firefox
+        assert!(!is_fullscreen_game(QUNS_D3D, true, true, false, false, "MozillaWindowClass"));
+    }
+
+    #[test]
+    fn maximized_apps_do_not_hide_island() {
+        const QUNS_D3D: Option<u32> = Some(3);
+        // Если окно развёрнуто через IsZoomed, это обычное приложение, а не эксклюзивная игра.
+        assert!(!is_fullscreen_game(QUNS_D3D, true, true, true, false, "SomeAppWindow"));
+        // Окно со стандартным заголовком (WS_CAPTION) также не скрывает остров.
+        assert!(!is_fullscreen_game(QUNS_D3D, true, true, false, true, "SomeAppWindow"));
+    }
+
+    #[test]
+    fn window_on_other_monitor_does_not_hide_island() {
+        const QUNS_D3D: Option<u32> = Some(3);
+        // Полноэкранная игра на втором мониторе не должна скрывать остров на основном.
+        assert!(!is_fullscreen_game(QUNS_D3D, false, true, false, false, "UnrealWindow"));
+    }
+
+    #[test]
+    fn window_not_covering_monitor_does_not_hide_island() {
+        const QUNS_D3D: Option<u32> = Some(3);
+        // Окно не на весь экран не должно скрывать остров.
+        assert!(!is_fullscreen_game(QUNS_D3D, true, false, false, false, "UnrealWindow"));
+    }
+
+    #[test]
+    fn system_and_media_apps_do_not_hide_island() {
+        const QUNS_D3D: Option<u32> = Some(3);
+        for class in [
+            "CabinetWClass",
+            "ExploreWClass",
+            "Progman",
+            "WorkerW",
+            "Shell_TrayWnd",
+            "Shell_SecondaryTrayWnd",
+            "ApplicationFrameWindow",
+            "Windows.UI.Core.CoreWindow",
+            "screenClass",
+            "PP12FrameClass",
+            "PPTFrameClass",
+            "mpv",
+            "vlc",
+            "MediaPlayerClassicW",
+            "Qt5QWindowIcon",
+        ] {
+            assert!(
+                !is_fullscreen_game(QUNS_D3D, true, true, false, false, class),
+                "class {class} should not hide island"
+            );
+        }
+    }
+
+    #[test]
+    fn true_exclusive_d3d_game_hides_island() {
+        const QUNS_D3D: Option<u32> = Some(3);
+        // Настоящие игры на движках Unreal, Unity, Source или кастомных без заголовка и не zoomed.
+        assert!(is_fullscreen_game(QUNS_D3D, true, true, false, false, "UnrealWindow"));
+        assert!(is_fullscreen_game(QUNS_D3D, true, true, false, false, "UnityWndClass"));
+        assert!(is_fullscreen_game(QUNS_D3D, true, true, false, false, "Valve001"));
+        assert!(is_fullscreen_game(QUNS_D3D, true, true, false, false, "D3D Window"));
+        assert!(is_fullscreen_game(QUNS_D3D, true, true, false, false, "GameMainWnd"));
     }
 }

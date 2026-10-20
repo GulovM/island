@@ -27,6 +27,7 @@ mod window;
 mod wnd;
 mod we;
 mod update;
+mod state;
 mod app;
 
 pub use app::{App, HotZone};
@@ -58,32 +59,23 @@ use windows::Win32::System::RemoteDesktop::WTSRegisterSessionNotification;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::HiDpi::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::UI::Shell::{SHQueryUserNotificationState, ShellExecuteW, QUNS_RUNNING_D3D_FULL_SCREEN};
+use windows::Win32::UI::Shell::{SHQueryUserNotificationState, ShellExecuteW};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 // ---------- Раскладка (логические пиксели, умножаются на DPI-масштаб) ----------
 
 pub(crate) const TAB_COUNT: usize = 7;
 pub(crate) const TABS: [&str; TAB_COUNT] = ["Controls", "Today", "Stats", "Clipboard", "Apps", "Wallpaper", "Power"];
-/// Размер панели для каждой вкладки (ширина, высота) — как на скриншотах; последний — страница настроек.
-pub(crate) const TAB_SIZES: [(f32, f32); 8] = [
-    (430.0, 282.0),
-    (660.0, 304.0),
-    (640.0, 282.0),
-    (590.0, 300.0),
-    (480.0, 420.0),
-    (700.0, 236.0),
-    (420.0, 112.0),
-    (620.0, 476.0),
-];
 /// Высота «тонкой полоски», в которую остров сворачивается поверх развёрнутого на весь экран окна.
 pub(crate) const STRIP_H: f32 = 3.0;
 pub(crate) const TAB_H: f32 = 17.0;
 pub(crate) const TAB_GAP: f32 = 4.0;
 pub(crate) const TAB_PAD: f32 = 8.0;
 pub(crate) const TAB_TOP: f32 = 9.0;
-/// Отступ ряда вкладок от краёв панели.
-pub(crate) const TAB_SIDE: f32 = 28.0;
+/// Левый отступ ряда вкладок от края панели (карандаш перенесён направо, поэтому слева только отступ до края).
+pub(crate) const TAB_SIDE_LEFT: f32 = 16.0;
+/// Правый отступ ряда вкладок: под шестерёнку настроек и карандаш правки виджетов.
+pub(crate) const TAB_SIDE_RIGHT: f32 = 56.0;
 /// Размер окна: самая большая панель (650×400) + запас под перелёт пружины и «ушки».
 pub(crate) const WIN_LOGICAL: (f32, f32) = (760.0, 500.0);
 /// Допуск вокруг раскрытой формы, где мышь ещё считается «на острове» (только слева/справа/снизу).
@@ -98,8 +90,10 @@ pub(crate) const HOT_H: i32 = 2;
 pub(crate) const RECOVER_MS: u32 = 500;
 
 pub(crate) const WM_MOUSELEAVE: u32 = 0x02A3;
+pub(crate) const WM_SYSCOLORCHANGE: u32 = 0x0015;
 /// Цвет оформления окон (акцент) поменялся — его подстраивает, например, Wallpaper Engine под обои.
 pub(crate) const WM_DWMCOLORIZATIONCOLORCHANGED: u32 = 0x0320;
+pub(crate) const WM_THEMECHANGED: u32 = 0x031A;
 pub(crate) const WM_WTSSESSION_CHANGE: u32 = 0x02B1;
 pub(crate) const WTS_SESSION_LOCK: usize = 7;
 pub(crate) const WTS_SESSION_UNLOCK: usize = 8;
@@ -137,6 +131,8 @@ pub(crate) const UPDATE_TICK_MS: u32 = 60 * 60 * 1000;
 /// Долгое нажатие на пустом месте вкладки включает режим правки виджетов.
 pub(crate) const LONG_TIMER: usize = 12;
 pub(crate) const LONG_MS: u32 = 520;
+/// Повторная проверка системных цветов после смены темы/обоев (гонка записи в реестр).
+pub(crate) const SYS_COLOR_TIMER: usize = 13;
 pub(crate) const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 pub(crate) const WM_HOTKEY: u32 = 0x0312;
 pub(crate) const HOTKEY_ID: i32 = 1;
@@ -171,7 +167,17 @@ fn run() -> Result<()> {
     }
     i18n::set(i18n::from_config(&cfg.language));
     log::info("запуск");
-    let mut app = App::new(cfg)?;
+    let state = state::load();
+    let now = sys::now_secs();
+    let weather_fresh = state.weather.time > 0 && now.saturating_sub(state.weather.time) < 24 * 3600;
+    if weather_fresh
+        && !state.weather.city.is_empty()
+        && (cfg.weather_city.is_empty() || cfg.weather_city.eq_ignore_ascii_case(&state.weather.city))
+    {
+        online::init_cached_weather(state.weather.temp, state.weather.code, state.weather.city.clone());
+    }
+    online::init_cached_calendar(&cfg.calendar_ics);
+    let mut app = App::new(cfg, &state)?;
     let mut last = Instant::now();
     let mut dirty = true;
     let mut perf = perf::Perf::new();
@@ -183,7 +189,10 @@ fn run() -> Result<()> {
         // Мини-плееру нужно знать о музыке и при свёрнутом острове: подписка на события сессии.
         bg::send(bg::Cmd::Media);
         let cfg = app.cfg.clone();
-        app.tabs.load(&cfg);
+        app.tabs.load(&cfg, &state);
+        app.retarget();
+        app.w.snap();
+        app.h.snap();
         if let Err(e) = AddClipboardFormatListener(app.hwnd) {
             log::error(&format!("не удалось подписаться на буфер обмена: {e}"));
         }
@@ -192,8 +201,8 @@ fn run() -> Result<()> {
         if let Err(e) = WTSRegisterSessionNotification(app.hwnd, 0) {
             log::error(&format!("не удалось подписаться на блокировку сессии: {e}"));
         }
-        // Смена активного окна и сворачивание/разворачивание — мгновенная реакция;
-        // развернуть окно без смены фокуса ловит редкий опрос.
+        // Смена активного окна, сворачивание/разворачивание и окончание перетаскивания окна — мгновенная реакция;
+        // развернуть окно без смены фокуса ловит редкий опрос (400 мс).
         let hooks = [
             SetWinEventHook(
                 EVENT_SYSTEM_FOREGROUND,
@@ -207,6 +216,15 @@ fn run() -> Result<()> {
             SetWinEventHook(
                 EVENT_SYSTEM_MINIMIZESTART,
                 EVENT_SYSTEM_MINIMIZEEND,
+                None,
+                Some(on_win_event),
+                0,
+                0,
+                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+            ),
+            SetWinEventHook(
+                EVENT_SYSTEM_MOVESIZEEND,
+                EVENT_SYSTEM_MOVESIZEEND,
                 None,
                 Some(on_win_event),
                 0,
@@ -281,6 +299,7 @@ fn run() -> Result<()> {
         if app.save_pending {
             config::save(&app.cfg, &TABS);
         }
+        state::flush();
         for h in hooks {
             let _ = UnhookWinEvent(h);
         }

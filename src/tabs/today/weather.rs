@@ -71,11 +71,11 @@ impl Today {
                 cv.text(&desc, Rect::new(wc.x + 38.0, wc.y + 37.0, wc.w - 44.0, 12.0), &f.small, dim());
             }
             1 => {
-                cv.glyph(glyph, Rect::new(wc.x, wc.y + 15.0, wc.w, 20.0), true, col);
-                cv.text(&temp, Rect::new(wc.x, wc.y + 40.0, wc.w, 22.0), &f.num_c, tcol);
-                cv.text(&desc, Rect::new(wc.x + 4.0, wc.y + 65.0, wc.w - 8.0, 12.0), &f.small_c, dim());
+                cv.glyph(glyph, Rect::new(wc.x, wc.y + 11.0, wc.w, 20.0), true, col);
+                cv.text(&temp, Rect::new(wc.x, wc.y + 33.0, wc.w, 22.0), &f.num_c, tcol);
+                cv.text(&desc, Rect::new(wc.x + 4.0, wc.y + 56.0, wc.w - 8.0, 12.0), &f.small_c, dim());
                 if !city.is_empty() {
-                    cv.text(&city, Rect::new(wc.x + 4.0, wc.y + 79.0, wc.w - 8.0, 12.0), &f.small_c, faint);
+                    cv.text(&city, Rect::new(wc.x + 4.0, wc.y + 70.0, wc.w - 8.0, 12.0), &f.small_c, faint);
                 }
             }
             _ => {

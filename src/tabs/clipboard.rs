@@ -108,7 +108,8 @@ pub struct Clip {
 }
 
 impl Clip {
-    pub fn load(&mut self) {
+    pub fn load(&mut self, paused: bool) {
+        self.paused = paused;
         self.items = read_lines_sealed(FILE)
             .iter()
             .filter_map(|l| {
@@ -291,6 +292,7 @@ impl Clip {
         }
         if ui.icon_button(cv, id(CLIPBOARD, 5), gear, icon::SETTINGS_GEAR, self.paused) {
             self.paused = !self.paused;
+            crate::state::set_clipboard_paused(self.paused);
         }
 
         ui.sticky_focus = Some(fid);

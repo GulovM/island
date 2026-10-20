@@ -14,11 +14,11 @@ mod http;
 mod speedtest;
 mod weather;
 
-pub use calendar::{events_by_day, next_of, refresh_calendar, refresh_calendar_age, DayEvent, Event, RawEvent};
+pub use calendar::{events_by_day, init_cached_calendar, next_of, refresh_calendar, refresh_calendar_age, DayEvent, Event, RawEvent};
 pub use datetime::{civil_from_days, days_from_civil, now_local_minutes, utc_offset_minutes, weekday};
 pub(crate) use http::{get_bytes, get_text, json_str};
 pub use speedtest::{run_speedtest, Speed};
-pub use weather::{refresh_weather, weather_text, Weather};
+pub use weather::{init_cached_weather, refresh_weather, weather_text, Weather};
 
 /// После ошибки повторяем раньше, чем через полный срок.
 pub(super) const RETRY_AFTER: Duration = Duration::from_secs(2 * 60);

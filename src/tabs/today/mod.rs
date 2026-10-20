@@ -46,24 +46,39 @@ const TODO: usize = 4;
 const MONTH_W: f32 = 230.0;
 const MONTH_H: f32 = 252.0;
 
-static CLOCK_SIZES: [Size; 2] = [sz(2, 76.0), sz(2, 140.0)];
-static WEATHER_SIZES: [Size; 3] = [sz(2, 62.0), sz(2, 102.0), sz(4, 62.0)];
-static WEEK_SIZES: [Size; 3] = [sz(4, 76.0), sz(4, 122.0), sz(6, 122.0)];
-static TIMER_SIZES: [Size; 3] = [sz(4, 64.0), sz(4, 120.0), sz(6, 120.0)];
-static TODO_SIZES: [Size; 3] = [sz(4, 122.0), sz(4, 252.0), sz(6, 252.0)];
+static CLOCK_SIZES: [Size; 2] = [sz(8, 6), sz(8, 10)];
+static WEATHER_SIZES: [Size; 3] = [sz(8, 4), sz(8, 6), sz(16, 4)];
+static WEEK_SIZES: [Size; 4] = [sz(16, 6), sz(16, 8), sz(24, 8), sz(16, 16)];
+static TIMER_SIZES: [Size; 3] = [sz(16, 4), sz(16, 8), sz(24, 8)];
+static TODO_SIZES: [Size; 3] = [sz(16, 8), sz(16, 16), sz(24, 16)];
 
-/// Сетка вкладки: 10 колонок по ~64 px (632 px внутри полей). Часы и погода занимают 2 колонки,
-/// неделя, таймер и задачи — по 4: исходные пропорции макета.
+/// Сетка вкладки: 40 колонок по 16 px (шаг CELL=16, зазор GAP=8), 16 рядов. Часы и погода занимают
+/// 8 колонок, неделя, таймер и задачи — по 16: исходные пропорции макета.
+///
+/// Статический `min_rows = 4` задаёт компактный размер при скрытых виджетах или пустой вкладке.
+/// Месячный календарь (MONTH_H = 252 px) запрашивает место динамически через `overlay_rows`.
 pub static SPEC: TabSpec = TabSpec {
-    cols: 10,
+    cols: 40,
+    rows: 16,
+    min_cols: 16,
+    min_rows: 4,
     specs: &[
-        Spec { key: "clock", title: "Часы", sizes: &CLOCK_SIZES, size: 1, col: 0 },
-        Spec { key: "weather", title: "Погода", sizes: &WEATHER_SIZES, size: 1, col: 0 },
-        Spec { key: "week", title: "Эта неделя", sizes: &WEEK_SIZES, size: 1, col: 2 },
-        Spec { key: "timer", title: "Таймер", sizes: &TIMER_SIZES, size: 1, col: 2 },
-        Spec { key: "todo", title: "Задачи", sizes: &TODO_SIZES, size: 1, col: 6 },
+        Spec { key: "clock", title: "Часы", sizes: &CLOCK_SIZES, size: 1, col: 0, row: 0 },
+        Spec { key: "weather", title: "Погода", sizes: &WEATHER_SIZES, size: 1, col: 0, row: 10 },
+        Spec { key: "week", title: "Эта неделя", sizes: &WEEK_SIZES, size: 1, col: 8, row: 0 },
+        Spec { key: "timer", title: "Таймер", sizes: &TIMER_SIZES, size: 1, col: 8, row: 8 },
+        Spec { key: "todo", title: "Задачи", sizes: &TODO_SIZES, size: 1, col: 24, row: 0 },
     ],
 };
+
+/// Вычисляет число рядов сетки, необходимое для раскрытого месячного календаря.
+/// Динамический расчёт overlay_rows:
+/// Месячный календарь (MONTH_H = 252 px) раскрывается поверх сетки.
+/// Число рядов под высоту MONTH_H: ceil(MONTH_H / CELL) = ceil(252 / 16) = 16 рядов.
+#[inline]
+pub fn today_overlay_rows(month_h: f32) -> u8 {
+    (month_h / super::layout::CELL).ceil().max(0.0) as u8
+}
 
 pub struct Today {
     /// Выбранный пресет (индекс в `PRESETS`); `None` — время задано вручную.
@@ -86,7 +101,7 @@ pub struct Today {
     city: String,
     /// Карточка погоды в режиме ввода города.
     editing: bool,
-    ics: String,
+    ics: Vec<String>,
     /// Карточка недели в режиме ввода ссылки на календарь; `cal_bad` — введён не адрес.
     cal_editing: bool,
     cal_bad: bool,
@@ -134,7 +149,7 @@ impl Default for Today {
             month_t: Spring::unit(0.0, 240.0, 26.0),
             city: String::new(),
             editing: false,
-            ics: String::new(),
+            ics: Vec::new(),
             cal_editing: false,
             cal_bad: false,
             online: Online::default(),
@@ -159,7 +174,6 @@ impl Default for Today {
 }
 
 impl Today {
-
     pub fn configure(&mut self, cfg: &Config) {
         self.city = cfg.weather_city.clone();
         self.ics = cfg.calendar_ics.clone();
@@ -227,6 +241,7 @@ impl Today {
             if self.sound {
                 play_alarm();
             }
+            self.save_timer();
         }
         // Проверки «устарело ли» дешёвые: сеть дёргается раз в 15–20 минут.
         online::refresh_weather(&self.city);
@@ -241,12 +256,16 @@ impl Today {
 
     /// Рисует вкладку по сетке; месячный календарь раскрывается поверх неё. `h` — высота панели
     /// без полосы правки.
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
-        let area = Rect::new(PAD, TOP, w - 2.0 * PAD, h - TOP - PAD);
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, _w: f32, _h: f32) {
+        self.month_t.target = if self.month_open { 1.0 } else { 0.0 };
+        let month_active = self.month_open || self.month_t.value > 0.0;
+        let overlay_rows = if month_active { today_overlay_rows(MONTH_H) } else { 0 };
+        grid.set_overlay_rows(overlay_rows);
+
+        let area = Rect::new(PAD, TOP, grid.window().content_w(), grid.window().content_h());
         let t = GetLocalTime();
         let dow = (t.wDayOfWeek as usize + 6) % 7;
         let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
-        self.month_t.target = if self.month_open { 1.0 } else { 0.0 };
         // Виджеты под календарём гаснут и не принимают нажатий (иначе они перехватят их у дней месяца).
         let cover = (self.month_t.value > 0.004).then(|| self.month_rect(area));
         grid.draw(ui, cv, area, 0, |ui, cv, it| self.widget(ui, cv, it, cover, &t, today, dow));
@@ -344,5 +363,22 @@ impl Today {
         self.clock_face(cv, c, t, size == 0);
         let foot = format!("{} • {} {}", crate::i18n::weekdays()[dow], t.wDay, crate::i18n::months_short()[(t.wMonth as usize).clamp(1, 12) - 1]);
         cv.text(&foot, Rect::new(c.x, c.bottom() - 20.0, c.w, 13.0), &f.small_c, dim());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_today_overlay_rows() {
+        // Высота месячного календаря MONTH_H = 252 px -> 252 / 16 = 15.75 -> ceil = 16 рядов
+        assert_eq!(today_overlay_rows(MONTH_H), 16);
+        assert_eq!(today_overlay_rows(252.0), 16);
+
+        // Меньшие высоты
+        assert_eq!(today_overlay_rows(64.0), 4);
+        assert_eq!(today_overlay_rows(16.0), 1);
+        assert_eq!(today_overlay_rows(0.0), 0);
     }
 }

@@ -319,6 +319,9 @@ mod tests {
                 at: std::time::Instant::now(),
                 art: None,
                 key,
+                can_seek: true,
+                min_seek: 0.0,
+                max_seek: 100.0,
             }),
             ..Default::default()
         }

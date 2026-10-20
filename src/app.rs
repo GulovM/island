@@ -97,10 +97,12 @@ pub struct App {
     pub(crate) high_surrogate: u32,
     /// Где нажали кнопку мыши (пиксели окна), пока ждём долгого нажатия.
     pub(crate) press_pos: Option<(i32, i32)>,
+    /// Планировщик повторных проверок темы (гонка записи в реестр Windows/WE).
+    pub(crate) color_retry: sys::ColorRetry,
 }
 
 impl App {
-    pub(crate) fn new(cfg: Config) -> Result<Self> {
+    pub(crate) fn new(cfg: Config, state: &crate::state::State) -> Result<Self> {
         unsafe {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -176,6 +178,11 @@ impl App {
             let gfx = Gfx::new(hwnd, cw, ch, scale, &dwrite)?;
             let tab_widths = measure_tabs(&dwrite, scale)?;
             let order = cfg.resolve_visible(&TABS);
+            let initial_tab = if !state.last_tab.is_empty() {
+                order.iter().position(|&idx| TABS[idx].eq_ignore_ascii_case(&state.last_tab)).unwrap_or(0)
+            } else {
+                0
+            };
 
             let icon = sys::make_icon(hinst, cfg.accent)
                 .or_else(|| LoadIconW(None, IDI_APPLICATION).ok());
@@ -206,7 +213,7 @@ impl App {
                 leave_armed: false,
                 trim_pending: true,
                 rgn: (-1, -1, -1),
-                tab: 0,
+                tab: initial_tab,
                 settings_open: false,
                 glow: Spring::unit(0.0, 220.0, 26.0),
                 face: face::Face::new(cfg.idle_face),
@@ -233,6 +240,7 @@ impl App {
                 prev_fg: HWND(std::ptr::null_mut()),
                 high_surrogate: 0,
                 press_pos: None,
+                color_retry: sys::ColorRetry::new(),
                 cfg,
             };
             theme::set_glass(app.cfg.glass);
@@ -286,6 +294,15 @@ impl App {
         }
         theme::set(p);
         true
+    }
+
+    /// Проверяет системные цвета и эффекты прозрачности. Возвращает `true`, если палитра или
+    /// прозрачность изменились и нужен кадр перерисовки.
+    pub(crate) fn check_sys_colors(&mut self) -> bool {
+        let t = sys::transparency_enabled();
+        let flipped = std::mem::replace(&mut self.transparency, t) != t;
+        let theme_changed = self.cfg.system_colors && self.apply_theme();
+        theme_changed || flipped
     }
 
     /// Номер вкладки (индекс в `TABS`), выбранной в ряду.
@@ -354,15 +371,14 @@ impl App {
         self.save_pending = true;
     }
 
-    /// Ширина панели вкладки: не уже ряда вкладок, иначе они обрезаются.
-    /// Высота панели вкладки: у «Управления» прибавляется полоска яркости, если она поддерживается.
-    pub(crate) fn tab_h(id: usize) -> f32 {
-        let extra = if id == tabs::CONTROLS && bright::available() { 34.0 } else { 0.0 };
-        TAB_SIZES[id].1 + extra
+    /// Высота панели вкладки: берётся через `Tabs::island_size`.
+    pub(crate) fn tab_h(&self, id: usize) -> f32 {
+        self.tabs.island_size(id).1
     }
 
+    /// Ширина панели вкладки: не уже ряда вкладок, иначе они обрезаются.
     pub(crate) fn tab_w(&self, id: usize) -> f32 {
-        TAB_SIZES[id].0.max(self.tab_row_width() + 2.0 * TAB_SIDE)
+        self.tabs.island_size(id).0.max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT)
     }
 
     /// Применяет язык из конфига: подписи вкладок меняют ширину, поэтому ряд измеряется заново.
@@ -400,7 +416,17 @@ impl App {
 
     // ---------- События, анимация, отрисовка ----------
 
+    /// Минимальная ширина сетки виджетов в ячейках, достаточная для размещения ряда вкладок.
+    pub(crate) fn min_grid_cols(&self) -> u8 {
+        ((self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT - 2.0 * tabs::PAD + tabs::layout::GAP)
+            / tabs::layout::CELL)
+            .ceil()
+            .max(1.0) as u8
+    }
+
     pub(crate) fn retarget(&mut self) {
+        let min_cols = self.min_grid_cols();
+        self.tabs.set_min_cols(min_cols);
         let (w, h) = self.target_size();
         self.w.target = w;
         self.h.target = h;
