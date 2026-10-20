@@ -162,13 +162,8 @@ impl App {
                 bg::send(bg::Cmd::Net);
                 true
             }
-            Ev::SysColors => {
-                // «Эффекты прозрачности» перечитываем здесь же: отдельного события для них нет. При смене
-                // нужен кадр: он покажет или спрячет подложку (`apply_blur`) и пересчитает альфу тела.
-                let t = sys::transparency_enabled();
-                let flipped = std::mem::replace(&mut self.transparency, t) != t;
-                (self.cfg.system_colors && self.apply_theme()) || flipped
-            }
+            Ev::SysColors => self.on_sys_colors(),
+            Ev::SysColorsRetry => self.on_sys_colors_retry(),
             Ev::Volume(level, muted) => {
                 if self.live.volume_changed(level, muted) {
                     self.show_toast(live::Toast::Volume { level, muted })
@@ -196,6 +191,27 @@ impl App {
                 false
             }
         }
+    }
+
+    /// Системные цвета или тема Windows изменились (или сменились обои рабочего стола).
+    /// Запускаем немедленную проверку и планируем повторные проверки на случай задержки/гонки в реестре.
+    pub(crate) unsafe fn on_sys_colors(&mut self) -> bool {
+        let delay_ms = self.color_retry.arm();
+        SetTimer(Some(self.hwnd), SYS_COLOR_TIMER, delay_ms, None);
+        self.check_sys_colors()
+    }
+
+    /// Повторная проверка системных цветов по таймеру (реестр мог обновиться с задержкой).
+    pub(crate) unsafe fn on_sys_colors_retry(&mut self) -> bool {
+        match self.color_retry.on_tick() {
+            Some(delay_ms) => {
+                SetTimer(Some(self.hwnd), SYS_COLOR_TIMER, delay_ms, None);
+            }
+            None => {
+                let _ = KillTimer(Some(self.hwnd), SYS_COLOR_TIMER);
+            }
+        }
+        self.check_sys_colors()
     }
 
     /// Новая запись в буфере обмена: пишем в историю, даже когда остров свёрнут.

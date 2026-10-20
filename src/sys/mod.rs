@@ -15,7 +15,8 @@ mod seal;
 mod shell;
 
 pub use appearance::{
-    current_wallpaper, dark_mode, light_mode, set_dark_mode, set_wallpaper, system_colors, transparency_enabled,
+    current_wallpaper, dark_mode, light_mode, set_dark_mode, set_wallpaper, system_colors,
+    transparency_enabled, ColorRetry, is_theme_setting_str,
 };
 pub use clipboard::{
     clipboard_excluded, clipboard_has_image, clipboard_has_text, clipboard_image, clipboard_owned_by,

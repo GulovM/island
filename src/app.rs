@@ -97,6 +97,8 @@ pub struct App {
     pub(crate) high_surrogate: u32,
     /// Где нажали кнопку мыши (пиксели окна), пока ждём долгого нажатия.
     pub(crate) press_pos: Option<(i32, i32)>,
+    /// Планировщик повторных проверок темы (гонка записи в реестр Windows/WE).
+    pub(crate) color_retry: sys::ColorRetry,
 }
 
 impl App {
@@ -233,6 +235,7 @@ impl App {
                 prev_fg: HWND(std::ptr::null_mut()),
                 high_surrogate: 0,
                 press_pos: None,
+                color_retry: sys::ColorRetry::new(),
                 cfg,
             };
             theme::set_glass(app.cfg.glass);
@@ -286,6 +289,15 @@ impl App {
         }
         theme::set(p);
         true
+    }
+
+    /// Проверяет системные цвета и эффекты прозрачности. Возвращает `true`, если палитра или
+    /// прозрачность изменились и нужен кадр перерисовки.
+    pub(crate) fn check_sys_colors(&mut self) -> bool {
+        let t = sys::transparency_enabled();
+        let flipped = std::mem::replace(&mut self.transparency, t) != t;
+        let theme_changed = self.cfg.system_colors && self.apply_theme();
+        theme_changed || flipped
     }
 
     /// Номер вкладки (индекс в `TABS`), выбранной в ряду.

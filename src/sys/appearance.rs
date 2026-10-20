@@ -18,12 +18,16 @@ const PERSONALIZE: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Th
 
 /// Тёмная тема приложений включена.
 pub fn dark_mode() -> bool {
-    read_dword(PERSONALIZE, w!("AppsUseLightTheme")) == Some(0)
+    read_dword(PERSONALIZE, w!("AppsUseLightTheme"))
+        .or_else(|| read_dword(PERSONALIZE, w!("SystemUsesLightTheme")))
+        == Some(0)
 }
 
 /// В Windows включена светлая тема приложений (если значения в реестре нет — считаем тёмной).
 pub fn light_mode() -> bool {
-    read_dword(PERSONALIZE, w!("AppsUseLightTheme")) == Some(1)
+    read_dword(PERSONALIZE, w!("AppsUseLightTheme"))
+        .or_else(|| read_dword(PERSONALIZE, w!("SystemUsesLightTheme")))
+        == Some(1)
 }
 
 /// В Windows включены «Эффекты прозрачности» (без значения в реестре — включены).
@@ -100,4 +104,115 @@ pub fn system_colors() -> Option<SystemColors> {
     let v = read_dword(w!("Software\\Microsoft\\Windows\\DWM"), w!("AccentColor"))?;
     let ch = |shift: u32| ((v >> shift) & 0xFF) as f32 / 255.0;
     Some(SystemColors::from_accent([ch(0), ch(8), ch(16)]))
+}
+
+/// Планировщик повторных проверок системных цветов.
+/// Защищает от гонки: Windows и сторонние программы (в т. ч. Wallpaper Engine) могут слать
+/// уведомления до завершения записи новых значений в реестр или обновлять цвета обоев
+/// асинхронно в течение нескольких сотен миллисекунд.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ColorRetry {
+    retries_left: u8,
+}
+
+impl ColorRetry {
+    /// Число повторных проверок после первого события.
+    pub const DEFAULT_RETRIES: u8 = 2;
+    /// Интервал между повторными проверками в миллисекундах (300–600 мс).
+    pub const RETRY_DELAY_MS: u32 = 400;
+
+    pub const fn new() -> Self {
+        Self { retries_left: 0 }
+    }
+
+    /// Запускает или перезапускает цикл повторных проверок.
+    /// Возвращает задержку первого тика в миллисекундах.
+    pub fn arm(&mut self) -> u32 {
+        self.retries_left = Self::DEFAULT_RETRIES;
+        Self::RETRY_DELAY_MS
+    }
+
+    /// Обрабатывает очередной тик таймера.
+    /// Если попытки ещё остались — возвращает `Some(next_delay_ms)`.
+    /// Когда попытки исчерпаны — возвращает `None` (таймер пора снять через `KillTimer`).
+    pub fn on_tick(&mut self) -> Option<u32> {
+        if self.retries_left == 0 {
+            return None;
+        }
+        self.retries_left -= 1;
+        if self.retries_left > 0 {
+            Some(Self::RETRY_DELAY_MS)
+        } else {
+            None
+        }
+    }
+}
+
+/// Проверяет, относится ли строка параметра `WM_SETTINGCHANGE` к оформлению (цвета, тема, обои).
+pub fn is_theme_setting_str(s: &str) -> bool {
+    let s = s.trim();
+    if s.is_empty() {
+        return true;
+    }
+    let lower = s.to_ascii_lowercase();
+    lower.contains("color")
+        || lower.contains("theme")
+        || lower.contains("accent")
+        || lower.contains("personalize")
+        || lower.contains("wallpaper")
+        || lower == "desktop"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn color_retry_lifecycle() {
+        let mut cr = ColorRetry::new();
+        assert_eq!(cr.on_tick(), None);
+
+        let delay = cr.arm();
+        assert_eq!(delay, ColorRetry::RETRY_DELAY_MS);
+
+        // Первый тик — остаётся ещё одна попытка
+        assert_eq!(cr.on_tick(), Some(ColorRetry::RETRY_DELAY_MS));
+
+        // Второй тик — попытки исчерпаны
+        assert_eq!(cr.on_tick(), None);
+
+        // Последующие тики не уходят в минус и возвращают None
+        assert_eq!(cr.on_tick(), None);
+    }
+
+    #[test]
+    fn color_retry_rearm() {
+        let mut cr = ColorRetry::new();
+        cr.arm();
+        assert_eq!(cr.on_tick(), Some(ColorRetry::RETRY_DELAY_MS));
+
+        // Повторный arm перезапускает счётчик до начального максимума
+        cr.arm();
+        assert_eq!(cr.on_tick(), Some(ColorRetry::RETRY_DELAY_MS));
+        assert_eq!(cr.on_tick(), None);
+        assert_eq!(cr.on_tick(), None);
+    }
+
+    #[test]
+    fn theme_setting_strings_match_expected() {
+        assert!(is_theme_setting_str("ImmersiveColorSet"));
+        assert!(is_theme_setting_str("WindowsThemeElement"));
+        assert!(is_theme_setting_str("ColorPalette"));
+        assert!(is_theme_setting_str("Personalize"));
+        assert!(is_theme_setting_str("WindowColor"));
+        assert!(is_theme_setting_str("Wallpaper"));
+        assert!(is_theme_setting_str("desktop"));
+        assert!(is_theme_setting_str(""));
+        assert!(is_theme_setting_str("   "));
+
+        assert!(!is_theme_setting_str("Environment"));
+        assert!(!is_theme_setting_str("intl"));
+        assert!(!is_theme_setting_str("Policy"));
+        assert!(!is_theme_setting_str("FontSmoothing"));
+    }
 }

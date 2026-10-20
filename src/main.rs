@@ -100,8 +100,10 @@ pub(crate) const HOT_H: i32 = 2;
 pub(crate) const RECOVER_MS: u32 = 500;
 
 pub(crate) const WM_MOUSELEAVE: u32 = 0x02A3;
+pub(crate) const WM_SYSCOLORCHANGE: u32 = 0x0015;
 /// Цвет оформления окон (акцент) поменялся — его подстраивает, например, Wallpaper Engine под обои.
 pub(crate) const WM_DWMCOLORIZATIONCOLORCHANGED: u32 = 0x0320;
+pub(crate) const WM_THEMECHANGED: u32 = 0x031A;
 pub(crate) const WM_WTSSESSION_CHANGE: u32 = 0x02B1;
 pub(crate) const WTS_SESSION_LOCK: usize = 7;
 pub(crate) const WTS_SESSION_UNLOCK: usize = 8;
@@ -139,6 +141,8 @@ pub(crate) const UPDATE_TICK_MS: u32 = 60 * 60 * 1000;
 /// Долгое нажатие на пустом месте вкладки включает режим правки виджетов.
 pub(crate) const LONG_TIMER: usize = 12;
 pub(crate) const LONG_MS: u32 = 520;
+/// Повторная проверка системных цветов после смены темы/обоев (гонка записи в реестр).
+pub(crate) const SYS_COLOR_TIMER: usize = 13;
 pub(crate) const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 pub(crate) const WM_HOTKEY: u32 = 0x0312;
 pub(crate) const HOTKEY_ID: i32 = 1;
