@@ -416,7 +416,17 @@ impl App {
 
     // ---------- События, анимация, отрисовка ----------
 
+    /// Минимальная ширина сетки виджетов в ячейках, достаточная для размещения ряда вкладок.
+    pub(crate) fn min_grid_cols(&self) -> u8 {
+        ((self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT - 2.0 * tabs::PAD + tabs::layout::GAP)
+            / tabs::layout::CELL)
+            .ceil()
+            .max(1.0) as u8
+    }
+
     pub(crate) fn retarget(&mut self) {
+        let min_cols = self.min_grid_cols();
+        self.tabs.set_min_cols(min_cols);
         let (w, h) = self.target_size();
         self.w.target = w;
         self.h.target = h;

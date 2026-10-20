@@ -11,7 +11,7 @@ use std::f32::consts::TAU;
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows_numerics::Matrix3x2;
 
-use super::layout::{self, Layout, Placed, TabSpec, CELL};
+use super::layout::{self, Layout, Placed, Side, TabSpec, Window, CELL};
 use super::{id as tab_id};
 use crate::anim::Spring;
 use crate::i18n::tr;
@@ -124,6 +124,14 @@ struct Resize {
     before: Layout,
 }
 
+/// Нажатие/перетаскивание ручки растягивания окна сетки.
+struct StretchDrag {
+    side: Side,
+    press_pos: (f32, f32),
+    initial_window: Window,
+    live: bool,
+}
+
 /// Кнопки полосы под сеткой.
 struct Bar {
     tray: Rect,
@@ -157,6 +165,11 @@ pub struct Grid {
     editing: bool,
     drag: Option<Drag>,
     resizing: Option<Resize>,
+    stretching: Option<StretchDrag>,
+    window: Window,
+    min_cols: u8,
+    overlay_rows: u8,
+    last_skip: u32,
     /// Виджет, который рисуется поверх остальных, пока он «летит» на место.
     top: Option<usize>,
     tray_open: bool,
@@ -186,6 +199,11 @@ impl Default for Grid {
             editing: false,
             drag: None,
             resizing: None,
+            stretching: None,
+            window: Window { c0: 0, r0: 0, c1: 1, r1: 1 },
+            min_cols: 1,
+            overlay_rows: 0,
+            last_skip: 0,
             top: None,
             tray_open: false,
             note_text: "",
@@ -206,8 +224,60 @@ impl Grid {
         self.spec = spec;
         self.lay = Layout::default_for(spec);
         self.slots = spec.specs.iter().map(|_| Slot::new()).collect();
+        self.window = layout::fit_window(&self.lay.entries, spec, 0, self.min_cols.max(spec.min_cols), self.eff_min_rows());
         self.pending = Some(text.to_string());
         self.snap = true;
+    }
+
+    /// Текущее окно сетки вкладки (в целых ячейках).
+    #[inline]
+    pub fn window(&self) -> Window {
+        self.window
+    }
+
+    /// Число рядов окна, запрошенное открытым оверлеем (список устройств, месячный календарь).
+    #[cfg(test)]
+    #[inline]
+    pub fn overlay_rows(&self) -> u8 {
+        self.overlay_rows
+    }
+
+    /// Устанавливает динамическую потребность в рядах под активный оверлей.
+    pub fn set_overlay_rows(&mut self, rows: u8) {
+        if self.overlay_rows == rows {
+            return;
+        }
+        self.overlay_rows = rows;
+        if !self.editing {
+            let eff = self.eff_min_rows();
+            let new_win = layout::fit_window(&self.lay.entries, self.spec, self.last_skip, self.min_cols, eff);
+            if new_win != self.window {
+                self.window = new_win;
+                self.resize = true;
+            }
+        }
+    }
+
+    #[inline]
+    fn eff_min_rows(&self) -> u8 {
+        self.spec.min_rows.max(self.overlay_rows)
+    }
+
+    #[inline]
+    pub fn layout(&self) -> &Layout {
+        &self.lay
+    }
+
+    /// Минимальная ширина в ячейках для согласования с рядом вкладок острова.
+    pub fn set_min_cols(&mut self, min_cols: u8) {
+        let eff = min_cols.max(self.spec.min_cols);
+        if self.min_cols == eff {
+            return;
+        }
+        self.min_cols = eff;
+        if !self.editing {
+            self.window = layout::fit_window(&self.lay.entries, self.spec, self.last_skip, self.min_cols, self.eff_min_rows());
+        }
     }
 
     /// Раскладка из конфига изменилась снаружи (файл отредактировали). Свою же запись игнорируем.
@@ -242,6 +312,7 @@ impl Grid {
         self.editing = true;
         self.edit.target = 1.0;
         self.tray_open = false;
+        self.stretching = None;
     }
 
     pub fn end_edit(&mut self) {
@@ -250,14 +321,21 @@ impl Grid {
         }
         self.abort_drag();
         self.resizing = None;
+        self.stretching = None;
         self.editing = false;
         self.edit.target = 0.0;
         self.tray_open = false;
+        // По «Готово» окно сбрасывает ручные расширения и плотно обтягивает оставшиеся виджеты
+        self.window = layout::fit_window(&self.lay.entries, self.spec, self.last_skip, self.min_cols, self.eff_min_rows());
+        self.resize = true;
     }
 
     /// Вкладка стала видимой: пружины встают на конечные значения, а положения виджетов
     /// выставляются сразу, без «полёта» из нуля или со старых мест.
     pub fn show(&mut self) {
+        if !self.editing {
+            self.window = layout::fit_window(&self.lay.entries, self.spec, self.last_skip, self.min_cols, self.eff_min_rows());
+        }
         for sp in [&mut self.edit, &mut self.lift, &mut self.tray, &mut self.note, &mut self.empty] {
             sp.snap();
         }
@@ -273,6 +351,7 @@ impl Grid {
     /// Затухание рамок доигрывает пружина, пока старая вкладка видна при смене.
     pub fn hide(&mut self) {
         self.end_edit();
+        self.overlay_rows = 0;
     }
 
     /// Раскладка для записи в `config.toml`, если она изменилась с прошлого вызова.
@@ -314,6 +393,7 @@ impl Grid {
     pub fn animating(&self) -> bool {
         self.editing
             || self.drag.is_some()
+            || self.stretching.is_some()
             || !(self.edit.settled() && self.lift.settled() && self.tray.settled() && self.note.settled() && self.empty.settled())
             || self.slots.iter().any(|s| !s.settled())
             || self.ghost.iter().any(|g| !g.settled())
@@ -323,6 +403,16 @@ impl Grid {
 
     fn wid(&self, idx: usize, k: u32) -> u32 {
         tab_id(self.tab, 0x1000 + idx as u32 * 8 + k)
+    }
+
+    fn hid(&self, side: Side) -> u32 {
+        let k = match side {
+            Side::Left => 0,
+            Side::Top => 1,
+            Side::Right => 2,
+            Side::Bottom => 3,
+        };
+        tab_id(self.tab, 0x1400 + k)
     }
 
     fn bid(&self, k: u32) -> u32 {
@@ -346,6 +436,7 @@ impl Grid {
         if let Some(d) = self.drag.take() {
             self.slots[d.idx].follow(false);
         }
+        self.stretching = None;
         self.lift.target = 0.0;
     }
 
@@ -452,8 +543,33 @@ impl Grid {
             }
         }
 
+        // Ручки растягивания окна сетки
+        const SIDES: [Side; 4] = [Side::Left, Side::Top, Side::Right, Side::Bottom];
+        for &side in &SIDES {
+            if !layout::can_expand_side(self.window, spec, side) {
+                continue;
+            }
+            let id = self.hid(side);
+            let (_bar, hit) = Self::handle_geom(side, area);
+            let (_, clicked) = ui.click_area(id, hit);
+            let dragged = self.stretching.as_ref().is_some_and(|st| st.side == side && st.live);
+            if clicked && !dragged {
+                // Клик без движения: +4 ячейки (но не больше максимума)
+                self.window = layout::expand_side(self.window, spec, side, 4);
+                self.resize = true;
+            }
+            if self.stretching.is_none() && self.drag.is_none() && self.resizing.is_none() && ui.is_dragging(id) {
+                self.stretching = Some(StretchDrag {
+                    side,
+                    press_pos: ptr,
+                    initial_window: self.window,
+                    live: false,
+                });
+            }
+        }
+
         if let Some(idx) = shown {
-            if self.lay.place_new(spec, skip, idx) {
+            if self.lay.place_new_in_window(self.window, spec, skip, idx) {
                 self.commit();
                 if self.lay.hidden_list(spec, skip).is_empty() {
                     self.tray_open = false;
@@ -470,13 +586,14 @@ impl Grid {
             }
         }
         if let Some(idx) = to_cycle {
-            if self.lay.cycle_size(spec, skip, idx, area.h) {
+            if self.lay.cycle_size_in_window(self.window, spec, skip, idx) {
                 self.commit();
             } else {
                 self.say("Не хватает места");
             }
         }
 
+        self.stretch_step(ui, spec, area);
         self.resize_step(ui, area, skip);
         self.drag_step(ui, area, skip);
 
@@ -485,6 +602,122 @@ impl Grid {
             let on_toggle = ptr.1 >= area.bottom() && ptr.1 < area.bottom() + 40.0 && ptr.0 < area.x + 160.0;
             if !tray.card.contains(ptr) && !on_toggle {
                 self.tray_open = false;
+            }
+        }
+    }
+
+    /// Геометрия ручки растягивания окна: (полоса для рисования, область нажатия).
+    pub fn handle_geom(side: Side, area: Rect) -> (Rect, Rect) {
+        let span = 0.5;
+        let thick = 3.0;
+        match side {
+            Side::Left => {
+                let len = area.h * span;
+                let cy = area.cy();
+                let x = area.x - 4.5;
+                let bar = Rect::new(x - thick / 2.0, cy - len / 2.0, thick, len);
+                let hit = Rect::new(0.0, cy - len / 2.0, area.x + 2.0, len);
+                (bar, hit)
+            }
+            Side::Right => {
+                let len = area.h * span;
+                let cy = area.cy();
+                let x = area.right() + 4.5;
+                let bar = Rect::new(x - thick / 2.0, cy - len / 2.0, thick, len);
+                let hit = Rect::new(area.right() - 2.0, cy - len / 2.0, super::PAD + 8.0, len);
+                (bar, hit)
+            }
+            Side::Top => {
+                let len = area.w * span;
+                let cx = area.cx();
+                let y = area.y - 4.5;
+                let bar = Rect::new(cx - len / 2.0, y - thick / 2.0, len, thick);
+                let hit = Rect::new(cx - len / 2.0, area.y - 12.0, len, 14.0);
+                (bar, hit)
+            }
+            Side::Bottom => {
+                let len = area.w * span;
+                let cx = area.cx();
+                let y = area.bottom() + 4.0;
+                let bar = Rect::new(cx - len / 2.0, y - thick / 2.0, len, thick);
+                let hit = Rect::new(cx - len / 2.0, area.bottom() - 2.0, len, 9.0);
+                (bar, hit)
+            }
+        }
+    }
+
+    /// Растягивание окна сетки перетаскиванием ручки.
+    fn stretch_step(&mut self, ui: &mut Ui, spec: &TabSpec, area: Rect) {
+        let Some(mut st) = self.stretching.take() else { return };
+        if !ui.is_dragging(self.hid(st.side)) {
+            return;
+        }
+        let (px, py) = ui.pointer();
+        if !st.live && (px - st.press_pos.0).hypot(py - st.press_pos.1) > MOVE_MIN {
+            st.live = true;
+            self.tray_open = false;
+        }
+        if st.live {
+            let layer_w = area.w + 2.0 * super::PAD;
+            let new_win = layout::stretch_window(st.side, (px, py), st.press_pos, st.initial_window, spec, layer_w);
+            if new_win != self.window {
+                self.window = new_win;
+                self.resize = true;
+            }
+        }
+        self.stretching = Some(st);
+    }
+
+    /// Рисует подсвеченные ручки растягивания окна с пульсирующей альфой и шевронами наружу.
+    unsafe fn draw_handles(&self, ui: &mut Ui, cv: &Canvas, area: Rect) {
+        let e = self.edit.value.clamp(0.0, 1.0);
+        if e < 0.002 {
+            return;
+        }
+        let pulse = (self.phase * 0.25).sin() * 0.5 + 0.5;
+        let base_a = 0.40 + 0.25 * pulse;
+
+        const SIDES: [Side; 4] = [Side::Left, Side::Top, Side::Right, Side::Bottom];
+        for &side in &SIDES {
+            if !layout::can_expand_side(self.window, self.spec, side) {
+                continue;
+            }
+            let id = self.hid(side);
+            let hv = ui.hover_of(id);
+            let a = ((base_a + 0.35 * hv) * e).clamp(0.0, 1.0);
+            let col = fade(cv.accent, a);
+            let (bar, _) = Self::handle_geom(side, area);
+
+            let rad = (bar.w.min(bar.h) / 2.0).min(1.5);
+            cv.rr(bar, rad, col);
+
+            let stroke_col = fade(cv.accent, (a + 0.2 * e).clamp(0.0, 1.0));
+            let t = 1.3;
+            match side {
+                Side::Left => {
+                    let cx = bar.cx() - 1.0;
+                    let cy = bar.cy();
+                    cv.stroke_line((cx + 2.5, cy - 3.5), (cx - 1.5, cy), t, stroke_col);
+                    cv.stroke_line((cx - 1.5, cy), (cx + 2.5, cy + 3.5), t, stroke_col);
+                }
+                Side::Right => {
+                    let cx = bar.cx() + 1.0;
+                    let cy = bar.cy();
+                    cv.stroke_line((cx - 2.5, cy - 3.5), (cx + 1.5, cy), t, stroke_col);
+                    cv.stroke_line((cx + 1.5, cy), (cx - 2.5, cy + 3.5), t, stroke_col);
+                }
+                Side::Top => {
+                    let cx = bar.cx();
+                    let cy = bar.cy() - 1.0;
+                    cv.stroke_line((cx - 3.5, cy + 2.5), (cx, cy - 1.5), t, stroke_col);
+                    cv.stroke_line((cx, cy - 1.5), (cx + 3.5, cy + 2.5), t, stroke_col);
+                }
+                Side::Bottom => {
+                    let cx = bar.cx();
+                    let cy = bar.cy() + 1.0;
+                    cv.stroke_line((cx - 3.5, cy - 2.5), (cx, cy + 1.5), t, stroke_col);
+                    cv.stroke_line((cx, cy + 1.5), (cx + 3.5, cy - 2.5), t, stroke_col);
+                }
             }
         }
     }
@@ -506,8 +739,8 @@ impl Grid {
             self.tray_open = false;
             if let Some(e) = self.lay.entry(rs.idx) {
                 let sz = spec.specs[rs.idx].sizes[e.size];
-                let gx = area.x + e.col as f32 * CELL;
-                let gy = area.y + e.row as f32 * CELL;
+                let gx = area.x + (e.col - self.window.c0) as f32 * CELL;
+                let gy = area.y + (e.row - self.window.r0) as f32 * CELL;
                 let gw = sz.pixel_w();
                 let gh = sz.pixel_h();
                 for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
@@ -519,13 +752,13 @@ impl Grid {
         }
         if rs.live {
             let (w, h) = (rs.from.0 + px - rs.press.0, rs.from.1 + py - rs.press.1);
-            if let Some(lay) = self.lay.resized_to(spec, skip, rs.idx, w, h) {
+            if let Some(lay) = self.lay.resized_to_in_window(self.window, spec, skip, rs.idx, w, h) {
                 self.lay = lay;
             }
             if let Some(e) = self.lay.entry(rs.idx) {
                 let sz = spec.specs[rs.idx].sizes[e.size];
-                let gx = area.x + e.col as f32 * CELL;
-                let gy = area.y + e.row as f32 * CELL;
+                let gx = area.x + (e.col - self.window.c0) as f32 * CELL;
+                let gy = area.y + (e.row - self.window.r0) as f32 * CELL;
                 let gw = sz.pixel_w();
                 let gh = sz.pixel_h();
                 for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
@@ -582,10 +815,9 @@ impl Grid {
             let fx = (px - d.grab.0).clamp(area.x - 8.0, (area.right() - w + 8.0).max(area.x - 8.0));
             let fy = (py - d.grab.1).clamp(area.y - 8.0, (area.bottom() - h + 8.0).max(area.y - 8.0));
             d.float = (fx, fy);
-            let want_col = (((fx - area.x + CELL / 2.0) / CELL).floor().max(0.0) as u32).min(255) as u8;
-            let want_row = (((fy - area.y + CELL / 2.0) / CELL).floor().max(0.0) as u32).min(255) as u8;
+            let (want_col, want_row) = self.window.pixel_to_cell(fx - area.x + CELL / 2.0, fy - area.y + CELL / 2.0);
             let cur_size = self.lay.entry(d.idx).map_or(0, |e| e.size);
-            let target = if layout::can_place(spec, skip, &self.lay.entries, d.idx, cur_size, want_col, want_row) {
+            let target = if layout::can_place_in_window(self.window, spec, skip, &self.lay.entries, d.idx, cur_size, want_col, want_row) {
                 Some((want_col, want_row))
             } else {
                 None
@@ -595,16 +827,18 @@ impl Grid {
             let gw = sz.pixel_w();
             let gh = sz.pixel_h();
             if let Some((tc, tr)) = target {
-                let gx = area.x + tc as f32 * CELL;
-                let gy = area.y + tr as f32 * CELL;
+                let gx = area.x + (tc - self.window.c0) as f32 * CELL;
+                let gy = area.y + (tr - self.window.r0) as f32 * CELL;
                 for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
                     g.target = v;
                 }
             } else {
-                let max_c = spec.cols.saturating_sub(sz.w);
-                let max_r = spec.rows.saturating_sub(sz.h);
-                let gx = area.x + want_col.min(max_c) as f32 * CELL;
-                let gy = area.y + want_row.min(max_r) as f32 * CELL;
+                let max_c = self.window.c1.saturating_sub(sz.w);
+                let max_r = self.window.r1.saturating_sub(sz.h);
+                let clamp_c = want_col.clamp(self.window.c0, max_c.max(self.window.c0));
+                let clamp_r = want_row.clamp(self.window.r0, max_r.max(self.window.r0));
+                let gx = area.x + (clamp_c - self.window.c0) as f32 * CELL;
+                let gy = area.y + (clamp_r - self.window.r0) as f32 * CELL;
                 for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
                     g.target = v;
                 }
@@ -622,9 +856,13 @@ impl Grid {
         if spec.specs.is_empty() || self.slots.len() != spec.specs.len() {
             return;
         }
+        self.last_skip = skip;
         if let Some(text) = self.pending.take() {
             let lay = Layout::parse(spec, &text);
             self.lay = if lay.fits(spec, skip, area.h) { lay } else { Layout::default_for(spec) };
+            if !self.editing {
+                self.window = layout::fit_window(&self.lay.entries, spec, skip, self.min_cols, self.eff_min_rows());
+            }
         }
         if self.editing && ui.focus.is_some() {
             ui.blur();
@@ -639,11 +877,12 @@ impl Grid {
         }
         self.tray.target = if self.editing && self.tray_open { 1.0 } else { 0.0 };
 
-        // Раскладка → цели пружин.
-        let mut placed = self.lay.pack(spec, skip);
+        // Раскладка → цели пружин с учётом смещения текущего окна.
+        let mut placed = self.lay.pack_window(spec, skip, self.window);
         if !self.editing && self.drag.is_none() && !self.lay.is_default(spec) && !self.lay.fits(spec, skip, area.h) {
             self.lay = Layout::default_for(spec);
-            placed = self.lay.pack(spec, skip);
+            self.window = layout::fit_window(&self.lay.entries, spec, skip, self.min_cols, self.eff_min_rows());
+            placed = self.lay.pack_window(spec, skip, self.window);
         }
         self.retarget(area, &placed);
         let live = self.drag.as_ref().filter(|d| d.live).map(|d| d.idx);
@@ -696,6 +935,7 @@ impl Grid {
 
         self.draw_empty(ui, cv, area, skip);
         if self.edit.value > 0.002 {
+            self.draw_handles(ui, cv, area);
             self.draw_chrome(ui, cv, area, skip);
         }
     }
@@ -835,6 +1075,12 @@ impl Grid {
             self.lay = Layout::default_for(spec);
             self.commit();
             self.tray_open = false;
+            let def_win = layout::fit_window(&self.lay.entries, spec, skip, self.min_cols, self.eff_min_rows());
+            self.window.c0 = self.window.c0.min(def_win.c0);
+            self.window.r0 = self.window.r0.min(def_win.r0);
+            self.window.c1 = self.window.c1.max(def_win.c1);
+            self.window.r1 = self.window.r1.max(def_win.r1);
+            self.resize = true;
         }
         if ui.solid_button(&bcv, self.bid(3), bar.done, &tr("Готово"), cv.accent, ui::ink(), BAR_H / 2.0) {
             self.end_edit();
@@ -868,24 +1114,29 @@ impl Grid {
         }
     }
 
-    /// Рисует вершины сетки точками и «+» на углах под виджетами в режиме правки.
+    /// Рисует вершины сетки точками и «+» на углах под виджетами в режиме правки внутри текущего окна.
     unsafe fn draw_grid_vertices(&self, cv: &Canvas, area: Rect, focus: Option<(u8, u8, u8, u8)>) {
         let e = self.edit.value.clamp(0.0, 1.0);
         if e < 0.002 {
             return;
         }
-        let spec = self.spec;
         let fg = ui::fg();
         let base_inner = fade(fg, 0.22 * e);
         let base_edge = fade(fg, 0.38 * e);
         let base_corner = fade(fg, 0.45 * e);
         let max_dist = 2.5;
 
-        for r in 0..=spec.rows {
-            for c in 0..=spec.cols {
-                let (nx, ny) = node_pos(area, c, r);
-                let kind = classify_node(c, r, spec.cols, spec.rows);
-                let att = highlight_factor(c, r, focus, max_dist);
+        let win = self.window;
+        let cols = win.cols();
+        let rows = win.rows();
+
+        for r_rel in 0..=rows {
+            for c_rel in 0..=cols {
+                let (nx, ny) = node_pos(area, c_rel, r_rel);
+                let kind = classify_node(c_rel, r_rel, cols, rows);
+                let abs_c = win.c0 + c_rel;
+                let abs_r = win.r0 + r_rel;
+                let att = highlight_factor(abs_c, abs_r, focus, max_dist);
 
                 match kind {
                     NodeKind::Corner => {
@@ -1147,5 +1398,99 @@ mod tests {
         assert!(!g.animating());
         g.set_text("anything");
         assert!(g.take_saved().is_none() && !g.take_resize());
+    }
+
+    #[test]
+    fn handle_geometry_around_area() {
+        let area = Rect::new(14.0, 38.0, 200.0, 100.0);
+        let (bar_l, hit_l) = Grid::handle_geom(Side::Left, area);
+        assert!(bar_l.cx() < area.x);
+        assert_eq!(bar_l.cy(), area.cy());
+        assert!(hit_l.x < area.x);
+
+        let (bar_r, hit_r) = Grid::handle_geom(Side::Right, area);
+        assert!(bar_r.cx() > area.right());
+        assert_eq!(bar_r.cy(), area.cy());
+        assert!(hit_r.right() > area.right());
+
+        let (bar_t, hit_t) = Grid::handle_geom(Side::Top, area);
+        assert!(bar_t.cy() < area.y);
+        assert_eq!(bar_t.cx(), area.cx());
+        assert!(hit_t.y < area.y);
+
+        let (bar_b, hit_b) = Grid::handle_geom(Side::Bottom, area);
+        assert!(bar_b.cy() > area.bottom());
+        assert_eq!(bar_b.cx(), area.cx());
+        assert!(hit_b.bottom() > area.bottom());
+    }
+
+    #[test]
+    fn grid_stretching_and_end_edit_tightens() {
+        use super::layout::{Spec, TabSpec, Size, sz};
+        static SIZES: [Size; 1] = [sz(4, 2)];
+        static SPEC: TabSpec = TabSpec {
+            cols: 16,
+            rows: 10,
+            min_cols: 4,
+            min_rows: 2,
+            specs: &[
+                Spec { key: "a", title: "A", sizes: &SIZES, size: 0, col: 0, row: 0 },
+            ],
+        };
+
+        let mut g = Grid::default();
+        g.configure(0, &SPEC, "a@0,0");
+        // Плотное окно для одного виджета 4x2
+        assert_eq!(g.window(), Window { c0: 0, r0: 0, c1: 4, r1: 2 });
+
+        g.begin_edit();
+        assert!(g.is_editing());
+        // В режиме правки растягиваем вправо на 4 ячейки (клик)
+        g.window = layout::expand_side(g.window, &SPEC, Side::Right, 4);
+        assert_eq!(g.window, Window { c0: 0, r0: 0, c1: 8, r1: 2 });
+
+        // Растягиваем вниз на 3 ячейки
+        g.window = layout::expand_side(g.window, &SPEC, Side::Bottom, 3);
+        assert_eq!(g.window, Window { c0: 0, r0: 0, c1: 8, r1: 5 });
+
+        // По «Готово» временные расширения сбрасываются, и окно снова плотно обтягивает виджет
+        g.end_edit();
+        assert!(!g.is_editing());
+        assert_eq!(g.window(), Window { c0: 0, r0: 0, c1: 4, r1: 2 });
+        assert!(g.take_resize());
+    }
+
+    #[test]
+    fn grid_overlay_rows_dynamic_expansion() {
+        use super::layout::{sz, Size, Spec, TabSpec};
+        static SIZES: [Size; 1] = [sz(4, 2)];
+        static SPEC: TabSpec = TabSpec {
+            cols: 16,
+            rows: 16,
+            min_cols: 4,
+            min_rows: 2,
+            specs: &[Spec { key: "a", title: "A", sizes: &SIZES, size: 0, col: 0, row: 0 }],
+        };
+
+        let mut g = Grid::default();
+        g.configure(0, &SPEC, "a@0,0");
+        assert_eq!(g.window().rows(), 2);
+        assert_eq!(g.overlay_rows(), 0);
+
+        // Оверлей требует 8 рядов: окно увеличивается
+        g.set_overlay_rows(8);
+        assert_eq!(g.overlay_rows(), 8);
+        assert_eq!(g.window().rows(), 8);
+        assert!(g.take_resize());
+
+        // Повторная установка того же числа рядов не генерирует лишний resize
+        g.set_overlay_rows(8);
+        assert!(!g.take_resize());
+
+        // Оверлей закрылся: окно возвращается к min_rows = 2
+        g.set_overlay_rows(0);
+        assert_eq!(g.overlay_rows(), 0);
+        assert_eq!(g.window().rows(), 2);
+        assert!(g.take_resize());
     }
 }

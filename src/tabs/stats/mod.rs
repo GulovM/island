@@ -64,9 +64,17 @@ static SPEED_SIZES: [Size; 3] = [sz(8, 5), sz(16, 5), sz(24, 5)];
 
 /// Сетка вкладки: 40 колонок по 16 px (шаг CELL=16, зазор GAP=8), 15 рядов. Кольца и карточки занимают
 /// по 8 колонок, топ приложений и замер скорости — по 16.
+///
+/// Арифметика min_rows = 5:
+/// Вкладка Stats не имеет выпадающих оверлеев. Минимальная содержательная строка — инфо-карточки
+/// (sz(8, 5)) или кольца (sz(8, 4) / sz(8, 6)). При min_rows = 5 высота содержимого:
+/// 5 * 16 - 8 = 72 px, что достаточно как для компактного ряда карточек, так и для
+/// размещения заглушки «Нет виджетов» с кнопкой «Настроить».
 pub static SPEC: TabSpec = TabSpec {
     cols: 40,
     rows: 15,
+    min_cols: 8,
+    min_rows: 5,
     specs: &[
         Spec { key: "cpu", title: "CPU", sizes: &RING, size: 1, col: 0, row: 0 },
         Spec { key: "gpu", title: "GPU", sizes: &RING, size: 1, col: 8, row: 0 },
@@ -288,8 +296,8 @@ impl Stats {
     }
 
     /// Рисует вкладку по сетке. `h` — высота панели без полосы правки.
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
-        let area = Rect::new(PAD, TOP, w - 2.0 * PAD, h - TOP - PAD);
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, _w: f32, _h: f32) {
+        let area = Rect::new(PAD, TOP, grid.window().content_w(), grid.window().content_h());
         grid.draw(ui, cv, area, 0, |ui, cv, it| match it.idx {
             CPU | GPU | RAM => self.ring_card(cv, it.rect, it.size, it.idx),
             DISK | NET | UPTIME => self.info_card(cv, it.rect, it.size, it.idx),

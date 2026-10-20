@@ -12,7 +12,7 @@ use crate::sys;
 use crate::ui::{icon, mix, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink, txt, WHITE};
 
 use super::grid::{Grid, Item};
-use super::layout::{sz, Size, Spec, TabSpec, GAP};
+use super::layout::{sz, Size, Spec, TabSpec, CELL, GAP};
 use super::{id, CONTROLS, PAD, TOP};
 
 /// Сколько после перетаскивания слайдера не принимать громкость из снимка (иначе ползунок дёргается).
@@ -37,9 +37,14 @@ static PLAYER: [Size; 3] = [sz(24, 4), sz(12, 6), sz(24, 6)];
 
 /// Сетка вкладки: 24 колонки по 16 px (шаг CELL=16, зазор GAP=8), 16 рядов. Плитки по умолчанию занимают
 /// 8 ячеек (1/3 ширины) или 12 ячеек (1/2 ширины) при высоте 3 ячейки (40 px).
+///
+/// Статический `min_rows = 4` задаёт компактный размер при скрытых виджетах или пустой вкладке.
+/// Выпадающий список устройств LIST_H = 116 px запрашивает место динамически через `overlay_rows`.
 pub static SPEC: TabSpec = TabSpec {
     cols: 24,
     rows: 16,
+    min_cols: 8,
+    min_rows: 4,
     specs: &[
         Spec { key: "wifi", title: "Wi-Fi", sizes: &TILE, size: 1, col: 0, row: 0 },
         Spec { key: "bluetooth", title: "Bluetooth", sizes: &TILE, size: 1, col: 8, row: 0 },
@@ -51,6 +56,19 @@ pub static SPEC: TabSpec = TabSpec {
         Spec { key: "media", title: "Плеер", sizes: &PLAYER, size: 2, col: 0, row: 8 },
     ],
 };
+
+/// Вычисляет число рядов сетки, необходимое для выпадающего списка устройств.
+/// Динамический расчёт overlay_rows:
+/// Список устройств LIST_H = 116 px открывается под плитками (низ на `low` px от верха окна).
+/// С учётом зазоров GAP между плитками и списком и запаса GAP до нижнего края окна:
+/// ceil((low + GAP + LIST_H + GAP) / CELL).
+/// Для плиток по умолчанию в 2 ряда (низ row 6 -> low = 88 px):
+/// (88 + 8 + 116 + 8) / 16 = 220 / 16 = 13.75 -> 14 рядов.
+#[inline]
+pub fn controls_overlay_rows(low: f32) -> u8 {
+    let needed = low + GAP + LIST_H + GAP;
+    (needed / CELL).ceil().max(0.0) as u8
+}
 
 /// Прозрачность выпадающего списка: пружина, которой у `Default` нет.
 struct Fade(Spring);
@@ -130,12 +148,29 @@ pub struct Controls {
     /// Какой список рисуется (и пока гаснет после закрытия) и насколько он проявлен.
     shown: Option<ListKind>,
     list_t: Fade,
-    /// Низ самой нижней плитки в этом и прошлом кадре: под ней открывается список.
-    low: f32,
-    low_prev: f32,
 }
 
 impl Controls {
+    /// Расстояние от верха содержимого до низа видимых плиток (в логических пикселях).
+    /// Считается строго по дискретным координатам раскладки сетки во избежание дрожания.
+    pub fn tiles_low(grid: &Grid) -> f32 {
+        let mut max_r = 0u8;
+        for &idx in &[WIFI, BLUETOOTH, AUDIO, NIGHT, DARK] {
+            if let Some(e) = grid.layout().entry(idx) {
+                if !e.hidden {
+                    let sz = SPEC.specs[idx].sizes[e.size];
+                    max_r = max_r.max(e.row + sz.h);
+                }
+            }
+        }
+        let r_rel = max_r.saturating_sub(grid.window().r0);
+        if r_rel > 0 {
+            r_rel as f32 * super::layout::CELL - super::layout::GAP
+        } else {
+            0.0
+        }
+    }
+
     pub fn show(&mut self) -> bool {
         self.dark = sys::dark_mode();
         self.night = sys::night_light();
@@ -151,6 +186,9 @@ impl Controls {
     /// Вкладка скрыта или её начали править: список закрывается.
     pub fn hide(&mut self) {
         self.open = None;
+        self.shown = None;
+        self.list_t.0.target = 0.0;
+        self.list_t.0.snap();
         self.join = None;
         self.seek_hold = None;
         self.last_seek_send = None;
@@ -237,31 +275,43 @@ impl Controls {
 
     /// Рисует вкладку: виджеты по сетке, а поверх них — выпадающий список устройств. `h` — высота
     /// панели без полосы правки.
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
-        let area = Rect::new(PAD, TOP, w - 2.0 * PAD, h - TOP - PAD);
-        let skip = if crate::bright::available() { 0 } else { 1 << BRIGHTNESS };
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, _w: f32, _h: f32) {
         if let Some(kind) = self.open {
             self.shown = Some(kind);
         }
         self.list_t.0.target = if self.open.is_some() { 1.0 } else { 0.0 };
-        self.low_prev = std::mem::take(&mut self.low);
+        if self.open.is_none() && self.list_t.0.settled() {
+            self.shown = None;
+        }
+
+        let low = Self::tiles_low(grid);
+        let list_active = self.open.is_some() || (self.shown.is_some() && self.list_t.0.value > 0.0);
+        let overlay_rows = if list_active {
+            controls_overlay_rows(low)
+        } else {
+            0
+        };
+        grid.set_overlay_rows(overlay_rows);
+
+        let area = Rect::new(PAD, TOP, grid.window().content_w(), grid.window().content_h());
+        let skip = if crate::bright::available() { 0 } else { 1 << BRIGHTNESS };
         // Виджеты под списком гаснут и не принимают нажатий (иначе они перехватят их у строк списка).
-        let cover = (self.list_t.0.value > 0.004).then(|| self.list_rect(area));
+        let cover = (self.list_t.0.value > 0.004).then(|| self.list_rect(area, low));
         grid.draw(ui, cv, area, skip, |ui, cv, it| self.widget(ui, cv, it, cover));
-        self.overlay(ui, cv, area);
+        self.overlay(ui, cv, area, low);
     }
 
     /// Где лежит список устройств: сразу под самой нижней плиткой (а если места не хватает —
     /// прижат к низу области).
-    fn list_rect(&self, area: Rect) -> Rect {
-        let y = (self.low_prev + GAP).min(area.bottom() - LIST_H).max(area.y);
+    fn list_rect(&self, area: Rect, low: f32) -> Rect {
+        let y = (area.y + low + GAP).min(area.bottom() - LIST_H).max(area.y);
         Rect::new(area.x, y, area.w, LIST_H)
     }
 
-    unsafe fn overlay(&mut self, ui: &mut Ui, cv: &Canvas, area: Rect) {
+    unsafe fn overlay(&mut self, ui: &mut Ui, cv: &Canvas, area: Rect, low: f32) {
         let t = self.list_t.0.value.clamp(0.0, 1.0);
         let Some(kind) = self.shown.filter(|_| t > 0.01) else { return };
-        let mut r = self.list_rect(area);
+        let mut r = self.list_rect(area, low);
         r.y += (1.0 - t) * 6.0;
         let ocv = Canvas { g: cv.g, alpha: cv.alpha * t, accent: cv.accent };
         // Закрывающийся список уже не принимает нажатий.
@@ -274,9 +324,6 @@ impl Controls {
 
     /// Один виджет сетки; если его закрывает открытый список, он гаснет и становится немым.
     unsafe fn widget(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item, cover: Option<Rect>) {
-        if matches!(it.idx, WIFI | BLUETOOTH | AUDIO | NIGHT | DARK) {
-            self.low = self.low.max(it.rect.bottom());
-        }
         let covered = cover.is_some_and(|c| c.intersects(&it.rect));
         let k = if covered { 1.0 - self.list_t.0.value.clamp(0.0, 1.0) } else { 1.0 };
         if k < 0.004 {
@@ -830,18 +877,42 @@ mod tests {
         assert_eq!(wifi_sz.pixel_h(), 40.0);
 
         // Проверяем выпадающий список устройств: LIST_H=116 px
-        // Низ самой нижней плитки (Night/Dark): row 3 + h 3 = row 6 -> y = 6 * 16 = 96 px.
-        // y + GAP = 96.0 + 8.0 = 104.0 px (или от area.y).
-        // Высота области сетки: 16 * 16 - 8 = 248 px.
-        let low_tiles = 6.0 * CELL; // row 6 top / row 3 bottom
+        // Низ самой нижней плитки (Night/Dark): row 3 + h 3 = row 6 -> y = 6 * 16 - 8 = 88 px.
+        // y + GAP = 88.0 + 8.0 = 96.0 px (от верха содержимого).
+        // Низ списка: 96 + 116 = 212 px.
+        // При overlay_rows = 14 высота содержимого: 14 * 16 - 8 = 216 px (212 <= 216).
+        let low_tiles = 6.0 * CELL - GAP;
         let list_top = low_tiles + GAP;
         let list_bottom = list_top + LIST_H;
-        let area_h = SPEC.rows as f32 * CELL - GAP;
+        let area_h = 14.0 * CELL - GAP;
         assert!(
             list_bottom <= area_h,
             "список устройств не помещается: bottom {} > area_h {}",
             list_bottom,
             area_h
         );
+        assert_eq!(controls_overlay_rows(low_tiles), 14);
+    }
+
+    #[test]
+    fn test_controls_overlay_rows_and_tiles_low() {
+        // По умолчанию: Night/Dark заканчиваются на row 6 -> low = 6*16 - 8 = 88 px
+        assert_eq!(controls_overlay_rows(88.0), 14);
+
+        // Только 1 ряд плиток: row 3 -> low = 3*16 - 8 = 40 px
+        assert_eq!(controls_overlay_rows(40.0), 11);
+
+        // Без плиток (все скрыты): low = 0 px
+        assert_eq!(controls_overlay_rows(0.0), 9);
+
+        // Плитки смещены в edit mode: low = 120 px -> 16 рядов
+        assert_eq!(controls_overlay_rows(120.0), 16);
+
+        // Проверяем tiles_low на сетке по умолчанию
+        let mut grid = Grid::default();
+        grid.configure(CONTROLS, &SPEC, "");
+        let low = Controls::tiles_low(&grid);
+        assert_eq!(low, 88.0);
+        assert_eq!(controls_overlay_rows(low), 14);
     }
 }

@@ -190,6 +190,9 @@ fn run() -> Result<()> {
         bg::send(bg::Cmd::Media);
         let cfg = app.cfg.clone();
         app.tabs.load(&cfg, &state);
+        app.retarget();
+        app.w.snap();
+        app.h.snap();
         if let Err(e) = AddClipboardFormatListener(app.hwnd) {
             log::error(&format!("не удалось подписаться на буфер обмена: {e}"));
         }

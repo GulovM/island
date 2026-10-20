@@ -128,7 +128,6 @@ pub fn ago(now: u64, then: u64) -> String {
     crate::i18n::ago_long(d)
 }
 
-#[derive(Default)]
 pub struct Tabs {
     power: power::Power,
     stats: stats::Stats,
@@ -141,6 +140,27 @@ pub struct Tabs {
     pub actions: Vec<Action>,
     /// Сетки виджетов вкладок Controls, Today, Stats (индекс = номер вкладки).
     grids: [grid::Grid; 3],
+}
+
+impl Default for Tabs {
+    fn default() -> Self {
+        let mut grids: [grid::Grid; 3] = Default::default();
+        for (tab, g) in grids.iter_mut().enumerate() {
+            g.configure(tab, spec_of(tab), "");
+        }
+        Self {
+            power: Default::default(),
+            stats: Default::default(),
+            controls: Default::default(),
+            today: Default::default(),
+            clip: Default::default(),
+            apps: Default::default(),
+            wall: Default::default(),
+            settings: Default::default(),
+            actions: Default::default(),
+            grids,
+        }
+    }
 }
 
 /// Фиксированные размеры вкладок без сетки и страницы настроек: (ширина, высота).
@@ -213,18 +233,23 @@ impl Tabs {
         self.grids.get(tab).map_or(0.0, grid::Grid::extra)
     }
 
+    /// Устанавливает минимальную ширину сетки (в ячейках) для всех вкладок с сеткой
+    /// для согласования с длиной ряда вкладок острова.
+    pub fn set_min_cols(&mut self, min_cols: u8) {
+        for g in &mut self.grids {
+            g.set_min_cols(min_cols);
+        }
+    }
+
     /// Размер острова для вкладки `tab`: (ширина, высота) с учётом `edit_extra` в режиме правки.
-    /// Для вкладок с сеткой (Controls, Today, Stats) вычисляется строго из параметров сетки:
+    /// Для вкладок с сеткой (Controls, Today, Stats) вычисляется из текущего окна сетки:
     /// `ширина = cols * CELL - GAP + 2 * PAD`, `высота = TOP + rows * CELL - GAP + PAD`.
     /// Для остальных вкладок берутся их фиксированные размеры.
     pub fn island_size(&self, tab: usize) -> (f32, f32) {
         let (w, mut h) = match tab {
             CONTROLS | TODAY | STATS => {
-                let spec = spec_of(tab);
-                (
-                    spec.cols as f32 * layout::CELL - layout::GAP + 2.0 * PAD,
-                    TOP + spec.rows as f32 * layout::CELL - layout::GAP + PAD,
-                )
+                let win = self.grids[tab].window();
+                (win.island_w(), win.island_h(0.0))
             }
             CLIPBOARD..=SETTINGS => NON_GRID_SIZES[tab - CLIPBOARD],
             _ => (400.0, 200.0),
@@ -309,6 +334,9 @@ impl Tabs {
         }
         if tab == CONTROLS {
             self.controls.hide();
+        }
+        if tab == TODAY {
+            self.today.hide_overlays();
         }
     }
 
