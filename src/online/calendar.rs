@@ -185,6 +185,8 @@ pub fn merge_raw_events(lists: impl IntoIterator<Item = Vec<RawEvent>>) -> Vec<R
 pub struct DayEvent {
     /// Минуты от полуночи; `None` — весь день (или продолжение многодневного события).
     pub minute: Option<i64>,
+    /// Минуты окончания от полуночи; `None` — весь день или не задано.
+    pub end_minute: Option<i64>,
     pub title: String,
 }
 
@@ -513,7 +515,22 @@ pub fn events_by_day(raws: &[RawEvent], first_day: i64, days: usize, offset: i64
             let last = if dur > 0 { (t + dur - 1).div_euclid(1440).max(first) } else { first };
             for d in first.max(lo)..=last.min(hi - 1) {
                 let minute = (!raw.all_day && d == first).then_some(t.rem_euclid(1440));
-                out[(d - lo) as usize].push(DayEvent { minute, title: raw.title.clone() });
+                let end_minute = if raw.all_day {
+                    None
+                } else if dur > 0 {
+                    let end_t = t + dur;
+                    let end_d = end_t.div_euclid(1440);
+                    if end_d == d {
+                        Some(end_t.rem_euclid(1440))
+                    } else if end_d > d {
+                        Some(1440)
+                    } else {
+                        minute
+                    }
+                } else {
+                    minute
+                };
+                out[(d - lo) as usize].push(DayEvent { minute, end_minute, title: raw.title.clone() });
             }
         };
         if raw.rrule.is_none() {
@@ -575,6 +592,17 @@ mod tests {
         // 23-е исключено EXDATE, 30-е повторяется.
         assert!(on(23).is_empty());
         assert_eq!(on(30).len(), 1);
+    }
+
+    #[test]
+    fn events_by_day_end_minute() {
+        let ics = "BEGIN:VEVENT\nDTSTART:20261016T090000\nDTEND:20261016T103000\nSUMMARY:Meeting\nEND:VEVENT\n";
+        let raws = parse_ics(ics, 0);
+        let first = days_from_civil(2026, 10, 16);
+        let days = events_by_day(&raws, first, 1, 0);
+        assert_eq!(days[0].len(), 1);
+        assert_eq!(days[0][0].minute, Some(540));
+        assert_eq!(days[0][0].end_minute, Some(630));
     }
 
     #[test]

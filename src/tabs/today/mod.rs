@@ -48,7 +48,7 @@ const MONTH_H: f32 = 252.0;
 
 static CLOCK_SIZES: [Size; 2] = [sz(2, 76.0), sz(2, 140.0)];
 static WEATHER_SIZES: [Size; 3] = [sz(2, 62.0), sz(2, 102.0), sz(4, 62.0)];
-static WEEK_SIZES: [Size; 3] = [sz(4, 76.0), sz(4, 122.0), sz(6, 122.0)];
+static WEEK_SIZES: [Size; 4] = [sz(4, 76.0), sz(4, 122.0), sz(6, 122.0), sz(4, 252.0)];
 static TIMER_SIZES: [Size; 3] = [sz(4, 64.0), sz(4, 120.0), sz(6, 120.0)];
 static TODO_SIZES: [Size; 3] = [sz(4, 122.0), sz(4, 252.0), sz(6, 252.0)];
 
