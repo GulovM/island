@@ -204,7 +204,8 @@ impl Ui {
         let tw = (r.right() - tx - right_pad - rw - 8.0).max(10.0);
         let font = if centered { &cv.g.fonts.body_c } else { &cv.g.fonts.body };
         cv.text(title, Rect::new(tx, r.y, tw, r.h), font, txt());
-        cv.text(right, Rect::new(r.right() - right_pad - rw - 6.0, r.y, rw, r.h), &cv.g.fonts.small_r, dim());
+        // У строки нет своего фона (только подсветка при наведении): подпись — как текст на теле острова.
+        cv.text(right, Rect::new(r.right() - right_pad - rw - 6.0, r.y, rw, r.h), &cv.g.fonts.small_r, super::bare());
         clicked
     }
 
@@ -281,6 +282,7 @@ impl Ui {
                 bg.a = bg.a.max(0.0) * (ov + hv * 0.6).min(1.0);
             }
             cv.rr(rect, rect.h / 2.0, bg);
+            cv.hairline(rect, rect.h / 2.0);
         }
         let fg = match tint {
             Some(t) => mix(mix(dim(), txt(), hv), t, ov),
@@ -338,6 +340,18 @@ impl Ui {
         cv.circle(kx, cy, 5.5 + 0.8 * hv, txt());
         cv.circle(kx, cy, 2.4, cv.accent);
         changed
+    }
+
+    /// Недоступный ползунок: серая дорожка и ручка, без взаимодействия.
+    pub unsafe fn slider_thin_disabled(&self, cv: &Canvas, r: Rect, value: f32) {
+        let dis = D2D1_COLOR_F { a: 0.45, ..dim() };
+        let cy = r.cy();
+        let v = value.clamp(0.0, 1.0);
+        cv.rr(Rect::new(r.x, cy - 2.0, r.w, 4.0), 2.0, track());
+        if v > 0.0 {
+            cv.rr(Rect::new(r.x, cy - 2.0, (r.w * v).max(4.0), 4.0), 2.0, dis);
+        }
+        cv.circle(r.x + r.w * v, cy, 5.5, dis);
     }
 
     /// Область, которую можно тянуть мышью (палитра цвета): пока кнопка зажата, возвращает положение

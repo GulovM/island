@@ -13,7 +13,7 @@ use windows::Win32::Graphics::Direct2D::D2D1_ANTIALIAS_MODE_ALIASED;
 
 use crate::anim::Spring;
 use crate::config::Config;
-use crate::ui::{icon, Canvas, Rect, Ui, card, dim, ink};
+use crate::ui::{icon, Canvas, Rect, Ui, bare, card, ink};
 use crate::{sys, thumbs, we};
 
 use super::{id, read_lines, write_lines, PAD, TOP, WALLPAPER};
@@ -347,7 +347,7 @@ impl Wall {
         }
         let n = items.len();
         let max_off = n.saturating_sub(1) as f32;
-        cv.text(&format!("{n} {}", crate::i18n::pick("изобр.", "images")), Rect::new(x + 4.0, y, 100.0, 17.0), &f.small, dim());
+        cv.text(&format!("{n} {}", crate::i18n::pick("изобр.", "images")), Rect::new(x + 4.0, y, 100.0, 17.0), &f.small, bare());
         let fb = Rect::new(w - PAD - 19.0, y - 1.0, 19.0, 19.0);
         let pick_w = crate::i18n::pick("Выбрать папку…", "Choose folder…").chars().count() as f32 * 5.0 + 16.0;
         if ui.chip(cv, id(WALLPAPER, 8), Rect::new(fb.x - 6.0 - pick_w, y, pick_w, 17.0), "Выбрать папку…", false) {
@@ -438,7 +438,7 @@ impl Wall {
 
         // У проектов WE имена файлов ничего не говорят («preview.jpg»), поэтому подписываем название.
         if let (true, Some((fi, d))) = (self.loaded_we, center) {
-            let c = dim();
+            let c = bare();
             let col = windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F { a: c.a * (1.0 - d * 2.0).clamp(0.0, 1.0), ..c };
             let title = &self.we_items[fi].title;
             cv.text(title, Rect::new(PAD, cy + 71.0, w - 2.0 * PAD, 13.0), &f.small_c, col);
@@ -452,7 +452,7 @@ impl Wall {
             } else {
                 format!("{}: {}", crate::i18n::pick("В папке нет изображений", "No images in the folder"), self.dir_label)
             };
-            cv.text(&msg, Rect::new(PAD, cy - 8.0, w - 2.0 * PAD, 16.0), &f.small_c, dim());
+            cv.text(&msg, Rect::new(PAD, cy - 8.0, w - 2.0 * PAD, 16.0), &f.small_c, bare());
         }
 
         if let Some(fi) = chosen {

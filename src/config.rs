@@ -33,11 +33,16 @@ corner_radius = 14
 
 # 1 — эффект стекла у раскрытого острова: размытый фон просвечивает сквозь тело, на кромке блик,
 # сверху мягкое осветление, у выбранной вкладки подвижная «капля». 0 — прежний плоский вид.
-# Без системных «Эффектов прозрачности» тело остаётся сплошным. Меняется и в Настройках.
-glass = 1
+# Под телом размытый фон (как стекло в iOS 26); если в Windows выключены «Эффекты прозрачности»,
+# размытия нет и тело плотнее. Меняется и в Настройках.
+glass = 0
 
-# Прозрачность стекла: 0 — почти прозрачное, 100 — сплошное тело (0–100). Меняется и в Настройках.
+# Прозрачность стекла: 0 — самое прозрачное из допустимого (чёрная подкладка 41% поверх размытия),
+# 100 — сплошное тело (0–100). Меняется и в Настройках.
 glass_opacity = 70
+
+# 1 — капля выбора вкладки залита акцентом (как до стекла); 0 — нейтральная плашка. Меняется и в Настройках.
+accent_pill = 0
 
 # Масштаб интерфейса: шрифты и панель увеличиваются вместе (0.9–2.0). Меняется и в Настройках.
 ui_scale = 1.2
@@ -123,6 +128,8 @@ pub struct Config {
     pub glass: bool,
     /// Прозрачность стекла, 0–100: 0 — почти прозрачное, 100 — сплошное тело.
     pub glass_opacity: f32,
+    /// 1 — капля выбора вкладки залита акцентом, 0 — нейтральная плашка.
+    pub accent_pill: bool,
     /// Масштаб интерфейса (множитель к DPI монитора).
     pub ui_scale: f32,
     /// Над развёрнутыми окнами остров сжимается в тонкую полоску.
@@ -167,8 +174,9 @@ impl Default for Config {
             bg: theme::DEFAULT_BG,
             system_colors: false,
             corner_radius: DEFAULT_RADIUS,
-            glass: true,
+            glass: false,
             glass_opacity: DEFAULT_GLASS_OPACITY,
+            accent_pill: false,
             ui_scale: DEFAULT_SCALE,
             strip_over_maximized: true,
             language: "auto".to_string(),
@@ -251,6 +259,7 @@ fn save_updates(cfg: &Config, names: &[&str]) -> Vec<(&'static str, String)> {
         ("corner_radius", format!("{}", cfg.corner_radius.round() as i32)),
         ("glass", (cfg.glass as u8).to_string()),
         ("glass_opacity", format!("{}", cfg.glass_opacity.round() as i32)),
+        ("accent_pill", (cfg.accent_pill as u8).to_string()),
         ("ui_scale", format!("{:.3}", cfg.ui_scale)),
         ("strip_over_maximized", (cfg.strip_over_maximized as u8).to_string()),
         ("language", fmt_str(&cfg.language)),
@@ -450,7 +459,7 @@ fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
     });
     let top: Vec<&str> = text.lines().take_while(|l| !l.trim_start().starts_with('[')).collect();
     let present = |k: &str| top.iter().any(|l| !l.trim_start().starts_with('#') && l.split_once('=').is_some_and(|(a, _)| a.trim() == k));
-    let appearance = ["accent", "bg", "system_colors", "corner_radius", "glass", "glass_opacity", "ui_scale", "strip_over_maximized", "language", "tabs", "hidden_tabs", "idle_face", "auto_update"];
+    let appearance = ["accent", "bg", "system_colors", "corner_radius", "glass", "glass_opacity", "accent_pill", "ui_scale", "strip_over_maximized", "language", "tabs", "hidden_tabs", "idle_face", "auto_update"];
     if tmpl.filter(|k| appearance.contains(&k.as_str())).all(|k| present(&k)) {
         return;
     }
@@ -509,10 +518,11 @@ pub fn parse(text: &str) -> Config {
             ("", "idle_face", Value::Num(v)) => cfg.idle_face = v != 0.0,
             ("", "auto_update", Value::Num(v)) => cfg.auto_update = v != 0.0,
             ("", "corner_radius", Value::Num(v)) => cfg.corner_radius = (v as f32).clamp(0.0, MAX_RADIUS),
-            ("", "glass", Value::Num(v)) => cfg.glass = v != 0.0,
+            ("", "glass", _) => {} // режим стекла на доработке: всегда выключен
             ("", "glass_opacity", Value::Num(v)) => cfg.glass_opacity = (v as f32).clamp(0.0, 100.0),
-            // Ключ из 0.5.0: настройка капли убрана, строку в старых конфигах молча пропускаем.
-            ("", "accent_pill", _) => {}
+            // Ключ тестовых сборок с подложкой размытия: больше ничего не значит, молча пропускаем.
+            ("", "glass_hint_dismissed", _) => {}
+            ("", "accent_pill", Value::Num(v)) => cfg.accent_pill = v != 0.0,
             ("", "ui_scale", Value::Num(v)) => cfg.ui_scale = (v as f32).clamp(MIN_SCALE, MAX_SCALE),
             ("", "strip_over_maximized", Value::Num(v)) => cfg.strip_over_maximized = v != 0.0,
             ("", "language", Value::Str(s)) => {
@@ -660,9 +670,21 @@ mod tests {
         assert_eq!(c.collapsed, (180.0, 24.0));
         assert_eq!(c.tabs.len(), 7);
         assert_eq!(c.key("weather"), None);
-        assert!(c.glass);
-        assert_eq!((Config::default().glass, Config::default().glass_opacity), (c.glass, c.glass_opacity));
+        assert!(!c.glass);
+        assert!(!c.accent_pill);
+        assert_eq!(
+            (Config::default().glass, Config::default().glass_opacity, Config::default().accent_pill),
+            (c.glass, c.glass_opacity, c.accent_pill)
+        );
         assert_eq!(c.glass_opacity, DEFAULT_GLASS_OPACITY);
+    }
+
+    #[test]
+    fn obsolete_glass_hint_key_is_ignored() {
+        // Старый ключ из тестовых сборок не ломает разбор и не попадает обратно в файл.
+        assert_eq!(parse("glass_hint_dismissed = 1\n"), Config::default());
+        assert!(!DEFAULT_TEMPLATE.contains("glass_hint_dismissed"));
+        assert!(save_updates(&Config::default(), &[]).iter().all(|(k, _)| *k != "glass_hint_dismissed"));
     }
 
     #[test]
@@ -773,6 +795,7 @@ gmail = \"https://mail.google.com\"
         c.corner_radius = 22.0;
         c.glass = false;
         c.glass_opacity = 35.0;
+        c.accent_pill = true;
         c.ui_scale = 1.5;
         c.strip_over_maximized = false;
         c.hidden_tabs = vec!["Power".into(), "Wallpaper".into()];
@@ -786,6 +809,7 @@ gmail = \"https://mail.google.com\"
             ("corner_radius", "22".to_string()),
             ("glass", "0".to_string()),
             ("glass_opacity", "35".to_string()),
+            ("accent_pill", "1".to_string()),
             ("ui_scale", format!("{:.3}", c.ui_scale)),
             ("strip_over_maximized", "0".to_string()),
             ("tabs", fmt_list(&c.tabs)),
@@ -832,8 +856,10 @@ gmail = \"https://mail.google.com\"
     }
 
     #[test]
-    fn old_accent_pill_key_is_ignored() {
-        assert_eq!(parse("accent_pill = 1
-glass_opacity = 250").glass_opacity, 100.0);
+    fn accent_pill_key_parses() {
+        assert!(parse("accent_pill = 1\nglass_opacity = 250").accent_pill);
+        assert!(!parse("accent_pill = 0\n").accent_pill);
+        assert!(parse("accent_pill = true\n").accent_pill);
+        assert!(!parse("accent_pill = false\n").accent_pill);
     }
 }

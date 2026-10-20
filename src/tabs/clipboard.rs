@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use crate::sys;
 use windows::Win32::System::SystemInformation::GetLocalTime;
 
-use crate::ui::{icon, Canvas, Nav, Rect, Submit, Ui, card, dim, txt};
+use crate::ui::{icon, Canvas, Nav, Rect, Submit, Ui, bare, card, dim, txt};
 
 use super::{escape, id, read_lines_sealed, unescape, write_lines_sealed, Action, CLIPBOARD, PAD, TOP};
 
@@ -373,7 +373,7 @@ impl Clip {
                 continue;
             }
             if let Some(title) = head {
-                cv.text(title, Rect::new(list.x + 5.0, yy + 3.0, list.w, 11.0), &f.caps, dim());
+                cv.text(title, Rect::new(list.x + 5.0, yy + 3.0, list.w, 11.0), &f.caps, bare());
                 continue;
             }
             let n = order[p];
@@ -400,7 +400,7 @@ impl Clip {
         }
         if order.is_empty() {
             let msg = if self.items.is_empty() { "История пуста — скопируйте что-нибудь" } else { "Ничего не найдено" };
-            cv.text(msg, Rect::new(list.x + 5.0, list.y + 6.0, list.w, 14.0), &f.small, dim());
+            cv.text(msg, Rect::new(list.x + 5.0, list.y + 6.0, list.w, 14.0), &f.small, bare());
         }
 
         let prev = Rect::new(PAD + LIST_W + 14.0, TOP + 36.0, w - 2.0 * PAD - LIST_W - 14.0, (h - TOP - 36.0 - 36.0).max(120.0));
@@ -517,7 +517,7 @@ impl Clip {
             }
         }
         let hint = if self.paused { "Запись приостановлена (шестерёнка)" } else { "↑↓ выбор • Tab фильтр • Enter вставить" };
-        cv.text(hint, Rect::new(w - PAD - 230.0, cy - 7.0, 228.0, 14.0), &cv.g.fonts.small_r, dim());
+        cv.text(hint, Rect::new(w - PAD - 230.0, cy - 7.0, 228.0, 14.0), &cv.g.fonts.small_r, bare());
     }
 }
 

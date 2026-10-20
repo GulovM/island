@@ -23,11 +23,12 @@ pub struct App {
     pub(crate) win_h: i32,
     /// Последние применённые x, y, w, h окна — чтобы не дёргать `SetWindowPos` зря.
     pub(crate) placed: (i32, i32, i32, i32),
-    /// Последний применённый регион размытия (x, y, w·h, радиус, включено) — чтобы не пересоздавать зря.
+    /// Последняя применённая форма подложки размытия (x, y, ширина, высота, отпечаток контура;
+    /// `(0, 0, 0, 0, −1)` — скрыта) — чтобы не дёргать `SetWindowPos`/`SetWindowRgn` зря.
     pub(crate) blur_key: std::cell::Cell<(i32, i32, i32, i32, i32)>,
     /// Вспомогательное окно под островом: на нём размытие (у основного окна без битмапа оно не обрезается регионом).
     pub(crate) glass_wnd: HWND,
-    /// Размытие доступно: окно подложки приняло blur-behind. Иначе остров рисуется сплошным.
+    /// Размытие доступно: окно подложки приняло blur-behind.
     pub(crate) blur_ok: bool,
     /// Системные «Эффекты прозрачности» включены; иначе DWM рисует плоский фон вместо размытия.
     pub(crate) transparency: bool,
@@ -159,6 +160,9 @@ impl App {
                 None,
             )?;
             let blur_ok = crate::wnd::enable_blur_behind(glass_wnd);
+            if !blur_ok {
+                log::info("стекло: blur-behind недоступен, тело острова остаётся без размытия");
+            }
             MAIN_WND.with(|w| w.set(hwnd));
             TASKBAR_MSG.with(|c| c.set(RegisterWindowMessageW(w!("TaskbarCreated"))));
 
@@ -251,6 +255,12 @@ impl App {
         self.cfg.collapsed
     }
 
+    /// Под телом настоящее размытие: стекло включено в конфиге, в Windows включены «Эффекты прозрачности»
+    /// и окно подложки приняло blur-behind. Иначе подложка скрыта, а тело плотнее (`glass::body_alpha`).
+    pub(crate) fn real_glass(&self) -> bool {
+        self.cfg.glass && self.transparency && self.blur_ok
+    }
+
     /// Акцент, который сейчас действует (свой или системный).
     pub(crate) fn accent(&self) -> D2D1_COLOR_F {
         theme::get().accent
@@ -318,6 +328,7 @@ impl App {
         self.cfg.corner_radius = new.corner_radius;
         self.cfg.glass = new.glass;
         self.cfg.glass_opacity = new.glass_opacity;
+        self.cfg.accent_pill = new.accent_pill;
         theme::set_glass(new.glass);
         if (self.cfg.ui_scale - new.ui_scale).abs() > 0.001 {
             self.cfg.ui_scale = new.ui_scale;
@@ -369,6 +380,7 @@ impl App {
         self.order = cfg.resolve_visible(&TABS);
         self.tab = self.order.iter().position(|&i| i == current).unwrap_or(0);
         self.cfg = cfg;
+        theme::set_glass(self.cfg.glass);
         set_ui_scale(self.cfg.ui_scale);
         self.refresh_language();
         self.apply_monitor(self.mon, true);
