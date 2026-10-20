@@ -362,7 +362,7 @@ impl App {
     }
 
     pub(crate) fn tab_w(&self, id: usize) -> f32 {
-        TAB_SIZES[id].0.max(self.tab_row_width() + 2.0 * TAB_SIDE)
+        TAB_SIZES[id].0.max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT)
     }
 
     /// Применяет язык из конфига: подписи вкладок меняют ширину, поэтому ряд измеряется заново.

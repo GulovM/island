@@ -24,7 +24,7 @@ impl App {
     /// Для каждой позиции вкладки: (левый край, ширина) в логических пикселях.
     pub(crate) fn tab_rects(&self) -> Vec<(f32, f32)> {
         let total = self.tab_row_width();
-        let mut x = self.win_w as f32 / self.scale / 2.0 - total / 2.0;
+        let mut x = self.win_w as f32 / self.scale / 2.0 - total / 2.0 + (TAB_SIDE_LEFT - TAB_SIDE_RIGHT) / 2.0;
         let mut out = Vec::with_capacity(self.order.len());
         for &id in &self.order {
             out.push((x, self.tab_widths[id]));
@@ -38,10 +38,10 @@ impl App {
         self.expanded && !self.settings_open && self.tabs.editable(self.normal_id())
     }
 
-    /// Центр карандаша — зеркально шестерёнке, у левого края острова.
+    /// Центр карандаша — левее шестерёнки настроек в ряду вкладок.
     pub(crate) fn pencil_center(&self) -> (f32, f32) {
-        let half = self.w.value / self.scale / 2.0;
-        (self.win_w as f32 / self.scale / 2.0 - half + 16.0, TAB_TOP + TAB_H / 2.0)
+        let (gx, gy) = self.gear_center();
+        (gx - 24.0, gy)
     }
 
     /// Включает или выключает режим правки текущей вкладки; остров подстраивает высоту под полосу кнопок.
@@ -65,7 +65,7 @@ impl App {
             self.toggle_settings();
             return true;
         }
-        // Карандаш слева: режим правки виджетов (только на вкладках с виджетами).
+        // Карандаш справа (левее шестерёнки): режим правки виджетов (только на вкладках с виджетами).
         if self.pencil_visible() {
             let (ex, ey) = self.pencil_center();
             if (x - ex).hypot(y - ey) <= GEAR_R + 3.0 {
@@ -156,5 +156,44 @@ impl App {
         if let Some((x, y)) = self.ui.ime_pos {
             sys::ime_set_position(self.hwnd, (x * self.scale) as i32, (y * self.scale) as i32);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pencil_and_gear_layout_no_overlap() {
+        // Проверяем взаимное расположение кнопок справа и ряда вкладок:
+        // шестерёнка справа, карандаш левее шестерёнки, ряд вкладок не налезает на карандаш.
+        let win_w = 760.0;
+        let total = 400.0;
+        let island_w = total + TAB_SIDE_LEFT + TAB_SIDE_RIGHT;
+        let half = island_w / 2.0;
+        let cx = win_w / 2.0;
+        let gx = cx + half - 16.0;
+        let gy = TAB_TOP + TAB_H / 2.0;
+        let ex = gx - 24.0;
+        let ey = gy;
+
+        // Хитбоксы кнопок радиуса GEAR_R + 3.0:
+        let hit_r = GEAR_R + 3.0;
+        let gear_left = gx - hit_r;
+        let pencil_right = ex + hit_r;
+        let pencil_left = ex - hit_r;
+        assert!(pencil_right <= gear_left, "хитбоксы карандаша и шестерёнки не должны перекрываться");
+        assert_eq!(ey, gy, "карандаш и шестерёнка на одной высоте");
+
+        // Ряд вкладок при минимальной ширине острова:
+        let first_tab_x = cx - total / 2.0 + (TAB_SIDE_LEFT - TAB_SIDE_RIGHT) / 2.0;
+        let last_tab_right = first_tab_x + total;
+        let left_edge = cx - half;
+        let right_edge = cx + half;
+
+        assert!((first_tab_x - left_edge - TAB_SIDE_LEFT).abs() < 0.001, "левый отступ должен быть равен TAB_SIDE_LEFT");
+        assert!((right_edge - last_tab_right - TAB_SIDE_RIGHT).abs() < 0.001, "правый отступ должен быть равен TAB_SIDE_RIGHT");
+        assert!(last_tab_right <= pencil_left, "ряд вкладок не должен налезать на хитбокс карандаша");
+        assert!(pencil_left - last_tab_right >= TAB_GAP, "зазор от вкладки до хитбокса карандаша не меньше TAB_GAP");
     }
 }

@@ -50,7 +50,7 @@ impl App {
         let h_prog = ((ah - base_h) / span_h).clamp(0.0, 1.0);
 
         let base_w = self.collapsed().0 * s;
-        let content_w = TAB_SIZES.iter().map(|t| t.0).fold(f32::MAX, f32::min).max(self.tab_row_width() + 2.0 * TAB_SIDE) * s;
+        let content_w = TAB_SIZES.iter().map(|t| t.0).fold(f32::MAX, f32::min).max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT) * s;
         let span_w = (content_w - base_w).max(1.0);
         let w_prog = ((aw - base_w) / span_w).clamp(0.0, 1.0);
 
@@ -253,7 +253,7 @@ impl App {
             let gcol = if self.settings_open { accent } else { ui::mix(ui::dim(), ui::txt(), gv) };
             gcv.glyph(ui::icon::SETTINGS, ui::Rect::new(gx - GEAR_R, gy - GEAR_R, 2.0 * GEAR_R, 2.0 * GEAR_R), false, gcol);
 
-            // Карандаш слева: правка виджетов. Появляется только на вкладках с сеткой, в режиме правки залит акцентом.
+            // Карандаш справа (левее шестерёнки): правка виджетов. Появляется только на вкладках с сеткой, в режиме правки залит акцентом.
             let cur = self.normal_id();
             let pv = ui.presence(0xF102, self.expanded && !self.settings_open && tabs.editable(cur));
             if pv > 0.01 {
