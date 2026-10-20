@@ -377,26 +377,13 @@ pub(crate) fn set_ui_scale(v: f32) {
     UI_SCALE.store(v.to_bits(), Ordering::Relaxed);
 }
 
-/// Коэффициент DPI (1.25 при 125% в Windows) последнего измеренного монитора; в Настройках
-/// масштаб показывается суммарно: DPI × множитель.
-static DPI_FACTOR: AtomicU32 = AtomicU32::new(0);
-
-pub(crate) fn dpi_factor() -> f32 {
-    match DPI_FACTOR.load(Ordering::Relaxed) {
-        0 => 1.0,
-        b => f32::from_bits(b),
-    }
-}
-
 pub(crate) unsafe fn monitor_scale(mon: HMONITOR) -> f32 {
-    let (mut x, mut y) = (96u32, 96u32);
-    let _ = GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut x, &mut y);
     let zoom = match UI_SCALE.load(Ordering::Relaxed) {
         0 => config::DEFAULT_SCALE,
         b => f32::from_bits(b),
     };
-    DPI_FACTOR.store((x as f32 / 96.0).to_bits(), Ordering::Relaxed);
-    let mut scale = x as f32 / 96.0 * zoom;
+    // Суммарный масштаб задан шкалой 50–150 напрямую и от DPI монитора не зависит.
+    let mut scale = config::scale_total(zoom);
     // Окно не должно быть больше монитора.
     let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
     if GetMonitorInfoW(mon, &mut mi).as_bool() {

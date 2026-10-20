@@ -125,7 +125,7 @@ pub fn derive(bg: Rgb, accent: Rgb) -> Palette {
         bg: col(bg),
         fg: col(fg),
         text: on(if light { 0.90 } else { 0.945 }),
-        dim: on(0.56),
+        dim: on(0.78),
         card: on(0.058),
         track: on(0.128),
         chip: on(0.105),
@@ -208,8 +208,8 @@ mod tests {
     #[test]
     fn default_palette_matches_original_look() {
         let p = derive(DEFAULT_BG, DEFAULT_ACCENT);
-        // Исходные константы: CARD 0.105, TRACK 0.17, CHIP 0.15, INSET 0.14, TEXT 0.95, DIM 0.58.
-        for (got, want) in [(p.card.r, 0.105), (p.track.r, 0.17), (p.chip.r, 0.15), (p.inset.r, 0.14), (p.text.r, 0.95), (p.dim.r, 0.58)] {
+        // Исходные константы: CARD 0.105, TRACK 0.17, CHIP 0.15, INSET 0.14, TEXT 0.95, DIM 0.58 (с тех пор осветлён: серый текст терялся на стекле).
+        for (got, want) in [(p.card.r, 0.105), (p.track.r, 0.17), (p.chip.r, 0.15), (p.inset.r, 0.14), (p.text.r, 0.95), (p.dim.r, 0.79)] {
             assert!((got - want).abs() < 0.01, "{got} против {want}");
         }
         // Тёмная надпись на золотом акценте.
