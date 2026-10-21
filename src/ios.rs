@@ -448,6 +448,13 @@ pub fn island_size(role: TextRole) -> f32 {
     (ios_size * island_scale() * 2.0).round() / 2.0
 }
 
+/// Вычисляет добавочный трекинг (letter-spacing) в пикселях для заданной роли и размера шрифта.
+/// Ограничен только сужением (<= 0.0), чтобы текст не расширялся и не обрезался многоточием.
+pub fn tracking_px(role: TextRole, size_px: f32) -> f32 {
+    let (_, _, _, tracking_em) = type_spec(role);
+    (tracking_em * size_px).min(0.0)
+}
+
 // ---------------------------------------------------------------------------
 // Тесты
 // ---------------------------------------------------------------------------
@@ -735,5 +742,46 @@ mod tests {
 
         assert!((island_scale() - (9.0 / 17.0)).abs() < 1e-6);
         assert_eq!(island_size(TextRole::Body), 9.0);
+    }
+
+    #[test]
+    fn test_tracking_px_bounds_and_signs() {
+        let roles = [
+            TextRole::LargeTitle,
+            TextRole::Title1,
+            TextRole::Title2,
+            TextRole::Title3,
+            TextRole::Headline,
+            TextRole::Body,
+            TextRole::Callout,
+            TextRole::Subheadline,
+            TextRole::Footnote,
+            TextRole::Caption1,
+            TextRole::Caption2,
+        ];
+        for r in roles {
+            let t = tracking_px(r, 16.0);
+            assert!(t <= 0.0, "Роль {r:?}: трекинг {t} должен быть <= 0");
+        }
+
+        assert_eq!(tracking_px(TextRole::LargeTitle, 34.0), 0.0);
+        assert_eq!(tracking_px(TextRole::Title1, 28.0), 0.0);
+        assert_eq!(tracking_px(TextRole::Caption1, 12.0), 0.0);
+        assert_eq!(tracking_px(TextRole::Caption2, 11.0), 0.0);
+
+        assert!(tracking_px(TextRole::Headline, 17.0) < 0.0);
+        assert!(tracking_px(TextRole::Body, 17.0) < 0.0);
+        assert!(tracking_px(TextRole::Callout, 16.0) < 0.0);
+        assert!(tracking_px(TextRole::Subheadline, 15.0) < 0.0);
+        assert!(tracking_px(TextRole::Footnote, 13.0) < 0.0);
+        assert!(tracking_px(TextRole::Title2, 22.0) < 0.0);
+        assert!(tracking_px(TextRole::Title3, 20.0) < 0.0);
+
+        let t10 = tracking_px(TextRole::Body, 10.0);
+        let t20 = tracking_px(TextRole::Body, 20.0);
+        assert!((t20 - 2.0 * t10).abs() < 1e-5);
+
+        let t_body = tracking_px(TextRole::Body, 9.0);
+        assert!((t_body - (-0.0253 * 9.0)).abs() < 1e-5);
     }
 }

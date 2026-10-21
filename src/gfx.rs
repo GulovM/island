@@ -38,7 +38,7 @@ pub(crate) unsafe fn make_text(dwrite: &IDWriteFactory, scale: f32) -> Result<ID
     let text = dwrite.CreateTextFormat(
         family,
         None,
-        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+        ui::WEIGHT_EMPHASIZED,
         DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL,
         8.5 * scale,
@@ -47,6 +47,11 @@ pub(crate) unsafe fn make_text(dwrite: &IDWriteFactory, scale: f32) -> Result<ID
     text.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
     text.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
     Ok(text)
+}
+
+/// Трекинг подписей вкладок (роль Callout в масштабе острова с учётом DPI-масштаба `scale`).
+pub(crate) fn tab_tracking(scale: f32) -> f32 {
+    crate::ios::tracking_px(crate::ios::TextRole::Callout, 8.5 * scale)
 }
 impl Gfx {
     /// Окно и буфер фиксированы на максимум и меняются только при смене DPI: анимируется
@@ -97,6 +102,7 @@ impl Gfx {
         let brush = dc.CreateSolidColorBrush(&theme::get().bg, None)?;
         let text = make_text(dwrite, scale)?;
         let fonts = Fonts::new(dwrite)?;
+        fonts.register_tracking(&text, tab_tracking(scale));
         let round = d2d.CreateStrokeStyle(
             &D2D1_STROKE_STYLE_PROPERTIES1 {
                 startCap: D2D1_CAP_STYLE_ROUND,
@@ -158,8 +164,10 @@ impl Gfx {
         self.target = None;
         self.swapchain.ResizeBuffers(0, w as u32, h as u32, DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG(0))?;
         self.create_target()?;
+        self.fonts.unregister_tracking(&self.text);
         self.text = make_text(dwrite, scale)?;
         self.fonts.clear_layouts();
+        self.fonts.register_tracking(&self.text, tab_tracking(scale));
         Ok(())
     }
 
