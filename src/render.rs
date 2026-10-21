@@ -118,14 +118,10 @@ impl App {
                 };
                 g.dc.PushLayer(&params, None);
 
-                const SHADOW_STEPS: usize = 6;
-                for step in 1..=SHADOW_STEPS {
-                    let t = step as f32 / SHADOW_STEPS as f32;
-                    // Квадратичное затухание прозрачности к наружному краю
-                    let weight = (1.0 - t * 0.7) / SHADOW_STEPS as f32;
-                    let step_alpha = layers.shadow.alpha * weight * 1.5; // подобрано
-                    let grow = max_spread * t;
-                    let dy = eff_dy * t;
+                const SHADOW_RINGS: usize = 24;
+                let rings = crate::glass::shadow_rings(max_spread, layers.shadow.alpha, SHADOW_RINGS);
+                for &(grow, ring_alpha) in &rings {
+                    let dy = eff_dy * (grow / max_spread);
                     let s_x0 = x0 - grow;
                     let s_aw = aw + 2.0 * grow;
                     let s_ah = ah + dy + grow;
@@ -136,7 +132,7 @@ impl App {
                             r: layers.shadow.color[0],
                             g: layers.shadow.color[1],
                             b: layers.shadow.color[2],
-                            a: step_alpha,
+                            a: ring_alpha,
                         });
                         g.dc.FillGeometry(&shadow_geo, &g.brush, None);
                     }
@@ -540,7 +536,8 @@ impl App {
 
     /// Подложка стекла: окно с размытием фона под телом острова.
     /// В Windows 11 с поддержкой DWM-скругления (`self.blur_round`) окно подложки позиционируется
-    /// как скруглённый DWM-прямоугольник (`glass::blur_plate`), вписанный в тело острова без SetWindowRgn.
+    /// как скруглённый DWM-прямоугольник (`glass::blur_plate`), вписанный в тело острова.
+    /// Прямоугольный регион `SetWindowRgn` отключает системную тень DWM, не влияя на скругление размытия.
     /// На Windows 10 форма окна по-прежнему вырезается регионом `SetWindowRgn` по `glass::body_outline`.
     unsafe fn apply_blur(&self, x0: f32, aw: f32, ah: f32, ear: f32, r: f32, on: bool) {
         if self.blur_round {
@@ -567,6 +564,8 @@ impl App {
                 height,
                 SWP_NOACTIVATE | SWP_SHOWWINDOW,
             );
+            let rgn = CreateRectRgn(0, 0, width, height);
+            SetWindowRgn(self.glass_wnd, Some(rgn), true);
         } else {
             let shape = crate::glass::BlurShape::from_outline(&crate::glass::body_outline(x0, aw, ah, ear, r, 1.0));
             let (gx, gy) = (self.win_x + shape.left, self.win_y + shape.top);
