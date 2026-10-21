@@ -288,6 +288,76 @@ impl App {
                 let (px, pw) = (self.pill_x.value * s, self.pill_w.value.max(1.0) * s);
                 let (py, ph) = (TAB_TOP * s, TAB_H * s);
                 let rr = D2D1_ROUNDED_RECT { rect: D2D_RECT_F { left: px, top: py, right: px + pw, bottom: py + ph }, radiusX: ph / 2.0, radiusY: ph / 2.0 };
+
+                // Мягкая компактная тень Liquid Glass Small: 0 2 8 rgba(0,0,0,0.18) (подобрано).
+                // Рисуется ТОЛЬКО снаружи капли (вычитание геометрии через PushLayer), чтобы тень не темнила полупрозрачную каплю.
+                let shadow_dy = 2.0 * s;
+                let shadow_blur = 8.0 * s;
+                let outer_rr = D2D1_ROUNDED_RECT {
+                    rect: D2D_RECT_F {
+                        left: px - shadow_blur,
+                        top: py - shadow_blur,
+                        right: px + pw + shadow_blur,
+                        bottom: py + ph + shadow_dy + shadow_blur,
+                    },
+                    radiusX: ph / 2.0 + shadow_blur,
+                    radiusY: ph / 2.0 + shadow_blur,
+                };
+                if let (Ok(pill_geo), Ok(outer_geo)) = (
+                    g.d2d.CreateRoundedRectangleGeometry(&rr),
+                    g.d2d.CreateRoundedRectangleGeometry(&outer_rr),
+                ) {
+                    if let Ok(mask_geo) = g.d2d.CreatePathGeometry() {
+                        if let Ok(sink) = mask_geo.Open() {
+                            let combine_res = outer_geo.CombineWithGeometry(
+                                &pill_geo,
+                                D2D1_COMBINE_MODE_EXCLUDE,
+                                None,
+                                D2D1_DEFAULT_FLATTENING_TOLERANCE,
+                                &sink,
+                            );
+                            if combine_res.is_ok() && sink.Close().is_ok() {
+                                if let Ok(geom_mask) = mask_geo.cast::<ID2D1Geometry>() {
+                                    let params = D2D1_LAYER_PARAMETERS1 {
+                                        contentBounds: D2D_RECT_F { left: f32::MIN, top: f32::MIN, right: f32::MAX, bottom: f32::MAX },
+                                        geometricMask: std::mem::ManuallyDrop::new(Some(geom_mask)),
+                                        maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                                        maskTransform: ui::matrix(1.0, 0.0, 0.0),
+                                        opacity: 1.0,
+                                        opacityBrush: std::mem::ManuallyDrop::new(None),
+                                        layerOptions: D2D1_LAYER_OPTIONS1_NONE,
+                                    };
+                                    g.dc.PushLayer(&params, None);
+
+                                    const PILL_SHADOW_STEPS: usize = 4;
+                                    for step in 1..=PILL_SHADOW_STEPS {
+                                        let t = step as f32 / PILL_SHADOW_STEPS as f32;
+                                        let weight = (1.0 - t * 0.6) / PILL_SHADOW_STEPS as f32;
+                                        let step_alpha = 0.18 * pill_a * weight * 1.5;
+                                        let grow = shadow_blur * t;
+                                        let dy = shadow_dy * t;
+                                        let step_rr = D2D1_ROUNDED_RECT {
+                                            rect: D2D_RECT_F {
+                                                left: px - grow,
+                                                top: py - grow + dy,
+                                                right: px + pw + grow,
+                                                bottom: py + ph + grow + dy,
+                                            },
+                                            radiusX: ph / 2.0 + grow,
+                                            radiusY: ph / 2.0 + grow,
+                                        };
+                                        g.brush.SetColor(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: step_alpha });
+                                        g.dc.FillRoundedRectangle(&step_rr, &g.brush);
+                                    }
+
+                                    g.dc.PopLayer();
+                                    drop(std::mem::ManuallyDrop::into_inner(params.geometricMask));
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let mut c = if self.cfg.accent_pill {
                     D2D1_COLOR_F { a: 0.26, ..accent }
                 } else {
@@ -296,8 +366,9 @@ impl App {
                 c.a *= pill_a;
                 g.brush.SetColor(&c);
                 g.dc.FillRoundedRectangle(&rr, &g.brush);
-                let fade = |c: D2D1_COLOR_F| D2D1_COLOR_F { a: c.a * pill_a * 0.6, ..c };
-                let stops = [(0.0, fade(pal.rim_hi)), (0.5, fade(pal.rim_mid)), (1.0, fade(pal.rim_lo))];
+                let fade = |c: D2D1_COLOR_F, factor: f32| D2D1_COLOR_F { a: c.a * pill_a * factor, ..c };
+                // Усилен блик слева-сверху (0.85 вместо 0.60)
+                let stops = [(0.0, fade(pal.rim_hi, 0.85)), (0.5, fade(pal.rim_mid, 0.60)), (1.0, fade(pal.rim_lo, 0.60))];
                 if let Some(br) = gradient_brush(g, (px, py), (px + pw, py + ph), &stops) {
                     let h = 0.5 * s;
                     let line = D2D1_ROUNDED_RECT {

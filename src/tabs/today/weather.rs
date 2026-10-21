@@ -48,7 +48,7 @@ impl Today {
         }
         let hv = ui.hover_of(id(TODAY, 60));
         if hover || hv > 0.01 {
-            cv.rr(wc, 11.0, D2D1_COLOR_F { a: 0.04 * hv, ..fg() });
+            cv.rr(wc, crate::ui::card_radius(), D2D1_COLOR_F { a: 0.04 * hv, ..fg() });
             cv.glyph(icon::EDIT, Rect::new(wc.right() - 22.0, wc.y + 5.0, 16.0, 16.0), false, D2D1_COLOR_F { a: hv, ..dim() });
         }
 

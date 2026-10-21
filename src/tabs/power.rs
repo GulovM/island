@@ -59,7 +59,7 @@ impl Power {
             let label = if armed { "Подтвердить" } else { l };
             let clicked = ui.button(cv, id(POWER, i as u32), r, g, label);
             if armed {
-                cv.rr_line(r, 10.0, cv.accent, 1.5);
+                cv.rr_line(r, crate::ui::card_radius(), cv.accent, 1.5);
             }
             if clicked {
                 self.press(i);

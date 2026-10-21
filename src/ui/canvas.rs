@@ -275,8 +275,9 @@ impl Canvas<'_> {
     }
 
     pub unsafe fn card(&self, r: Rect) {
-        self.rr(r, 11.0, card());
-        self.hairline(r, 11.0);
+        let rad = card_radius();
+        self.rr(r, rad, card());
+        self.hairline(r, rad);
     }
 
     /// Волосяная граница 1 px: рисуется только при включённом стекле.
@@ -323,5 +324,23 @@ impl Canvas<'_> {
         if fw > 0.0 {
             self.rr(Rect::new(r.x, r.y, fw, r.h), r.h / 2.0, c);
         }
+    }
+}
+
+/// Радиус скругления стандартных карточек по спецификации iOS 26 в масштабе острова:
+/// `(ios::R_MEDIUM * ios::island_scale()).round() = 14.0`.
+pub fn card_radius() -> f32 {
+    (crate::ios::R_MEDIUM * crate::ios::island_scale()).round()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_card_radius() {
+        assert_eq!(card_radius(), 14.0);
+        let expected = (crate::ios::R_MEDIUM * crate::ios::island_scale()).round();
+        assert_eq!(card_radius(), expected);
     }
 }

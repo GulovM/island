@@ -33,16 +33,17 @@ impl Ui {
         let (_, clicked) = self.interact(id, r);
         let w = self.widget(id);
         let (hv, pr) = (w.hover.value, w.press.value);
-        let rect = r.inset(1.0 * pr);
-        cv.rr(rect, 10.0, mix(card(), fg(), 0.055 * hv + 0.03 * pr));
-        cv.hairline(rect, 10.0);
+        let bg_rect = press_scale(r, pr);
+        let rad = super::card_radius();
+        cv.rr(bg_rect, rad, mix(card(), fg(), 0.055 * hv + 0.03 * pr));
+        cv.hairline(bg_rect, rad);
         if label.is_empty() {
-            cv.glyph(glyph, rect, false, txt());
+            cv.glyph(glyph, r, false, txt());
         } else if glyph.is_empty() {
-            cv.text(label, rect, &cv.g.fonts.body_c, txt());
+            cv.text(label, r, &cv.g.fonts.body_c, txt());
         } else {
-            cv.glyph(glyph, Rect::new(rect.x, rect.cy() - 18.0, rect.w, 18.0), false, txt());
-            cv.text(label, Rect::new(rect.x, rect.cy() + 1.0, rect.w, 16.0), &cv.g.fonts.body_c, txt());
+            cv.glyph(glyph, Rect::new(r.x, r.cy() - 18.0, r.w, 18.0), false, txt());
+            cv.text(label, Rect::new(r.x, r.cy() + 1.0, r.w, 16.0), &cv.g.fonts.body_c, txt());
         }
         clicked
     }
@@ -210,6 +211,7 @@ impl Ui {
     }
 
     /// Сплошная кнопка с подписью (Старт/Сброс, «Замерить скорость»).
+    /// `_radius` игнорируется: капсула iOS 26 (при h <= 40.0) или card_radius().
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn solid_button(
         &mut self,
@@ -219,14 +221,15 @@ impl Ui {
         label: &str,
         bg: D2D1_COLOR_F,
         fg: D2D1_COLOR_F,
-        radius: f32,
+        _radius: f32,
     ) -> bool {
         let (_, clicked) = self.interact(id, r);
         let w = self.widget(id);
         let (hv, pr) = (w.hover.value, w.press.value);
-        let rect = r.inset(0.8 * pr);
-        cv.rr(rect, radius, mix(bg, crate::ui::fg(), 0.08 * hv));
-        cv.text(label, rect, &cv.g.fonts.small_c, fg);
+        let bg_rect = press_scale(r, pr);
+        let rad = if bg_rect.h <= 40.0 { bg_rect.h / 2.0 } else { super::card_radius() };
+        cv.rr(bg_rect, rad, mix(bg, crate::ui::fg(), 0.08 * hv));
+        cv.text(label, r, &cv.g.fonts.small_c, fg);
         clicked
     }
 
@@ -268,7 +271,7 @@ impl Ui {
         let w = self.widget(id);
         w.on.target = if selected { 1.0 } else { 0.0 };
         let (hv, pr, ov) = (w.hover.value, w.press.value, w.on.value);
-        let rect = r.inset(0.8 * pr);
+        let bg_rect = press_scale(r, pr);
         let mut base = if flat { card() } else { chip_bg() };
         base = mix(base, fg(), 0.06 * hv);
         if flat && ov < 0.01 && hv < 0.01 {
@@ -281,18 +284,19 @@ impl Ui {
             if flat {
                 bg.a = bg.a.max(0.0) * (ov + hv * 0.6).min(1.0);
             }
-            cv.rr(rect, rect.h / 2.0, bg);
-            cv.hairline(rect, rect.h / 2.0);
+            cv.rr(bg_rect, bg_rect.h / 2.0, bg);
+            cv.hairline(bg_rect, bg_rect.h / 2.0);
         }
         let fg = match tint {
             Some(t) => mix(mix(dim(), txt(), hv), t, ov),
             None => mix(mix(rgb(0.78, 0.78, 0.78), txt(), hv), ink(), ov),
         };
-        cv.text(label, rect, &cv.g.fonts.small_c, fg);
+        cv.text(label, r, &cv.g.fonts.small_c, fg);
         clicked
     }
 
-    /// Переключатель-«пилюля» 30×16 в прямоугольнике `r`. `enabled == false` — серый и неактивный.
+    /// Переключатель-«пилюля» в прямоугольнике `r` (пропорции iOS 26: высота 31, диаметр ручки 27, отступ 2).
+    /// `enabled == false` — серый и неактивный (opacity 0.40).
     /// Возвращает `true` в кадре, когда значение переключили.
     pub unsafe fn switch(&mut self, cv: &Canvas, id: u32, r: Rect, on: &mut bool, enabled: bool) -> bool {
         let clicked = if enabled { self.interact(id, r).1 } else { false };
@@ -302,20 +306,56 @@ impl Ui {
         let w = self.widget(id);
         w.on.target = if *on { 1.0 } else { 0.0 };
         let (hv, pr, ov) = (w.hover.value, w.press.value, w.on.value);
-        let mut bg = mix(mix(chip_bg(), fg(), 0.05 * hv), cv.accent, ov);
-        let mut knob = mix(dim(), ink(), ov);
+
+        // Цвет включённого состояния: системный зелёный iOS или текущий акцент Windows
+        let on_col = super::color::switch_on_color(cv.accent);
+        let off_col = mix(chip_bg(), fg(), 0.05 * hv);
+        let mut bg = mix(off_col, on_col, ov);
         if !enabled {
-            bg.a = 0.45;
-            knob.a = 0.5;
+            bg.a = 0.40;
         }
         cv.rr(r, r.h / 2.0, bg);
-        let kr = r.h / 2.0 - 3.0 + 0.6 * pr;
-        let kx = r.x + r.h / 2.0 + (r.w - r.h) * ov;
-        cv.circle(kx, r.cy(), kr, knob);
+
+        // Ручка переключателя с отступом 2/31 и диаметром 27/31 от высоты дорожки
+        let thumb_rect = switch_thumb_rect(r, ov, pr);
+        let thumb_rad = thumb_rect.h / 2.0;
+
+        // Мягкая тень ручки iOS (Figma: 0px 3px 8px rgba(0,0,0,0.15), 0px 3px 1px rgba(0,0,0,0.06))
+        if enabled {
+            let scale_h = r.h / 31.0;
+            let s1_dy = 2.0 * scale_h;
+            let s1_spread = 1.5 * scale_h;
+            let s1 = Rect::new(
+                thumb_rect.x - s1_spread,
+                thumb_rect.y + s1_dy - s1_spread,
+                thumb_rect.w + 2.0 * s1_spread,
+                thumb_rect.h + 2.0 * s1_spread,
+            );
+            cv.rr(s1, s1.h / 2.0, D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.15 });
+
+            let s2_dy = 1.0 * scale_h;
+            let s2_spread = 0.5 * scale_h;
+            let s2 = Rect::new(
+                thumb_rect.x - s2_spread,
+                thumb_rect.y + s2_dy - s2_spread,
+                thumb_rect.w + 2.0 * s2_spread,
+                thumb_rect.h + 2.0 * s2_spread,
+            );
+            cv.rr(s2, s2.h / 2.0, D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.08 });
+        }
+
+        // Белая ручка переключателя
+        let mut thumb_col = super::color::WHITE;
+        if !enabled {
+            thumb_col.a = 0.40;
+        }
+        cv.rr(thumb_rect, thumb_rad, thumb_col);
+
         clicked
     }
 
-    /// Тонкий ползунок 0..1: дорожка, акцентная заливка и круглая ручка. Возвращает `true`, пока значение меняется.
+    /// Тонкий ползунок 0..1: дорожка, акцентная заливка и белая круглая ручка с мягкой тенью.
+    /// Возвращает `true`, пока значение меняется.
     pub unsafe fn slider_thin(&mut self, cv: &Canvas, id: u32, r: Rect, value: &mut f32) -> bool {
         let hit = Rect::new(r.x - 8.0, r.y - 8.0, r.w + 16.0, r.h + 16.0);
         let _ = self.interact(id, hit);
@@ -336,9 +376,11 @@ impl Ui {
             cv.rr(Rect::new(r.x, cy - 2.0, (r.w * v).max(4.0), 4.0), 2.0, cv.accent);
         }
         let kx = r.x + r.w * v;
-        cv.circle(kx, cy, 8.0 + 2.0 * hv + 1.5 * pr, D2D1_COLOR_F { a: 0.16 * (hv + pr).min(1.0), ..cv.accent });
-        cv.circle(kx, cy, 5.5 + 0.8 * hv, txt());
-        cv.circle(kx, cy, 2.4, cv.accent);
+        // Ручка: белая круглая с мягкой тенью (вместо трёх кругов), под нажатием слегка растёт (подобрано).
+        let kr = 5.5 + 0.4 * hv + 1.2 * pr;
+        cv.circle(kx, cy + 1.2, kr + 1.0, D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.12 });
+        cv.circle(kx, cy + 0.6, kr + 0.3, D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.15 });
+        cv.circle(kx, cy, kr, super::color::WHITE);
         changed
     }
 
@@ -382,5 +424,118 @@ impl Ui {
         cv.circle(cx, cy, rad - 1.2, bg);
         cv.circle(cx, cy, (rad - 1.2) * 0.5, accent);
         clicked
+    }
+}
+
+/// Диаметр ручки переключателя iOS (27/31 от высоты дорожки, docs/figma/toggles.md).
+pub fn switch_thumb_diameter(track_h: f32) -> f32 {
+    track_h * (27.0 / 31.0)
+}
+
+/// Отступ ручки переключателя iOS от края дорожки (2/31 от высоты дорожки, docs/figma/toggles.md).
+pub fn switch_thumb_offset(track_h: f32) -> f32 {
+    track_h * (2.0 / 31.0)
+}
+
+/// Растяжение ручки переключателя по ширине при нажатии (пружина press).
+/// Подобрано: при press = 1.0 ручка вытягивается на ~3.5/31 высоты дорожки (~1.8 px при высоте 16 px).
+pub fn switch_thumb_stretch(track_h: f32, press: f32) -> f32 {
+    track_h * (3.5 / 31.0) * press.clamp(0.0, 1.0)
+}
+
+/// Прямоугольник ручки переключателя: диаметр 27/31 h, отступ 2/31 h.
+/// При нажатии ручка слегка вытягивается по ширине в сторону центра дорожки,
+/// оставаясь внутри дорожки с отступом `offset`.
+pub fn switch_thumb_rect(track: Rect, on_val: f32, press: f32) -> Rect {
+    let d = switch_thumb_diameter(track.h);
+    let off = switch_thumb_offset(track.h);
+    let stretch = switch_thumb_stretch(track.h, press);
+    let w = d + stretch;
+    let h = d;
+    let ov = on_val.clamp(0.0, 1.0);
+    // Номинальный центр без растяжения: от (track.x + off + d / 2) до (track.right() - off - d / 2)
+    let nominal_cx = track.x + off + d / 2.0 + (track.w - 2.0 * off - d) * ov;
+    // При растяжении ручка расширяется внутрь дорожки:
+    // при ov = 0 левый край привязан к track.x + offset,
+    // при ov = 1 правый край привязан к track.right() - offset.
+    let cx = nominal_cx + (0.5 - ov) * stretch;
+    let cy = track.cy();
+    Rect::new(cx - w / 2.0, cy - h / 2.0, w, h)
+}
+
+/// Масштабирует прямоугольник относительно его центра при нажатии:
+/// при `press == 0.0` масштаб равен 1.0, при `press == 1.0` масштаб уменьшается до ~0.97 (сжатие на 3%).
+pub fn press_scale(r: Rect, press: f32) -> Rect {
+    let scale = 1.0 - 0.03 * press.clamp(0.0, 1.0);
+    let dw = r.w * (1.0 - scale);
+    let dh = r.h * (1.0 - scale);
+    Rect::new(r.x + dw / 2.0, r.y + dh / 2.0, r.w - dw, r.h - dh)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_switch_proportions() {
+        let h = 31.0;
+        assert_eq!(switch_thumb_diameter(h), 27.0);
+        assert_eq!(switch_thumb_offset(h), 2.0);
+        assert!((2.0 * switch_thumb_offset(h) + switch_thumb_diameter(h) - h).abs() < 1e-5);
+
+        // Для высоты острова 16.0:
+        let h16 = 16.0;
+        let d = switch_thumb_diameter(h16);
+        let off = switch_thumb_offset(h16);
+        assert!((2.0 * off + d - h16).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_switch_thumb_bounds() {
+        let track = Rect::new(10.0, 20.0, 51.0, 31.0);
+        let off = switch_thumb_offset(track.h);
+        assert_eq!(off, 2.0);
+
+        // ov = 0, press = 0: левый край строго равен track.x + offset
+        let r0_unpressed = switch_thumb_rect(track, 0.0, 0.0);
+        assert_eq!(r0_unpressed.x, track.x + off);
+        assert_eq!(r0_unpressed.w, 27.0);
+        assert_eq!(r0_unpressed.h, 27.0);
+
+        // ov = 0, press = 1: левый край по-прежнему на track.x + offset, а правый растянут вправо
+        let r0_pressed = switch_thumb_rect(track, 0.0, 1.0);
+        assert!((r0_pressed.x - (track.x + off)).abs() < 1e-5);
+        assert!(r0_pressed.w > 27.0);
+        assert!(r0_pressed.right() < track.right());
+
+        // ov = 1, press = 0: правый край строго равен track.right() - offset
+        let r1_unpressed = switch_thumb_rect(track, 1.0, 0.0);
+        assert!((r1_unpressed.right() - (track.right() - off)).abs() < 1e-5);
+        assert_eq!(r1_unpressed.w, 27.0);
+
+        // ov = 1, press = 1: правый край по-прежнему на track.right() - offset, а левый растянут влево
+        let r1_pressed = switch_thumb_rect(track, 1.0, 1.0);
+        assert!((r1_pressed.right() - (track.right() - off)).abs() < 1e-5);
+        assert!(r1_pressed.w > 27.0);
+        assert!(r1_pressed.x > track.x);
+    }
+
+    #[test]
+    fn test_press_scale() {
+        let r = Rect::new(10.0, 20.0, 100.0, 40.0);
+
+        // Без нажатия: исходный прямоугольник
+        let p0 = press_scale(r, 0.0);
+        assert_eq!(p0.x, r.x);
+        assert_eq!(p0.y, r.y);
+        assert_eq!(p0.w, r.w);
+        assert_eq!(p0.h, r.h);
+
+        // Полное нажатие (press = 1.0): сжатие на 3% (масштаб 0.97) относительно центра
+        let p1 = press_scale(r, 1.0);
+        assert!((p1.cx() - r.cx()).abs() < 1e-5);
+        assert!((p1.cy() - r.cy()).abs() < 1e-5);
+        assert!((p1.w - 97.0).abs() < 1e-5);
+        assert!((p1.h - 38.8).abs() < 1e-5);
     }
 }

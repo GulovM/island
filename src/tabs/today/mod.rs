@@ -335,8 +335,8 @@ impl Today {
             step = if wheel > 0.0 { -1 } else { 1 };
         }
         if picking {
-            cv.rr(c, 11.0, D2D1_COLOR_F { a: 0.05, ..cv.accent });
-            cv.rr_line(c, 11.0, cv.accent, 1.5);
+            cv.rr(c, crate::ui::card_radius(), D2D1_COLOR_F { a: 0.05, ..cv.accent });
+            cv.rr_line(c, crate::ui::card_radius(), cv.accent, 1.5);
             let ay = c.cy() - 10.0;
             if ui.icon_button(cv, id(TODAY, 71), Rect::new(c.x + 3.0, ay, 20.0, 20.0), icon::LEFT, false) {
                 step = -1;

@@ -44,6 +44,7 @@ const WHITE: Rgb = [1.0; 3];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
+    pub style: PaletteStyle,
     pub accent: D2D1_COLOR_F,
     pub bg: D2D1_COLOR_F,
     /// Цвет, к которому подмешиваются поверхности и подсветка: белый на тёмном фоне, чёрный на светлом.
@@ -153,6 +154,7 @@ pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
 
     // Базовая палитра (стиль Windows).
     let mut p = Palette {
+        style,
         accent: col(accent),
         bg: col(bg),
         fg: col(fg),
@@ -377,6 +379,15 @@ mod tests {
         assert_eq!(light_p.chip, ios::fill_secondary(false));
         assert_eq!(light_p.inset, ios::fill_tertiary(false));
         assert_eq!(light_p.hairline, ios::separator_non_opaque(false));
+    }
+
+    #[test]
+    fn style_change_with_same_colors_yields_different_palette() {
+        let p_win = derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows);
+        let p_ios = derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Ios);
+        assert_ne!(p_win, p_ios);
+        assert_eq!(p_win.style, PaletteStyle::Windows);
+        assert_eq!(p_ios.style, PaletteStyle::Ios);
     }
 
     #[test]

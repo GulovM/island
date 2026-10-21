@@ -75,6 +75,25 @@ pub fn mix(a: D2D1_COLOR_F, b: D2D1_COLOR_F, t: f32) -> D2D1_COLOR_F {
     }
 }
 
+/// Проверяет, активен ли стиль палитры iOS.
+pub fn is_ios_palette() -> bool {
+    crate::theme::get().style == crate::theme::PaletteStyle::Ios
+}
+
+/// Цвет переключателя во включённом состоянии:
+/// в стиле палитры iOS — системный зелёный `ios::sys(Green, dark)`,
+/// в стиле Windows — текущий цвет акцента.
+pub fn switch_on_color(accent: D2D1_COLOR_F) -> D2D1_COLOR_F {
+    let p = crate::theme::get();
+    if is_ios_palette() {
+        let dark = !crate::theme::is_light([p.bg.r, p.bg.g, p.bg.b]);
+        let green = crate::ios::sys(crate::ios::SysColor::Green, dark);
+        crate::ios::to_d2d(green, 1.0)
+    } else {
+        accent
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +102,27 @@ mod tests {
     fn mix_endpoints() {
         let c = mix(track(), fg(), 1.0);
         assert!((c.r - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_switch_on_color_styles() {
+        use crate::theme::{derive, DEFAULT_ACCENT, DEFAULT_BG, PaletteStyle};
+        // Для палитры Windows: возвращается переданный акцент
+        let p_win = derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows);
+        crate::theme::set(p_win);
+        assert!(!is_ios_palette());
+        let on_win = switch_on_color(p_win.accent);
+        assert_eq!(on_win, p_win.accent);
+
+        // Для палитры iOS: возвращается системный зелёный iOS
+        let p_ios = derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Ios);
+        crate::theme::set(p_ios);
+        assert!(is_ios_palette());
+        let on_ios = switch_on_color(p_ios.accent);
+        let expected_green = crate::ios::to_d2d(crate::ios::sys(crate::ios::SysColor::Green, true), 1.0);
+        assert_eq!(on_ios, expected_green);
+
+        // Восстанавливаем палитру по умолчанию
+        crate::theme::set(p_win);
     }
 }
