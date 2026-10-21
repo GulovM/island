@@ -465,6 +465,11 @@ impl App {
     unsafe fn restore_after_shot(&mut self) -> bool {
         match self.shot_until {
             Some(t) if Instant::now() >= t => {
+                // Пока открыта область выбора Ножниц, остров остаётся скрытым; вернётся сразу после съёмки.
+                if FindWindowW(w!("SnipOverlayRootWindow"), PCWSTR::null()).is_ok() {
+                    self.shot_until = Some(Instant::now() + std::time::Duration::from_millis(300));
+                    return false;
+                }
                 self.shot_until = None;
                 if !self.hidden {
                     let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);

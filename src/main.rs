@@ -104,7 +104,7 @@ pub(crate) const WM_RECHECK: u32 = WM_APP + 1;
 /// Нажата клавиша скриншота (из хука клавиатуры).
 pub(crate) const WM_SHOT: u32 = WM_APP + 5;
 /// Сколько остров остаётся спрятанным после клавиши скриншота.
-pub(crate) const SHOT_HIDE_MS: u64 = 8000;
+pub(crate) const SHOT_HIDE_MS: u64 = 1500;
 /// Сообщение от значка в трее.
 pub(crate) const WM_TRAY: u32 = WM_APP + 2;
 pub(crate) const LEAVE_TIMER: usize = 1;
