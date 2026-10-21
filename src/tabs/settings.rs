@@ -2,19 +2,21 @@
 //! под ним только настройки выбранного раздела:
 //! - «Внешний вид»: слева цвета (переключатель «Цвет системы», готовые темы, палитра — квадрат
 //!   насыщенности/яркости, полоса оттенка, hex) и радиус углов (пока ползунок тянут, остров
-//!   «засвечивается» — см. `glowing`); справа стекло, прозрачность, акцентная капля, масштаб, плашка
-//!   о выключенных «Эффектах прозрачности» Windows и «Сбросить внешний вид»;
+//!   «засвечивается» — см. `glowing`); справа стекло, прозрачность, акцентная капля, стиль цветов,
+//!   материал, масштаб, подпись о выключенных «Эффектах прозрачности» Windows и «Сбросить внешний вид»;
 //! - «Вкладки»: включение/выключение и порядок;
 //! - «Система»: автозапуск, «лицо» свёрнутого острова, полоска над развёрнутыми окнами, язык, обновления.
 //!
 //! Выбранный раздел помнится до выхода из программы. Страница правит рабочую копию `Config` и отдаёт
 //! её наружу через `take_change`; применяет и сохраняет изменения главное окно.
 
+use std::time::{Duration, Instant};
+
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use crate::anim::Spring;
-use crate::config::{Config, DEFAULT_RADIUS, DEFAULT_SCALE, MAX_RADIUS, MAX_SCALE, MIN_SCALE};
-use crate::theme::{self, Rgb};
+use crate::config::{Config, DEFAULT_RADIUS, DEFAULT_SCALE, MAX_RADIUS, MAX_SCALE, MIN_SCALE, Material};
+use crate::theme::{self, PaletteStyle, Rgb};
 use crate::ui::{chip_bg, dim, icon, ink, inset, txt, Canvas, Rect, Submit, Ui, WHITE};
 
 use super::{id, PAD, SETTINGS, TOP};
@@ -37,13 +39,16 @@ const N_LANG: u32 = 13;
 const N_AUTOUPDATE: u32 = 16;
 const N_UPDATE: u32 = 17;
 const N_GLASS: u32 = 18;
-#[allow(dead_code)] // слайдер скрыт, пока стекло на доработке; номер зарезервирован
 const N_OPACITY: u32 = 19;
 /// Занимает шесть номеров подряд (20–25) — по числу `PRESETS`.
 const N_PRESET: u32 = 20;
 const N_ACCENT_PILL: u32 = 26;
+/// Занимает два номера подряд (27–28) — по числу `PALETTE_STYLES`.
+const N_PALETTE_STYLE: u32 = 27;
 /// Занимает три номера подряд (30–32) — по числу `SECTIONS`.
 const N_SECTION: u32 = 30;
+/// Занимает пять номеров подряд (33–37) — по числу `MATERIALS`.
+const N_MATERIAL: u32 = 33;
 /// Три группы по номеру вкладки (+0..6): переключатель, «вверх», «вниз».
 const N_SWITCH: u32 = 40;
 const N_UP: u32 = 60;
@@ -78,6 +83,69 @@ const PRESETS: [(&str, &str); 6] = [
     ("#2F6FED", "#F1F3F6"),
 ];
 
+/// Стили палитры оформления: Windows (цвета системы) или iOS 26.
+pub const PALETTE_STYLES: [(PaletteStyle, &str); 2] = [
+    (PaletteStyle::Windows, "Windows"),
+    (PaletteStyle::Ios, "iOS"),
+];
+
+pub fn palette_style_from_idx(idx: usize) -> PaletteStyle {
+    match idx {
+        1 => PaletteStyle::Ios,
+        _ => PaletteStyle::Windows,
+    }
+}
+
+pub fn palette_style_idx(style: PaletteStyle) -> usize {
+    match style {
+        PaletteStyle::Windows => 0,
+        PaletteStyle::Ios => 1,
+    }
+}
+
+/// Системные материалы тела острова (iOS 26 Liquid Glass).
+pub const MATERIALS: [(Material, &str); 5] = [
+    (Material::Ultrathin, "Ultrathin"),
+    (Material::Thin, "Thin"),
+    (Material::Regular, "Regular"),
+    (Material::Thick, "Thick"),
+    (Material::Chrome, "Chrome"),
+];
+
+const MATERIAL_CHIP_WIDTHS: [f32; 5] = [62.0, 40.0, 56.0, 46.0, 52.0];
+
+/// Время жизни кэша проверки системных эффектов прозрачности (1 секунда).
+pub const TRANSPARENCY_TTL: Duration = Duration::from_secs(1);
+
+/// Проверяет, свеж ли кэш значения: если с момента проверки прошло меньше `ttl`, возвращает значение из кэша.
+pub fn cached_transparency(cache: Option<(Instant, bool)>, now: Instant, ttl: Duration) -> Option<bool> {
+    match cache {
+        Some((at, val)) if now.saturating_duration_since(at) < ttl => Some(val),
+        _ => None,
+    }
+}
+
+pub fn material_from_idx(idx: usize) -> Material {
+    match idx {
+        0 => Material::Ultrathin,
+        1 => Material::Thin,
+        2 => Material::Regular,
+        3 => Material::Thick,
+        4 => Material::Chrome,
+        _ => Material::Regular,
+    }
+}
+
+pub fn material_idx(m: Material) -> usize {
+    match m {
+        Material::Ultrathin => 0,
+        Material::Thin => 1,
+        Material::Regular => 2,
+        Material::Thick => 3,
+        Material::Chrome => 4,
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Target {
     Accent,
@@ -102,6 +170,8 @@ pub struct Settings {
     rows_ready: bool,
     /// Выбранный раздел: помнится, пока программа работает (в конфиг не пишется).
     section: Section,
+    /// Кэш состояния «Эффектов прозрачности» Windows: (время проверки, значение).
+    transparency_cache: Option<(Instant, bool)>,
 }
 
 impl Default for Settings {
@@ -117,6 +187,7 @@ impl Default for Settings {
             rows: std::array::from_fn(|_| Spring::new(0.0, 520.0, 38.0)),
             rows_ready: false,
             section: Section::Look,
+            transparency_cache: None,
         }
     }
 }
@@ -155,6 +226,18 @@ impl Settings {
         self.autostart = crate::sys::autostart_enabled();
         self.rows_ready = false;
         self.hsv = theme::rgb_to_hsv(self.current());
+        self.transparency_cache = None;
+    }
+
+    /// Состояние «Эффектов прозрачности» Windows с кэшированием до 1 секунды.
+    fn transparency_enabled(&mut self) -> bool {
+        let now = Instant::now();
+        if let Some(val) = cached_transparency(self.transparency_cache, now, TRANSPARENCY_TTL) {
+            return val;
+        }
+        let fresh = crate::sys::transparency_enabled();
+        self.transparency_cache = Some((now, fresh));
+        fresh
     }
 
     /// Конфиг перечитан из файла, пока страница закрыта.
@@ -250,6 +333,8 @@ impl Settings {
         self.cfg.corner_radius = DEFAULT_RADIUS;
         self.cfg.glass = d.glass;
         self.cfg.glass_opacity = d.glass_opacity;
+        self.cfg.material = d.material;
+        self.cfg.palette_style = d.palette_style;
         self.cfg.accent_pill = d.accent_pill;
         self.cfg.ui_scale = DEFAULT_SCALE;
         self.scale_drag = None;
@@ -458,27 +543,97 @@ impl Settings {
         let iw = rc.w - 20.0;
         let mut y = rc.y + 9.0;
 
+        let glass_on = self.cfg.glass;
+
         // Стекло и акцентная капля: компактные переключатели в одной строке
-        cv.text("Стекло", Rect::new(x, y, 48.0, 20.0), &f.body, dim());
-        let mut glass = false;
-        ui.switch(cv, id(SETTINGS, N_GLASS), Rect::new(x + 50.0, y + 2.0, 30.0, 16.0), &mut glass, false);
+        cv.text("Стекло", Rect::new(x, y, 48.0, 20.0), &f.body, txt());
+        let mut glass = self.cfg.glass;
+        if ui.switch(cv, id(SETTINGS, N_GLASS), Rect::new(x + 50.0, y + 2.0, 30.0, 16.0), &mut glass, true) {
+            self.cfg.glass = glass;
+            self.changed = true;
+        }
 
         let pill_x = x + 92.0;
         let pill_sw_x = rc.right() - 40.0;
-        cv.text("Акцентная капля", Rect::new(pill_x, y, pill_sw_x - pill_x - 6.0, 20.0), &f.body, dim());
+        cv.text("Акцентная капля", Rect::new(pill_x, y, pill_sw_x - pill_x - 6.0, 20.0), &f.body, txt());
         let mut accent_pill = self.cfg.accent_pill;
-        ui.switch(cv, id(SETTINGS, N_ACCENT_PILL), Rect::new(pill_sw_x, y + 2.0, 30.0, 16.0), &mut accent_pill, false);
+        if ui.switch(cv, id(SETTINGS, N_ACCENT_PILL), Rect::new(pill_sw_x, y + 2.0, 30.0, 16.0), &mut accent_pill, true) {
+            self.cfg.accent_pill = accent_pill;
+            self.changed = true;
+        }
         y += 24.0;
+
+        // Если в Windows выключены эффекты прозрачности, стекло отображается без размытия.
+        if glass_on && !self.transparency_enabled() {
+            cv.text("Нет размытия: в Windows выключены эффекты прозрачности", Rect::new(x, y, iw, 12.0), &f.small, dim());
+            y += 16.0;
+        }
+
         // Прозрачность тела: 0% — самое прозрачное из допустимого (`glass::MIN_BODY_ALPHA`), 100% — сплошное.
-        cv.text("Прозрачность", Rect::new(x, y, 170.0, 13.0), &f.body, dim());
+        cv.text("Прозрачность", Rect::new(x, y, 170.0, 13.0), &f.body, if glass_on { txt() } else { dim() });
         cv.text(&format!("{}%", self.cfg.glass_opacity.round() as i32), Rect::new(rc.right() - 70.0, y, 60.0, 13.0), &f.body_r, dim());
         y += 21.0;
-        let frac = self.cfg.glass_opacity / 100.0;
         let slider = Rect::new(x + 6.0, y, iw - 12.0, 14.0);
-        ui.slider_thin_disabled(cv, slider, frac);
-        let tip_on = ui.hovering(Rect::new(slider.x - 8.0, slider.y - 8.0, slider.w + 16.0, slider.h + 16.0));
-        y += 28.0;
-        let tip_rect = Rect::new(slider.cx() - 55.0, slider.y - 30.0, 110.0, 22.0);
+        if glass_on {
+            let mut frac = self.cfg.glass_opacity / 100.0;
+            if ui.slider_thin(cv, id(SETTINGS, N_OPACITY), slider, &mut frac) {
+                self.cfg.glass_opacity = (frac * 100.0).clamp(0.0, 100.0);
+                self.changed = true;
+            }
+        } else {
+            let frac = self.cfg.glass_opacity / 100.0;
+            ui.slider_thin_disabled(cv, slider, frac);
+        }
+        y += 26.0;
+
+        // Стиль цветов: системный Windows или iOS 26 Liquid Glass
+        cv.text("Стиль цветов", Rect::new(x, y, 110.0, 18.0), &f.body, txt());
+        let win_w = 68.0;
+        let ios_w = 42.0;
+        let mut cx = rc.right() - 10.0 - (win_w + ios_w + 4.0);
+        let cur_style_idx = palette_style_idx(self.cfg.palette_style);
+        for (k, &(_, label)) in PALETTE_STYLES.iter().enumerate() {
+            let w = if k == 0 { win_w } else { ios_w };
+            if ui.chip(cv, id(SETTINGS, N_PALETTE_STYLE + k as u32), Rect::new(cx, y, w, 18.0), label, cur_style_idx == k) {
+                self.cfg.palette_style = palette_style_from_idx(k);
+                self.changed = true;
+            }
+            cx += w + 4.0;
+        }
+        y += 26.0;
+
+        // Материал стекла (iOS 26 Liquid Glass): 5 вариантов плотности. Активен только со стеклом.
+        cv.text("Материал", Rect::new(x, y, iw, 13.0), &f.body, if glass_on { txt() } else { dim() });
+        y += 18.0;
+        let cur_mat_idx = material_idx(self.cfg.material);
+        let mut mcx = x;
+        for (k, &(_, label)) in MATERIALS.iter().enumerate() {
+            let mw = MATERIAL_CHIP_WIDTHS[k];
+            let mr = Rect::new(mcx, y, mw, 18.0);
+            let sel = cur_mat_idx == k;
+            if glass_on {
+                if ui.chip(cv, id(SETTINGS, N_MATERIAL + k as u32), mr, label, sel) {
+                    self.cfg.material = material_from_idx(k);
+                    self.changed = true;
+                }
+            } else {
+                let bg = if sel {
+                    D2D1_COLOR_F { a: 0.30, ..dim() }
+                } else {
+                    D2D1_COLOR_F { a: 0.12, ..dim() }
+                };
+                cv.rr(mr, mr.h / 2.0, bg);
+                cv.hairline(mr, mr.h / 2.0);
+                let fg = if sel {
+                    D2D1_COLOR_F { a: 0.60, ..dim() }
+                } else {
+                    D2D1_COLOR_F { a: 0.35, ..dim() }
+                };
+                cv.text(label, mr, &cv.g.fonts.small_c, fg);
+            }
+            mcx += mw + 4.0;
+        }
+        y += 26.0;
 
         // Масштаб интерфейса (шаг 0.05): применяется, когда мышь отпущена.
         let shown = self.scale_drag.unwrap_or(self.cfg.ui_scale);
@@ -494,13 +649,6 @@ impl Settings {
         let reset = Rect::new(x, rc.bottom() - 10.0 - 22.0, iw, 22.0);
         if ui.solid_button(cv, id(SETTINGS, N_RESET), reset, "Сбросить внешний вид", chip_bg(), txt(), 7.0) {
             self.reset();
-        }
-
-        // Подсказка поверх всего: стекло пока недоступно.
-        if tip_on {
-            cv.rr(tip_rect, 6.0, D2D1_COLOR_F { r: 0.1, g: 0.1, b: 0.11, a: 0.98 });
-            cv.hairline(tip_rect, 6.0);
-            cv.text("На доработке", tip_rect, &f.small_c, txt());
         }
     }
 
@@ -689,13 +837,59 @@ mod tests {
         let mut s = settings();
         s.cfg.ui_scale = 140.0;
         s.cfg.corner_radius = 3.0;
+        s.cfg.glass = false;
+        s.cfg.glass_opacity = 20.0;
+        s.cfg.material = Material::Chrome;
+        s.cfg.palette_style = PaletteStyle::Ios;
+        s.cfg.accent_pill = true;
         s.cfg.hidden_tabs = vec!["Apps".into()];
         s.cfg.idle_face = false;
         s.reset();
         assert_eq!(s.cfg.corner_radius, DEFAULT_RADIUS);
         assert_eq!(s.cfg.ui_scale, DEFAULT_SCALE);
+        assert_eq!(s.cfg.glass, Config::default().glass);
+        assert_eq!(s.cfg.glass_opacity, Config::default().glass_opacity);
+        assert_eq!(s.cfg.material, Config::default().material);
+        assert_eq!(s.cfg.palette_style, Config::default().palette_style);
+        assert_eq!(s.cfg.accent_pill, Config::default().accent_pill);
         assert!(s.cfg.hidden_tabs.is_empty() && s.cfg.idle_face);
         assert_eq!(s.cfg.resolve_visible(&crate::TABS).len(), 7);
+    }
+
+    #[test]
+    fn palette_style_index_helpers_roundtrip() {
+        assert_eq!(PALETTE_STYLES.len(), 2);
+        assert_eq!(PALETTE_STYLES[0], (PaletteStyle::Windows, "Windows"));
+        assert_eq!(PALETTE_STYLES[1], (PaletteStyle::Ios, "iOS"));
+
+        assert_eq!(palette_style_from_idx(0), PaletteStyle::Windows);
+        assert_eq!(palette_style_from_idx(1), PaletteStyle::Ios);
+        assert_eq!(palette_style_from_idx(99), PaletteStyle::Windows);
+
+        assert_eq!(palette_style_idx(PaletteStyle::Windows), 0);
+        assert_eq!(palette_style_idx(PaletteStyle::Ios), 1);
+    }
+
+    #[test]
+    fn material_index_helpers_roundtrip() {
+        assert_eq!(MATERIALS.len(), 5);
+        let expected = [
+            (Material::Ultrathin, "Ultrathin"),
+            (Material::Thin, "Thin"),
+            (Material::Regular, "Regular"),
+            (Material::Thick, "Thick"),
+            (Material::Chrome, "Chrome"),
+        ];
+        for (i, &(m, label)) in expected.iter().enumerate() {
+            assert_eq!(MATERIALS[i], (m, label));
+            assert_eq!(material_from_idx(i), m);
+            assert_eq!(material_idx(m), i);
+        }
+        assert_eq!(material_from_idx(99), Material::Regular);
+
+        // Проверка ширины чипов: сумма ширин + отступов ровно 272 px (ширина карточки iw)
+        let total_w: f32 = MATERIAL_CHIP_WIDTHS.iter().sum::<f32>() + 4.0 * 4.0;
+        assert_eq!(total_w, 272.0);
     }
 
     #[test]
@@ -721,7 +915,9 @@ mod tests {
             (N_OPACITY, 1),
             (N_PRESET, PRESETS.len() as u32),
             (N_ACCENT_PILL, 1),
+            (N_PALETTE_STYLE, PALETTE_STYLES.len() as u32),
             (N_SECTION, SECTIONS.len() as u32),
+            (N_MATERIAL, MATERIALS.len() as u32),
             (N_SWITCH, tabs),
             (N_UP, tabs),
             (N_DOWN, tabs),
@@ -734,6 +930,25 @@ mod tests {
         }
         // Старший бит номера занят у широких плиток (`id | 0x8000`), выше — номер вкладки.
         assert!(seen.iter().all(|&n| n < 0x8000));
+    }
+
+    #[test]
+    fn cached_transparency_expires_after_ttl() {
+        let now = Instant::now();
+        let ttl = Duration::from_secs(1);
+
+        // Пустой кэш возвращает None
+        assert_eq!(cached_transparency(None, now, ttl), None);
+
+        // Свежий кэш возвращает закэшированное значение
+        let cache_true = Some((now, true));
+        let cache_false = Some((now, false));
+        assert_eq!(cached_transparency(cache_true, now + Duration::from_millis(500), ttl), Some(true));
+        assert_eq!(cached_transparency(cache_false, now + Duration::from_millis(999), ttl), Some(false));
+
+        // Ровно TTL или больше — кэш протух, возвращает None
+        assert_eq!(cached_transparency(cache_true, now + Duration::from_millis(1000), ttl), None);
+        assert_eq!(cached_transparency(cache_true, now + Duration::from_secs(5), ttl), None);
     }
 
     #[test]
