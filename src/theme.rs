@@ -7,7 +7,35 @@ use std::cell::Cell;
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
+use crate::ios;
+
 pub type Rgb = [f32; 3];
+
+/// Стиль цветовой палитры интерфейса острова.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PaletteStyle {
+    /// Системные цвета Windows или пользовательские `bg` и `accent`.
+    #[default]
+    Windows,
+    /// Системная палитра iOS 26 Liquid Glass: акцент Blue, системные метки, заливки и разделители.
+    Ios,
+}
+
+impl PaletteStyle {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Windows => "windows",
+            Self::Ios => "ios",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "ios" => Self::Ios,
+            _ => Self::Windows,
+        }
+    }
+}
 
 /// Стандартные цвета: золотой акцент на почти чёрном.
 pub const DEFAULT_ACCENT: Rgb = [0.83, 0.69, 0.37];
@@ -113,14 +141,18 @@ pub fn to_hex(c: Rgb) -> String {
     format!("#{:02X}{:02X}{:02X}", b(c[0]), b(c[1]), b(c[2]))
 }
 
-/// Палитра из фона и акцента.
-pub fn derive(bg: Rgb, accent: Rgb) -> Palette {
+/// Палитра из фона, акцента и выбранного стиля.
+pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
     let light = is_light(bg);
+    let dark = !light;
     let fg: Rgb = if light { [0.0, 0.0, 0.0] } else { [1.0, 1.0, 1.0] };
     let on = |t: f32| col(mix3(bg, fg, t));
+
     // Тёмная надпись на светлом акценте, светлая — на тёмном.
-    let ink = if is_light(accent) { [0.10, 0.085, 0.05] } else { [0.97, 0.97, 0.97] };
-    Palette {
+    let ink_for = |acc: Rgb| if is_light(acc) { [0.10, 0.085, 0.05] } else { [0.97, 0.97, 0.97] };
+
+    // Базовая палитра (стиль Windows).
+    let mut p = Palette {
         accent: col(accent),
         bg: col(bg),
         fg: col(fg),
@@ -130,14 +162,45 @@ pub fn derive(bg: Rgb, accent: Rgb) -> Palette {
         track: on(0.128),
         chip: on(0.105),
         inset: on(0.095),
-        ink: col(ink),
+        ink: col(ink_for(accent)),
         rim_hi: rgba(WHITE, if light { 0.70 } else { 0.50 }),
         rim_mid: rgba(WHITE, if light { 0.08 } else { 0.05 }),
         rim_lo: if light { rgba([0.0; 3], 0.10) } else { rgba(WHITE, 0.22) },
         sheen: rgba(WHITE, if light { 0.30 } else { 0.07 }),
         pill: on(if light { 0.08 } else { 0.16 }),
         hairline: D2D1_COLOR_F { a: if light { 0.08 } else { 0.07 }, ..col(fg) },
+    };
+
+    if style == PaletteStyle::Ios {
+        // Системный акцент Blue iOS 26 для текущей темы (тёмная/светлая).
+        let ios_accent = ios::sys(ios::SysColor::Blue, dark);
+        p.accent = col(ios_accent);
+        p.ink = col(ink_for(ios_accent));
+
+        // Текст: основной — Label Primary (непрозрачный).
+        p.text = ios::label_primary(dark);
+
+        // Вторичный текст (dim): токен Label Secondary (с альфой 0.6) смешивается с фоном,
+        // чтобы поле оставалось непрозрачным (альфа 1.0) как и у стиля Windows.
+        let sec = ios::label_secondary(dark);
+        let dim_rgb = mix3(bg, [sec.r, sec.g, sec.b], sec.a);
+        p.dim = col(dim_rgb);
+
+        // Поверхности по смыслу и визуальной иерархии iOS:
+        // card — Quaternary Fill (самая нежная заливка подложки крупных карточек);
+        // track — Primary Fill (наиболее контрастная заливка для тонких дорожек слайдеров и прогресса);
+        // chip — Secondary Fill (интерактивные плашки/чипы и кнопки);
+        // inset — Tertiary Fill (утопленные поля ввода и внутренние группировки).
+        p.card = ios::fill_quaternary(dark);
+        p.track = ios::fill_primary(dark);
+        p.chip = ios::fill_secondary(dark);
+        p.inset = ios::fill_tertiary(dark);
+
+        // Волосяная граница: полупрозрачный системный разделитель iOS (Non-Opaque).
+        p.hairline = ios::separator_non_opaque(dark);
     }
+
+    p
 }
 
 /// Цвета системы Windows → (фон острова, акцент). Тёмная тема: фон — самый тёмный оттенок
@@ -180,7 +243,7 @@ pub fn parse_accent_palette(bytes: &[u8]) -> Option<SystemColors> {
 }
 
 thread_local! {
-    static PALETTE: Cell<Palette> = Cell::new(derive(DEFAULT_BG, DEFAULT_ACCENT));
+    static PALETTE: Cell<Palette> = Cell::new(derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows));
     static GLASS: Cell<bool> = const { Cell::new(true) };
 }
 
@@ -207,7 +270,7 @@ mod tests {
 
     #[test]
     fn default_palette_matches_original_look() {
-        let p = derive(DEFAULT_BG, DEFAULT_ACCENT);
+        let p = derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows);
         // Исходные константы: CARD 0.105, TRACK 0.17, CHIP 0.15, INSET 0.14, TEXT 0.95, DIM 0.58 (с тех пор осветлён: серый текст терялся на стекле).
         for (got, want) in [(p.card.r, 0.105), (p.track.r, 0.17), (p.chip.r, 0.15), (p.inset.r, 0.14), (p.text.r, 0.95), (p.dim.r, 0.79)] {
             assert!((got - want).abs() < 0.01, "{got} против {want}");
@@ -219,13 +282,13 @@ mod tests {
     #[test]
     fn pill_is_darker_in_light_theme_and_lighter_in_dark_theme() {
         // Тёмная тема: капля светлее фона острова.
-        let dark = derive(DEFAULT_BG, DEFAULT_ACCENT);
+        let dark = derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows);
         assert!(!is_light(DEFAULT_BG));
         assert!(luminance([dark.pill.r, dark.pill.g, dark.pill.b]) > luminance(DEFAULT_BG));
 
         // Светлая тема: капля темнее фона острова.
         let light_bg = [0.95, 0.95, 0.96];
-        let light = derive(light_bg, DEFAULT_ACCENT);
+        let light = derive(light_bg, DEFAULT_ACCENT, PaletteStyle::Windows);
         assert!(is_light(light_bg));
         assert!(luminance([light.pill.r, light.pill.g, light.pill.b]) < luminance(light_bg));
     }
@@ -233,7 +296,7 @@ mod tests {
     #[test]
     fn glass_tokens_are_sane_on_any_background() {
         for bg in [DEFAULT_BG, [0.95, 0.95, 0.96], [0.8, 0.1, 0.1], [0.1, 0.2, 0.9], [0.1, 0.6, 0.2], [0.5, 0.5, 0.5]] {
-            let p = derive(bg, DEFAULT_ACCENT);
+            let p = derive(bg, DEFAULT_ACCENT, PaletteStyle::Windows);
             for c in [p.rim_hi, p.rim_mid, p.rim_lo, p.sheen, p.hairline] {
                 assert!((0.0..=1.0).contains(&c.a), "{bg:?}: alpha {}", c.a);
             }
@@ -253,10 +316,67 @@ mod tests {
 
     #[test]
     fn light_background_flips_text() {
-        let p = derive([0.95, 0.95, 0.96], [0.1, 0.4, 0.8]);
+        let p = derive([0.95, 0.95, 0.96], [0.1, 0.4, 0.8], PaletteStyle::Windows);
         assert!(p.text.r < 0.3 && p.card.r < 0.95);
         // Светлая надпись на тёмном акценте.
         assert!(p.ink.r > 0.9);
+    }
+
+    #[test]
+    fn ios_palette_dark_and_light() {
+        // Тёмный фон: акцент Blue Dark (#0091FF), Label Primary Dark (#FFFFFF)
+        let dark_p = derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Ios);
+        let blue_dark = ios::sys(ios::SysColor::Blue, true);
+        assert_eq!([dark_p.accent.r, dark_p.accent.g, dark_p.accent.b], blue_dark);
+        assert_eq!(dark_p.text, ios::label_primary(true));
+        assert!(dark_p.text.r > 0.9, "текст на тёмном фоне должен быть светлым");
+
+        // Светлый фон: акцент Blue Light (#0088FF), Label Primary Light (#000000)
+        let light_bg = [0.95, 0.95, 0.96];
+        let light_p = derive(light_bg, DEFAULT_ACCENT, PaletteStyle::Ios);
+        let blue_light = ios::sys(ios::SysColor::Blue, false);
+        assert_eq!([light_p.accent.r, light_p.accent.g, light_p.accent.b], blue_light);
+        assert_eq!(light_p.text, ios::label_primary(false));
+        assert!(light_p.text.r < 0.1, "текст на светлом фоне должен быть тёмным");
+
+        // Все поля должны иметь валидные альфы в диапазоне 0..=1
+        for p in [dark_p, light_p] {
+            for (name, c) in [
+                ("accent", p.accent),
+                ("bg", p.bg),
+                ("fg", p.fg),
+                ("text", p.text),
+                ("dim", p.dim),
+                ("card", p.card),
+                ("track", p.track),
+                ("chip", p.chip),
+                ("inset", p.inset),
+                ("ink", p.ink),
+                ("rim_hi", p.rim_hi),
+                ("rim_mid", p.rim_mid),
+                ("rim_lo", p.rim_lo),
+                ("sheen", p.sheen),
+                ("pill", p.pill),
+                ("hairline", p.hairline),
+            ] {
+                assert!((0.0..=1.0).contains(&c.a), "поле {name} имеет недопустимую альфу {}", c.a);
+            }
+            // dim непрозрачный
+            assert_eq!(p.dim.a, 1.0);
+        }
+
+        // Проверка соответствия токенов заливки iOS
+        assert_eq!(dark_p.card, ios::fill_quaternary(true));
+        assert_eq!(dark_p.track, ios::fill_primary(true));
+        assert_eq!(dark_p.chip, ios::fill_secondary(true));
+        assert_eq!(dark_p.inset, ios::fill_tertiary(true));
+        assert_eq!(dark_p.hairline, ios::separator_non_opaque(true));
+
+        assert_eq!(light_p.card, ios::fill_quaternary(false));
+        assert_eq!(light_p.track, ios::fill_primary(false));
+        assert_eq!(light_p.chip, ios::fill_secondary(false));
+        assert_eq!(light_p.inset, ios::fill_tertiary(false));
+        assert_eq!(light_p.hairline, ios::separator_non_opaque(false));
     }
 
     #[test]

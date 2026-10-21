@@ -288,7 +288,7 @@ impl App {
     /// Пересчитывает палитру. `true` — цвета изменились и нужен кадр.
     pub(crate) fn apply_theme(&mut self) -> bool {
         let (bg, accent) = self.effective_colors();
-        let p = theme::derive(bg, accent);
+        let p = theme::derive(bg, accent, self.cfg.palette_style);
         if p == theme::get() {
             return false;
         }
@@ -345,6 +345,8 @@ impl App {
         self.cfg.corner_radius = new.corner_radius;
         self.cfg.glass = new.glass;
         self.cfg.glass_opacity = new.glass_opacity;
+        self.cfg.material = new.material;
+        self.cfg.palette_style = new.palette_style;
         self.cfg.accent_pill = new.accent_pill;
         theme::set_glass(new.glass);
         if (self.cfg.ui_scale - new.ui_scale).abs() > 0.001 {

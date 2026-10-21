@@ -6,6 +6,9 @@ use std::path::PathBuf;
 use crate::log;
 use crate::theme;
 
+pub use crate::ios::Material;
+pub use crate::theme::PaletteStyle;
+
 /// Скругление нижних углов по умолчанию и допустимые пределы, логические пиксели.
 pub const DEFAULT_RADIUS: f32 = 14.0;
 pub const MAX_RADIUS: f32 = 30.0;
@@ -46,6 +49,14 @@ glass = 0
 # Прозрачность стекла: 0 — самое прозрачное из допустимого (чёрная подкладка 41% поверх размытия),
 # 100 — сплошное тело (0–100). Меняется и в Настройках.
 glass_opacity = 70
+
+# Материал стеклянного тела острова: "ultrathin", "thin", "regular", "thick", "chrome".
+# Меняется и в Настройках.
+material = "regular"
+
+# Стиль палитры: "windows" (цвета системы/пользовательские) или "ios" (системные цвета iOS 26).
+# Меняется и в Настройках.
+palette_style = "windows"
 
 # 1 — капля выбора вкладки залита акцентом (как до стекла); 0 — нейтральная плашка. Меняется и в Настройках.
 accent_pill = 0
@@ -138,6 +149,10 @@ pub struct Config {
     pub glass: bool,
     /// Прозрачность стекла, 0–100: 0 — почти прозрачное, 100 — сплошное тело.
     pub glass_opacity: f32,
+    /// Материал стеклянного тела острова (iOS 26 Liquid Glass).
+    pub material: Material,
+    /// Стиль палитры: Windows (из системы/пользовательские) или iOS (системные цвета iOS 26).
+    pub palette_style: PaletteStyle,
     /// 1 — капля выбора вкладки залита акцентом, 0 — нейтральная плашка.
     pub accent_pill: bool,
     /// Масштаб интерфейса (множитель к DPI монитора).
@@ -186,6 +201,8 @@ impl Default for Config {
             corner_radius: DEFAULT_RADIUS,
             glass: false,
             glass_opacity: DEFAULT_GLASS_OPACITY,
+            material: Material::Regular,
+            palette_style: PaletteStyle::Windows,
             accent_pill: false,
             ui_scale: DEFAULT_SCALE,
             strip_over_maximized: true,
@@ -269,6 +286,8 @@ fn save_updates(cfg: &Config, names: &[&str]) -> Vec<(&'static str, String)> {
         ("corner_radius", format!("{}", cfg.corner_radius.round() as i32)),
         ("glass", (cfg.glass as u8).to_string()),
         ("glass_opacity", format!("{}", cfg.glass_opacity.round() as i32)),
+        ("material", fmt_str(cfg.material.as_str())),
+        ("palette_style", fmt_str(cfg.palette_style.as_str())),
         ("accent_pill", (cfg.accent_pill as u8).to_string()),
         ("ui_scale_percent", format!("{}", cfg.ui_scale.round() as i32)),
         ("strip_over_maximized", (cfg.strip_over_maximized as u8).to_string()),
@@ -504,7 +523,24 @@ fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
     });
     let top: Vec<&str> = text.lines().take_while(|l| !l.trim_start().starts_with('[')).collect();
     let present = |k: &str| top.iter().any(|l| !l.trim_start().starts_with('#') && l.split_once('=').is_some_and(|(a, _)| a.trim() == k));
-    let appearance = ["accent", "bg", "system_colors", "corner_radius", "glass", "glass_opacity", "accent_pill", "ui_scale_percent", "strip_over_maximized", "language", "tabs", "hidden_tabs", "idle_face", "auto_update"];
+    let appearance = [
+        "accent",
+        "bg",
+        "system_colors",
+        "corner_radius",
+        "glass",
+        "glass_opacity",
+        "material",
+        "palette_style",
+        "accent_pill",
+        "ui_scale_percent",
+        "strip_over_maximized",
+        "language",
+        "tabs",
+        "hidden_tabs",
+        "idle_face",
+        "auto_update",
+    ];
     if tmpl.filter(|k| appearance.contains(&k.as_str())).all(|k| present(&k)) {
         return;
     }
@@ -565,6 +601,10 @@ pub fn parse(text: &str) -> Config {
             ("", "corner_radius", Value::Num(v)) => cfg.corner_radius = (v as f32).clamp(0.0, MAX_RADIUS),
             ("", "glass", _) => {} // режим стекла на доработке: всегда выключен
             ("", "glass_opacity", Value::Num(v)) => cfg.glass_opacity = (v as f32).clamp(0.0, 100.0),
+            ("", "material", Value::Str(s)) => cfg.material = Material::parse(&s),
+            ("", "material", _) => cfg.material = Material::Regular,
+            ("", "palette_style", Value::Str(s)) => cfg.palette_style = PaletteStyle::parse(&s),
+            ("", "palette_style", _) => cfg.palette_style = PaletteStyle::Windows,
             // Ключ из 0.5.0: настройка капли убрана, строку в старых конфигах молча пропускаем.
             // Ключ тестовых сборок с подложкой размытия: больше ничего не значит, молча пропускаем.
             ("", "glass_hint_dismissed", _) => {}
@@ -726,9 +766,11 @@ mod tests {
         assert_eq!(c.key("weather"), None);
         assert!(!c.glass);
         assert!(!c.accent_pill);
+        assert_eq!(c.palette_style, PaletteStyle::Windows);
+        assert_eq!(c.material, Material::Regular);
         assert_eq!(
-            (Config::default().glass, Config::default().glass_opacity, Config::default().accent_pill),
-            (c.glass, c.glass_opacity, c.accent_pill)
+            (Config::default().glass, Config::default().glass_opacity, Config::default().accent_pill, Config::default().palette_style, Config::default().material),
+            (c.glass, c.glass_opacity, c.accent_pill, c.palette_style, c.material)
         );
         assert_eq!(c.glass_opacity, DEFAULT_GLASS_OPACITY);
     }
@@ -933,6 +975,8 @@ gmail = \"https://mail.google.com\"
         c.corner_radius = 22.0;
         c.glass = false;
         c.glass_opacity = 35.0;
+        c.material = Material::Thin;
+        c.palette_style = PaletteStyle::Ios;
         c.accent_pill = true;
         c.ui_scale = 125.0;
         c.strip_over_maximized = false;
@@ -947,6 +991,8 @@ gmail = \"https://mail.google.com\"
             ("corner_radius", "22".to_string()),
             ("glass", "0".to_string()),
             ("glass_opacity", "35".to_string()),
+            ("material", fmt_str(c.material.as_str())),
+            ("palette_style", fmt_str(c.palette_style.as_str())),
             ("accent_pill", "1".to_string()),
             ("ui_scale_percent", "125".to_string()),
             ("strip_over_maximized", "0".to_string()),
@@ -957,6 +1003,55 @@ gmail = \"https://mail.google.com\"
         ];
         let back = parse(&set_keys(DEFAULT_TEMPLATE, &updates));
         assert_eq!(back, c);
+    }
+
+    #[test]
+    fn palette_style_and_material_parsing() {
+        // Проверка парсинга всех материалов (строки в кавычках, регистронезависимо)
+        for (input, expected) in [
+            ("material = \"ultrathin\"\n", Material::Ultrathin),
+            ("material = \"Thin\"\n", Material::Thin),
+            ("material = \"REGULAR\"\n", Material::Regular),
+            ("material = \"thick\"\n", Material::Thick),
+            ("material = \"Chrome\"\n", Material::Chrome),
+        ] {
+            assert_eq!(parse(input).material, expected, "input: {input}");
+        }
+
+        // Проверка парсинга palette_style (строки в кавычках, регистронезависимо)
+        for (input, expected) in [
+            ("palette_style = \"windows\"\n", PaletteStyle::Windows),
+            ("palette_style = \"Windows\"\n", PaletteStyle::Windows),
+            ("palette_style = \"ios\"\n", PaletteStyle::Ios),
+            ("palette_style = \"IOS\"\n", PaletteStyle::Ios),
+        ] {
+            assert_eq!(parse(input).palette_style, expected, "input: {input}");
+        }
+    }
+
+    #[test]
+    fn palette_style_and_material_garbage_values_fallback_to_defaults() {
+        // Мусорные значения (неизвестные строки, числа, списки, пустые строки) сбрасываются в умолчания
+        let c = parse("material = \"superglass\"\npalette_style = \"macos\"\n");
+        assert_eq!(c.material, Material::Regular);
+        assert_eq!(c.palette_style, PaletteStyle::Windows);
+
+        let c = parse("material = 42\npalette_style = 999\n");
+        assert_eq!(c.material, Material::Regular);
+        assert_eq!(c.palette_style, PaletteStyle::Windows);
+
+        let c = parse("material = [\"regular\"]\npalette_style = [\"ios\"]\n");
+        assert_eq!(c.material, Material::Regular);
+        assert_eq!(c.palette_style, PaletteStyle::Windows);
+
+        let c = parse("material = \"\"\npalette_style = \"\"\n");
+        assert_eq!(c.material, Material::Regular);
+        assert_eq!(c.palette_style, PaletteStyle::Windows);
+
+        // Неквотированные слова игнорируются парсером и сбрасываются в умолчания
+        let c = parse("material = ultrathin\npalette_style = ios\n");
+        assert_eq!(c.material, Material::Regular);
+        assert_eq!(c.palette_style, PaletteStyle::Windows);
     }
 
     #[test]

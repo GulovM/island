@@ -44,13 +44,36 @@ pub const fn to_d2d(rgb: Rgb, a: f32) -> D2D1_COLOR_F {
 // ---------------------------------------------------------------------------
 
 /// Пять системных материалов iOS 26 (раздел `_Materials/Mode Options`, `docs/figma/materials.md`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Material {
     Ultrathin,
     Thin,
+    #[default]
     Regular,
     Thick,
     Chrome,
+}
+
+impl Material {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ultrathin => "ultrathin",
+            Self::Thin => "thin",
+            Self::Regular => "regular",
+            Self::Thick => "thick",
+            Self::Chrome => "chrome",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "ultrathin" => Self::Ultrathin,
+            "thin" => Self::Thin,
+            "thick" => Self::Thick,
+            "chrome" => Self::Chrome,
+            _ => Self::Regular,
+        }
+    }
 }
 
 /// Числовая спецификация материала: радиус размытия фона и слои заливки.
