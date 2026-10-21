@@ -1,0 +1,1557 @@
+NAME: "iOS and iPadOS 26 (Community)"
+
+GLOBAL_VARS:
+fill_97d170e1: []
+layout_96b525a7:
+  mode: none
+  sizing:
+    horizontal: fixed
+    vertical: fixed
+  dimensions:
+    width: 100
+    height: 100
+fill_548ca883:
+  - rgba(0, 0, 0, 0.85)
+  - type: IMAGE
+    imageRef: 7f796ce21f42e90f63d310f5896b4023ecd8a433
+    scaleMode: TILE
+    scalingFactor: 1
+    backgroundRepeat: repeat
+    backgroundSize: calc(var(--original-width) * 1) calc(var(--original-height) * 1)
+    isBackground: true
+    imageDownloadArguments:
+      needsCropping: false
+      requiresImageDimensions: true
+layout_1ac93ca6:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 10
+    y: 10
+  dimensions:
+    width: 80
+    height: 80
+fill_50c9b13a:
+  - '#FF4245'
+fill_6f6550fb:
+  - type: IMAGE
+    imageRef: 7f796ce21f42e90f63d310f5896b4023ecd8a433
+    scaleMode: TILE
+    scalingFactor: 1
+    backgroundRepeat: repeat
+    backgroundSize: calc(var(--original-width) * 1) calc(var(--original-height) * 1)
+    isBackground: true
+    imageDownloadArguments:
+      needsCropping: false
+      requiresImageDimensions: true
+fill_0a22ca4d:
+  - '#FF383C'
+Footnote/Regular:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 13
+  lineHeight: 18px
+  letterSpacing: '-0.0062em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+fill_34dc0314:
+  - '#000000'
+Footnote/Emphasized:
+  fontFamily: SF Pro
+  fontStyle: Semibold
+  fontWeight: 590
+  fontSize: 13
+  lineHeight: 18px
+  letterSpacing: '-0.0062em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_41e71aae:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 20
+    y: 0
+  dimensions:
+    width: 120
+    height: 60
+layout_8b308b8f:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 20
+    y: 20
+  dimensions:
+    width: 120
+    height: 60
+layout_372c3216:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: -30
+  dimensions:
+    width: 33
+    height: 18
+fill_1ac5cce3:
+  - '#6155F5'
+layout_342556d0:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 23
+    y: 22
+  dimensions:
+    width: 53.05
+    height: 56.37
+fill_658ab2fa:
+  - '#FFFFFF'
+fill_52acbf84:
+  - '#1C1C1E'
+fill_ff8525ea:
+  - '#2C2C2E'
+fill_75f9dc96:
+  - '#3A3A3C'
+fill_4e4e5c8d:
+  - '#F2F2F7'
+fill_30c14c3c:
+  - rgba(235, 235, 245, 0.7)
+fill_0c32b9f8:
+  - rgba(235, 235, 245, 0.55)
+fill_e8e354ea:
+  - rgba(235, 235, 245, 0.4)
+fill_d960564e:
+  - rgba(60, 60, 67, 0.8)
+fill_40107054:
+  - rgba(60, 60, 67, 0.7)
+fill_d57b22f5:
+  - rgba(60, 60, 67, 0.55)
+ts1:
+  fontStyle: Bold
+  fills:
+    - '#FFFFFF'
+Grays/Gray 2:
+  - '#AEAEB2'
+layout_51763d79:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: -30
+  dimensions:
+    width: 40
+    height: 18
+layout_b2235761:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: -30
+  dimensions:
+    width: 41
+    height: 18
+layout_85237ef3:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: -30
+  dimensions:
+    width: 39
+    height: 18
+layout_cba86b99:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: -30
+  dimensions:
+    width: 27
+    height: 18
+fill_0ae59bb9:
+  - rgba(235, 235, 245, 0.3)
+fill_34e31616:
+  - rgba(235, 235, 245, 0.16)
+fill_2a5f7e61:
+  - rgba(60, 60, 67, 0.6)
+fill_48ed6d09:
+  - rgba(60, 60, 67, 0.3)
+fill_febf08b7:
+  - rgba(60, 60, 67, 0.18)
+fill_01dbe54b:
+  - '#8E8E93'
+fill_1bf7d495:
+  - '#0088FF'
+
+ELEMENTS:
+EL-fa4c20c7:
+  type: FRAME
+  layout:
+    mode: row
+    gap: 20px
+    sizing:
+      horizontal: fixed
+      vertical: fixed
+    locationRelativeToParent:
+      x: 200
+      y: 270
+    dimensions:
+      width: 459
+      height: 100
+EL-7258d2dc:
+  type: INSTANCE
+  layout: layout_96b525a7
+  fills: fill_548ca883
+  componentId: 509:77731
+  componentProperties:
+    Color: Color
+EL-af381308:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills: fill_50c9b13a
+  borderRadius: 40px
+EL-fe263623:
+  type: FRAME
+  layout:
+    mode: row
+    gap: 20px
+    sizing:
+      horizontal: fixed
+      vertical: fixed
+    locationRelativeToParent:
+      x: 200
+      y: 150
+    dimensions:
+      width: 459
+      height: 100
+EL-e5578e38:
+  type: FRAME
+  layout:
+    mode: row
+    gap: 20px
+    sizing:
+      horizontal: fixed
+      vertical: fixed
+    locationRelativeToParent:
+      x: 200
+      y: 30
+    dimensions:
+      width: 459
+      height: 100
+EL-5481e2c8:
+  type: INSTANCE
+  layout: layout_96b525a7
+  fills: fill_6f6550fb
+  componentId: 0:4207
+  componentProperties:
+    Color: Color
+EL-e3131f87:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills: fill_0a22ca4d
+  borderRadius: 40px
+EL-a1cd6689:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 180
+    dimensions:
+      width: 94
+      height: 18
+  text: Dark - Elevated
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-fb9c6c1c:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 290
+    dimensions:
+      width: 72
+      height: 18
+  text: Dark - Base
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-e541f4c2:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 70
+    dimensions:
+      width: 31
+      height: 18
+  text: Light
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-5a2dc936:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 560
+      y: 0
+    dimensions:
+      width: 69
+      height: 18
+  text: Quaternary
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-159a998a:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 440
+      y: 0
+    dimensions:
+      width: 47
+      height: 18
+  text: Tertiary
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-dac48545:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 320
+      y: 0
+    dimensions:
+      width: 65
+      height: 18
+  text: Secondary
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-b1d62a32:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 200
+      y: 0
+    dimensions:
+      width: 47
+      height: 18
+  text: Primary
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-6a7e5982:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 0
+    dimensions:
+      width: 83
+      height: 18
+  text: Backgrounds
+  textStyle: Footnote/Emphasized
+  fills: fill_34dc0314
+  componentPropertyReferences:
+    text: Group
+EL-42406932:
+  type: FRAME
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 80
+    dimensions:
+      width: 160
+      height: 80
+  fills: fill_548ca883
+EL-cce70f78:
+  type: FRAME
+  layout: layout_41e71aae
+  fills: fill_50c9b13a
+  borderRadius: 0px 0px 100px 100px
+EL-7bed0ad3:
+  type: FRAME
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 0
+    dimensions:
+      width: 160
+      height: 80
+  fills: fill_6f6550fb
+EL-7430d651:
+  type: FRAME
+  layout: layout_8b308b8f
+  fills: fill_0a22ca4d
+  borderRadius: 100px 100px 0px 0px
+EL-605e031f:
+  type: IMAGE-SVG
+  layout: layout_342556d0
+  fills: fill_658ab2fa
+EL-ab4a7cac:
+  type: TEXT
+  layout: layout_372c3216
+  text: Color
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+  componentPropertyReferences:
+    text: Color
+EL-e146ae07:
+  type: IMAGE-SVG
+  layout: layout_342556d0
+  fills: fill_34dc0314
+EL-ba0da291:
+  type: SECTION
+  layout:
+    mode: none
+    sizing: {}
+    dimensions:
+      width: 2560
+      height: 1500
+  fills:
+    - '#F5F5F5'
+  strokes:
+    - rgba(0, 0, 0, 0.4)
+  strokeWeight: 1px
+EL-ffeef560:
+  type: INSTANCE
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 100
+      y: 1030
+    dimensions:
+      width: 659
+      height: 370
+  fills: fill_97d170e1
+  componentId: 5532:7800
+  componentProperties:
+    Group: Grouped Backgrounds
+EL-31f12ff5:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills: fill_34dc0314
+  borderRadius: 40px
+EL-7f12a7b2:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills: fill_52acbf84
+  borderRadius: 40px
+EL-5c831a91:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills: fill_ff8525ea
+  borderRadius: 40px
+EL-be3b3606:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills: fill_75f9dc96
+  borderRadius: 40px
+EL-e66aeda5:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills: fill_4e4e5c8d
+  borderRadius: 40px
+EL-04a5103a:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills: fill_658ab2fa
+  borderRadius: 40px
+EL-e0200185:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 0
+    dimensions:
+      width: 141
+      height: 18
+  text: Grouped Backgrounds
+  textStyle: Footnote/Emphasized
+  fills: fill_34dc0314
+  componentPropertyReferences:
+    text: Group
+EL-19116558:
+  type: INSTANCE
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 900
+      y: 1030
+    dimensions:
+      width: 659
+      height: 370
+  fills: fill_97d170e1
+  componentId: 5532:7800
+  componentProperties:
+    Group: Fills
+EL-8a0f411d:
+  type: INSTANCE
+  layout: layout_96b525a7
+  fills: fill_548ca883
+  componentId: 509:77742
+  componentProperties:
+    Color: Color
+EL-642b6cfd:
+  type: IMAGE-SVG
+  layout: layout_342556d0
+  fills: fill_30c14c3c
+EL-f9dfe3e4:
+  type: INSTANCE
+  layout: layout_96b525a7
+  fills: fill_6f6550fb
+  componentId: 509:77740
+  componentProperties:
+    Color: Color
+EL-c466ff65:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 180
+    dimensions:
+      width: 29
+      height: 18
+  text: Dark
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-6b14c45f:
+  type: INSTANCE
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 900
+      y: 600
+    dimensions:
+      width: 659
+      height: 370
+  fills: fill_97d170e1
+  componentId: 5532:7800
+  componentProperties:
+    Group: Labels
+EL-84326563:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills: fill_30c14c3c
+  borderRadius: 40px
+EL-f385a327:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 290
+    dimensions:
+      width: 0
+      height: 18
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-859b1bf8:
+  type: INSTANCE
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 100
+      y: 600
+    dimensions:
+      width: 659
+      height: 370
+  fills: fill_97d170e1
+  componentId: 5532:7800
+  componentProperties:
+    Group: Backgrounds
+EL-83902685:
+  type: INSTANCE
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 1900
+      y: 600
+    dimensions:
+      width: 659
+      height: 370
+  fills: fill_97d170e1
+  componentId: 5532:7800
+  componentProperties:
+    Group: Separators
+EL-6397ecab:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills:
+    - '#38383A'
+  borderRadius: 40px
+EL-69293967:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills:
+    - rgba(255, 255, 255, 0.17)
+  borderRadius: 40px
+EL-e8a5343d:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills:
+    - '#C6C6C8'
+  borderRadius: 40px
+EL-c8f05334:
+  type: RECTANGLE
+  layout: layout_1ac93ca6
+  fills:
+    - rgba(0, 0, 0, 0.12)
+  borderRadius: 40px
+EL-1a07e52c:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 320
+      y: 0
+    dimensions:
+      width: 77
+      height: 18
+  text: Non-opaque
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-18288f11:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 200
+      y: 0
+    dimensions:
+      width: 48
+      height: 18
+  text: Opaque
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-1dcb846d:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 0
+    dimensions:
+      width: 72
+      height: 18
+  text: '{ts1}**Separators**{/ts1}'
+  boldWeight: 700
+  textStyle: Footnote/Emphasized
+  fills: fill_34dc0314
+  componentPropertyReferences:
+    text: Group
+EL-e73d7392:
+  type: GROUP
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 100
+      y: 100
+    dimensions:
+      width: 2360
+      height: 420
+  fills: fill_97d170e1
+EL-45666e4a:
+  type: FRAME
+  layout:
+    mode: row
+    gap: 40px
+    sizing:
+      horizontal: hug
+      vertical: hug
+    locationRelativeToParent:
+      x: 0
+      y: 260
+EL-6aac7e08:
+  type: INSTANCE
+  layout:
+    mode: none
+    sizing:
+      horizontal: fixed
+      vertical: fixed
+    dimensions:
+      width: 160
+      height: 160
+  componentId: 0:4299
+EL-689af1bf:
+  type: FRAME
+  layout: layout_41e71aae
+  fills: fill_34dc0314
+  borderRadius: 0px 0px 100px 100px
+EL-3625b173:
+  type: FRAME
+  layout: layout_8b308b8f
+  fills: fill_34dc0314
+  borderRadius: 100px 100px 0px 0px
+EL-f2acf0b3:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: -30
+    dimensions:
+      width: 34
+      height: 18
+  text: Black
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-89fb3247:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: -30
+    dimensions:
+      width: 29
+      height: 18
+  text: Gray
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-602398a7:
+  type: FRAME
+  layout: layout_8b308b8f
+  fills: Grays/Gray 2
+  borderRadius: 100px 100px 0px 0px
+EL-6479d58e:
+  type: TEXT
+  layout: layout_51763d79
+  text: Gray 2
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-46fc79c3:
+  type: TEXT
+  layout: layout_b2235761
+  text: Gray 3
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-38351ac5:
+  type: TEXT
+  layout: layout_b2235761
+  text: Gray 4
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-1010fefc:
+  type: TEXT
+  layout: layout_51763d79
+  text: Gray 5
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-98fb6fc3:
+  type: TEXT
+  layout: layout_b2235761
+  text: Gray 6
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-964476af:
+  type: FRAME
+  layout: layout_41e71aae
+  fills: fill_658ab2fa
+  borderRadius: 0px 0px 100px 100px
+EL-b7fa6dca:
+  type: FRAME
+  layout: layout_8b308b8f
+  fills: fill_658ab2fa
+  borderRadius: 100px 100px 0px 0px
+EL-d879d8a6:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: -30
+    dimensions:
+      width: 36
+      height: 18
+  text: White
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-8eee3384:
+  type: FRAME
+  layout:
+    mode: row
+    gap: 40px
+    sizing:
+      horizontal: hug
+      vertical: hug
+    locationRelativeToParent:
+      x: 0
+      y: 0
+EL-54445a3d:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: -30
+    dimensions:
+      width: 24
+      height: 18
+  text: Red
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-4bd40066:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: -30
+    dimensions:
+      width: 45
+      height: 18
+  text: Orange
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-121bf9e3:
+  type: TEXT
+  layout: layout_85237ef3
+  text: Yellow
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-d6562716:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: -30
+    dimensions:
+      width: 37
+      height: 18
+  text: Green
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-4f9f84cf:
+  type: TEXT
+  layout: layout_cba86b99
+  text: Mint
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-1c653631:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: -30
+    dimensions:
+      width: 25
+      height: 18
+  text: Teal
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-fbbadc94:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: -30
+    dimensions:
+      width: 31
+      height: 18
+  text: Cyan
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-60ab2176:
+  type: TEXT
+  layout: layout_cba86b99
+  text: Blue
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-a20213ff:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: -30
+    dimensions:
+      width: 38
+      height: 18
+  text: Indigo
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-e2d47e46:
+  type: TEXT
+  layout: layout_51763d79
+  text: Purple
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-21009468:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: -30
+    dimensions:
+      width: 26
+      height: 18
+  text: Pink
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+EL-ba47f77e:
+  type: TEXT
+  layout: layout_85237ef3
+  text: Brown
+  textStyle: Footnote/Regular
+  fills: fill_34dc0314
+
+COMPONENTS:
+5532:7800:
+  id: 5532:7800
+  key: 8d042f14657f99b6adc86c30ac442de473ebafa4
+  name: _Swatch Grid
+  propertyDefinitions:
+    Group:
+      type: text
+      defaultValue: Backgrounds
+509:77731:
+  id: 509:77731
+  key: 4a96c7436294977dbddf898339503c83f4e67343
+  name: Type=Color, Mode=Dark
+  componentSetId: 509:77730
+0:4207:
+  id: 0:4207
+  key: d98147d427ce99797151ec0892de2634f96511be
+  name: Type=Color, Mode=Light
+  componentSetId: 509:77730
+0:4299:
+  id: 0:4299
+  key: e1de5c4a921918b6f54ae7e4f58e047d3426632e
+  name: _Swatch - Light and Dark
+509:77742:
+  id: 509:77742
+  key: d1e1cd41993a72aca5d07362986286bf458f9a4e
+  name: Type=Label, Mode=Dark
+  componentSetId: 509:77730
+509:77740:
+  id: 509:77740
+  key: f506ae47db95eacbb13696248a8838069405aa9a
+  name: Type=Label, Mode=Light
+  componentSetId: 509:77730
+507:29149:
+  id: 507:29149
+  key: e13ad208573b21c6fc331a20341d001b94901239
+  name: _Component Header
+
+COMPONENT_SETS:
+509:77730:
+  id: 509:77730
+  key: 2f1b5248f2f26f6a5aec487809f61e14e117c273
+  name: _Swatch
+  description: ''
+  propertyDefinitions:
+    Color:
+      type: text
+      defaultValue: Color
+
+NODES:
+[CANVAS] "Colors" #0:1746
+  [COMPONENT] "_Swatch Grid" #5532:7800 layout={"mode":"none","sizing":{},"dimensions":{"width":659,"height":370}} fills=fill_97d170e1
+    [FRAME] "Dark - Base" #509:77786 template=EL-fa4c20c7
+      [INSTANCE] "Swatch" #5532:9490 template=EL-7258d2dc
+        [RECTANGLE] "Swatch" #I5532:9490;509:77732 template=EL-af381308
+      [INSTANCE] "Swatch" #5532:9491 template=EL-7258d2dc
+        [RECTANGLE] "Swatch" #I5532:9491;509:77732 template=EL-af381308
+      [INSTANCE] "Swatch" #5532:9492 template=EL-7258d2dc
+        [RECTANGLE] "Swatch" #I5532:9492;509:77732 template=EL-af381308
+      [INSTANCE] "Swatch" #5532:9493 template=EL-7258d2dc
+        [RECTANGLE] "Swatch" #I5532:9493;509:77732 template=EL-af381308
+    [FRAME] "Dark - Elevated" #509:77785 template=EL-fe263623
+      [INSTANCE] "Swatch" #5532:9247 template=EL-7258d2dc
+        [RECTANGLE] "Swatch" #I5532:9247;509:77732 template=EL-af381308
+      [INSTANCE] "Swatch" #5532:9248 template=EL-7258d2dc
+        [RECTANGLE] "Swatch" #I5532:9248;509:77732 template=EL-af381308
+      [INSTANCE] "Swatch" #5532:9249 template=EL-7258d2dc
+        [RECTANGLE] "Swatch" #I5532:9249;509:77732 template=EL-af381308
+      [INSTANCE] "Swatch" #5532:9250 template=EL-7258d2dc
+        [RECTANGLE] "Swatch" #I5532:9250;509:77732 template=EL-af381308
+    [FRAME] "Light" #509:77781 template=EL-e5578e38
+      [INSTANCE] "Swatch" #5532:8553 template=EL-5481e2c8
+        [RECTANGLE] "Swatch" #I5532:8553;509:77507 template=EL-e3131f87
+      [INSTANCE] "Swatch" #5532:8832 template=EL-5481e2c8
+        [RECTANGLE] "Swatch" #I5532:8832;509:77507 template=EL-e3131f87
+      [INSTANCE] "Swatch" #5532:8905 template=EL-5481e2c8
+        [RECTANGLE] "Swatch" #I5532:8905;509:77507 template=EL-e3131f87
+      [INSTANCE] "Swatch" #5532:8993 template=EL-5481e2c8
+        [RECTANGLE] "Swatch" #I5532:8993;509:77507 template=EL-e3131f87
+    [TEXT] #5405:369 template=EL-a1cd6689
+    [TEXT] #5405:371 template=EL-fb9c6c1c
+    [TEXT] #5405:370 template=EL-e541f4c2
+    [TEXT] #5405:294 template=EL-5a2dc936
+    [TEXT] #5532:7860 template=EL-159a998a
+    [TEXT] #5405:295 template=EL-dac48545
+    [TEXT] #5405:296 template=EL-b1d62a32
+    [TEXT] #5405:297 template=EL-6a7e5982
+  [COMPONENT] "_Swatch - Light and Dark" #0:4299 layout={"mode":"none","sizing":{},"dimensions":{"width":160,"height":160}}
+    [FRAME] "Dark" #5532:10569 template=EL-42406932
+      [FRAME] "Swatch" #5532:10570 template=EL-cce70f78
+    [FRAME] "Light" #5532:10308 template=EL-7bed0ad3
+      [FRAME] "Swatch" #509:77509 template=EL-7430d651
+    [TEXT] #5532:8268 layout=layout_372c3216 fills=fill_34dc0314 textStyle=Footnote/Regular text="Label"
+  [COMPONENT_SET] "_Swatch" #509:77730 layout={"mode":"none","sizing":{},"dimensions":{"width":259,"height":330}} strokes=fill_1ac5cce3 strokeWeight=1px strokeDashes=10,5 borderRadius=5px
+    [COMPONENT] "Type=Label, Mode=Dark" #509:77742 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":140,"y":210},"dimensions":{"width":100,"height":100}} fills=fill_548ca883
+      [IMAGE-SVG] "Swatch" #509:77750 template=EL-605e031f
+      [TEXT] #5532:8028 template=EL-ab4a7cac
+    [COMPONENT] "Type=Color, Mode=Dark" #509:77731 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":20,"y":210},"dimensions":{"width":100,"height":100}} fills=fill_548ca883
+      [RECTANGLE] "Swatch" #509:77732 template=EL-af381308
+      [TEXT] #5532:7896 template=EL-ab4a7cac
+    [COMPONENT] "Type=Label, Mode=Light" #509:77740 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":140,"y":50},"dimensions":{"width":100,"height":100}} fills=fill_6f6550fb
+      [IMAGE-SVG] "Swatch" #509:77747 template=EL-e146ae07
+      [TEXT] #5532:8027 template=EL-ab4a7cac
+    [COMPONENT] "Type=Color, Mode=Light" #0:4207 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":20,"y":50},"dimensions":{"width":100,"height":100}} fills=fill_6f6550fb
+      [RECTANGLE] "Swatch" #509:77507 template=EL-e3131f87
+      [TEXT] #5532:8026 template=EL-ab4a7cac
+  [SECTION] "Increased Contrast" #5707:28660 template=EL-ba0da291
+    [INSTANCE] "Swatch Grid" #5735:67114 template=EL-ffeef560
+      [FRAME] "Dark - Base" #I5735:67114;509:77786 template=EL-fa4c20c7
+        [INSTANCE] "Swatch" #I5735:67114;5532:9490 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5735:67114;5532:9490;509:77732 template=EL-31f12ff5
+        [INSTANCE] "Swatch" #I5735:67114;5532:9491 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5735:67114;5532:9491;509:77732 template=EL-7f12a7b2
+        [INSTANCE] "Swatch" #I5735:67114;5532:9492 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5735:67114;5532:9492;509:77732 template=EL-5c831a91
+      [FRAME] "Dark - Elevated" #I5735:67114;509:77785 template=EL-fe263623
+        [INSTANCE] "Swatch" #I5735:67114;5532:9247 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5735:67114;5532:9247;509:77732 template=EL-7f12a7b2
+        [INSTANCE] "Swatch" #I5735:67114;5532:9248 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5735:67114;5532:9248;509:77732 template=EL-5c831a91
+        [INSTANCE] "Swatch" #I5735:67114;5532:9249 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5735:67114;5532:9249;509:77732 template=EL-be3b3606
+      [FRAME] "Light" #I5735:67114;509:77781 template=EL-e5578e38
+        [INSTANCE] "Swatch" #I5735:67114;5532:8553 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5735:67114;5532:8553;509:77507 template=EL-e66aeda5
+        [INSTANCE] "Swatch" #I5735:67114;5532:8832 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5735:67114;5532:8832;509:77507 template=EL-04a5103a
+        [INSTANCE] "Swatch" #I5735:67114;5532:8905 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5735:67114;5532:8905;509:77507 template=EL-e66aeda5
+      [TEXT] #I5735:67114;5405:369 template=EL-a1cd6689
+      [TEXT] #I5735:67114;5405:371 template=EL-fb9c6c1c
+      [TEXT] #I5735:67114;5405:370 template=EL-e541f4c2
+      [TEXT] #I5735:67114;5532:7860 template=EL-159a998a
+      [TEXT] #I5735:67114;5405:295 template=EL-dac48545
+      [TEXT] #I5735:67114;5405:296 template=EL-b1d62a32
+      [TEXT] #I5735:67114;5405:297 template=EL-e0200185
+    [INSTANCE] "Swatches" #5532:12331 template=EL-19116558
+      [FRAME] "Dark - Elevated" #I5532:12331;509:77785 template=EL-fe263623
+        [INSTANCE] "Swatch" #I5532:12331;5532:9247 template=EL-8a0f411d
+          [IMAGE-SVG] "Swatch" #I5532:12331;5532:9247;509:77750 template=EL-605e031f
+        [INSTANCE] "Swatch" #I5532:12331;5532:9248 template=EL-8a0f411d
+          [IMAGE-SVG] "Swatch" #I5532:12331;5532:9248;509:77750 template=EL-642b6cfd
+        [INSTANCE] "Swatch" #I5532:12331;5532:9249 template=EL-8a0f411d
+          [IMAGE-SVG] "Swatch" #I5532:12331;5532:9249;509:77750 layout=layout_342556d0 fills=fill_0c32b9f8
+        [INSTANCE] "Swatch" #I5532:12331;5532:9250 template=EL-8a0f411d
+          [IMAGE-SVG] "Swatch" #I5532:12331;5532:9250;509:77750 layout=layout_342556d0 fills=fill_e8e354ea
+      [FRAME] "Light" #I5532:12331;509:77781 template=EL-e5578e38
+        [INSTANCE] "Swatch" #I5532:12331;5532:8553 template=EL-f9dfe3e4
+          [IMAGE-SVG] "Swatch" #I5532:12331;5532:8553;509:77747 template=EL-e146ae07
+        [INSTANCE] "Swatch" #I5532:12331;5532:8832 template=EL-f9dfe3e4
+          [IMAGE-SVG] "Swatch" #I5532:12331;5532:8832;509:77747 layout=layout_342556d0 fills=fill_d960564e
+        [INSTANCE] "Swatch" #I5532:12331;5532:8905 template=EL-f9dfe3e4
+          [IMAGE-SVG] "Swatch" #I5532:12331;5532:8905;509:77747 layout=layout_342556d0 fills=fill_40107054
+        [INSTANCE] "Swatch" #I5532:12331;5532:8993 template=EL-f9dfe3e4
+          [IMAGE-SVG] "Swatch" #I5532:12331;5532:8993;509:77747 layout=layout_342556d0 fills=fill_d57b22f5
+      [TEXT] #I5532:12331;5405:369 template=EL-c466ff65
+      [TEXT] #I5532:12331;5405:370 template=EL-e541f4c2
+      [TEXT] #I5532:12331;5405:294 template=EL-5a2dc936
+      [TEXT] #I5532:12331;5532:7860 template=EL-159a998a
+      [TEXT] #I5532:12331;5405:295 template=EL-dac48545
+      [TEXT] #I5532:12331;5405:296 template=EL-b1d62a32
+      [TEXT] #I5532:12331;5405:297 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":0},"dimensions":{"width":27,"height":18}} fills=fill_34dc0314 componentPropertyReferences={"text":"Group"} textStyle=Footnote/Emphasized boldWeight=700 text="{ts1}**Fills**{/ts1}"
+    [INSTANCE] "Swatch Grid" #5532:12327 template=EL-6b14c45f
+      [FRAME] "Dark - Base" #I5532:12327;509:77786 template=EL-fa4c20c7
+      [FRAME] "Dark - Elevated" #I5532:12327;509:77785 template=EL-fe263623
+        [INSTANCE] "Swatch" #I5532:12327;5532:9247 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:12327;5532:9247;509:77732 template=EL-04a5103a
+        [INSTANCE] "Swatch" #I5532:12327;5532:9248 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:12327;5532:9248;509:77732 template=EL-84326563
+        [INSTANCE] "Swatch" #I5532:12327;5532:9249 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:12327;5532:9249;509:77732 layout=layout_1ac93ca6 fills=fill_0c32b9f8 borderRadius=40px
+        [INSTANCE] "Swatch" #I5532:12327;5532:9250 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:12327;5532:9250;509:77732 layout=layout_1ac93ca6 fills=fill_e8e354ea borderRadius=40px
+      [FRAME] "Light" #I5532:12327;509:77781 template=EL-e5578e38
+        [INSTANCE] "Swatch" #I5532:12327;5532:8553 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:12327;5532:8553;509:77507 template=EL-31f12ff5
+        [INSTANCE] "Swatch" #I5532:12327;5532:8832 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:12327;5532:8832;509:77507 layout=layout_1ac93ca6 fills=fill_d960564e borderRadius=40px
+        [INSTANCE] "Swatch" #I5532:12327;5532:8905 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:12327;5532:8905;509:77507 layout=layout_1ac93ca6 fills=fill_40107054 borderRadius=40px
+        [INSTANCE] "Swatch" #I5532:12327;5532:8993 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:12327;5532:8993;509:77507 layout=layout_1ac93ca6 fills=fill_d57b22f5 borderRadius=40px
+      [TEXT] #I5532:12327;5405:369 template=EL-c466ff65
+      [TEXT] #I5532:12327;5405:371 template=EL-f385a327
+      [TEXT] #I5532:12327;5405:370 template=EL-e541f4c2
+      [TEXT] #I5532:12327;5405:294 template=EL-5a2dc936
+      [TEXT] #I5532:12327;5532:7860 template=EL-159a998a
+      [TEXT] #I5532:12327;5405:295 template=EL-dac48545
+      [TEXT] #I5532:12327;5405:296 template=EL-b1d62a32
+      [TEXT] #I5532:12327;5405:297 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":0},"dimensions":{"width":43,"height":18}} fills=fill_34dc0314 componentPropertyReferences={"text":"Group"} textStyle=Footnote/Emphasized boldWeight=700 text="{ts1}**Labels**{/ts1}"
+    [INSTANCE] "Swatch Grid" #5735:67113 template=EL-859b1bf8
+      [FRAME] "Dark - Base" #I5735:67113;509:77786 template=EL-fa4c20c7
+        [INSTANCE] "Swatch" #I5735:67113;5532:9490 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5735:67113;5532:9490;509:77732 template=EL-31f12ff5
+        [INSTANCE] "Swatch" #I5735:67113;5532:9491 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5735:67113;5532:9491;509:77732 template=EL-7f12a7b2
+        [INSTANCE] "Swatch" #I5735:67113;5532:9492 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5735:67113;5532:9492;509:77732 template=EL-5c831a91
+      [FRAME] "Dark - Elevated" #I5735:67113;509:77785 template=EL-fe263623
+        [INSTANCE] "Swatch" #I5735:67113;5532:9247 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5735:67113;5532:9247;509:77732 template=EL-7f12a7b2
+        [INSTANCE] "Swatch" #I5735:67113;5532:9248 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5735:67113;5532:9248;509:77732 template=EL-5c831a91
+        [INSTANCE] "Swatch" #I5735:67113;5532:9249 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5735:67113;5532:9249;509:77732 template=EL-be3b3606
+      [FRAME] "Light" #I5735:67113;509:77781 template=EL-e5578e38
+        [INSTANCE] "Swatch" #I5735:67113;5532:8553 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5735:67113;5532:8553;509:77507 template=EL-04a5103a
+        [INSTANCE] "Swatch" #I5735:67113;5532:8832 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5735:67113;5532:8832;509:77507 template=EL-e66aeda5
+        [INSTANCE] "Swatch" #I5735:67113;5532:8905 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5735:67113;5532:8905;509:77507 template=EL-04a5103a
+      [TEXT] #I5735:67113;5405:369 template=EL-a1cd6689
+      [TEXT] #I5735:67113;5405:371 template=EL-fb9c6c1c
+      [TEXT] #I5735:67113;5405:370 template=EL-e541f4c2
+      [TEXT] #I5735:67113;5532:7860 template=EL-159a998a
+      [TEXT] #I5735:67113;5405:295 template=EL-dac48545
+      [TEXT] #I5735:67113;5405:296 template=EL-b1d62a32
+      [TEXT] #I5735:67113;5405:297 template=EL-6a7e5982
+    [INSTANCE] "Swatches" #5532:12329 template=EL-83902685
+      [FRAME] "Dark - Base" #I5532:12329;509:77786 template=EL-fa4c20c7
+      [FRAME] "Dark - Elevated" #I5532:12329;509:77785 template=EL-fe263623
+        [INSTANCE] "Swatch" #I5532:12329;5532:9247 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:12329;5532:9247;509:77732 template=EL-6397ecab
+        [INSTANCE] "Swatch" #I5532:12329;5532:9248 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:12329;5532:9248;509:77732 template=EL-69293967
+      [FRAME] "Light" #I5532:12329;509:77781 template=EL-e5578e38
+        [INSTANCE] "Swatch" #I5532:12329;5532:8553 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:12329;5532:8553;509:77507 template=EL-e8a5343d
+        [INSTANCE] "Swatch" #I5532:12329;5532:8832 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:12329;5532:8832;509:77507 template=EL-c8f05334
+      [TEXT] #I5532:12329;5405:369 template=EL-c466ff65
+      [TEXT] #I5532:12329;5405:370 template=EL-e541f4c2
+      [TEXT] #I5532:12329;5405:295 template=EL-1a07e52c
+      [TEXT] #I5532:12329;5405:296 template=EL-18288f11
+      [TEXT] #I5532:12329;5405:297 template=EL-1dcb846d
+    [GROUP] "Colors" #5532:12332 template=EL-e73d7392
+      [FRAME] "Grays" #5532:12333 template=EL-45666e4a
+        [INSTANCE] "Swatch" #5532:12334 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12334;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12334;5532:10570 template=EL-689af1bf
+          [FRAME] "Light" #I5532:12334;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12334;509:77509 template=EL-3625b173
+          [TEXT] #I5532:12334;5532:8268 template=EL-f2acf0b3
+        [INSTANCE] "Swatch" #5532:12335 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12335;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12335;5532:10570 layout=layout_41e71aae fills=["#AEAEB2"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12335;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12335;509:77509 layout=layout_8b308b8f fills=["#6C6C70"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12335;5532:8268 template=EL-89fb3247
+        [INSTANCE] "Swatch" #5532:12336 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12336;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12336;5532:10570 layout=layout_41e71aae fills=["#545456"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12336;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12336;509:77509 template=EL-602398a7
+          [TEXT] #I5532:12336;5532:8268 template=EL-6479d58e
+        [INSTANCE] "Swatch" #5532:12337 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12337;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12337;5532:10570 layout=layout_41e71aae fills=["#444446"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12337;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12337;509:77509 layout=layout_8b308b8f fills=["#C7C7CB"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12337;5532:8268 template=EL-46fc79c3
+        [INSTANCE] "Swatch" #5532:12338 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12338;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12338;5532:10570 layout=layout_41e71aae fills=["#363638"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12338;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12338;509:77509 layout=layout_8b308b8f fills=["#D1D1D5"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12338;5532:8268 template=EL-38351ac5
+        [INSTANCE] "Swatch" #5532:12339 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12339;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12339;5532:10570 layout=layout_41e71aae fills=["#242426"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12339;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12339;509:77509 layout=layout_8b308b8f fills=["#E5E5E9"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12339;5532:8268 template=EL-1010fefc
+        [INSTANCE] "Swatch" #5532:12340 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12340;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12340;5532:10570 template=EL-689af1bf
+          [FRAME] "Light" #I5532:12340;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12340;509:77509 layout=layout_8b308b8f fills=["#F2F2F6"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12340;5532:8268 template=EL-98fb6fc3
+        [INSTANCE] "Swatch" #5532:12341 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12341;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12341;5532:10570 template=EL-964476af
+          [FRAME] "Light" #I5532:12341;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12341;509:77509 template=EL-b7fa6dca
+          [TEXT] #I5532:12341;5532:8268 template=EL-d879d8a6
+      [FRAME] "Colors" #5532:12342 template=EL-8eee3384
+        [INSTANCE] "Swatch" #5532:12343 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12343;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12343;5532:10570 layout=layout_41e71aae fills=["#FF6165"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12343;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12343;509:77509 layout=layout_8b308b8f fills=["#E9152D"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12343;5532:8268 template=EL-54445a3d
+        [INSTANCE] "Swatch" #5532:12344 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12344;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12344;5532:10570 layout=layout_41e71aae fills=["#FFA056"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12344;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12344;509:77509 layout=layout_8b308b8f fills=["#C55300"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12344;5532:8268 template=EL-4bd40066
+        [INSTANCE] "Swatch" #5532:12345 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12345;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12345;5532:10570 layout=layout_41e71aae fills=["#FEDF43"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12345;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12345;509:77509 layout=layout_8b308b8f fills=["#A16A00"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12345;5532:8268 template=EL-121bf9e3
+        [INSTANCE] "Swatch" #5532:12346 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12346;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12346;5532:10570 layout=layout_41e71aae fills=["#4AE968"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12346;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12346;509:77509 layout=layout_8b308b8f fills=["#008932"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12346;5532:8268 template=EL-d6562716
+        [INSTANCE] "Swatch" #5532:12347 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12347;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12347;5532:10570 layout=layout_41e71aae fills=["#54DFCB"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12347;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12347;509:77509 layout=layout_8b308b8f fills=["#008575"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12347;5532:8268 template=EL-4f9f84cf
+        [INSTANCE] "Swatch" #5532:12348 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12348;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12348;5532:10570 layout=layout_41e71aae fills=["#3BDDEC"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12348;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12348;509:77509 layout=layout_8b308b8f fills=["#008198"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12348;5532:8268 template=EL-1c653631
+        [INSTANCE] "Swatch" #5532:12349 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12349;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12349;5532:10570 layout=layout_41e71aae fills=["#6DD9FF"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12349;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12349;509:77509 layout=layout_8b308b8f fills=["#007EAE"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12349;5532:8268 template=EL-fbbadc94
+        [INSTANCE] "Swatch" #5532:12350 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12350;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12350;5532:10570 layout=layout_41e71aae fills=["#5CB8FF"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12350;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12350;509:77509 layout=layout_8b308b8f fills=["#1E6EF4"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12350;5532:8268 template=EL-60ab2176
+        [INSTANCE] "Swatch" #5532:12351 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12351;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12351;5532:10570 layout=layout_41e71aae fills=["#A7AAFF"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12351;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12351;509:77509 layout=layout_8b308b8f fills=["#564ADE"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12351;5532:8268 template=EL-a20213ff
+        [INSTANCE] "Swatch" #5532:12352 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12352;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12352;5532:10570 layout=layout_41e71aae fills=["#EA8DFF"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12352;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12352;509:77509 layout=layout_8b308b8f fills=["#B02FC2"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12352;5532:8268 template=EL-e2d47e46
+        [INSTANCE] "Swatch" #5532:12353 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12353;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12353;5532:10570 layout=layout_41e71aae fills=["#FF8AC4"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12353;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12353;509:77509 layout=layout_8b308b8f fills=["#E7124D"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12353;5532:8268 template=EL-21009468
+        [INSTANCE] "Swatch" #5532:12354 template=EL-6aac7e08
+          [FRAME] "Dark" #I5532:12354;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I5532:12354;5532:10570 layout=layout_41e71aae fills=["#DBA679"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I5532:12354;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I5532:12354;509:77509 layout=layout_8b308b8f fills=["#956D51"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I5532:12354;5532:8268 template=EL-ba47f77e
+  [SECTION] "Default" #5707:28659 template=EL-ba0da291
+    [INSTANCE] "Swatch Grid" #5532:8370 template=EL-ffeef560
+      [FRAME] "Dark - Base" #I5532:8370;509:77786 template=EL-fa4c20c7
+        [INSTANCE] "Swatch" #I5532:8370;5532:9490 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:8370;5532:9490;509:77732 template=EL-31f12ff5
+        [INSTANCE] "Swatch" #I5532:8370;5532:9491 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:8370;5532:9491;509:77732 template=EL-7f12a7b2
+        [INSTANCE] "Swatch" #I5532:8370;5532:9492 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:8370;5532:9492;509:77732 template=EL-5c831a91
+      [FRAME] "Dark - Elevated" #I5532:8370;509:77785 template=EL-fe263623
+        [INSTANCE] "Swatch" #I5532:8370;5532:9247 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:8370;5532:9247;509:77732 template=EL-7f12a7b2
+        [INSTANCE] "Swatch" #I5532:8370;5532:9248 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:8370;5532:9248;509:77732 template=EL-5c831a91
+        [INSTANCE] "Swatch" #I5532:8370;5532:9249 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:8370;5532:9249;509:77732 template=EL-be3b3606
+      [FRAME] "Light" #I5532:8370;509:77781 template=EL-e5578e38
+        [INSTANCE] "Swatch" #I5532:8370;5532:8553 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:8370;5532:8553;509:77507 template=EL-e66aeda5
+        [INSTANCE] "Swatch" #I5532:8370;5532:8832 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:8370;5532:8832;509:77507 template=EL-04a5103a
+        [INSTANCE] "Swatch" #I5532:8370;5532:8905 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:8370;5532:8905;509:77507 template=EL-e66aeda5
+      [TEXT] #I5532:8370;5405:369 template=EL-a1cd6689
+      [TEXT] #I5532:8370;5405:371 template=EL-fb9c6c1c
+      [TEXT] #I5532:8370;5405:370 template=EL-e541f4c2
+      [TEXT] #I5532:8370;5532:7860 template=EL-159a998a
+      [TEXT] #I5532:8370;5405:295 template=EL-dac48545
+      [TEXT] #I5532:8370;5405:296 template=EL-b1d62a32
+      [TEXT] #I5532:8370;5405:297 template=EL-e0200185
+    [INSTANCE] "Swatches" #5532:8407 template=EL-19116558
+      [FRAME] "Dark - Elevated" #I5532:8407;509:77785 template=EL-fe263623
+        [INSTANCE] "Swatch" #I5532:8407;5532:9247 template=EL-8a0f411d
+          [IMAGE-SVG] "Swatch" #I5532:8407;5532:9247;509:77750 template=EL-605e031f
+        [INSTANCE] "Swatch" #I5532:8407;5532:9248 template=EL-8a0f411d
+          [IMAGE-SVG] "Swatch" #I5532:8407;5532:9248;509:77750 template=EL-642b6cfd
+        [INSTANCE] "Swatch" #I5532:8407;5532:9249 template=EL-8a0f411d
+          [IMAGE-SVG] "Swatch" #I5532:8407;5532:9249;509:77750 layout=layout_342556d0 fills=fill_0ae59bb9
+        [INSTANCE] "Swatch" #I5532:8407;5532:9250 template=EL-8a0f411d
+          [IMAGE-SVG] "Swatch" #I5532:8407;5532:9250;509:77750 layout=layout_342556d0 fills=fill_34e31616
+      [FRAME] "Light" #I5532:8407;509:77781 template=EL-e5578e38
+        [INSTANCE] "Swatch" #I5532:8407;5532:8553 template=EL-f9dfe3e4
+          [IMAGE-SVG] "Swatch" #I5532:8407;5532:8553;509:77747 template=EL-e146ae07
+        [INSTANCE] "Swatch" #I5532:8407;5532:8832 template=EL-f9dfe3e4
+          [IMAGE-SVG] "Swatch" #I5532:8407;5532:8832;509:77747 layout=layout_342556d0 fills=fill_2a5f7e61
+        [INSTANCE] "Swatch" #I5532:8407;5532:8905 template=EL-f9dfe3e4
+          [IMAGE-SVG] "Swatch" #I5532:8407;5532:8905;509:77747 layout=layout_342556d0 fills=fill_48ed6d09
+        [INSTANCE] "Swatch" #I5532:8407;5532:8993 template=EL-f9dfe3e4
+          [IMAGE-SVG] "Swatch" #I5532:8407;5532:8993;509:77747 layout=layout_342556d0 fills=fill_febf08b7
+      [TEXT] #I5532:8407;5405:369 template=EL-c466ff65
+      [TEXT] #I5532:8407;5405:370 template=EL-e541f4c2
+      [TEXT] #I5532:8407;5405:294 template=EL-5a2dc936
+      [TEXT] #I5532:8407;5532:7860 template=EL-159a998a
+      [TEXT] #I5532:8407;5405:295 template=EL-dac48545
+      [TEXT] #I5532:8407;5405:296 template=EL-b1d62a32
+      [TEXT] #I5532:8407;5405:297 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":0},"dimensions":{"width":26,"height":18}} fills=fill_34dc0314 componentPropertyReferences={"text":"Group"} textStyle=Footnote/Emphasized text="Fills"
+    [INSTANCE] "Swatch Grid" #5532:8406 template=EL-6b14c45f
+      [FRAME] "Dark - Base" #I5532:8406;509:77786 template=EL-fa4c20c7
+      [FRAME] "Dark - Elevated" #I5532:8406;509:77785 template=EL-fe263623
+        [INSTANCE] "Swatch" #I5532:8406;5532:9247 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:8406;5532:9247;509:77732 template=EL-04a5103a
+        [INSTANCE] "Swatch" #I5532:8406;5532:9248 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:8406;5532:9248;509:77732 template=EL-84326563
+        [INSTANCE] "Swatch" #I5532:8406;5532:9249 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:8406;5532:9249;509:77732 layout=layout_1ac93ca6 fills=fill_0ae59bb9 borderRadius=40px
+        [INSTANCE] "Swatch" #I5532:8406;5532:9250 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:8406;5532:9250;509:77732 layout=layout_1ac93ca6 fills=fill_34e31616 borderRadius=40px
+      [FRAME] "Light" #I5532:8406;509:77781 template=EL-e5578e38
+        [INSTANCE] "Swatch" #I5532:8406;5532:8553 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:8406;5532:8553;509:77507 template=EL-31f12ff5
+        [INSTANCE] "Swatch" #I5532:8406;5532:8832 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:8406;5532:8832;509:77507 layout=layout_1ac93ca6 fills=fill_2a5f7e61 borderRadius=40px
+        [INSTANCE] "Swatch" #I5532:8406;5532:8905 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:8406;5532:8905;509:77507 layout=layout_1ac93ca6 fills=fill_48ed6d09 borderRadius=40px
+        [INSTANCE] "Swatch" #I5532:8406;5532:8993 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:8406;5532:8993;509:77507 layout=layout_1ac93ca6 fills=fill_febf08b7 borderRadius=40px
+      [TEXT] #I5532:8406;5405:369 template=EL-c466ff65
+      [TEXT] #I5532:8406;5405:371 template=EL-f385a327
+      [TEXT] #I5532:8406;5405:370 template=EL-e541f4c2
+      [TEXT] #I5532:8406;5405:294 template=EL-5a2dc936
+      [TEXT] #I5532:8406;5532:7860 template=EL-159a998a
+      [TEXT] #I5532:8406;5405:295 template=EL-dac48545
+      [TEXT] #I5532:8406;5405:296 template=EL-b1d62a32
+      [TEXT] #I5532:8406;5405:297 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":0},"dimensions":{"width":42,"height":18}} fills=fill_34dc0314 componentPropertyReferences={"text":"Group"} textStyle=Footnote/Emphasized text="Labels"
+    [INSTANCE] "Swatch Grid" #5532:7801 template=EL-859b1bf8
+      [FRAME] "Dark - Base" #I5532:7801;509:77786 template=EL-fa4c20c7
+        [INSTANCE] "Swatch" #I5532:7801;5532:9490 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:7801;5532:9490;509:77732 template=EL-31f12ff5
+        [INSTANCE] "Swatch" #I5532:7801;5532:9491 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:7801;5532:9491;509:77732 template=EL-7f12a7b2
+        [INSTANCE] "Swatch" #I5532:7801;5532:9492 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:7801;5532:9492;509:77732 template=EL-5c831a91
+      [FRAME] "Dark - Elevated" #I5532:7801;509:77785 template=EL-fe263623
+        [INSTANCE] "Swatch" #I5532:7801;5532:9247 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:7801;5532:9247;509:77732 template=EL-7f12a7b2
+        [INSTANCE] "Swatch" #I5532:7801;5532:9248 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:7801;5532:9248;509:77732 template=EL-5c831a91
+        [INSTANCE] "Swatch" #I5532:7801;5532:9249 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:7801;5532:9249;509:77732 template=EL-be3b3606
+      [FRAME] "Light" #I5532:7801;509:77781 template=EL-e5578e38
+        [INSTANCE] "Swatch" #I5532:7801;5532:8553 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:7801;5532:8553;509:77507 template=EL-04a5103a
+        [INSTANCE] "Swatch" #I5532:7801;5532:8832 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:7801;5532:8832;509:77507 template=EL-e66aeda5
+        [INSTANCE] "Swatch" #I5532:7801;5532:8905 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:7801;5532:8905;509:77507 template=EL-04a5103a
+      [TEXT] #I5532:7801;5405:369 template=EL-a1cd6689
+      [TEXT] #I5532:7801;5405:371 template=EL-fb9c6c1c
+      [TEXT] #I5532:7801;5405:370 template=EL-e541f4c2
+      [TEXT] #I5532:7801;5532:7860 template=EL-159a998a
+      [TEXT] #I5532:7801;5405:295 template=EL-dac48545
+      [TEXT] #I5532:7801;5405:296 template=EL-b1d62a32
+      [TEXT] #I5532:7801;5405:297 template=EL-6a7e5982
+    [INSTANCE] "Swatches" #5532:8478 template=EL-83902685
+      [FRAME] "Dark - Base" #I5532:8478;509:77786 template=EL-fa4c20c7
+      [FRAME] "Dark - Elevated" #I5532:8478;509:77785 template=EL-fe263623
+        [INSTANCE] "Swatch" #I5532:8478;5532:9247 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:8478;5532:9247;509:77732 template=EL-6397ecab
+        [INSTANCE] "Swatch" #I5532:8478;5532:9248 template=EL-7258d2dc
+          [RECTANGLE] "Swatch" #I5532:8478;5532:9248;509:77732 template=EL-69293967
+      [FRAME] "Light" #I5532:8478;509:77781 template=EL-e5578e38
+        [INSTANCE] "Swatch" #I5532:8478;5532:8553 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:8478;5532:8553;509:77507 template=EL-e8a5343d
+        [INSTANCE] "Swatch" #I5532:8478;5532:8832 template=EL-5481e2c8
+          [RECTANGLE] "Swatch" #I5532:8478;5532:8832;509:77507 template=EL-c8f05334
+      [TEXT] #I5532:8478;5405:369 template=EL-c466ff65
+      [TEXT] #I5532:8478;5405:370 template=EL-e541f4c2
+      [TEXT] #I5532:8478;5405:295 template=EL-1a07e52c
+      [TEXT] #I5532:8478;5405:296 template=EL-18288f11
+      [TEXT] #I5532:8478;5405:297 template=EL-1dcb846d
+    [GROUP] "Colors" #0:2049 template=EL-e73d7392
+      [FRAME] "Grays" #509:77595 template=EL-45666e4a
+        [INSTANCE] "Swatch" #509:77588 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77588;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77588;5532:10570 template=EL-689af1bf
+          [FRAME] "Light" #I509:77588;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77588;509:77509 template=EL-3625b173
+          [TEXT] #I509:77588;5532:8268 template=EL-f2acf0b3
+        [INSTANCE] "Swatch" #509:77681 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77681;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77681;5532:10570 layout=layout_41e71aae fills=fill_01dbe54b borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77681;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77681;509:77509 layout=layout_8b308b8f fills=fill_01dbe54b borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77681;5532:8268 template=EL-89fb3247
+        [INSTANCE] "Swatch" #509:77688 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77688;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77688;5532:10570 layout=layout_41e71aae fills=["#636366"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77688;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77688;509:77509 template=EL-602398a7
+          [TEXT] #I509:77688;5532:8268 template=EL-6479d58e
+        [INSTANCE] "Swatch" #509:77695 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77695;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77695;5532:10570 layout=layout_41e71aae fills=["#48484A"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77695;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77695;509:77509 layout=layout_8b308b8f fills=["#C7C7CC"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77695;5532:8268 template=EL-46fc79c3
+        [INSTANCE] "Swatch" #509:77702 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77702;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77702;5532:10570 layout=layout_41e71aae fills=fill_75f9dc96 borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77702;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77702;509:77509 layout=layout_8b308b8f fills=["#D1D1D6"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77702;5532:8268 template=EL-38351ac5
+        [INSTANCE] "Swatch" #509:77709 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77709;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77709;5532:10570 layout=layout_41e71aae fills=fill_ff8525ea borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77709;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77709;509:77509 layout=layout_8b308b8f fills=["#E5E5EA"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77709;5532:8268 template=EL-1010fefc
+        [INSTANCE] "Swatch" #509:77716 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77716;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77716;5532:10570 layout=layout_41e71aae fills=fill_52acbf84 borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77716;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77716;509:77509 layout=layout_8b308b8f fills=fill_4e4e5c8d borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77716;5532:8268 template=EL-98fb6fc3
+        [INSTANCE] "Swatch" #509:77723 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77723;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77723;5532:10570 template=EL-964476af
+          [FRAME] "Light" #I509:77723;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77723;509:77509 template=EL-b7fa6dca
+          [TEXT] #I509:77723;5532:8268 template=EL-d879d8a6
+      [FRAME] "Colors" #509:77596 template=EL-8eee3384
+        [INSTANCE] "Swatch" #509:77597 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77597;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77597;5532:10570 template=EL-cce70f78
+          [FRAME] "Light" #I509:77597;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77597;509:77509 template=EL-7430d651
+          [TEXT] #I509:77597;5532:8268 template=EL-54445a3d
+        [INSTANCE] "Swatch" #509:77598 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77598;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77598;5532:10570 layout=layout_41e71aae fills=["#FF9230"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77598;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77598;509:77509 layout=layout_8b308b8f fills=["#FF8D28"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77598;5532:8268 template=EL-4bd40066
+        [INSTANCE] "Swatch" #509:77599 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77599;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77599;5532:10570 layout=layout_41e71aae fills=["#FFD600"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77599;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77599;509:77509 layout=layout_8b308b8f fills=["#FFCC00"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77599;5532:8268 template=EL-121bf9e3
+        [INSTANCE] "Swatch" #509:77600 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77600;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77600;5532:10570 layout=layout_41e71aae fills=["#30D158"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77600;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77600;509:77509 layout=layout_8b308b8f fills=["#34C759"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77600;5532:8268 template=EL-d6562716
+        [INSTANCE] "Swatch" #509:77601 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77601;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77601;5532:10570 layout=layout_41e71aae fills=["#00DAC3"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77601;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77601;509:77509 layout=layout_8b308b8f fills=["#00C8B3"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77601;5532:8268 template=EL-4f9f84cf
+        [INSTANCE] "Swatch" #509:77602 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77602;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77602;5532:10570 layout=layout_41e71aae fills=["#00D2E0"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77602;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77602;509:77509 layout=layout_8b308b8f fills=["#00C3D0"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77602;5532:8268 template=EL-1c653631
+        [INSTANCE] "Swatch" #509:77603 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77603;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77603;5532:10570 layout=layout_41e71aae fills=["#3CD3FE"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77603;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77603;509:77509 layout=layout_8b308b8f fills=["#00C0E8"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77603;5532:8268 template=EL-fbbadc94
+        [INSTANCE] "Swatch" #509:77604 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77604;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77604;5532:10570 layout=layout_41e71aae fills=["#0091FF"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77604;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77604;509:77509 layout=layout_8b308b8f fills=fill_1bf7d495 borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77604;5532:8268 template=EL-60ab2176
+        [INSTANCE] "Swatch" #509:77605 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77605;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77605;5532:10570 layout=layout_41e71aae fills=["#6D7CFF"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77605;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77605;509:77509 layout=layout_8b308b8f fills=fill_1ac5cce3 borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77605;5532:8268 template=EL-a20213ff
+        [INSTANCE] "Swatch" #509:77606 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77606;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77606;5532:10570 layout=layout_41e71aae fills=["#DB34F2"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77606;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77606;509:77509 layout=layout_8b308b8f fills=["#CB30E0"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77606;5532:8268 template=EL-e2d47e46
+        [INSTANCE] "Swatch" #509:77607 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77607;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77607;5532:10570 layout=layout_41e71aae fills=["#FF375F"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77607;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77607;509:77509 layout=layout_8b308b8f fills=["#FF2D55"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77607;5532:8268 template=EL-21009468
+        [INSTANCE] "Swatch" #509:77608 template=EL-6aac7e08
+          [FRAME] "Dark" #I509:77608;5532:10569 template=EL-42406932
+            [FRAME] "Swatch" #I509:77608;5532:10570 layout=layout_41e71aae fills=["#B78A66"] borderRadius="0px 0px 100px 100px"
+          [FRAME] "Light" #I509:77608;5532:10308 template=EL-7bed0ad3
+            [FRAME] "Swatch" #I509:77608;509:77509 layout=layout_8b308b8f fills=["#AC7F5E"] borderRadius="100px 100px 0px 0px"
+          [TEXT] #I509:77608;5532:8268 template=EL-ba47f77e
+  [INSTANCE] "_Component Header" #544:193103 layout={"mode":"column","alignItems":"stretch","gap":"32px","sizing":{"horizontal":"fixed","vertical":"hug"},"dimensions":{"width":1800}} componentId=507:29149 componentProperties={"Link 2":"Human Interface Guidelines","Show Link 2":false,"Show Link 1":true,"Description":"Judicious use of color can enhance communication, evoke your brand, provide visual continuity, communicate status and feedback, and help people understand information.","Component name":"Colors","Show Description":true,"Link 1":"Human Interface Guidelines 􀄫 Color"}
+    [TEXT] #I544:193103;507:29150 layout={"mode":"none","sizing":{"horizontal":"fill","vertical":"fixed"},"dimensions":{"height":60}} fills=fill_34dc0314 componentPropertyReferences={"text":"Component name"} textStyle={"fontFamily":"SF Pro","fontStyle":"Bold","fontWeight":700,"fontSize":56,"lineHeight":"60px","letterSpacing":"-0.005em","textAlignHorizontal":"LEFT","textAlignVertical":"CENTER"} text="Colors"
+    [TEXT] #I544:193103;507:29151 layout={"mode":"none","sizing":{"horizontal":"fill","vertical":"hug"}} fills=fill_34dc0314 componentPropertyReferences={"visible":"Show Description","text":"Description"} textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":28,"lineHeight":"34px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Judicious use of color can enhance communication, evoke your brand, provide visual continuity, communicate status and feedback, and help people understand information."
+    [FRAME] "Frame" #I544:193103;540:190144 layout={"mode":"column","alignSelf":"stretch","padding":"8px 0px","gap":"16px","sizing":{"horizontal":"fill","vertical":"hug"}}
+      [TEXT] #I544:193103;507:29154 layout={"mode":"none","sizing":{"horizontal":"fill","vertical":"fixed"},"dimensions":{"height":34}} fills=fill_1bf7d495 componentPropertyReferences={"visible":"Show Link 1","text":"Link 1"} textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":28,"lineHeight":"34px","textAlignHorizontal":"LEFT","textAlignVertical":"CENTER","hyperlink":{"type":"URL","url":"https://developer.apple.com/design/human-interface-guidelines/color"}} text="Human Interface Guidelines 􀄫 Color"

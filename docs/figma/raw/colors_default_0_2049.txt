@@ -1,0 +1,263 @@
+NAME: "iOS and iPadOS 26 (Community)"
+
+GLOBAL_VARS:
+layout_41e71aae:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 20
+    y: 0
+  dimensions:
+    width: 120
+    height: 60
+fill_34dc0314:
+  - '#000000'
+layout_8b308b8f:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 20
+    y: 20
+  dimensions:
+    width: 120
+    height: 60
+Footnote/Regular:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 13
+  lineHeight: 18px
+  letterSpacing: '-0.0062em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+fill_01dbe54b:
+  - '#8E8E93'
+Grays/Gray 2:
+  - '#AEAEB2'
+layout_51763d79:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: -30
+  dimensions:
+    width: 40
+    height: 18
+layout_b2235761:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: -30
+  dimensions:
+    width: 41
+    height: 18
+fill_658ab2fa:
+  - '#FFFFFF'
+layout_85237ef3:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: -30
+  dimensions:
+    width: 39
+    height: 18
+layout_cba86b99:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: -30
+  dimensions:
+    width: 27
+    height: 18
+
+ELEMENTS:
+EL-6aac7e08:
+  type: INSTANCE
+  layout:
+    mode: none
+    sizing:
+      horizontal: fixed
+      vertical: fixed
+    dimensions:
+      width: 160
+      height: 160
+  componentId: 0:4299
+EL-42406932:
+  type: FRAME
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 80
+    dimensions:
+      width: 160
+      height: 80
+  fills:
+    - rgba(0, 0, 0, 0.85)
+    - type: IMAGE
+      imageRef: 7f796ce21f42e90f63d310f5896b4023ecd8a433
+      scaleMode: TILE
+      scalingFactor: 1
+      backgroundRepeat: repeat
+      backgroundSize: calc(var(--original-width) * 1) calc(var(--original-height) * 1)
+      isBackground: true
+      imageDownloadArguments:
+        needsCropping: false
+        requiresImageDimensions: true
+EL-7bed0ad3:
+  type: FRAME
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 0
+    dimensions:
+      width: 160
+      height: 80
+  fills:
+    - type: IMAGE
+      imageRef: 7f796ce21f42e90f63d310f5896b4023ecd8a433
+      scaleMode: TILE
+      scalingFactor: 1
+      backgroundRepeat: repeat
+      backgroundSize: calc(var(--original-width) * 1) calc(var(--original-height) * 1)
+      isBackground: true
+      imageDownloadArguments:
+        needsCropping: false
+        requiresImageDimensions: true
+
+COMPONENTS:
+0:4299:
+  id: 0:4299
+  key: e1de5c4a921918b6f54ae7e4f58e047d3426632e
+  name: _Swatch - Light and Dark
+
+NODES:
+[GROUP] "Colors" #0:2049 layout={"mode":"none","sizing":{}} fills=[]
+  [FRAME] "Grays" #509:77595 layout={"mode":"row","gap":"40px","sizing":{"horizontal":"hug","vertical":"hug"},"locationRelativeToParent":{"x":0,"y":260}}
+    [INSTANCE] "Swatch" #509:77588 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77588;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77588;5532:10570 layout=layout_41e71aae fills=fill_34dc0314 borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77588;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77588;509:77509 layout=layout_8b308b8f fills=fill_34dc0314 borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77588;5532:8268 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":-30},"dimensions":{"width":34,"height":18}} fills=fill_34dc0314 textStyle=Footnote/Regular text="Black"
+    [INSTANCE] "Swatch" #509:77681 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77681;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77681;5532:10570 layout=layout_41e71aae fills=fill_01dbe54b borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77681;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77681;509:77509 layout=layout_8b308b8f fills=fill_01dbe54b borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77681;5532:8268 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":-30},"dimensions":{"width":29,"height":18}} fills=fill_34dc0314 textStyle=Footnote/Regular text="Gray"
+    [INSTANCE] "Swatch" #509:77688 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77688;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77688;5532:10570 layout=layout_41e71aae fills=["#636366"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77688;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77688;509:77509 layout=layout_8b308b8f fills="Grays/Gray 2" borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77688;5532:8268 layout=layout_51763d79 fills=fill_34dc0314 textStyle=Footnote/Regular text="Gray 2"
+    [INSTANCE] "Swatch" #509:77695 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77695;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77695;5532:10570 layout=layout_41e71aae fills=["#48484A"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77695;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77695;509:77509 layout=layout_8b308b8f fills=["#C7C7CC"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77695;5532:8268 layout=layout_b2235761 fills=fill_34dc0314 textStyle=Footnote/Regular text="Gray 3"
+    [INSTANCE] "Swatch" #509:77702 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77702;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77702;5532:10570 layout=layout_41e71aae fills=["#3A3A3C"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77702;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77702;509:77509 layout=layout_8b308b8f fills=["#D1D1D6"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77702;5532:8268 layout=layout_b2235761 fills=fill_34dc0314 textStyle=Footnote/Regular text="Gray 4"
+    [INSTANCE] "Swatch" #509:77709 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77709;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77709;5532:10570 layout=layout_41e71aae fills=["#2C2C2E"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77709;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77709;509:77509 layout=layout_8b308b8f fills=["#E5E5EA"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77709;5532:8268 layout=layout_51763d79 fills=fill_34dc0314 textStyle=Footnote/Regular text="Gray 5"
+    [INSTANCE] "Swatch" #509:77716 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77716;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77716;5532:10570 layout=layout_41e71aae fills=["#1C1C1E"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77716;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77716;509:77509 layout=layout_8b308b8f fills=["#F2F2F7"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77716;5532:8268 layout=layout_b2235761 fills=fill_34dc0314 textStyle=Footnote/Regular text="Gray 6"
+    [INSTANCE] "Swatch" #509:77723 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77723;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77723;5532:10570 layout=layout_41e71aae fills=fill_658ab2fa borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77723;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77723;509:77509 layout=layout_8b308b8f fills=fill_658ab2fa borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77723;5532:8268 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":-30},"dimensions":{"width":36,"height":18}} fills=fill_34dc0314 textStyle=Footnote/Regular text="White"
+  [FRAME] "Colors" #509:77596 layout={"mode":"row","gap":"40px","sizing":{"horizontal":"hug","vertical":"hug"},"locationRelativeToParent":{"x":0,"y":0}}
+    [INSTANCE] "Swatch" #509:77597 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77597;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77597;5532:10570 layout=layout_41e71aae fills=["#FF4245"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77597;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77597;509:77509 layout=layout_8b308b8f fills=["#FF383C"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77597;5532:8268 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":-30},"dimensions":{"width":24,"height":18}} fills=fill_34dc0314 textStyle=Footnote/Regular text="Red"
+    [INSTANCE] "Swatch" #509:77598 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77598;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77598;5532:10570 layout=layout_41e71aae fills=["#FF9230"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77598;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77598;509:77509 layout=layout_8b308b8f fills=["#FF8D28"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77598;5532:8268 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":-30},"dimensions":{"width":45,"height":18}} fills=fill_34dc0314 textStyle=Footnote/Regular text="Orange"
+    [INSTANCE] "Swatch" #509:77599 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77599;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77599;5532:10570 layout=layout_41e71aae fills=["#FFD600"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77599;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77599;509:77509 layout=layout_8b308b8f fills=["#FFCC00"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77599;5532:8268 layout=layout_85237ef3 fills=fill_34dc0314 textStyle=Footnote/Regular text="Yellow"
+    [INSTANCE] "Swatch" #509:77600 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77600;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77600;5532:10570 layout=layout_41e71aae fills=["#30D158"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77600;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77600;509:77509 layout=layout_8b308b8f fills=["#34C759"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77600;5532:8268 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":-30},"dimensions":{"width":37,"height":18}} fills=fill_34dc0314 textStyle=Footnote/Regular text="Green"
+    [INSTANCE] "Swatch" #509:77601 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77601;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77601;5532:10570 layout=layout_41e71aae fills=["#00DAC3"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77601;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77601;509:77509 layout=layout_8b308b8f fills=["#00C8B3"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77601;5532:8268 layout=layout_cba86b99 fills=fill_34dc0314 textStyle=Footnote/Regular text="Mint"
+    [INSTANCE] "Swatch" #509:77602 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77602;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77602;5532:10570 layout=layout_41e71aae fills=["#00D2E0"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77602;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77602;509:77509 layout=layout_8b308b8f fills=["#00C3D0"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77602;5532:8268 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":-30},"dimensions":{"width":25,"height":18}} fills=fill_34dc0314 textStyle=Footnote/Regular text="Teal"
+    [INSTANCE] "Swatch" #509:77603 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77603;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77603;5532:10570 layout=layout_41e71aae fills=["#3CD3FE"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77603;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77603;509:77509 layout=layout_8b308b8f fills=["#00C0E8"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77603;5532:8268 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":-30},"dimensions":{"width":31,"height":18}} fills=fill_34dc0314 textStyle=Footnote/Regular text="Cyan"
+    [INSTANCE] "Swatch" #509:77604 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77604;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77604;5532:10570 layout=layout_41e71aae fills=["#0091FF"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77604;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77604;509:77509 layout=layout_8b308b8f fills=["#0088FF"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77604;5532:8268 layout=layout_cba86b99 fills=fill_34dc0314 textStyle=Footnote/Regular text="Blue"
+    [INSTANCE] "Swatch" #509:77605 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77605;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77605;5532:10570 layout=layout_41e71aae fills=["#6D7CFF"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77605;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77605;509:77509 layout=layout_8b308b8f fills=["#6155F5"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77605;5532:8268 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":-30},"dimensions":{"width":38,"height":18}} fills=fill_34dc0314 textStyle=Footnote/Regular text="Indigo"
+    [INSTANCE] "Swatch" #509:77606 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77606;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77606;5532:10570 layout=layout_41e71aae fills=["#DB34F2"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77606;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77606;509:77509 layout=layout_8b308b8f fills=["#CB30E0"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77606;5532:8268 layout=layout_51763d79 fills=fill_34dc0314 textStyle=Footnote/Regular text="Purple"
+    [INSTANCE] "Swatch" #509:77607 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77607;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77607;5532:10570 layout=layout_41e71aae fills=["#FF375F"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77607;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77607;509:77509 layout=layout_8b308b8f fills=["#FF2D55"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77607;5532:8268 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":-30},"dimensions":{"width":26,"height":18}} fills=fill_34dc0314 textStyle=Footnote/Regular text="Pink"
+    [INSTANCE] "Swatch" #509:77608 template=EL-6aac7e08
+      [FRAME] "Dark" #I509:77608;5532:10569 template=EL-42406932
+        [FRAME] "Swatch" #I509:77608;5532:10570 layout=layout_41e71aae fills=["#B78A66"] borderRadius="0px 0px 100px 100px"
+      [FRAME] "Light" #I509:77608;5532:10308 template=EL-7bed0ad3
+        [FRAME] "Swatch" #I509:77608;509:77509 layout=layout_8b308b8f fills=["#AC7F5E"] borderRadius="100px 100px 0px 0px"
+      [TEXT] #I509:77608;5532:8268 layout=layout_85237ef3 fills=fill_34dc0314 textStyle=Footnote/Regular text="Brown"

@@ -1,0 +1,325 @@
+{
+  "node_id": "0:1746",
+  "name": "Colors",
+  "description": "iOS and iPadOS 26 complete color palette: System colors, Grays, Labels, Fills, Separators, Backgrounds, and Grouped Backgrounds for Light, Dark, and Increased Contrast",
+  "system_colors": {
+    "Red": {
+      "default": {
+        "light": "#FF383C",
+        "dark": "#FF4245"
+      },
+      "increased_contrast": {
+        "light": "#E9152D",
+        "dark": "#FF6165"
+      }
+    },
+    "Orange": {
+      "default": {
+        "light": "#FF8D28",
+        "dark": "#FF9230"
+      },
+      "increased_contrast": {
+        "light": "#C55300",
+        "dark": "#FFA056"
+      }
+    },
+    "Yellow": {
+      "default": {
+        "light": "#FFCC00",
+        "dark": "#FFD600"
+      },
+      "increased_contrast": {
+        "light": "#A16A00",
+        "dark": "#FEDF43"
+      }
+    },
+    "Green": {
+      "default": {
+        "light": "#34C759",
+        "dark": "#30D158"
+      },
+      "increased_contrast": {
+        "light": "#008932",
+        "dark": "#4AE968"
+      }
+    },
+    "Mint": {
+      "default": {
+        "light": "#00C8B3",
+        "dark": "#00DAC3"
+      },
+      "increased_contrast": {
+        "light": "#008575",
+        "dark": "#54DFCB"
+      }
+    },
+    "Teal": {
+      "default": {
+        "light": "#00C3D0",
+        "dark": "#00D2E0"
+      },
+      "increased_contrast": {
+        "light": "#008198",
+        "dark": "#3BDDEC"
+      }
+    },
+    "Cyan": {
+      "default": {
+        "light": "#00C0E8",
+        "dark": "#3CD3FE"
+      },
+      "increased_contrast": {
+        "light": "#007EAE",
+        "dark": "#6DD9FF"
+      }
+    },
+    "Blue": {
+      "default": {
+        "light": "#0088FF",
+        "dark": "#0091FF"
+      },
+      "increased_contrast": {
+        "light": "#1E6EF4",
+        "dark": "#5CB8FF"
+      }
+    },
+    "Indigo": {
+      "default": {
+        "light": "#6155F5",
+        "dark": "#6D7CFF"
+      },
+      "increased_contrast": {
+        "light": "#564ADE",
+        "dark": "#A7AAFF"
+      }
+    },
+    "Purple": {
+      "default": {
+        "light": "#CB30E0",
+        "dark": "#DB34F2"
+      },
+      "increased_contrast": {
+        "light": "#B02FC2",
+        "dark": "#EA8DFF"
+      }
+    },
+    "Pink": {
+      "default": {
+        "light": "#FF2D55",
+        "dark": "#FF375F"
+      },
+      "increased_contrast": {
+        "light": "#E7124D",
+        "dark": "#FF8AC4"
+      }
+    },
+    "Brown": {
+      "default": {
+        "light": "#AC7F5E",
+        "dark": "#B78A66"
+      },
+      "increased_contrast": {
+        "light": "#956D51",
+        "dark": "#DBA679"
+      }
+    }
+  },
+  "grays": {
+    "Black": {
+      "default": {
+        "light": "#000000",
+        "dark": "#000000"
+      },
+      "increased_contrast": {
+        "light": "#000000",
+        "dark": "#000000"
+      }
+    },
+    "Gray": {
+      "default": {
+        "light": "#8E8E93",
+        "dark": "#8E8E93"
+      },
+      "increased_contrast": {
+        "light": "#8E8E93",
+        "dark": "#8E8E93"
+      }
+    },
+    "Gray 2": {
+      "default": {
+        "light": "#AEAEB2",
+        "dark": "#636366"
+      },
+      "increased_contrast": {
+        "light": "#6C6C70",
+        "dark": "#AEAEB2"
+      }
+    },
+    "Gray 3": {
+      "default": {
+        "light": "#C7C7CC",
+        "dark": "#48484A"
+      },
+      "increased_contrast": {
+        "light": "#AEAEB2",
+        "dark": "#545456"
+      }
+    },
+    "Gray 4": {
+      "default": {
+        "light": "#D1D1D6",
+        "dark": "#3A3A3C"
+      },
+      "increased_contrast": {
+        "light": "#C7C7CB",
+        "dark": "#444446"
+      }
+    },
+    "Gray 5": {
+      "default": {
+        "light": "#E5E5EA",
+        "dark": "#2C2C2E"
+      },
+      "increased_contrast": {
+        "light": "#D1D1D5",
+        "dark": "#363638"
+      }
+    },
+    "Gray 6": {
+      "default": {
+        "light": "#F2F2F7",
+        "dark": "#1C1C1E"
+      },
+      "increased_contrast": {
+        "light": "#E5E5E9",
+        "dark": "#242426"
+      }
+    },
+    "White": {
+      "default": {
+        "light": "#FFFFFF",
+        "dark": "#FFFFFF"
+      },
+      "increased_contrast": {
+        "light": "#F2F2F6",
+        "dark": "#FFFFFF"
+      }
+    }
+  },
+  "labels": {
+    "default": {
+      "light": {
+        "primary": "#000000",
+        "secondary": "rgba(60, 60, 67, 0.6)",
+        "tertiary": "rgba(60, 60, 67, 0.3)",
+        "quaternary": "rgba(60, 60, 67, 0.18)"
+      },
+      "dark": {
+        "primary": "#FFFFFF",
+        "secondary": "rgba(235, 235, 245, 0.6)",
+        "tertiary": "rgba(235, 235, 245, 0.3)",
+        "quaternary": "rgba(235, 235, 245, 0.16)"
+      }
+    },
+    "increased_contrast": {
+      "light": {
+        "primary": "#000000",
+        "secondary": "rgba(60, 60, 67, 0.8)",
+        "tertiary": "rgba(60, 60, 67, 0.7)",
+        "quaternary": "rgba(60, 60, 67, 0.55)"
+      },
+      "dark": {
+        "primary": "#FFFFFF",
+        "secondary": "rgba(235, 235, 245, 0.8)",
+        "tertiary": "rgba(235, 235, 245, 0.55)",
+        "quaternary": "rgba(235, 235, 245, 0.4)"
+      }
+    }
+  },
+  "fills": {
+    "default": {
+      "light": {
+        "primary": "rgba(120, 120, 128, 0.2)",
+        "secondary": "rgba(120, 120, 128, 0.16)",
+        "tertiary": "rgba(118, 118, 128, 0.12)",
+        "quaternary": "rgba(116, 116, 128, 0.08)"
+      },
+      "dark": {
+        "primary": "rgba(120, 120, 128, 0.36)",
+        "secondary": "rgba(120, 120, 128, 0.32)",
+        "tertiary": "rgba(118, 118, 128, 0.24)",
+        "quaternary": "rgba(118, 118, 128, 0.18)"
+      }
+    },
+    "increased_contrast": {
+      "light": {
+        "primary": "rgba(60, 60, 67, 0.8)",
+        "secondary": "rgba(60, 60, 67, 0.7)",
+        "tertiary": "rgba(60, 60, 67, 0.55)",
+        "quaternary": "rgba(60, 60, 67, 0.3)"
+      },
+      "dark": {
+        "primary": "rgba(235, 235, 245, 0.8)",
+        "secondary": "rgba(235, 235, 245, 0.55)",
+        "tertiary": "rgba(235, 235, 245, 0.4)",
+        "quaternary": "rgba(235, 235, 245, 0.3)"
+      }
+    }
+  },
+  "separators": {
+    "default": {
+      "light": {
+        "opaque": "#C6C6C8",
+        "non_opaque": "rgba(0, 0, 0, 0.12)"
+      },
+      "dark": {
+        "opaque": "#38383A",
+        "non_opaque": "rgba(255, 255, 255, 0.17)"
+      }
+    },
+    "increased_contrast": {
+      "light": {
+        "opaque": "#C6C6C8",
+        "non_opaque": "rgba(0, 0, 0, 0.25)"
+      },
+      "dark": {
+        "opaque": "#38383A",
+        "non_opaque": "rgba(255, 255, 255, 0.35)"
+      }
+    }
+  },
+  "backgrounds": {
+    "light": {
+      "primary": "#FFFFFF",
+      "secondary": "#F2F2F7",
+      "tertiary": "#FFFFFF"
+    },
+    "dark_base": {
+      "primary": "#000000",
+      "secondary": "#1C1C1E",
+      "tertiary": "#2C2C2E"
+    },
+    "dark_elevated": {
+      "primary": "#1C1C1E",
+      "secondary": "#2C2C2E",
+      "tertiary": "#3A3A3C"
+    }
+  },
+  "grouped_backgrounds": {
+    "light": {
+      "primary": "#F2F2F7",
+      "secondary": "#FFFFFF",
+      "tertiary": "#F2F2F7"
+    },
+    "dark_base": {
+      "primary": "#000000",
+      "secondary": "#1C1C1E",
+      "tertiary": "#2C2C2E"
+    },
+    "dark_elevated": {
+      "primary": "#1C1C1E",
+      "secondary": "#2C2C2E",
+      "tertiary": "#3A3A3C"
+    }
+  }
+}

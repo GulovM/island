@@ -1,0 +1,490 @@
+{
+  "node_id": "215:105157",
+  "name": "Materials",
+  "description": "iOS and iPadOS 26 Liquid Glass & System Materials exact specifications",
+  "materials_mode_options": {
+    "component_set_id": "510:78330",
+    "name": "_Materials/Mode Options",
+    "styles": [
+      {
+        "style": "Ultrathin",
+        "light": {
+          "id": "510:78329",
+          "fills": [
+            "rgba(255, 255, 255, 0.03)",
+            "rgba(255, 255, 255, 0.07)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "dark": {
+          "id": "510:78347",
+          "fills": [
+            "rgba(0, 0, 0, 0.02)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "increased_contrast_light": {
+          "id": "3095:22074",
+          "fills": [
+            "rgba(255, 255, 255, 0.03)",
+            "rgba(255, 255, 255, 0.07)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "increased_contrast_dark": {
+          "id": "3095:22069",
+          "fills": [
+            "rgba(0, 0, 0, 0.02)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        }
+      },
+      {
+        "style": "Thin",
+        "light": {
+          "id": "510:78331",
+          "fills": [
+            "rgba(255, 255, 255, 0.4)",
+            "rgba(255, 255, 255, 0.05)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "dark": {
+          "id": "510:78345",
+          "fills": [
+            "rgba(0, 0, 0, 0.26)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "increased_contrast_light": {
+          "id": "3095:22073",
+          "fills": [
+            "rgba(255, 255, 255, 0.4)",
+            "rgba(255, 255, 255, 0.05)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "increased_contrast_dark": {
+          "id": "3095:22068",
+          "fills": [
+            "rgba(0, 0, 0, 0.26)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        }
+      },
+      {
+        "style": "Regular",
+        "light": {
+          "id": "510:78333",
+          "fills": [
+            "rgba(255, 255, 255, 0.6)",
+            "rgba(255, 255, 255, 0.25)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "dark": {
+          "id": "510:78343",
+          "fills": [
+            "rgba(0, 0, 0, 0.41)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "increased_contrast_light": {
+          "id": "3095:22072",
+          "fills": [
+            "rgba(255, 255, 255, 0.6)",
+            "rgba(255, 255, 255, 0.25)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "increased_contrast_dark": {
+          "id": "3095:22067",
+          "fills": [
+            "rgba(0, 0, 0, 0.41)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        }
+      },
+      {
+        "style": "Thick",
+        "light": {
+          "id": "510:78335",
+          "fills": [
+            "rgba(255, 255, 255, 0.84)",
+            "rgba(255, 255, 255, 0.34)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "dark": {
+          "id": "510:78341",
+          "fills": [
+            "rgba(0, 0, 0, 0.6)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "increased_contrast_light": {
+          "id": "3095:22071",
+          "fills": [
+            "rgba(255, 255, 255, 0.84)",
+            "rgba(255, 255, 255, 0.34)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "increased_contrast_dark": {
+          "id": "3095:22066",
+          "fills": [
+            "rgba(0, 0, 0, 0.6)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        }
+      },
+      {
+        "style": "Chrome",
+        "light": {
+          "id": "510:78337",
+          "fills": [
+            "rgba(255, 255, 255, 0.75)"
+          ],
+          "backdrop_blur": "blur(25px)",
+          "dimensions": {
+            "width": 100,
+            "height": "hug"
+          }
+        },
+        "dark": {
+          "id": "510:78339",
+          "fills": [
+            "#7C7C7C",
+            "rgba(28, 28, 28, 0.9)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        },
+        "increased_contrast_light": {
+          "id": "3095:22070",
+          "fills": [
+            "rgba(255, 255, 255, 0.75)"
+          ],
+          "backdrop_blur": "blur(25px)",
+          "dimensions": {
+            "width": 100,
+            "height": "hug"
+          }
+        },
+        "increased_contrast_dark": {
+          "id": "3095:22065",
+          "fills": [
+            "#7C7C7C",
+            "rgba(28, 28, 28, 0.9)"
+          ],
+          "backdrop_blur": "blur(50px)",
+          "dimensions": {
+            "width": 100,
+            "height": 100
+          }
+        }
+      }
+    ]
+  },
+  "liquid_glass": {
+    "large": {
+      "component_set_id": "5584:32504",
+      "name": "Liquid Glass - Regular - Large",
+      "dimensions": {
+        "width": 160,
+        "height": 160
+      },
+      "border_radius": "34px",
+      "dark": {
+        "component_id": "5584:31860",
+        "fill_shadow": {
+          "node_id": "5607:25707",
+          "fills": [
+            "rgba(255, 255, 255, 0.06)",
+            "rgba(0, 0, 0, 0.8)",
+            "#CCCCCC"
+          ],
+          "box_shadow": "0px 8px 40px 0px rgba(0, 0, 0, 0.12)",
+          "opacity": 0.6700000166893005,
+          "border_radius": "34px"
+        },
+        "glass_effect": {
+          "node_id": "5607:25699",
+          "border_radius": "34px"
+        }
+      },
+      "light": {
+        "component_id": "5584:31859",
+        "fill_shadow": {
+          "node_id": "5607:25683",
+          "fills": [
+            "rgba(250, 250, 250, 0.7)",
+            "#262626"
+          ],
+          "box_shadow": "0px 8px 40px 0px rgba(0, 0, 0, 0.12)",
+          "border_radius": "34px"
+        },
+        "glass_effect": {
+          "node_id": "5607:25691",
+          "border_radius": "34px"
+        }
+      }
+    },
+    "medium": {
+      "component_set_id": "5584:32503",
+      "name": "Liquid Glass - Regular - Medium",
+      "dimensions": {
+        "width": 160,
+        "height": 160
+      },
+      "border_radius": "34px",
+      "dark": {
+        "component_id": "5584:31858",
+        "fill_shadow": {
+          "node_id": "5607:25810",
+          "fills": [
+            "rgba(255, 255, 255, 0.06)",
+            "rgba(0, 0, 0, 0.6)",
+            "#CCCCCC"
+          ],
+          "box_shadow": "0px 8px 40px 0px rgba(0, 0, 0, 0.12)",
+          "opacity": 0.6700000166893005,
+          "border_radius": "34px"
+        },
+        "glass_effect": {
+          "node_id": "5607:25716",
+          "border_radius": "34px"
+        }
+      },
+      "light": {
+        "component_id": "5584:31857",
+        "fill_shadow": {
+          "node_id": "5607:25956",
+          "fills": [
+            "rgba(245, 245, 245, 0.6)",
+            "#262626"
+          ],
+          "box_shadow": "0px 8px 40px 0px rgba(0, 0, 0, 0.12)",
+          "border_radius": "34px"
+        },
+        "glass_effect": {
+          "node_id": "5607:25843",
+          "border_radius": "34px"
+        }
+      }
+    },
+    "small": {
+      "component_set_id": "5584:32505",
+      "name": "Liquid Glass - Regular - Small",
+      "dimensions": {
+        "width": 48,
+        "height": 48
+      },
+      "dark_default": {
+        "component_id": "5426:6767",
+        "fill_shadow": {
+          "node_id": "5607:79976",
+          "fills": [
+            "rgba(255, 255, 255, 0.06)",
+            "rgba(0, 0, 0, 0.6)",
+            "rgba(204, 204, 204, 0.5)"
+          ],
+          "box_shadow": "0px 8px 40px 0px rgba(0, 0, 0, 0.12)",
+          "opacity": 0.6700000166893005,
+          "border_radius": "1000px"
+        },
+        "glass_effect": {
+          "node_id": "5607:78589",
+          "fills": [
+            "rgba(0, 0, 0, 0.2)"
+          ],
+          "border_radius": "296px"
+        }
+      },
+      "dark_primary": {
+        "component_id": "5431:1764",
+        "tint_shadow": {
+          "node_id": "5609:49572",
+          "fills": [
+            "#0091FF",
+            "#999999",
+            "#FFFFFF",
+            "rgba(255, 255, 255, 0.75)"
+          ],
+          "box_shadow": "0px 8px 40px 0px rgba(0, 0, 0, 0.12)",
+          "border_radius": "1000px"
+        },
+        "glass_effect": {
+          "node_id": "5609:49417",
+          "border_radius": "296px"
+        }
+      },
+      "light_default": {
+        "component_id": "5564:42811",
+        "fill_shadow": {
+          "node_id": "6491:20172",
+          "fills": [
+            "#F7F7F7",
+            "#DDDDDD",
+            "rgba(255, 255, 255, 0.65)"
+          ],
+          "box_shadow": "0px 8px 40px 0px rgba(0, 0, 0, 0.12)",
+          "border_radius": "296px"
+        },
+        "glass_effect": {
+          "node_id": "6491:20173",
+          "border_radius": "296px"
+        }
+      },
+      "light_primary": {
+        "component_id": "5564:42807",
+        "tint_shadow": {
+          "node_id": "5607:78140",
+          "fills": [
+            "#0091FF",
+            "#999999",
+            "#FFFFFF",
+            "rgba(255, 255, 255, 0.75)"
+          ],
+          "box_shadow": "0px 8px 40px 0px rgba(0, 0, 0, 0.12)",
+          "border_radius": "1000px"
+        },
+        "glass_effect": {
+          "node_id": "5607:77747",
+          "border_radius": "296px"
+        }
+      }
+    },
+    "clear_light": {
+      "component_id": "5914:23547",
+      "name": "Liquid Glass - Clear/Light",
+      "dimensions": {
+        "width": 160,
+        "height": 160
+      },
+      "glass_effect": {
+        "node_id": "5914:23552",
+        "fills": [
+          "rgba(255, 255, 255, 0.07)"
+        ],
+        "box_shadow": "0px 8px 40px 0px rgba(0, 0, 0, 0.2)",
+        "border_radius": "24px"
+      }
+    }
+  },
+  "scroll_edge_effect": {
+    "soft": {
+      "component_set_id": "5661:26943",
+      "backdrop_blur": "blur(5px)",
+      "dimensions": {
+        "width": 200,
+        "height": 200
+      },
+      "edges": {
+        "leading": {
+          "node_id": "5661:26942",
+          "gradient_mask": "linear-gradient(90deg, rgba(255, 0, 0, 0.9) 0%, rgba(255, 0, 0, 0) 100%)"
+        },
+        "trailing": {
+          "node_id": "5661:26944",
+          "gradient_mask": "linear-gradient(270deg, rgba(255, 0, 0, 0.9) 0%, rgba(255, 0, 0, 0) 100%)"
+        },
+        "bottom": {
+          "node_id": "5661:26968",
+          "gradient_mask": "linear-gradient(0deg, rgba(255, 0, 0, 0.9) 0%, rgba(255, 0, 0, 0) 100%)"
+        },
+        "top": {
+          "node_id": "5661:26964",
+          "gradient_mask": "linear-gradient(180deg, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0) 100%)"
+        }
+      }
+    },
+    "hard": {
+      "component_set_id": "5661:26978",
+      "backdrop_blur": "blur(30px)",
+      "dimensions": {
+        "width": 200,
+        "height": 200
+      },
+      "fill": "#FFFFFF",
+      "stroke": "rgba(0, 0, 0, 0.12)",
+      "edges": {
+        "bottom": {
+          "node_id": "5661:26984",
+          "stroke_weight": "1px 0px 0px 0px"
+        },
+        "top": {
+          "node_id": "5661:26986",
+          "stroke_weight": "0px 0px 1px 0px"
+        }
+      }
+    }
+  }
+}

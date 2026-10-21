@@ -1,0 +1,762 @@
+{
+  "node_id": "0:3329",
+  "name": "Examples",
+  "sections": {
+    "iPhone": {
+      "id": "5742:36225",
+      "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+      "items": [
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Notifications",
+          "id": "770:21905",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Expanded=True",
+              "id": "754:64316",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Expanded=False",
+              "id": "754:64315",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Lock Screen",
+          "id": "754:64083",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Home Screen Widgets",
+          "id": "775:13152",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Size=Large",
+              "id": "754:63000",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Size=Medium",
+              "id": "754:62987",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Size=Small",
+              "id": "754:62974",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Home Screen Quick Actions",
+          "id": "754:62883",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Home Screen",
+          "id": "754:62878",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Control Center",
+          "id": "2570:20912",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Toolbars - Top",
+          "id": "5661:41970",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=Title 2 Line Left",
+              "id": "5661:42566",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Type=Title 2 Line",
+              "id": "5661:42453",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Type=Large Title",
+              "id": "5661:41971",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Type=Compact Large Title",
+              "id": "5661:41980",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Type=Default",
+              "id": "5661:41989",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Toolbars - Bottom",
+          "id": "2517:14528",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=Search",
+              "id": "5432:25429",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Type=Symbols",
+              "id": "2517:14527",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Type=Text",
+              "id": "2517:14526",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Steppers",
+          "id": "5661:34264",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Text Fields",
+          "id": "5661:33949",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Tab Bar",
+          "id": "5660:57680",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Split Search=False",
+              "id": "5660:57681",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Split Search=True",
+              "id": "2517:14488",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Steppers",
+          "id": "5661:43368",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Slider",
+          "id": "5661:43611",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Sheets (Modals)",
+          "id": "770:21908",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=Inspector",
+              "id": "754:64555",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Type=Fullscreen Stack",
+              "id": "754:64543",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Type=Fullscreen",
+              "id": "754:64541",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Picker",
+          "id": "5661:46038",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=Inline",
+              "id": "5661:44434",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Type=Compact",
+              "id": "5661:46039",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Menus",
+          "id": "770:21901",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=Menu",
+              "id": "754:64091",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Type=Edit Medium",
+              "id": "5711:35806",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/List",
+          "id": "781:15374",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=Full Width + Section Headers",
+              "id": "754:63509",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Type=Full Width",
+              "id": "754:63455",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Type=Inset",
+              "id": "754:63381",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Keyboard",
+          "id": "770:21899",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=Find and Replace",
+              "id": "754:63116",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Type=Find",
+              "id": "5532:28030",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Type=Emoji",
+              "id": "754:63103",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Type=Numeric",
+              "id": "754:63090",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Type=Text",
+              "id": "754:63077",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Face ID",
+          "id": "770:21898",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "State=Success",
+              "id": "754:62809",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "State=Authenticating",
+              "id": "754:62794",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Empty States",
+          "id": "5581:40610",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Config=Large Symbol",
+              "id": "5581:40767",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Config=Symbol in Circle",
+              "id": "5581:40611",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Config=Title and Subtitle",
+              "id": "5581:39343",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Context Menu",
+          "id": "754:62668",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Color Picker",
+          "id": "3147:15989",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Action Sheet",
+          "id": "754:62559",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Alert",
+          "id": "770:21495",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=Stacked",
+              "id": "754:57652",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            },
+            {
+              "name": "Type=Side-by-side",
+              "id": "754:43567",
+              "dimensions": {
+                "width": 402,
+                "height": 874
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Activity View",
+          "id": "754:26934",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        }
+      ]
+    },
+    "iPad": {
+      "id": "5742:36226",
+      "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+      "items": [
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Window",
+          "id": "5589:4058",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Notifications",
+          "id": "770:21906",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Expanded=True",
+              "id": "754:64334",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            },
+            {
+              "name": "Expanded=False",
+              "id": "754:64333",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Lock Screen",
+          "id": "754:64084",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Home Screen Widgets",
+          "id": "775:13153",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Size=Extra Large",
+              "id": "754:63061",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Size=Large",
+              "id": "754:63045",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Size=Medium",
+              "id": "754:63029",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            },
+            {
+              "name": "Size=Small",
+              "id": "754:63013",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Home Screen Quick Actions",
+          "id": "754:62926",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Home Screen",
+          "id": "754:62918",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Control Center",
+          "id": "2607:22514",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Toolbars - Top",
+          "id": "5732:63624",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=2 Line - Large Title",
+              "id": "5735:66009",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Type=2 Line - Large Title Inline",
+              "id": "5735:65908",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            },
+            {
+              "name": "Type=2 Line - Center Aligned",
+              "id": "5732:63625",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            },
+            {
+              "name": "Type=2 Line - Left Aligned",
+              "id": "5732:63592",
+              "dimensions": "{\"mode\":\"none\",\"sizing\":{}"
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Tab Bars",
+          "id": "5735:66270",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=With Search",
+              "id": "5735:66271",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            },
+            {
+              "name": "Type=Without Search",
+              "id": "2517:14496",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Sidebar",
+          "id": "5726:29555",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=List",
+              "id": "754:64697",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            },
+            {
+              "name": "Type=List (Multi-level)",
+              "id": "5726:29556",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Sheets (Modals)",
+          "id": "754:64609",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Popover",
+          "id": "754:64525",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Menus",
+          "id": "5719:26500",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=Menu and Submenu",
+              "id": "5719:26501",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            },
+            {
+              "name": "Type=Edit Menu",
+              "id": "754:64157",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/List",
+          "id": "754:63935",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Keyboard",
+          "id": "770:21900",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Type=Text (Upper Case)",
+              "id": "754:63281",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            },
+            {
+              "name": "Type=Text (Lower Case)",
+              "id": "754:63259",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Context Menu",
+          "id": "754:62748",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Color Picker",
+          "id": "754:62648",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Action Sheet",
+          "id": "754:62590",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        },
+        {
+          "type": "COMPONENT_SET",
+          "name": "Examples/Alert",
+          "id": "770:21750",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": [
+            {
+              "name": "Keyboard=True",
+              "id": "754:62521",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            },
+            {
+              "name": "Keyboard=False",
+              "id": "754:62509",
+              "dimensions": {
+                "width": 1210,
+                "height": 834
+              }
+            }
+          ]
+        },
+        {
+          "type": "COMPONENT",
+          "name": "Examples/Activity View",
+          "id": "754:26926",
+          "dimensions": "{\"mode\":\"none\",\"sizing\":{}",
+          "variants": []
+        }
+      ]
+    }
+  }
+}

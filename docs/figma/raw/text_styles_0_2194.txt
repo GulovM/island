@@ -1,0 +1,1406 @@
+NAME: "iOS and iPadOS 26 (Community)"
+
+GLOBAL_VARS:
+fill_44168f3d:
+  - '#F5F5F5'
+fill_62008434:
+  - rgba(0, 0, 0, 0.4)
+Caption1/Regular:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 12
+  lineHeight: 16px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+Labels/Primary:
+  - '#000000'
+style_6499248d:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 17
+  lineHeight: 22px
+  letterSpacing: '-0.0253em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+fill_34dc0314:
+  - '#000000'
+style_6920745e:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 18
+  lineHeight: 23px
+  letterSpacing: '-0.0244em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_83666c37:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 19
+  lineHeight: 24px
+  letterSpacing: '-0.0237em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_9d731089:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 21
+  lineHeight: 28px
+  letterSpacing: '-0.0171em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_b4e754a3:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 26
+  lineHeight: 32px
+  letterSpacing: 0.0085em
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_881d320b:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 15
+  lineHeight: 20px
+  letterSpacing: '-0.0153em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_266ba10b:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 16
+  lineHeight: 21px
+  letterSpacing: '-0.0194em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_a471d33d:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 20
+  lineHeight: 24px
+  letterSpacing: '-0.0225em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_93033bb6:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 24
+  lineHeight: 30px
+  letterSpacing: 0.0029em
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_0df18ad3:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 32
+  lineHeight: 39px
+  letterSpacing: 0.0128em
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_ff9fc8c4:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 13
+  lineHeight: 18px
+  letterSpacing: '-0.0062em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_7b886be8:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 14
+  lineHeight: 19px
+  letterSpacing: '-0.0107em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_c6253ea0:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 22
+  lineHeight: 28px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+Caption2/Regular:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 11
+  lineHeight: 13px
+  letterSpacing: 0.0055em
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+Footnote/Regular:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 13
+  lineHeight: 18px
+  letterSpacing: '-0.0062em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+Subheadline/Regular:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 15
+  lineHeight: 20px
+  letterSpacing: '-0.0153em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+Callout/Regular:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 16
+  lineHeight: 21px
+  letterSpacing: '-0.0194em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+Headline/Regular:
+  fontFamily: SF Pro
+  fontStyle: Semibold
+  fontWeight: 590
+  fontSize: 17
+  lineHeight: 22px
+  letterSpacing: '-0.0253em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+Title3/Regular:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 20
+  lineHeight: 25px
+  letterSpacing: '-0.0225em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+Title2/Regular:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 22
+  lineHeight: 28px
+  letterSpacing: '-0.0118em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+Title1/Regular:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 28
+  lineHeight: 34px
+  letterSpacing: 0.0136em
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+Large Title/Regular:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 34
+  lineHeight: 41px
+  letterSpacing: 0.0118em
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_23f3b263:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 11
+  lineHeight: 13px
+  letterSpacing: 0.0055em
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_7ba12a8f:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 12
+  lineHeight: 16px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_91c9d597:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 40
+  lineHeight: 48px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_f970f598:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 43
+  lineHeight: 51px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_8ae07660:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 44
+  lineHeight: 52px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_f85057b9:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 53
+  lineHeight: 62px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_fea79ad8:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 56
+  lineHeight: 66px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_b0e10376:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 34
+  lineHeight: 41px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_c7c550ec:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 37
+  lineHeight: 44px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_6c8f954b:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 38
+  lineHeight: 46px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_a4fee3aa:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 32
+  lineHeight: 39px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_0db7b070:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 33
+  lineHeight: 40px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_aa41814c:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 48
+  lineHeight: 57px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_b3264a15:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 26
+  lineHeight: 32px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+style_40853cb8:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 28
+  lineHeight: 34px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_e1259cba:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 1426
+  dimensions:
+    width: 50
+    height: 13
+Caption2/Emphasized Italic:
+  fontFamily: SF Pro
+  fontStyle: Semibold Italic
+  fontWeight: 590
+  fontSize: 11
+  lineHeight: 13px
+  letterSpacing: 0.0055em
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+fill_febf08b7:
+  - rgba(60, 60, 67, 0.18)
+layout_f7101ebe:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 1402
+  dimensions:
+    width: 48
+    height: 13
+Caption2/Italic:
+  fontFamily: SF Pro
+  fontStyle: Regular Italic
+  fontWeight: 400
+  fontSize: 11
+  lineHeight: 13px
+  letterSpacing: 0.0055em
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+layout_cd4f2d0f:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 1380
+  dimensions:
+    width: 50
+    height: 13
+Caption2/Emphasized:
+  fontFamily: SF Pro
+  fontStyle: Semibold
+  fontWeight: 590
+  fontSize: 11
+  lineHeight: 13px
+  letterSpacing: 0.0055em
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_d784fb37:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 1357
+  dimensions:
+    width: 48
+    height: 13
+layout_2809d1fb:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 1291
+  dimensions:
+    width: 52
+    height: 16
+Caption1/Emphasized Italic:
+  fontFamily: SF Pro
+  fontStyle: Semibold Italic
+  fontWeight: 590
+  fontSize: 12
+  lineHeight: 16px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+layout_ab2a28ab:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 1264
+  dimensions:
+    width: 50
+    height: 16
+Caption1/Italic:
+  fontFamily: SF Pro
+  fontStyle: Regular Italic
+  fontWeight: 400
+  fontSize: 12
+  lineHeight: 16px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+layout_2e267093:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 1239
+  dimensions:
+    width: 52
+    height: 16
+Caption1/Emphasized:
+  fontFamily: SF Pro
+  fontStyle: Semibold
+  fontWeight: 590
+  fontSize: 12
+  lineHeight: 16px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_fa661e4a:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 1213
+  dimensions:
+    width: 50
+    height: 16
+layout_d6aa73f8:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 1145
+  dimensions:
+    width: 58
+    height: 18
+Footnote/Emphasized Italic:
+  fontFamily: SF Pro
+  fontStyle: Semibold Italic
+  fontWeight: 590
+  fontSize: 13
+  lineHeight: 18px
+  letterSpacing: '-0.0062em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+layout_3b38a82b:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 1116
+  dimensions:
+    width: 55
+    height: 18
+Footnote/Italic:
+  fontFamily: SF Pro
+  fontStyle: Regular Italic
+  fontWeight: 400
+  fontSize: 13
+  lineHeight: 18px
+  letterSpacing: '-0.0062em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+layout_ab4c55d7:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 1089
+  dimensions:
+    width: 57
+    height: 18
+Footnote/Emphasized:
+  fontFamily: SF Pro
+  fontStyle: Semibold
+  fontWeight: 590
+  fontSize: 13
+  lineHeight: 18px
+  letterSpacing: '-0.0062em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_6ad219cb:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 1061
+  dimensions:
+    width: 55
+    height: 18
+layout_738a9a52:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 991
+  dimensions:
+    width: 90
+    height: 20
+Subheadline/Emphaized Italic:
+  fontFamily: SF Pro
+  fontStyle: Semibold Italic
+  fontWeight: 590
+  fontSize: 15
+  lineHeight: 20px
+  letterSpacing: '-0.0153em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+layout_843bedd3:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 960
+  dimensions:
+    width: 86
+    height: 20
+Subheadline/Italic:
+  fontFamily: SF Pro
+  fontStyle: Regular Italic
+  fontWeight: 400
+  fontSize: 15
+  lineHeight: 20px
+  letterSpacing: '-0.0153em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+layout_a67d51ba:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 931
+  dimensions:
+    width: 89
+    height: 20
+Subheadline/Emphasized:
+  fontFamily: SF Pro
+  fontStyle: Semibold
+  fontWeight: 590
+  fontSize: 15
+  lineHeight: 20px
+  letterSpacing: '-0.0153em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_331e0f13:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 901
+  dimensions:
+    width: 85
+    height: 20
+layout_d15e9c6f:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 830
+  dimensions:
+    width: 54
+    height: 21
+Callout/Emphasized Italic:
+  fontFamily: SF Pro
+  fontStyle: Semibold Italic
+  fontWeight: 590
+  fontSize: 16
+  lineHeight: 21px
+  letterSpacing: '-0.0194em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+layout_ae60d1c9:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 799
+  dimensions:
+    width: 52
+    height: 21
+Callout/Italic:
+  fontFamily: SF Pro
+  fontStyle: Regular Italic
+  fontWeight: 400
+  fontSize: 16
+  lineHeight: 21px
+  letterSpacing: '-0.0194em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+layout_a04a5c6e:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 769
+  dimensions:
+    width: 54
+    height: 21
+Callout/Emphasized:
+  fontFamily: SF Pro
+  fontStyle: Semibold
+  fontWeight: 590
+  fontSize: 16
+  lineHeight: 21px
+  letterSpacing: '-0.0194em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_a29462cd:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 738
+  dimensions:
+    width: 52
+    height: 21
+layout_cbb68f44:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 666
+  dimensions:
+    width: 42
+    height: 22
+Body/Emphasized Italic:
+  fontFamily: SF Pro
+  fontStyle: Semibold Italic
+  fontWeight: 590
+  fontSize: 17
+  lineHeight: 22px
+  letterSpacing: '-0.0253em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+layout_30be21c2:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 633
+  dimensions:
+    width: 40
+    height: 22
+Body/Italic:
+  fontFamily: SF Pro
+  fontStyle: Regular Italic
+  fontWeight: 400
+  fontSize: 17
+  lineHeight: 22px
+  letterSpacing: '-0.0253em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+layout_0eb1914e:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 602
+  dimensions:
+    width: 42
+    height: 22
+Body/Emphasized:
+  fontFamily: SF Pro
+  fontStyle: Semibold
+  fontWeight: 590
+  fontSize: 17
+  lineHeight: 22px
+  letterSpacing: '-0.0253em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_2a805d95:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 570
+  dimensions:
+    width: 40
+    height: 22
+Body/Regular:
+  fontFamily: SF Pro
+  fontStyle: Regular
+  fontWeight: 400
+  fontSize: 17
+  lineHeight: 22px
+  letterSpacing: '-0.0253em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_307b6b02:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 508
+  dimensions:
+    width: 71
+    height: 22
+Headline/Italic:
+  fontFamily: SF Pro
+  fontStyle: Semibold Italic
+  fontWeight: 590
+  fontSize: 17
+  lineHeight: 22px
+  letterSpacing: '-0.0253em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+  italic: true
+layout_8c15ea47:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 476
+  dimensions:
+    width: 71
+    height: 22
+layout_96c931bb:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 410
+  dimensions:
+    width: 53
+    height: 25
+Title3/Emphasized:
+  fontFamily: SF Pro
+  fontStyle: Semibold
+  fontWeight: 590
+  fontSize: 20
+  lineHeight: 25px
+  letterSpacing: '-0.0225em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_de3e6212:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 376
+  dimensions:
+    width: 50
+    height: 25
+layout_2ba598a9:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 299
+  dimensions:
+    width: 59
+    height: 28
+Title2/Emphasized:
+  fontFamily: SF Pro
+  fontStyle: Bold
+  fontWeight: 700
+  fontSize: 22
+  lineHeight: 28px
+  letterSpacing: '-0.0118em'
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_99428ce7:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 261
+  dimensions:
+    width: 54
+    height: 28
+layout_cfa516d3:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 180
+  dimensions:
+    width: 71
+    height: 34
+Title1/Emphasized:
+  fontFamily: SF Pro
+  fontStyle: Bold
+  fontWeight: 700
+  fontSize: 28
+  lineHeight: 34px
+  letterSpacing: 0.0136em
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_71d48390:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 133
+  dimensions:
+    width: 64
+    height: 34
+layout_9ccdc4e2:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 52
+  dimensions:
+    width: 155
+    height: 41
+Large Title/Emphasized:
+  fontFamily: SF Pro
+  fontStyle: Bold
+  fontWeight: 700
+  fontSize: 34
+  lineHeight: 41px
+  letterSpacing: 0.0118em
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+layout_981802a0:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 0
+  dimensions:
+    width: 141
+    height: 41
+Labels/Tertiary:
+  - rgba(60, 60, 67, 0.3)
+fill_2a5f7e61:
+  - rgba(60, 60, 67, 0.6)
+ts1:
+  fills:
+    - '#0088FF'
+
+ELEMENTS:
+EL-d270743c:
+  type: GROUP
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 100
+      y: 100
+    dimensions:
+      width: 1191
+      height: 16
+  borderRadius: 0px 0px 0px 0px
+EL-0e240cc8:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 0
+    dimensions:
+      width: 38
+      height: 16
+  text: xSmall
+  textStyle: Caption1/Regular
+  fills: Labels/Primary
+EL-dfc2ee1f:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 180
+      y: 0
+    dimensions:
+      width: 31
+      height: 16
+  text: Small
+  textStyle: Caption1/Regular
+  fills: Labels/Primary
+EL-36ae8d7f:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 360
+      y: 0
+    dimensions:
+      width: 46
+      height: 16
+  text: Medium
+  textStyle: Caption1/Regular
+  fills: Labels/Primary
+EL-1108a4be:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 540
+      y: 0
+    dimensions:
+      width: 86
+      height: 16
+  text: Large \(Default\)
+  textStyle: Caption1/Regular
+  fills: Labels/Primary
+EL-b76ca0ad:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 730
+      y: 0
+    dimensions:
+      width: 39
+      height: 16
+  text: xLarge
+  textStyle: Caption1/Regular
+  fills: Labels/Primary
+EL-ce9b7334:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 930
+      y: 0
+    dimensions:
+      width: 45
+      height: 16
+  text: xxLarge
+  textStyle: Caption1/Regular
+  fills: Labels/Primary
+EL-ec1be3cf:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 1140
+      y: 0
+    dimensions:
+      width: 51
+      height: 16
+  text: xxxLarge
+  textStyle: Caption1/Regular
+  fills: Labels/Primary
+EL-5a1a5828:
+  type: GROUP
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 100
+      y: 100
+    dimensions:
+      width: 1084
+      height: 16
+  borderRadius: 0px 0px 0px 0px
+EL-df57a534:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 0
+    dimensions:
+      width: 22
+      height: 16
+  text: AX1
+  textStyle: Caption1/Regular
+  fills: Labels/Primary
+EL-14a22ac2:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 240
+      y: 0
+    dimensions:
+      width: 24
+      height: 16
+  text: AX2
+  textStyle: Caption1/Regular
+  fills: Labels/Primary
+EL-f25dc72c:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 500
+      y: 0
+    dimensions:
+      width: 24
+      height: 16
+  text: AX3
+  textStyle: Caption1/Regular
+  fills: Labels/Primary
+EL-30fe8e1f:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 770
+      y: 0
+    dimensions:
+      width: 24
+      height: 16
+  text: AX4
+  textStyle: Caption1/Regular
+  fills: Labels/Primary
+EL-26847131:
+  type: TEXT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 1060
+      y: 0
+    dimensions:
+      width: 24
+      height: 16
+  text: AX5
+  textStyle: Caption1/Regular
+  fills: Labels/Primary
+
+COMPONENTS:
+507:29149:
+  id: 507:29149
+  key: e13ad208573b21c6fc331a20341d001b94901239
+  name: _Component Header
+
+NODES:
+[CANVAS] "Text Styles and Dynamic Type" #0:2194
+  [SECTION] "Dynamic Type" #5418:17465 layout={"mode":"none","sizing":{},"dimensions":{"width":1520,"height":1184}} fills=fill_44168f3d strokes=fill_62008434 strokeWeight=1px
+    [GROUP] "Labels — — — — — — — — — — — —" #224:56285 template=EL-d270743c
+      [TEXT] #0:3130 template=EL-0e240cc8
+      [TEXT] #0:3131 template=EL-dfc2ee1f
+      [TEXT] #0:3132 template=EL-36ae8d7f
+      [TEXT] #0:3133 template=EL-1108a4be
+      [TEXT] #0:3134 template=EL-b76ca0ad
+      [TEXT] #0:3135 template=EL-ce9b7334
+      [TEXT] #0:3136 template=EL-ec1be3cf
+    [GROUP] "Labels — — — — — — — — — — — —" #5418:27107 template=EL-d270743c
+      [TEXT] #5418:27113 template=EL-0e240cc8
+      [TEXT] #5418:27114 template=EL-dfc2ee1f
+      [TEXT] #5418:27115 template=EL-36ae8d7f
+      [TEXT] #5418:27116 template=EL-1108a4be
+      [TEXT] #5418:27117 template=EL-b76ca0ad
+      [TEXT] #5418:27118 template=EL-ce9b7334
+      [TEXT] #5418:27119 template=EL-ec1be3cf
+    [GROUP] "xxxLarge" #224:56264 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1240,"y":141},"dimensions":{"width":180,"height":943}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #0:3210 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":921},"dimensions":{"width":74,"height":22}} fills=fill_34dc0314 textStyle=style_6499248d text="Caption 2"
+      [TEXT] #0:3211 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":830},"dimensions":{"width":76,"height":23}} fills=fill_34dc0314 textStyle=style_6920745e text="Caption 1"
+      [TEXT] #0:3212 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":739},"dimensions":{"width":77,"height":24}} fills=fill_34dc0314 textStyle=style_83666c37 text="Footnote"
+      [TEXT] #0:3213 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":647},"dimensions":{"width":83,"height":28}} fills=fill_34dc0314 textStyle=style_9d731089 text="Subhead"
+      [TEXT] #0:3214 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":556},"dimensions":{"width":68,"height":28}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":22,"lineHeight":"28px","letterSpacing":"-0.0118em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Callout"
+      [TEXT] #0:3215 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":465},"dimensions":{"width":52,"height":29}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":23,"lineHeight":"29px","letterSpacing":"-0.0043em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Body"
+      [TEXT] #0:3216 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":375},"dimensions":{"width":93,"height":29}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Semibold","fontWeight":590,"fontSize":23,"lineHeight":"29px","letterSpacing":"-0.0043em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Headline"
+      [TEXT] #0:3217 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":283},"dimensions":{"width":70,"height":32}} fills=fill_34dc0314 textStyle=style_b4e754a3 text="Title 3"
+      [TEXT] #0:3218 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":191},"dimensions":{"width":74,"height":34}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":28,"lineHeight":"34px","letterSpacing":"0.0136em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Title 2"
+      [TEXT] #0:3219 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":95},"dimensions":{"width":86,"height":41}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":34,"lineHeight":"41px","letterSpacing":"0.0118em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Title 1"
+      [TEXT] #0:3220 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":0},"dimensions":{"width":179,"height":48}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":40,"lineHeight":"48px","letterSpacing":"0.0093em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Large Title"
+    [GROUP] "xxLarge" #224:56263 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1030,"y":142},"dimensions":{"width":171,"height":942}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #0:3198 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":922},"dimensions":{"width":67,"height":20}} fills=fill_34dc0314 textStyle=style_881d320b text="Caption 2"
+      [TEXT] #0:3199 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":831},"dimensions":{"width":69,"height":21}} fills=fill_34dc0314 textStyle=style_266ba10b text="Caption 1"
+      [TEXT] #0:3200 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":740},"dimensions":{"width":69,"height":22}} fills=fill_34dc0314 textStyle=style_6499248d text="Footnote"
+      [TEXT] #0:3201 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":648},"dimensions":{"width":76,"height":24}} fills=fill_34dc0314 textStyle=style_83666c37 text="Subhead"
+      [TEXT] #0:3202 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":557},"dimensions":{"width":62,"height":24}} fills=fill_34dc0314 textStyle=style_a471d33d text="Callout"
+      [TEXT] #0:3203 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":467},"dimensions":{"width":48,"height":26}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":21,"lineHeight":"26px","letterSpacing":"-0.0171em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Body"
+      [TEXT] #0:3204 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":377},"dimensions":{"width":86,"height":26}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Semibold","fontWeight":590,"fontSize":21,"lineHeight":"26px","letterSpacing":"-0.0171em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Headline"
+      [TEXT] #0:3205 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":283},"dimensions":{"width":65,"height":30}} fills=fill_34dc0314 textStyle=style_93033bb6 text="Title 3"
+      [TEXT] #0:3206 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":192},"dimensions":{"width":69,"height":32}} fills=fill_34dc0314 textStyle=style_b4e754a3 text="Title 2"
+      [TEXT] #0:3207 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":96},"dimensions":{"width":81,"height":39}} fills=fill_34dc0314 textStyle=style_0df18ad3 text="Title 1"
+      [TEXT] #0:3208 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":0},"dimensions":{"width":170,"height":46}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":38,"lineHeight":"46px","letterSpacing":"0.0097em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Large Title"
+    [GROUP] "xLarge" #224:56262 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":830,"y":145},"dimensions":{"width":163,"height":938}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #0:3186 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":920},"dimensions":{"width":59,"height":18}} fills=fill_34dc0314 textStyle=style_ff9fc8c4 text="Caption 2"
+      [TEXT] #0:3187 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":830},"dimensions":{"width":61,"height":19}} fills=fill_34dc0314 textStyle=style_7b886be8 text="Caption 1"
+      [TEXT] #0:3188 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":739},"dimensions":{"width":62,"height":20}} fills=fill_34dc0314 textStyle=style_881d320b text="Footnote"
+      [TEXT] #0:3189 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":647},"dimensions":{"width":69,"height":22}} fills=fill_34dc0314 textStyle=style_6499248d text="Subhead"
+      [TEXT] #0:3190 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":556},"dimensions":{"width":57,"height":23}} fills=fill_34dc0314 textStyle=style_6920745e text="Callout"
+      [TEXT] #0:3191 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":465},"dimensions":{"width":44,"height":24}} fills=fill_34dc0314 textStyle=style_83666c37 text="Body"
+      [TEXT] #0:3192 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":375},"dimensions":{"width":79,"height":24}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Semibold","fontWeight":590,"fontSize":19,"lineHeight":"24px","letterSpacing":"-0.0237em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Headline"
+      [TEXT] #0:3193 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":2,"y":282},"dimensions":{"width":61,"height":28}} fills=fill_34dc0314 textStyle=style_c6253ea0 text="Title 3"
+      [TEXT] #0:3194 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":190},"dimensions":{"width":64,"height":30}} fills=fill_34dc0314 textStyle=style_93033bb6 text="Title 2"
+      [TEXT] #0:3195 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":2,"y":95},"dimensions":{"width":76,"height":36}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":30,"lineHeight":"36px","letterSpacing":"0.0133em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Title 1"
+      [TEXT] #0:3196 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":2,"y":0},"dimensions":{"width":161,"height":43}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":36,"lineHeight":"43px","letterSpacing":"0.0103em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Large Title"
+    [GROUP] "Large (Default)" #224:56261 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":640,"y":143},"dimensions":{"width":154,"height":938}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #0:3174 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":925},"dimensions":{"width":51,"height":13}} fills=fill_34dc0314 textStyle=Caption2/Regular text="Caption 2"
+      [TEXT] #0:3175 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":833},"dimensions":{"width":53,"height":16}} fills=fill_34dc0314 textStyle=Caption1/Regular text="Caption 1"
+      [TEXT] #0:3176 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":741},"dimensions":{"width":55,"height":18}} fills=fill_34dc0314 textStyle=Footnote/Regular text="Footnote"
+      [TEXT] #0:3177 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":650},"dimensions":{"width":62,"height":20}} fills=fill_34dc0314 textStyle=Subheadline/Regular text="Subhead"
+      [TEXT] #0:3178 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":559},"dimensions":{"width":52,"height":21}} fills=fill_34dc0314 textStyle=Callout/Regular text="Callout"
+      [TEXT] #0:3179 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":468},"dimensions":{"width":40,"height":22}} fills=fill_34dc0314 textStyle=style_6499248d text="Body"
+      [TEXT] #0:3180 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":378},"dimensions":{"width":71,"height":22}} fills=fill_34dc0314 textStyle=Headline/Regular text="Headline"
+      [TEXT] #0:3181 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":283},"dimensions":{"width":55,"height":25}} fills=fill_34dc0314 textStyle=Title3/Regular text="Title 3"
+      [TEXT] #0:3182 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":192},"dimensions":{"width":59,"height":28}} fills=fill_34dc0314 textStyle=Title2/Regular text="Title 2"
+      [TEXT] #0:3183 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":97},"dimensions":{"width":71,"height":34}} fills=fill_34dc0314 textStyle=Title1/Regular text="Title 1"
+      [TEXT] #0:3184 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":0},"dimensions":{"width":153,"height":41}} fills=fill_34dc0314 textStyle="Large Title/Regular" text="Large Title"
+    [GROUP] "Medium" #224:56260 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":460,"y":147},"dimensions":{"width":149,"height":935}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #0:3162 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":922},"dimensions":{"width":51,"height":13}} fills=fill_34dc0314 textStyle=style_23f3b263 text="Caption 2"
+      [TEXT] #0:3163 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":832},"dimensions":{"width":49,"height":13}} fills=fill_34dc0314 textStyle=style_23f3b263 text="Caption 1"
+      [TEXT] #0:3164 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":740},"dimensions":{"width":51,"height":16}} fills=fill_34dc0314 textStyle=style_7ba12a8f text="Footnote"
+      [TEXT] #0:3165 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":648},"dimensions":{"width":58,"height":19}} fills=fill_34dc0314 textStyle=style_7b886be8 text="Subhead"
+      [TEXT] #0:3166 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":557},"dimensions":{"width":49,"height":20}} fills=fill_34dc0314 textStyle=style_881d320b text="Callout"
+      [TEXT] #0:3167 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":466},"dimensions":{"width":38,"height":21}} fills=fill_34dc0314 textStyle=style_266ba10b text="Body"
+      [TEXT] #0:3168 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":376},"dimensions":{"width":68,"height":21}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Semibold","fontWeight":590,"fontSize":16,"lineHeight":"21px","letterSpacing":"-0.0194em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Headline"
+      [TEXT] #0:3169 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":283},"dimensions":{"width":54,"height":24}} fills=fill_34dc0314 textStyle=style_83666c37 text="Title 3"
+      [TEXT] #0:3170 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":189},"dimensions":{"width":57,"height":28}} fills=fill_34dc0314 textStyle=style_9d731089 text="Title 2"
+      [TEXT] #0:3171 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":96},"dimensions":{"width":68,"height":33}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":27,"lineHeight":"33px","letterSpacing":"0.0107em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Title 1"
+      [TEXT] #0:3172 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":0},"dimensions":{"width":148,"height":40}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":33,"lineHeight":"40px","letterSpacing":"0.0121em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Large Title"
+    [GROUP] "Small" #224:56259 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":280,"y":148},"dimensions":{"width":145,"height":934}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #0:3150 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":921},"dimensions":{"width":51,"height":13}} fills=fill_34dc0314 textStyle=style_23f3b263 text="Caption 2"
+      [TEXT] #0:3151 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":831},"dimensions":{"width":49,"height":13}} fills=fill_34dc0314 textStyle=style_23f3b263 text="Caption 1"
+      [TEXT] #0:3152 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":739},"dimensions":{"width":51,"height":16}} fills=fill_34dc0314 textStyle=style_7ba12a8f text="Footnote"
+      [TEXT] #0:3153 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":647},"dimensions":{"width":54,"height":18}} fills=fill_34dc0314 textStyle=style_ff9fc8c4 text="Subhead"
+      [TEXT] #0:3154 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":557},"dimensions":{"width":46,"height":19}} fills=fill_34dc0314 textStyle=style_7b886be8 text="Callout"
+      [TEXT] #0:3155 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":466},"dimensions":{"width":36,"height":20}} fills=fill_34dc0314 textStyle=style_881d320b text="Body"
+      [TEXT] #0:3156 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":376},"dimensions":{"width":64,"height":20}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Semibold","fontWeight":590,"fontSize":15,"lineHeight":"20px","letterSpacing":"-0.0153em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Headline"
+      [TEXT] #0:3157 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":283},"dimensions":{"width":51,"height":23}} fills=fill_34dc0314 textStyle=style_6920745e text="Title 3"
+      [TEXT] #0:3158 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":191},"dimensions":{"width":55,"height":24}} fills=fill_34dc0314 textStyle=style_a471d33d text="Title 2"
+      [TEXT] #0:3159 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":96},"dimensions":{"width":66,"height":32}} fills=fill_34dc0314 textStyle=style_b4e754a3 text="Title 1"
+      [TEXT] #0:3160 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":0},"dimensions":{"width":144,"height":39}} fills=fill_34dc0314 textStyle=style_0df18ad3 text="Large Title"
+    [GROUP] "xSmall" #224:56258 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":100,"y":149},"dimensions":{"width":140,"height":933}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #0:3138 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":920},"dimensions":{"width":51,"height":13}} fills=fill_34dc0314 textStyle=style_23f3b263 text="Caption 2"
+      [TEXT] #0:3139 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":830},"dimensions":{"width":49,"height":13}} fills=fill_34dc0314 textStyle=style_23f3b263 text="Caption 1"
+      [TEXT] #0:3140 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":738},"dimensions":{"width":51,"height":16}} fills=fill_34dc0314 textStyle=style_7ba12a8f text="Footnote"
+      [TEXT] #0:3141 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":648},"dimensions":{"width":50,"height":16}} fills=fill_34dc0314 textStyle=style_7ba12a8f text="Subhead"
+      [TEXT] #0:3142 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":556},"dimensions":{"width":43,"height":18}} fills=fill_34dc0314 textStyle=style_ff9fc8c4 text="Callout"
+      [TEXT] #0:3143 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":466},"dimensions":{"width":34,"height":19}} fills=fill_34dc0314 textStyle=style_7b886be8 text="Body"
+      [TEXT] #0:3144 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":376},"dimensions":{"width":60,"height":19}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Semibold","fontWeight":590,"fontSize":14,"lineHeight":"19px","letterSpacing":"-0.0107em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Headline"
+      [TEXT] #0:3145 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":283},"dimensions":{"width":48,"height":22}} fills=fill_34dc0314 textStyle=style_6499248d text="Title 3"
+      [TEXT] #0:3146 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":191},"dimensions":{"width":53,"height":23}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":19,"lineHeight":"23px","letterSpacing":"-0.0237em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Title 2"
+      [TEXT] #0:3147 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":96},"dimensions":{"width":63,"height":31}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":25,"lineHeight":"31px","letterSpacing":"0.006em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Title 1"
+      [TEXT] #0:3148 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1,"y":0},"dimensions":{"width":139,"height":38}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":31,"lineHeight":"38px","letterSpacing":"0.0119em","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Large Title"
+  [SECTION] "Dynamic Type – Accessibility Sizes" #5418:27121 layout={"mode":"none","sizing":{},"dimensions":{"width":1522,"height":1189}} fills=fill_44168f3d strokes=fill_62008434 strokeWeight=1px
+    [GROUP] "AX5" #5418:27122 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":1160,"y":123},"dimensions":{"width":262,"height":966}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #5418:27123 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":918},"dimensions":{"width":164,"height":48}} fills=fill_34dc0314 textStyle=style_91c9d597 text="Caption 2"
+      [TEXT] #5418:27124 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":825},"dimensions":{"width":170,"height":51}} fills=fill_34dc0314 textStyle=style_f970f598 text="Caption 1"
+      [TEXT] #5418:27125 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":734},"dimensions":{"width":165,"height":52}} fills=fill_34dc0314 textStyle=style_8ae07660 text="Footnote"
+      [TEXT] #5418:27126 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":640},"dimensions":{"width":186,"height":58}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":49,"lineHeight":"58px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Subhead"
+      [TEXT] #5418:27127 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":548},"dimensions":{"width":151,"height":60}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":51,"lineHeight":"60px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Callout"
+      [TEXT] #5418:27128 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":456},"dimensions":{"width":116,"height":62}} fills=fill_34dc0314 textStyle=style_f85057b9 text="Body"
+      [TEXT] #5418:27129 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":366},"dimensions":{"width":208,"height":62}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Semibold","fontWeight":590,"fontSize":53,"lineHeight":"62px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Headline"
+      [TEXT] #5418:27130 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":274},"dimensions":{"width":142,"height":65}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":55,"lineHeight":"65px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Title 3"
+      [TEXT] #5418:27131 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":183},"dimensions":{"width":143,"height":66}} fills=fill_34dc0314 textStyle=style_fea79ad8 text="Title 2"
+      [TEXT] #5418:27132 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":91},"dimensions":{"width":141,"height":68}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":58,"lineHeight":"68px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Title 1"
+      [TEXT] #5418:27133 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":0},"dimensions":{"width":262,"height":70}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":60,"lineHeight":"70px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Large Title"
+    [GROUP] "AX4" #5418:27134 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":870,"y":126},"dimensions":{"width":245,"height":961}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #5418:27135 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":920},"dimensions":{"width":139,"height":41}} fills=fill_34dc0314 textStyle=style_b0e10376 text="Caption 2"
+      [TEXT] #5418:27136 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":828},"dimensions":{"width":147,"height":44}} fills=fill_34dc0314 textStyle=style_c7c550ec text="Caption 1"
+      [TEXT] #5418:27137 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":736},"dimensions":{"width":142,"height":46}} fills=fill_34dc0314 textStyle=style_6c8f954b text="Footnote"
+      [TEXT] #5418:27138 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":643},"dimensions":{"width":159,"height":50}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":42,"lineHeight":"50px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Subhead"
+      [TEXT] #5418:27139 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":551},"dimensions":{"width":131,"height":52}} fills=fill_34dc0314 textStyle=style_8ae07660 text="Callout"
+      [TEXT] #5418:27140 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":458},"dimensions":{"width":103,"height":56}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":47,"lineHeight":"56px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Body"
+      [TEXT] #5418:27141 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":368},"dimensions":{"width":185,"height":56}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Semibold","fontWeight":590,"fontSize":47,"lineHeight":"56px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Headline"
+      [TEXT] #5418:27142 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":277},"dimensions":{"width":111,"height":51}} fills=fill_34dc0314 textStyle=style_f970f598 text="Title 3"
+      [TEXT] #5418:27143 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":186},"dimensions":{"width":128,"height":59}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":50,"lineHeight":"59px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Title 2"
+      [TEXT] #5418:27144 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":93},"dimensions":{"width":129,"height":62}} fills=fill_34dc0314 textStyle=style_f85057b9 text="Title 1"
+      [TEXT] #5418:27145 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":0},"dimensions":{"width":245,"height":66}} fills=fill_34dc0314 textStyle=style_fea79ad8 text="Large Title"
+    [GROUP] "AX3" #5418:27146 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":600,"y":130},"dimensions":{"width":227,"height":956}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #5418:27147 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":921},"dimensions":{"width":119,"height":35}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":29,"lineHeight":"35px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Caption 2"
+      [TEXT] #5418:27148 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":828},"dimensions":{"width":127,"height":39}} fills=fill_34dc0314 textStyle=style_a4fee3aa text="Caption 1"
+      [TEXT] #5418:27149 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":737},"dimensions":{"width":124,"height":40}} fills=fill_34dc0314 textStyle=style_0db7b070 text="Footnote"
+      [TEXT] #5418:27150 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":645},"dimensions":{"width":137,"height":43}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":36,"lineHeight":"43px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Subhead"
+      [TEXT] #5418:27151 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":552},"dimensions":{"width":113,"height":46}} fills=fill_34dc0314 textStyle=style_6c8f954b text="Callout"
+      [TEXT] #5418:27152 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":461},"dimensions":{"width":88,"height":48}} fills=fill_34dc0314 textStyle=style_91c9d597 text="Body"
+      [TEXT] #5418:27153 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":371},"dimensions":{"width":157,"height":48}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Semibold","fontWeight":590,"fontSize":40,"lineHeight":"48px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Headline"
+      [TEXT] #5418:27154 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":278},"dimensions":{"width":111,"height":51}} fills=fill_34dc0314 textStyle=style_f970f598 text="Title 3"
+      [TEXT] #5418:27155 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":187},"dimensions":{"width":115,"height":52}} fills=fill_34dc0314 textStyle=style_8ae07660 text="Title 2"
+      [TEXT] #5418:27156 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":93},"dimensions":{"width":117,"height":57}} fills=fill_34dc0314 textStyle=style_aa41814c text="Title 1"
+      [TEXT] #5418:27157 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":0},"dimensions":{"width":227,"height":61}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":52,"lineHeight":"61px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Large Title"
+    [GROUP] "AX2" #5418:27158 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":340,"y":133},"dimensions":{"width":210,"height":952}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #5418:27159 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":922},"dimensions":{"width":100,"height":30}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":24,"lineHeight":"30px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Caption 2"
+      [TEXT] #5418:27160 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":831},"dimensions":{"width":104,"height":32}} fills=fill_34dc0314 textStyle=style_b3264a15 text="Caption 1"
+      [TEXT] #5418:27161 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":740},"dimensions":{"width":102,"height":33}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":27,"lineHeight":"33px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Footnote"
+      [TEXT] #5418:27162 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":647},"dimensions":{"width":114,"height":37}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":30,"lineHeight":"37px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Subhead"
+      [TEXT] #5418:27163 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":555},"dimensions":{"width":95,"height":39}} fills=fill_34dc0314 textStyle=style_a4fee3aa text="Callout"
+      [TEXT] #5418:27164 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":464},"dimensions":{"width":72,"height":40}} fills=fill_34dc0314 textStyle=style_0db7b070 text="Body"
+      [TEXT] #5418:27165 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":374},"dimensions":{"width":130,"height":40}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Semibold","fontWeight":590,"fontSize":33,"lineHeight":"40px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Headline"
+      [TEXT] #5418:27166 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":281},"dimensions":{"width":96,"height":44}} fills=fill_34dc0314 textStyle=style_c7c550ec text="Title 3"
+      [TEXT] #5418:27167 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":189},"dimensions":{"width":110,"height":51}} fills=fill_34dc0314 textStyle=style_f970f598 text="Title 2"
+      [TEXT] #5418:27168 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":95},"dimensions":{"width":105,"height":51}} fills=fill_34dc0314 textStyle=style_f970f598 text="Title 1"
+      [TEXT] #5418:27169 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":0},"dimensions":{"width":210,"height":57}} fills=fill_34dc0314 textStyle=style_aa41814c text="Large Title"
+    [GROUP] "AX1" #5418:27170 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":100,"y":137},"dimensions":{"width":192,"height":947}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #5418:27171 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":922},"dimensions":{"width":89,"height":25}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":20,"lineHeight":"25px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Caption 2"
+      [TEXT] #5418:27172 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":830},"dimensions":{"width":92,"height":28}} fills=fill_34dc0314 textStyle=style_c6253ea0 text="Caption 1"
+      [TEXT] #5418:27173 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":739},"dimensions":{"width":90,"height":29}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":23,"lineHeight":"29px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Footnote"
+      [TEXT] #5418:27174 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":648},"dimensions":{"width":96,"height":31}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":25,"lineHeight":"31px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Subhead"
+      [TEXT] #5418:27175 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":557},"dimensions":{"width":78,"height":32}} fills=fill_34dc0314 textStyle=style_b3264a15 text="Callout"
+      [TEXT] #5418:27176 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":465},"dimensions":{"width":61,"height":34}} fills=fill_34dc0314 textStyle=style_40853cb8 text="Body"
+      [TEXT] #5418:27177 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":375},"dimensions":{"width":110,"height":34}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Semibold","fontWeight":590,"fontSize":28,"lineHeight":"34px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Headline"
+      [TEXT] #5418:27178 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":282},"dimensions":{"width":80,"height":38}} fills=fill_34dc0314 textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":31,"lineHeight":"38px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="Title 3"
+      [TEXT] #5418:27179 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":189},"dimensions":{"width":87,"height":41}} fills=fill_34dc0314 textStyle=style_b0e10376 text="Title 2"
+      [TEXT] #5418:27180 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":95},"dimensions":{"width":93,"height":46}} fills=fill_34dc0314 textStyle=style_6c8f954b text="Title 1"
+      [TEXT] #5418:27181 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":0},"dimensions":{"width":192,"height":52}} fills=fill_34dc0314 textStyle=style_8ae07660 text="Large Title"
+    [GROUP] "Labels — — — — — — — — — — — —" #5418:27182 template=EL-5a1a5828
+      [TEXT] #5418:27183 template=EL-df57a534
+      [TEXT] #5418:27184 template=EL-14a22ac2
+      [TEXT] #5418:27185 template=EL-f25dc72c
+      [TEXT] #5418:27186 template=EL-30fe8e1f
+      [TEXT] #5418:27187 template=EL-26847131
+    [GROUP] "Labels — — — — — — — — — — — —" #5418:27195 template=EL-5a1a5828
+      [TEXT] #5418:27196 template=EL-df57a534
+      [TEXT] #5418:27197 template=EL-14a22ac2
+      [TEXT] #5418:27198 template=EL-f25dc72c
+      [TEXT] #5418:27199 template=EL-30fe8e1f
+      [TEXT] #5418:27200 template=EL-26847131
+  [SECTION] "Text styles" #5418:17464 layout={"mode":"none","sizing":{},"dimensions":{"width":1075,"height":1682}} fills=fill_44168f3d strokes=fill_62008434 strokeWeight=1px
+    [GROUP] "Quaternary Label Color" #224:56277 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":820,"y":143},"dimensions":{"width":155,"height":1439}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #6:55824 layout=layout_e1259cba fills=fill_febf08b7 textStyle="Caption2/Emphasized Italic" text="Caption2"
+      [TEXT] #6:55825 layout=layout_f7101ebe fills=fill_febf08b7 textStyle=Caption2/Italic text="Caption2"
+      [TEXT] #6:55826 layout=layout_cd4f2d0f fills=fill_febf08b7 textStyle=Caption2/Emphasized text="Caption2"
+      [TEXT] #6:55827 layout=layout_d784fb37 fills=fill_febf08b7 textStyle=Caption2/Regular text="Caption2"
+      [TEXT] #6:55828 layout=layout_2809d1fb fills=fill_febf08b7 textStyle="Caption1/Emphasized Italic" text="Caption1"
+      [TEXT] #6:55829 layout=layout_ab2a28ab fills=fill_febf08b7 textStyle=Caption1/Italic text="Caption1"
+      [TEXT] #6:55830 layout=layout_2e267093 fills=fill_febf08b7 textStyle=Caption1/Emphasized text="Caption1"
+      [TEXT] #6:55831 layout=layout_fa661e4a fills=fill_febf08b7 textStyle=Caption1/Regular text="Caption1"
+      [TEXT] #6:55832 layout=layout_d6aa73f8 fills=fill_febf08b7 textStyle="Footnote/Emphasized Italic" text="Footnote"
+      [TEXT] #6:55833 layout=layout_3b38a82b fills=fill_febf08b7 textStyle=Footnote/Italic text="Footnote"
+      [TEXT] #6:55834 layout=layout_ab4c55d7 fills=fill_febf08b7 textStyle=Footnote/Emphasized text="Footnote"
+      [TEXT] #6:55835 layout=layout_6ad219cb fills=fill_febf08b7 textStyle=Footnote/Regular text="Footnote"
+      [TEXT] #6:55836 layout=layout_738a9a52 fills=fill_febf08b7 textStyle="Subheadline/Emphaized Italic" text="Subheadline"
+      [TEXT] #6:55837 layout=layout_843bedd3 fills=fill_febf08b7 textStyle=Subheadline/Italic text="Subheadline"
+      [TEXT] #6:55838 layout=layout_a67d51ba fills=fill_febf08b7 textStyle=Subheadline/Emphasized text="Subheadline"
+      [TEXT] #6:55839 layout=layout_331e0f13 fills=fill_febf08b7 textStyle=Subheadline/Regular text="Subheadline"
+      [TEXT] #6:55840 layout=layout_d15e9c6f fills=fill_febf08b7 textStyle="Callout/Emphasized Italic" text="Callout"
+      [TEXT] #6:55841 layout=layout_ae60d1c9 fills=fill_febf08b7 textStyle=Callout/Italic text="Callout"
+      [TEXT] #6:55842 layout=layout_a04a5c6e fills=fill_febf08b7 textStyle=Callout/Emphasized text="Callout"
+      [TEXT] #6:55843 layout=layout_a29462cd fills=fill_febf08b7 textStyle=Callout/Regular text="Callout"
+      [TEXT] #6:55844 layout=layout_cbb68f44 fills=fill_febf08b7 textStyle="Body/Emphasized Italic" text="Body"
+      [TEXT] #6:55845 layout=layout_30be21c2 fills=fill_febf08b7 textStyle=Body/Italic text="Body"
+      [TEXT] #6:55846 layout=layout_0eb1914e fills=fill_febf08b7 textStyle=Body/Emphasized text="Body"
+      [TEXT] #6:55847 layout=layout_2a805d95 fills=fill_febf08b7 textStyle=Body/Regular text="Body"
+      [TEXT] #6:55848 layout=layout_307b6b02 fills=fill_febf08b7 textStyle=Headline/Italic text="Headline"
+      [TEXT] #6:55849 layout=layout_8c15ea47 fills=fill_febf08b7 textStyle=Headline/Regular text="Headline"
+      [TEXT] #6:55850 layout=layout_96c931bb fills=fill_febf08b7 textStyle=Title3/Emphasized text="Title3"
+      [TEXT] #6:55851 layout=layout_de3e6212 fills=fill_febf08b7 textStyle=Title3/Regular text="Title3"
+      [TEXT] #6:55852 layout=layout_2ba598a9 fills=fill_febf08b7 textStyle=Title2/Emphasized text="Title2"
+      [TEXT] #6:55853 layout=layout_99428ce7 fills=fill_febf08b7 textStyle=Title2/Regular text="Title2"
+      [TEXT] #6:55854 layout=layout_cfa516d3 fills=fill_febf08b7 textStyle=Title1/Emphasized text="Title1"
+      [TEXT] #6:55855 layout=layout_71d48390 fills=fill_febf08b7 textStyle=Title1/Regular text="Title1"
+      [TEXT] #6:55856 layout=layout_9ccdc4e2 fills=fill_febf08b7 textStyle="Large Title/Emphasized" text="LargeTitle"
+      [TEXT] #6:55857 layout=layout_981802a0 fills=fill_febf08b7 textStyle="Large Title/Regular" text="LargeTitle"
+    [GROUP] "Tertiary Label Color" #224:56276 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":580,"y":143},"dimensions":{"width":155,"height":1439}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #6:55858 layout=layout_e1259cba fills=Labels/Tertiary textStyle="Caption2/Emphasized Italic" text="Caption2"
+      [TEXT] #6:55859 layout=layout_f7101ebe fills=Labels/Tertiary textStyle=Caption2/Italic text="Caption2"
+      [TEXT] #6:55860 layout=layout_cd4f2d0f fills=Labels/Tertiary textStyle=Caption2/Emphasized text="Caption2"
+      [TEXT] #6:55861 layout=layout_d784fb37 fills=Labels/Tertiary textStyle=Caption2/Regular text="Caption2"
+      [TEXT] #6:55862 layout=layout_2809d1fb fills=Labels/Tertiary textStyle="Caption1/Emphasized Italic" text="Caption1"
+      [TEXT] #6:55863 layout=layout_ab2a28ab fills=Labels/Tertiary textStyle=Caption1/Italic text="Caption1"
+      [TEXT] #6:55864 layout=layout_2e267093 fills=Labels/Tertiary textStyle=Caption1/Emphasized text="Caption1"
+      [TEXT] #6:55865 layout=layout_fa661e4a fills=Labels/Tertiary textStyle=Caption1/Regular text="Caption1"
+      [TEXT] #6:55866 layout=layout_d6aa73f8 fills=Labels/Tertiary textStyle="Footnote/Emphasized Italic" text="Footnote"
+      [TEXT] #6:55867 layout=layout_3b38a82b fills=Labels/Tertiary textStyle=Footnote/Italic text="Footnote"
+      [TEXT] #6:55868 layout=layout_ab4c55d7 fills=Labels/Tertiary textStyle=Footnote/Emphasized text="Footnote"
+      [TEXT] #6:55869 layout=layout_6ad219cb fills=Labels/Tertiary textStyle=Footnote/Regular text="Footnote"
+      [TEXT] #6:55870 layout=layout_738a9a52 fills=Labels/Tertiary textStyle="Subheadline/Emphaized Italic" text="Subheadline"
+      [TEXT] #6:55871 layout=layout_843bedd3 fills=Labels/Tertiary textStyle=Subheadline/Italic text="Subheadline"
+      [TEXT] #6:55872 layout=layout_a67d51ba fills=Labels/Tertiary textStyle=Subheadline/Emphasized text="Subheadline"
+      [TEXT] #6:55873 layout=layout_331e0f13 fills=Labels/Tertiary textStyle=Subheadline/Regular text="Subheadline"
+      [TEXT] #6:55874 layout=layout_d15e9c6f fills=Labels/Tertiary textStyle="Callout/Emphasized Italic" text="Callout"
+      [TEXT] #6:55875 layout=layout_ae60d1c9 fills=Labels/Tertiary textStyle=Callout/Italic text="Callout"
+      [TEXT] #6:55876 layout=layout_a04a5c6e fills=Labels/Tertiary textStyle=Callout/Emphasized text="Callout"
+      [TEXT] #6:55877 layout=layout_a29462cd fills=Labels/Tertiary textStyle=Callout/Regular text="Callout"
+      [TEXT] #6:55878 layout=layout_cbb68f44 fills=Labels/Tertiary textStyle="Body/Emphasized Italic" text="Body"
+      [TEXT] #6:55879 layout=layout_30be21c2 fills=Labels/Tertiary textStyle=Body/Italic text="Body"
+      [TEXT] #6:55880 layout=layout_0eb1914e fills=Labels/Tertiary textStyle=Body/Emphasized text="Body"
+      [TEXT] #6:55881 layout=layout_2a805d95 fills=Labels/Tertiary textStyle=Body/Regular text="Body"
+      [TEXT] #6:55882 layout=layout_307b6b02 fills=Labels/Tertiary textStyle=Headline/Italic text="Headline"
+      [TEXT] #6:55883 layout=layout_8c15ea47 fills=Labels/Tertiary textStyle=Headline/Regular text="Headline"
+      [TEXT] #6:55884 layout=layout_96c931bb fills=Labels/Tertiary textStyle=Title3/Emphasized text="Title3"
+      [TEXT] #6:55885 layout=layout_de3e6212 fills=Labels/Tertiary textStyle=Title3/Regular text="Title3"
+      [TEXT] #6:55886 layout=layout_2ba598a9 fills=Labels/Tertiary textStyle=Title2/Emphasized text="Title2"
+      [TEXT] #6:55887 layout=layout_99428ce7 fills=Labels/Tertiary textStyle=Title2/Regular text="Title2"
+      [TEXT] #6:55888 layout=layout_cfa516d3 fills=Labels/Tertiary textStyle=Title1/Emphasized text="Title1"
+      [TEXT] #6:55889 layout=layout_71d48390 fills=Labels/Tertiary textStyle=Title1/Regular text="Title1"
+      [TEXT] #6:55890 layout=layout_9ccdc4e2 fills=Labels/Tertiary textStyle="Large Title/Emphasized" text="LargeTitle"
+      [TEXT] #6:55891 layout=layout_981802a0 fills=Labels/Tertiary textStyle="Large Title/Regular" text="LargeTitle"
+    [GROUP] "Secondary Label Color" #224:56275 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":340,"y":143},"dimensions":{"width":155,"height":1439}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #6:55790 layout=layout_e1259cba fills=fill_2a5f7e61 textStyle="Caption2/Emphasized Italic" text="Caption2"
+      [TEXT] #6:55791 layout=layout_f7101ebe fills=fill_2a5f7e61 textStyle=Caption2/Italic text="Caption2"
+      [TEXT] #6:55792 layout=layout_cd4f2d0f fills=fill_2a5f7e61 textStyle=Caption2/Emphasized text="Caption2"
+      [TEXT] #6:55793 layout=layout_d784fb37 fills=fill_2a5f7e61 textStyle=Caption2/Regular text="Caption2"
+      [TEXT] #6:55794 layout=layout_2809d1fb fills=fill_2a5f7e61 textStyle="Caption1/Emphasized Italic" text="Caption1"
+      [TEXT] #6:55795 layout=layout_ab2a28ab fills=fill_2a5f7e61 textStyle=Caption1/Italic text="Caption1"
+      [TEXT] #6:55796 layout=layout_2e267093 fills=fill_2a5f7e61 textStyle=Caption1/Emphasized text="Caption1"
+      [TEXT] #6:55797 layout=layout_fa661e4a fills=fill_2a5f7e61 textStyle=Caption1/Regular text="Caption1"
+      [TEXT] #6:55798 layout=layout_d6aa73f8 fills=fill_2a5f7e61 textStyle="Footnote/Emphasized Italic" text="Footnote"
+      [TEXT] #6:55799 layout=layout_3b38a82b fills=fill_2a5f7e61 textStyle=Footnote/Italic text="Footnote"
+      [TEXT] #6:55800 layout=layout_ab4c55d7 fills=fill_2a5f7e61 textStyle=Footnote/Emphasized text="Footnote"
+      [TEXT] #6:55801 layout=layout_6ad219cb fills=fill_2a5f7e61 textStyle=Footnote/Regular text="Footnote"
+      [TEXT] #6:55802 layout=layout_738a9a52 fills=fill_2a5f7e61 textStyle="Subheadline/Emphaized Italic" text="Subheadline"
+      [TEXT] #6:55803 layout=layout_843bedd3 fills=fill_2a5f7e61 textStyle=Subheadline/Italic text="Subheadline"
+      [TEXT] #6:55804 layout=layout_a67d51ba fills=fill_2a5f7e61 textStyle=Subheadline/Emphasized text="Subheadline"
+      [TEXT] #6:55805 layout=layout_331e0f13 fills=fill_2a5f7e61 textStyle=Subheadline/Regular text="Subheadline"
+      [TEXT] #6:55806 layout=layout_d15e9c6f fills=fill_2a5f7e61 textStyle="Callout/Emphasized Italic" text="Callout"
+      [TEXT] #6:55807 layout=layout_ae60d1c9 fills=fill_2a5f7e61 textStyle=Callout/Italic text="Callout"
+      [TEXT] #6:55808 layout=layout_a04a5c6e fills=fill_2a5f7e61 textStyle=Callout/Emphasized text="Callout"
+      [TEXT] #6:55809 layout=layout_a29462cd fills=fill_2a5f7e61 textStyle=Callout/Regular text="Callout"
+      [TEXT] #6:55810 layout=layout_cbb68f44 fills=fill_2a5f7e61 textStyle="Body/Emphasized Italic" text="Body"
+      [TEXT] #6:55811 layout=layout_30be21c2 fills=fill_2a5f7e61 textStyle=Body/Italic text="Body"
+      [TEXT] #6:55812 layout=layout_0eb1914e fills=fill_2a5f7e61 textStyle=Body/Emphasized text="Body"
+      [TEXT] #6:55813 layout=layout_2a805d95 fills=fill_2a5f7e61 textStyle=Body/Regular text="Body"
+      [TEXT] #6:55814 layout=layout_307b6b02 fills=fill_2a5f7e61 textStyle=Headline/Italic text="Headline"
+      [TEXT] #6:55815 layout=layout_8c15ea47 fills=fill_2a5f7e61 textStyle=Headline/Regular text="Headline"
+      [TEXT] #6:55816 layout=layout_96c931bb fills=fill_2a5f7e61 textStyle=Title3/Emphasized text="Title3"
+      [TEXT] #6:55817 layout=layout_de3e6212 fills=fill_2a5f7e61 textStyle=Title3/Regular text="Title3"
+      [TEXT] #6:55818 layout=layout_2ba598a9 fills=fill_2a5f7e61 textStyle=Title2/Emphasized text="Title2"
+      [TEXT] #6:55819 layout=layout_99428ce7 fills=fill_2a5f7e61 textStyle=Title2/Regular text="Title2"
+      [TEXT] #6:55820 layout=layout_cfa516d3 fills=fill_2a5f7e61 textStyle=Title1/Emphasized text="Title1"
+      [TEXT] #6:55821 layout=layout_71d48390 fills=fill_2a5f7e61 textStyle=Title1/Regular text="Title1"
+      [TEXT] #6:55822 layout=layout_9ccdc4e2 fills=fill_2a5f7e61 textStyle="Large Title/Emphasized" text="LargeTitle"
+      [TEXT] #6:55823 layout=layout_981802a0 fills=fill_2a5f7e61 textStyle="Large Title/Regular" text="LargeTitle"
+    [GROUP] "Label Color" #224:56274 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":100,"y":143},"dimensions":{"width":155,"height":1439}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #0:3008 layout=layout_e1259cba fills=fill_34dc0314 textStyle="Caption2/Emphasized Italic" text="Caption2"
+      [TEXT] #0:3009 layout=layout_f7101ebe fills=fill_34dc0314 textStyle=Caption2/Italic text="Caption2"
+      [TEXT] #0:3010 layout=layout_cd4f2d0f fills=fill_34dc0314 textStyle=Caption2/Emphasized text="Caption2"
+      [TEXT] #0:3011 layout=layout_d784fb37 fills=fill_34dc0314 textStyle=Caption2/Regular text="Caption2"
+      [TEXT] #0:3012 layout=layout_2809d1fb fills=fill_34dc0314 textStyle="Caption1/Emphasized Italic" text="Caption1"
+      [TEXT] #0:3013 layout=layout_ab2a28ab fills=fill_34dc0314 textStyle=Caption1/Italic text="Caption1"
+      [TEXT] #0:3014 layout=layout_2e267093 fills=fill_34dc0314 textStyle=Caption1/Emphasized text="Caption1"
+      [TEXT] #0:3015 layout=layout_fa661e4a fills=fill_34dc0314 textStyle=Caption1/Regular text="Caption1"
+      [TEXT] #0:3016 layout=layout_d6aa73f8 fills=fill_34dc0314 textStyle="Footnote/Emphasized Italic" text="Footnote"
+      [TEXT] #0:3017 layout=layout_3b38a82b fills=fill_34dc0314 textStyle=Footnote/Italic text="Footnote"
+      [TEXT] #0:3018 layout=layout_ab4c55d7 fills=fill_34dc0314 textStyle=Footnote/Emphasized text="Footnote"
+      [TEXT] #0:3019 layout=layout_6ad219cb fills=fill_34dc0314 textStyle=Footnote/Regular text="Footnote"
+      [TEXT] #0:3020 layout=layout_738a9a52 fills=fill_34dc0314 textStyle="Subheadline/Emphaized Italic" text="Subheadline"
+      [TEXT] #0:3021 layout=layout_843bedd3 fills=fill_34dc0314 textStyle=Subheadline/Italic text="Subheadline"
+      [TEXT] #0:3022 layout=layout_a67d51ba fills=fill_34dc0314 textStyle=Subheadline/Emphasized text="Subheadline"
+      [TEXT] #0:3023 layout=layout_331e0f13 fills=fill_34dc0314 textStyle=Subheadline/Regular text="Subheadline"
+      [TEXT] #0:3024 layout=layout_d15e9c6f fills=fill_34dc0314 textStyle="Callout/Emphasized Italic" text="Callout"
+      [TEXT] #0:3025 layout=layout_ae60d1c9 fills=fill_34dc0314 textStyle=Callout/Italic text="Callout"
+      [TEXT] #0:3026 layout=layout_a04a5c6e fills=fill_34dc0314 textStyle=Callout/Emphasized text="Callout"
+      [TEXT] #0:3027 layout=layout_a29462cd fills=fill_34dc0314 textStyle=Callout/Regular text="Callout"
+      [TEXT] #0:3028 layout=layout_cbb68f44 fills=fill_34dc0314 textStyle="Body/Emphasized Italic" text="Body"
+      [TEXT] #0:3029 layout=layout_30be21c2 fills=fill_34dc0314 textStyle=Body/Italic text="Body"
+      [TEXT] #0:3030 layout=layout_0eb1914e fills=fill_34dc0314 textStyle=Body/Emphasized text="Body"
+      [TEXT] #0:3031 layout=layout_2a805d95 fills=fill_34dc0314 textStyle=Body/Regular text="Body"
+      [TEXT] #0:3032 layout=layout_307b6b02 fills=fill_34dc0314 textStyle=Headline/Italic text="Headline"
+      [TEXT] #0:3033 layout=layout_8c15ea47 fills=fill_34dc0314 textStyle=Headline/Regular text="Headline"
+      [TEXT] #0:3034 layout=layout_96c931bb fills=fill_34dc0314 textStyle=Title3/Emphasized text="Title3"
+      [TEXT] #0:3035 layout=layout_de3e6212 fills=fill_34dc0314 textStyle=Title3/Regular text="Title3"
+      [TEXT] #0:3036 layout=layout_2ba598a9 fills=fill_34dc0314 textStyle=Title2/Emphasized text="Title2"
+      [TEXT] #0:3037 layout=layout_99428ce7 fills=fill_34dc0314 textStyle=Title2/Regular text="Title2"
+      [TEXT] #0:3038 layout=layout_cfa516d3 fills=fill_34dc0314 textStyle=Title1/Emphasized text="Title1"
+      [TEXT] #0:3039 layout=layout_71d48390 fills=fill_34dc0314 textStyle=Title1/Regular text="Title1"
+      [TEXT] #0:3040 layout=layout_9ccdc4e2 fills=fill_34dc0314 textStyle="Large Title/Emphasized" text="LargeTitle"
+      [TEXT] #0:3041 layout=layout_981802a0 fills=fill_34dc0314 textStyle="Large Title/Regular" text="LargeTitle"
+    [GROUP] "Labels — — — — — — — — — — — —" #224:56284 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":100,"y":100},"dimensions":{"width":852,"height":16}} borderRadius="0px 0px 0px 0px"
+      [TEXT] #0:3043 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":720,"y":0},"dimensions":{"width":132,"height":16}} fills=Labels/Primary textStyle=Caption1/Regular text="Quaternary Label Color"
+      [TEXT] #0:3044 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":480,"y":0},"dimensions":{"width":111,"height":16}} fills=Labels/Primary textStyle=Caption1/Regular text="Tertiary Label Color"
+      [TEXT] #0:3045 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":240,"y":0},"dimensions":{"width":129,"height":16}} fills=Labels/Primary textStyle=Caption1/Regular text="Secondary Label Color"
+      [TEXT] #0:3046 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":0,"y":0},"dimensions":{"width":65,"height":16}} fills=Labels/Primary textStyle=Caption1/Regular text="Label Color"
+  [INSTANCE] "Header" #544:193115 layout={"mode":"column","alignItems":"stretch","gap":"32px","sizing":{"horizontal":"fixed","vertical":"hug"},"dimensions":{"width":1651}} componentId=507:29149 componentProperties={"Link 2":"","Show Link 2":false,"Show Link 1":true,"Description":"Apple provides two typeface families that support an extensive range of weights, sizes, styles, and languages: San Francisco and New York, which you can download here. The system defines a set of typographic attributes — called text styles — that work with both typeface families. Dynamic Type is a system-level feature that lets people adjust the size of visible text on their device to ensure readability and comfort. ","Component name":"Typography","Show Description":true,"Link 1":"Human Interface Guidelines 􀄫 Typography"}
+    [TEXT] #I544:193115;507:29150 layout={"mode":"none","sizing":{"horizontal":"fill","vertical":"fixed"},"dimensions":{"height":60}} fills=fill_34dc0314 componentPropertyReferences={"text":"Component name"} textStyle={"fontFamily":"SF Pro","fontStyle":"Bold","fontWeight":700,"fontSize":56,"lineHeight":"60px","letterSpacing":"-0.005em","textAlignHorizontal":"LEFT","textAlignVertical":"CENTER"} text="Typography"
+    [TEXT] #I544:193115;507:29151 layout={"mode":"none","sizing":{"horizontal":"fill","vertical":"hug"}} fills=fill_34dc0314 componentPropertyReferences={"visible":"Show Description","text":"Description"} textStyle=style_40853cb8 text="Apple provides two typeface families that support an extensive range of weights, sizes, styles, and languages: San Francisco and New York, which you can download {ts1}[here](https://developer.apple.com/fonts/){/ts1}. The system defines a set of typographic attributes — called text styles — that work with both typeface families. Dynamic Type is a system-level feature that lets people adjust the size of visible text on their device to ensure readability and comfort. "
+    [FRAME] "Frame" #I544:193115;540:190144 layout={"mode":"column","alignSelf":"stretch","padding":"8px 0px","gap":"16px","sizing":{"horizontal":"fill","vertical":"hug"}}
+      [TEXT] #I544:193115;507:29154 layout={"mode":"none","sizing":{"horizontal":"fill","vertical":"fixed"},"dimensions":{"height":34}} fills=["#0088FF"] componentPropertyReferences={"visible":"Show Link 1","text":"Link 1"} textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":28,"lineHeight":"34px","textAlignHorizontal":"LEFT","textAlignVertical":"CENTER","hyperlink":{"type":"URL","url":"https://developer.apple.com/design/human-interface-guidelines/typography"}} text="Human Interface Guidelines 􀄫 Typography"

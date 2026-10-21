@@ -1,0 +1,1573 @@
+NAME: "iOS and iPadOS 26 (Community)"
+
+GLOBAL_VARS:
+fill_8690abb2:
+  - '#AAAAAA'
+fill_62008434:
+  - rgba(0, 0, 0, 0.4)
+fill_ebaef1a5:
+  - '#7C7C7C'
+  - rgba(28, 28, 28, 0.9)
+effect_218dee37:
+  backdropFilter: blur(50px)
+fill_4cd5ff90:
+  - rgba(0, 0, 0, 0.6)
+fill_24288252:
+  - rgba(0, 0, 0, 0.41)
+fill_9e0322aa:
+  - rgba(0, 0, 0, 0.26)
+fill_19660d4e:
+  - rgba(0, 0, 0, 0.02)
+fill_80687602:
+  - rgba(255, 255, 255, 0.75)
+effect_b436d2d2:
+  backdropFilter: blur(25px)
+layout_032f642d:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 380
+    y: 20
+  dimensions:
+    width: 100
+    height: 100
+fill_fc0466cf:
+  - rgba(255, 255, 255, 0.84)
+  - rgba(255, 255, 255, 0.34)
+layout_bcddee50:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 260
+    y: 20
+  dimensions:
+    width: 100
+    height: 100
+fill_656755c8:
+  - rgba(255, 255, 255, 0.6)
+  - rgba(255, 255, 255, 0.25)
+layout_20fbc675:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 140
+    y: 20
+  dimensions:
+    width: 100
+    height: 100
+fill_3f76c788:
+  - rgba(255, 255, 255, 0.4)
+  - rgba(255, 255, 255, 0.05)
+layout_4c8c9926:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 20
+    y: 20
+  dimensions:
+    width: 100
+    height: 100
+fill_7d710495:
+  - rgba(255, 255, 255, 0.03)
+  - rgba(255, 255, 255, 0.07)
+layout_81c62857:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 0
+  dimensions:
+    width: 100
+    height: 100
+layout_aefb1341:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 60
+    y: 60
+  dimensions:
+    width: 500
+    height: 320
+layout_bf5a86c0:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 0
+  dimensions:
+    width: 500
+    height: 320
+layout_45888dbd:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 80
+    y: 322
+  dimensions:
+    width: 54
+    height: 13
+style_31db97df:
+  fontFamily: SF Pro
+  fontStyle: Semibold
+  fontWeight: 590
+  fontSize: 11
+  lineHeight: 13px
+  textAlignHorizontal: LEFT
+  textAlignVertical: TOP
+fill_658ab2fa:
+  - '#FFFFFF'
+layout_7f7d6c61:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 60
+    y: 313
+  dimensions:
+    width: 500
+    height: 0.5
+fill_aaa5ba5c:
+  - '#1A1A1A'
+layout_c12e504e:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 390
+    y: 214
+  dimensions:
+    width: 104
+    height: 13
+layout_be03f066:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 390
+    y: 164
+  dimensions:
+    width: 120
+    height: 13
+layout_22d4565e:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 390
+    y: 114
+  dimensions:
+    width: 104
+    height: 13
+layout_8724f4b5:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 340
+    y: 79
+  dimensions:
+    width: 22
+    height: 13
+layout_24ff0780:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 340
+    y: 200
+  dimensions:
+    width: 40
+    height: 40
+Vibrant Fills/Dark/Vibrant Tertiary:
+  - '#121212'
+layout_d60fa218:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 340
+    y: 150
+  dimensions:
+    width: 40
+    height: 40
+layout_7f977e8b:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 340
+    y: 100
+  dimensions:
+    width: 40
+    height: 40
+Vibrant Fills/Dark/Vibrant Primary:
+  - '#333333'
+layout_f58cbaac:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 80
+    y: 79
+  dimensions:
+    width: 36
+    height: 13
+layout_e8f28a22:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 130
+    y: 215
+  dimensions:
+    width: 111
+    height: 13
+Vibrant Labels/Dark/Vibrant Tertiary:
+  - '#404040'
+layout_bd5711d0:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 130
+    y: 165
+  dimensions:
+    width: 127
+    height: 13
+Vibrant Labels/Dark/Vibrant Secondary:
+  - '#999999'
+layout_5c5b8b8c:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 130
+    y: 115
+  dimensions:
+    width: 111
+    height: 13
+Vibrant Labels/Dark/Vibrant Primary:
+  - '#FFFFFF'
+layout_e7cdcebc:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 80
+    y: 200
+  dimensions:
+    width: 40
+    height: 40
+layout_121e1e1f:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 80
+    y: 150
+  dimensions:
+    width: 40
+    height: 40
+layout_1cf06c9d:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 80
+    y: 100
+  dimensions:
+    width: 40
+    height: 40
+layout_091bcddb:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 130
+    y: 265
+  dimensions:
+    width: 135
+    height: 13
+Vibrant Labels/Dark/Vibrant Quaternary:
+  - '#262626'
+layout_cb588cd6:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 80
+    y: 250
+  dimensions:
+    width: 40
+    height: 40
+fill_34dc0314:
+  - '#000000'
+fill_40f9bf4f:
+  - rgba(0, 0, 0, 0.12)
+Vibrant Fills/Light/Vibrant Tertiary:
+  - '#EDEDED'
+Vibrant Fills/Light/Vibrant Secondary:
+  - '#E0E0E0'
+Vibrant Fills/Light/Vibrant Primary:
+  - '#CCCCCC'
+Vibrant Labels/Light/Vibrant Tertiary:
+  - rgba(61, 61, 61, 0.5)
+  - rgba(127, 127, 127, 0.4)
+Vibrant Labels/Light/Vibrant Secondary:
+  - '#3D3D3D'
+  - rgba(127, 127, 127, 0.5)
+Vibrant Labels/Light/Vibrant Primary:
+  - '#000000'
+Vibrant Labels/Light/Vibrant Quaternary:
+  - rgba(61, 61, 61, 0.5)
+  - rgba(127, 127, 127, 0.2)
+fill_80258379:
+  - '#9747FF'
+effect_9257e533:
+  backdropFilter: blur(5px)
+layout_67fce2fb:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 0
+  dimensions:
+    width: 200
+    height: 200
+effect_785970ec:
+  backdropFilter: blur(30px)
+layout_cd6ed92e:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 20
+    y: 240
+  dimensions:
+    width: 200
+    height: 200
+layout_1c30b18f:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 20
+    y: 20
+  dimensions:
+    width: 200
+    height: 200
+layout_617da2ef:
+  mode: none
+  sizing:
+    horizontal: fill
+    vertical: fill
+layout_d07911e3:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 0
+  dimensions:
+    width: 160
+    height: 160
+fill_207bfefe:
+  - rgba(255, 255, 255, 0.06)
+  - rgba(0, 0, 0, 0.8)
+  - '#CCCCCC'
+effect_13835b08:
+  boxShadow: 0px 8px 40px 0px rgba(0, 0, 0, 0.12)
+fill_5e7588a8:
+  - rgba(250, 250, 250, 0.7)
+  - '#262626'
+fill_af0b0cfd:
+  - rgba(255, 255, 255, 0.06)
+  - rgba(0, 0, 0, 0.6)
+  - '#CCCCCC'
+fill_a9de6e35:
+  - rgba(245, 245, 245, 0.6)
+  - '#262626'
+layout_0171b919:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 0
+  dimensions:
+    width: 48
+    height: 48
+fill_69389439:
+  - '#0091FF'
+  - '#999999'
+  - '#FFFFFF'
+  - rgba(255, 255, 255, 0.75)
+fill_4f7f82ae:
+  - rgba(255, 255, 255, 0.06)
+  - rgba(0, 0, 0, 0.6)
+  - rgba(204, 204, 204, 0.5)
+fill_d316f320:
+  - rgba(0, 0, 0, 0.2)
+fill_9501dffe:
+  - '#F7F7F7'
+  - '#DDDDDD'
+  - rgba(255, 255, 255, 0.65)
+layout_138a5e54:
+  mode: column
+  padding: 30px 10px
+  alignItems: stretch
+  gap: 50px
+  sizing:
+    horizontal: fixed
+    vertical: fixed
+  dimensions:
+    width: 1000
+    height: 860
+layout_0d80f04d:
+  mode: row
+  alignItems: stretch
+  sizing:
+    horizontal: fixed
+    vertical: fixed
+  position: absolute
+  locationRelativeToParent:
+    x: 0
+    y: 0
+  dimensions:
+    width: 600
+    height: 860
+layout_24d13a26:
+  mode: none
+  sizing:
+    horizontal: fixed
+    vertical: fixed
+  dimensions:
+    width: 80
+    height: 48
+layout_de6bf766:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 0
+  dimensions:
+    width: 80
+    height: 48
+layout_46f0edc3:
+  mode: none
+  sizing:
+    horizontal: fixed
+    vertical: hug
+  dimensions:
+    width: 270
+style_93a79d2b:
+  fontFamily: SF Pro
+  fontStyle: Medium
+  fontWeight: 510
+  fontSize: 17
+  textAlignHorizontal: LEFT
+  textAlignVertical: CENTER
+layout_8ce81c93:
+  mode: none
+  sizing:
+    horizontal: fill
+    vertical: fixed
+  dimensions:
+    height: 180
+layout_a741192f:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 0
+  dimensions:
+    width: 585
+    height: 180
+layout_97c09b80:
+  mode: none
+  sizing:
+    horizontal: fill
+    vertical: fixed
+  dimensions:
+    height: 300
+layout_4a87b6d3:
+  mode: none
+  sizing: {}
+  locationRelativeToParent:
+    x: 0
+    y: 0
+  dimensions:
+    width: 585
+    height: 300
+
+ELEMENTS:
+EL-b73a15a5:
+  type: FRAME
+  layout:
+    mode: none
+    sizing: {}
+    dimensions:
+      width: 620
+      height: 440
+EL-658f080a:
+  type: INSTANCE
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 0
+      y: 0
+    dimensions:
+      width: 620
+      height: 440
+  fills:
+    - type: IMAGE
+      imageRef: 37e814e0e37fff7e40c488ab7c248738f856e2c3
+      scaleMode: FILL
+      objectFit: cover
+      isBackground: false
+      imageDownloadArguments:
+        needsCropping: false
+        requiresImageDimensions: false
+  componentId: 0:8808
+EL-ccabaa75:
+  type: INSTANCE
+  layout: layout_aefb1341
+  borderRadius: 20px
+  componentId: 510:79104
+EL-ed707dcc:
+  type: TEXT
+  layout: layout_45888dbd
+  text: Separator
+  textStyle: style_31db97df
+  fills: fill_658ab2fa
+EL-7add299e:
+  type: RECTANGLE
+  layout: layout_7f7d6c61
+  fills: fill_aaa5ba5c
+  borderRadius: 10px
+EL-995d7a65:
+  type: TEXT
+  layout: layout_c12e504e
+  text: Vibrant Tertiary Fill
+  textStyle: style_31db97df
+  fills: fill_658ab2fa
+EL-ec54997c:
+  type: TEXT
+  layout: layout_be03f066
+  text: Vibrant Secondary Fill
+  textStyle: style_31db97df
+  fills: fill_658ab2fa
+EL-264d7d92:
+  type: TEXT
+  layout: layout_22d4565e
+  text: Vibrant Primary Fill
+  textStyle: style_31db97df
+  fills: fill_658ab2fa
+EL-32d4b362:
+  type: TEXT
+  layout: layout_8724f4b5
+  text: Fills
+  textStyle: style_31db97df
+  fills: fill_658ab2fa
+EL-e0609912:
+  type: RECTANGLE
+  layout: layout_24ff0780
+  fills: Vibrant Fills/Dark/Vibrant Tertiary
+  borderRadius: 10px
+EL-e58638a6:
+  type: RECTANGLE
+  layout: layout_d60fa218
+  fills: Vibrant Fills/Dark/Vibrant Tertiary
+  borderRadius: 10px
+EL-080dc972:
+  type: RECTANGLE
+  layout: layout_7f977e8b
+  fills: Vibrant Fills/Dark/Vibrant Primary
+  borderRadius: 10px
+EL-9eac4bbb:
+  type: TEXT
+  layout: layout_f58cbaac
+  text: Labels
+  textStyle: style_31db97df
+  fills: fill_658ab2fa
+EL-5bfb62a1:
+  type: TEXT
+  layout: layout_e8f28a22
+  text: Vibrant Tertiary Text
+  textStyle: style_31db97df
+  fills: Vibrant Labels/Dark/Vibrant Tertiary
+EL-f333d028:
+  type: TEXT
+  layout: layout_bd5711d0
+  text: Vibrant Secondary Text
+  textStyle: style_31db97df
+  fills: Vibrant Labels/Dark/Vibrant Secondary
+EL-1eb3910b:
+  type: TEXT
+  layout: layout_5c5b8b8c
+  text: Vibrant Primary Text
+  textStyle: style_31db97df
+  fills: Vibrant Labels/Dark/Vibrant Primary
+EL-7b5bf1c2:
+  type: RECTANGLE
+  layout: layout_e7cdcebc
+  fills: Vibrant Labels/Dark/Vibrant Tertiary
+  borderRadius: 10px
+EL-d2738a0f:
+  type: RECTANGLE
+  layout: layout_121e1e1f
+  fills: Vibrant Labels/Dark/Vibrant Secondary
+  borderRadius: 10px
+EL-e9dd7750:
+  type: RECTANGLE
+  layout: layout_1cf06c9d
+  fills: Vibrant Labels/Dark/Vibrant Primary
+  borderRadius: 10px
+EL-9a8d00e5:
+  type: INSTANCE
+  layout: layout_aefb1341
+  borderRadius: 20px
+  componentId: 510:79112
+EL-8e5169bf:
+  type: INSTANCE
+  layout: layout_aefb1341
+  borderRadius: 20px
+  componentId: 510:79110
+EL-ba1a3f2a:
+  type: TEXT
+  layout: layout_091bcddb
+  text: Vibrant Quarternary Text
+  textStyle: style_31db97df
+  fills: Vibrant Labels/Dark/Vibrant Quaternary
+EL-3fa24d66:
+  type: RECTANGLE
+  layout: layout_cb588cd6
+  fills: Vibrant Labels/Dark/Vibrant Quaternary
+  borderRadius: 10px
+EL-f382d307:
+  type: INSTANCE
+  layout: layout_aefb1341
+  borderRadius: 20px
+  componentId: 510:79108
+EL-07a904b7:
+  type: TEXT
+  layout: layout_45888dbd
+  text: Separator
+  textStyle: style_31db97df
+  fills: fill_34dc0314
+EL-0239d89b:
+  type: RECTANGLE
+  layout: layout_7f7d6c61
+  fills: fill_40f9bf4f
+  borderRadius: 10px
+EL-06ccf2b4:
+  type: TEXT
+  layout: layout_c12e504e
+  text: Vibrant Tertiary Fill
+  textStyle: style_31db97df
+  fills: fill_34dc0314
+EL-882622f1:
+  type: TEXT
+  layout: layout_be03f066
+  text: Vibrant Secondary Fill
+  textStyle: style_31db97df
+  fills: fill_34dc0314
+EL-2028cf2e:
+  type: TEXT
+  layout: layout_22d4565e
+  text: Vibrant Primary Fill
+  textStyle: style_31db97df
+  fills: fill_34dc0314
+EL-e20f3a0f:
+  type: TEXT
+  layout: layout_8724f4b5
+  text: Fills
+  textStyle: style_31db97df
+  fills: fill_34dc0314
+EL-a5c59020:
+  type: RECTANGLE
+  layout: layout_24ff0780
+  fills: Vibrant Fills/Light/Vibrant Tertiary
+  borderRadius: 10px
+EL-6e2bb4fd:
+  type: RECTANGLE
+  layout: layout_d60fa218
+  fills: Vibrant Fills/Light/Vibrant Secondary
+  borderRadius: 10px
+EL-d247d387:
+  type: RECTANGLE
+  layout: layout_7f977e8b
+  fills: Vibrant Fills/Light/Vibrant Primary
+  borderRadius: 10px
+EL-91865fd2:
+  type: TEXT
+  layout: layout_f58cbaac
+  text: Labels
+  textStyle: style_31db97df
+  fills: fill_34dc0314
+EL-684b1476:
+  type: TEXT
+  layout: layout_e8f28a22
+  text: Vibrant Tertiary Text
+  textStyle: style_31db97df
+  fills: Vibrant Labels/Light/Vibrant Tertiary
+EL-a6e94428:
+  type: TEXT
+  layout: layout_bd5711d0
+  text: Vibrant Secondary Text
+  textStyle: style_31db97df
+  fills: Vibrant Labels/Light/Vibrant Secondary
+EL-1be47bc5:
+  type: TEXT
+  layout: layout_5c5b8b8c
+  text: Vibrant Primary Text
+  textStyle: style_31db97df
+  fills: Vibrant Labels/Light/Vibrant Primary
+EL-872d15ca:
+  type: RECTANGLE
+  layout: layout_e7cdcebc
+  fills: Vibrant Labels/Light/Vibrant Tertiary
+  borderRadius: 10px
+EL-cd2fe8cf:
+  type: RECTANGLE
+  layout: layout_121e1e1f
+  fills:
+    - rgba(0, 0, 0, 0.4)
+    - rgba(128, 128, 128, 0.7)
+  borderRadius: 10px
+EL-77c690b0:
+  type: RECTANGLE
+  layout: layout_1cf06c9d
+  fills: fill_34dc0314
+  borderRadius: 10px
+EL-e8a42385:
+  type: RECTANGLE
+  layout: layout_67fce2fb
+  fills: fill_34dc0314
+  effects: effect_785970ec
+  opacity: 0.8999999761581421
+EL-d0202107:
+  type: COMPONENT
+  layout:
+    mode: row
+    alignItems: stretch
+    sizing:
+      horizontal: fixed
+      vertical: fixed
+    dimensions:
+      width: 600
+      height: 20
+EL-d199a456:
+  type: RECTANGLE
+  layout: layout_617da2ef
+  fills:
+    - '#CCCCCC'
+EL-5f3516bd:
+  type: RECTANGLE
+  layout: layout_617da2ef
+  fills: fill_658ab2fa
+EL-d7c41188:
+  type: RECTANGLE
+  layout: layout_617da2ef
+  fills:
+    - '#F9DF1B'
+EL-63f84718:
+  type: RECTANGLE
+  layout: layout_617da2ef
+  fills:
+    - '#FD7113'
+EL-e6e20302:
+  type: RECTANGLE
+  layout: layout_617da2ef
+  fills:
+    - '#D30000'
+EL-c25602a5:
+  type: RECTANGLE
+  layout: layout_617da2ef
+  fills:
+    - '#333333'
+EL-4dac909f:
+  type: RECTANGLE
+  layout: layout_617da2ef
+  fills: fill_34dc0314
+EL-48bea0ea:
+  type: COMPONENT_SET
+  layout:
+    mode: none
+    sizing: {}
+    dimensions:
+      width: 400
+      height: 200
+  fills: fill_8690abb2
+  strokes: fill_62008434
+  strokeWeight: 1px
+  strokeDashes:
+    - 10
+    - 5
+EL-da9dce7d:
+  type: COMPONENT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 210
+      y: 20
+    dimensions:
+      width: 160
+      height: 160
+EL-0b00eed4:
+  type: FRAME
+  layout: layout_d07911e3
+  borderRadius: 34px
+EL-588cc829:
+  type: COMPONENT
+  layout:
+    mode: none
+    sizing: {}
+    locationRelativeToParent:
+      x: 20
+      y: 20
+    dimensions:
+      width: 160
+      height: 160
+EL-36690ee2:
+  type: FRAME
+  layout: layout_0171b919
+  fills: fill_69389439
+  effects: effect_13835b08
+  borderRadius: 1000px
+EL-f1bbbde9:
+  type: FRAME
+  layout: layout_0171b919
+  borderRadius: 296px
+EL-1636a092:
+  type: RECTANGLE
+  layout: layout_617da2ef
+  fills:
+    - '#808080'
+EL-cb6ff5cb:
+  type: FRAME
+  layout:
+    mode: row
+    alignSelf: stretch
+    alignItems: center
+    gap: 25px
+    sizing:
+      horizontal: fill
+      vertical: hug
+EL-41c19056:
+  type: FRAME
+  layout:
+    mode: row
+    padding: 0px 30px
+    gap: 20px
+    sizing:
+      horizontal: fixed
+      vertical: hug
+    dimensions:
+      width: 645
+EL-7965946f:
+  type: INSTANCE
+  layout: layout_24d13a26
+  componentId: 5426:6767
+EL-ce35bc01:
+  type: FRAME
+  layout: layout_de6bf766
+  fills: fill_4f7f82ae
+  effects: effect_13835b08
+  opacity: 0.6700000166893005
+  borderRadius: 1000px
+EL-9e7b46b0:
+  type: FRAME
+  layout: layout_de6bf766
+  fills: fill_d316f320
+  borderRadius: 296px
+EL-c2bb9826:
+  type: TEXT
+  layout: layout_46f0edc3
+  text: Small UI\nDynamic \(Over dark background\)
+  textStyle: style_93a79d2b
+  fills: fill_658ab2fa
+EL-325cff8c:
+  type: INSTANCE
+  layout: layout_24d13a26
+  componentId: 5431:1764
+EL-ec332f4c:
+  type: FRAME
+  layout: layout_de6bf766
+  fills: fill_69389439
+  effects: effect_13835b08
+  borderRadius: 1000px
+EL-64e90333:
+  type: FRAME
+  layout: layout_de6bf766
+  borderRadius: 296px
+EL-3da1c847:
+  type: FRAME
+  layout:
+    mode: column
+    padding: 0px 30px
+    alignItems: stretch
+    gap: 10px
+    sizing:
+      horizontal: fixed
+      vertical: hug
+    dimensions:
+      width: 645
+EL-62b5dd74:
+  type: FRAME
+  layout: layout_a741192f
+  borderRadius: 34px
+EL-19d2c006:
+  type: FRAME
+  layout: layout_4a87b6d3
+  borderRadius: 34px
+EL-859ef22a:
+  type: INSTANCE
+  layout: layout_24d13a26
+  componentId: 5564:42811
+EL-0ca83a03:
+  type: FRAME
+  layout: layout_de6bf766
+  fills: fill_9501dffe
+  effects: effect_13835b08
+  borderRadius: 296px
+EL-327b738a:
+  type: TEXT
+  layout: layout_46f0edc3
+  text: Small UI\nDynamic \(Over light background\)
+  textStyle: style_93a79d2b
+  fills: fill_34dc0314
+EL-33d51684:
+  type: INSTANCE
+  layout: layout_24d13a26
+  componentId: 5564:42807
+
+COMPONENTS:
+510:78339:
+  id: 510:78339
+  key: 98ad2036554a7b5ab71a3a891174249d611bb229
+  name: Mode=Dark, Style=Chrome
+  componentSetId: 510:78330
+3095:22065:
+  id: 3095:22065
+  key: d28b747d41dce38d3f69b41f0ab086c83d49b7ca
+  name: Mode=IC - Dark, Style=Chrome
+  componentSetId: 510:78330
+510:78341:
+  id: 510:78341
+  key: f14f15147251fc2bf4cd202d41cb9e7586657847
+  name: Mode=Dark, Style=Thick
+  componentSetId: 510:78330
+3095:22066:
+  id: 3095:22066
+  key: 35e33bead1d05f749b1f43e793e8de6980f2ce4f
+  name: Mode=IC - Dark, Style=Thick
+  componentSetId: 510:78330
+510:78343:
+  id: 510:78343
+  key: 0887e92742534aec11a9d571be34b310558d6c78
+  name: Mode=Dark, Style=Regular
+  componentSetId: 510:78330
+3095:22067:
+  id: 3095:22067
+  key: 4c91fb5477736040431f9cc47811ad150be1f523
+  name: Mode=IC - Dark, Style=Regular
+  componentSetId: 510:78330
+510:78345:
+  id: 510:78345
+  key: 1b55af202cc17a5b45e48e8eeea3d6c364da06f4
+  name: Mode=Dark, Style=Thin
+  componentSetId: 510:78330
+3095:22068:
+  id: 3095:22068
+  key: 0b46c007ca7e81ce836c224325ef7c4190a09680
+  name: Mode=IC - Dark, Style=Thin
+  componentSetId: 510:78330
+510:78347:
+  id: 510:78347
+  key: cdae65cff684fb41f918050393712926fb4726a1
+  name: Mode=Dark, Style=Ultrathin
+  componentSetId: 510:78330
+3095:22069:
+  id: 3095:22069
+  key: a2b1094d893dfdb73666b5873240259c6583c8b5
+  name: Mode=IC - Dark, Style=Ultrathin
+  componentSetId: 510:78330
+510:78337:
+  id: 510:78337
+  key: bcd4c3e8d68e122186e7fe57a6f2c78ab3c41385
+  name: Mode=Light, Style=Chrome
+  componentSetId: 510:78330
+3095:22070:
+  id: 3095:22070
+  key: d206896100e9324b72fc692e80401ecaa363862e
+  name: Mode=IC - Light, Style=Chrome
+  componentSetId: 510:78330
+510:78335:
+  id: 510:78335
+  key: fad9bdb88837d5484a3671408fd0140c285baff3
+  name: Mode=Light, Style=Thick
+  componentSetId: 510:78330
+3095:22071:
+  id: 3095:22071
+  key: cd98f4603d305704786d650361a9e1346f868d47
+  name: Mode=IC - Light, Style=Thick
+  componentSetId: 510:78330
+510:78333:
+  id: 510:78333
+  key: 2e3beaf050f4d9905df7b14962810e8a1a56abec
+  name: Mode=Light, Style=Regular
+  componentSetId: 510:78330
+3095:22072:
+  id: 3095:22072
+  key: 1f6736550449721738dd2f2a37322ba4b9b85173
+  name: Mode=IC - Light, Style=Regular
+  componentSetId: 510:78330
+510:78331:
+  id: 510:78331
+  key: de6195697c30783a762576781fec62f37be67a79
+  name: Mode=Light, Style=Thin
+  componentSetId: 510:78330
+3095:22073:
+  id: 3095:22073
+  key: f92d2ed80fa0f2bf18d6bf3acdd452c5571636bc
+  name: Mode=IC - Light, Style=Thin
+  componentSetId: 510:78330
+510:78329:
+  id: 510:78329
+  key: 912f176390aaa307e907117ea57102dd7b5bbeb3
+  name: Mode=Light, Style=Ultrathin
+  componentSetId: 510:78330
+3095:22074:
+  id: 3095:22074
+  key: 580fa327ebc76ea72246df99b737503ac9920991
+  name: Mode=IC - Light, Style=Ultrathin
+  componentSetId: 510:78330
+510:79106:
+  id: 510:79106
+  key: 159a99355a4de458d929875f75d5ce98ad8447a4
+  name: Style=Chrome
+  componentSetId: 510:79105
+510:79108:
+  id: 510:79108
+  key: a2cee401d3bde7ca68c0a5761ea14a6c1d8893f7
+  name: Style=Thick
+  componentSetId: 510:79105
+510:79110:
+  id: 510:79110
+  key: 38f8a2a99ed15863ed57c509515048fd384922f0
+  name: Style=Regular
+  componentSetId: 510:79105
+510:79112:
+  id: 510:79112
+  key: 2649c558191f56a8e95fe5a7a495cb6f52ddac87
+  name: Style=Thin
+  componentSetId: 510:79105
+510:79104:
+  id: 510:79104
+  key: eb050ebf9658f735b050f3a7af334bf6b8a04821
+  name: Style=Ultrathin
+  componentSetId: 510:79105
+0:8808:
+  id: 0:8808
+  key: 7f2039d6cc02b86925e039dce3dedea466e59db9
+  name: Mode=Light
+  componentSetId: 5707:11471
+5661:26942:
+  id: 5661:26942
+  key: f2c9e374bbe130ff143a4005650dc21be88dd130
+  name: Edge=Leading
+  componentSetId: 5661:26943
+5661:26944:
+  id: 5661:26944
+  key: 80b5985834d1c022e9ae90366f8c886fbfe55218
+  name: Edge=Trailing
+  componentSetId: 5661:26943
+5661:26968:
+  id: 5661:26968
+  key: eca6e4a04dec5c4adc0855508adbc45e70d318bb
+  name: Edge=Bottom
+  componentSetId: 5661:26943
+5661:26964:
+  id: 5661:26964
+  key: f9dff8bacbcfa2f802c79da9ef1c354648553255
+  name: Edge=Top
+  componentSetId: 5661:26943
+5661:26984:
+  id: 5661:26984
+  key: 0b796531bfcbe687b0fdabbff6231672180af517
+  name: Edge=Bottom
+  componentSetId: 5661:26978
+5661:26986:
+  id: 5661:26986
+  key: 8943b3cbc76c5641cfe0af72e4634e6f9b2e3429
+  name: Edge=Top
+  componentSetId: 5661:26978
+5584:32149:
+  id: 5584:32149
+  key: 00c951a4b49db75752e90f5542b8220e9c3c479c
+  name: _Colors/Dark
+5584:32148:
+  id: 5584:32148
+  key: 54de76ee6ee507961f6938a8fd5bf16232a062b7
+  name: _Colors/Light
+5584:31860:
+  id: 5584:31860
+  key: 1400d6528f83c9d809a863fc3a25d09afbb3556b
+  name: Mode=Dark
+  componentSetId: 5584:32504
+5584:31859:
+  id: 5584:31859
+  key: 975f49db4fe899fa565e96d7654cb4fccfdce39b
+  name: Mode=Light
+  componentSetId: 5584:32504
+5584:31858:
+  id: 5584:31858
+  key: 655421096eec79ff1af4b6aad5cd32c06e1260ca
+  name: Mode=Dark
+  componentSetId: 5584:32503
+5584:31857:
+  id: 5584:31857
+  key: 24e411798e9d1dda92c475ed6c67b0ef14ba8932
+  name: Mode=Light
+  componentSetId: 5584:32503
+5431:1764:
+  id: 5431:1764
+  key: 41e2188dec86684899c0df22611861e626ac0a8b
+  name: Mode=Dark, State=Primary
+  componentSetId: 5584:32505
+5426:6767:
+  id: 5426:6767
+  key: 074e4f932b3791209d6f01d93c451234ebe81018
+  name: Mode=Dark, State=Default
+  componentSetId: 5584:32505
+5564:42807:
+  id: 5564:42807
+  key: 6891d263af1de0f832e6853d399fc23ebd12c222
+  name: Mode=Light, State=Primary
+  componentSetId: 5584:32505
+5564:42811:
+  id: 5564:42811
+  key: 8c56a5bb8c7de206f72c33216827326a09a162a1
+  name: Mode=Light, State=Default
+  componentSetId: 5584:32505
+5914:23547:
+  id: 5914:23547
+  key: 3111035584680e45b0fb64d2b572a9f65a60c569
+  name: Liquid Glass - Clear/Light
+507:29149:
+  id: 507:29149
+  key: e13ad208573b21c6fc331a20341d001b94901239
+  name: _Component Header
+
+COMPONENT_SETS:
+510:78330:
+  id: 510:78330
+  key: 77e13e7d8a818f53b86d310ec150d08865ef81e2
+  name: _Materials/Mode Options
+  description: ''
+510:79105:
+  id: 510:79105
+  key: d72e7426d2e8e656fe1be59e4a6c99cf061ff2c7
+  name: _Materials
+  description: ''
+5707:11471:
+  id: 5707:11471
+  key: 5a43100ca2a5f53f39e9ba10cd296d9b5db2dc60
+  name: Wallpapers - iPad
+  description: ''
+5661:26943:
+  id: 5661:26943
+  key: 7577919c36ecc2166ce6e27a3f516a881f83193d
+  name: Scroll Edge Effect - Soft
+  description: ''
+5661:26978:
+  id: 5661:26978
+  key: 9c47adab4dcd26cb3395d75fdb7b92d696c19e7b
+  name: Scroll Edge Effect - Hard
+  description: ''
+5584:32504:
+  id: 5584:32504
+  key: b93d91f7ae1dcd7344c3e854f597a0ae1b19a932
+  name: Liquid Glass - Regular - Large
+  description: ''
+5584:32503:
+  id: 5584:32503
+  key: 9228d8baf7e2fe9a610754ff9d5dd7d6d1e11762
+  name: Liquid Glass - Regular - Medium
+  description: ''
+5584:32505:
+  id: 5584:32505
+  key: 95dfa1f2828323dd1cdcd539c59ac0f980534ce0
+  name: Liquid Glass - Regular - Small
+  description: ''
+
+NODES:
+[CANVAS] "Materials" #215:105157
+  [COMPONENT_SET] "_Materials/Mode Options" #510:78330 layout={"mode":"none","sizing":{},"dimensions":{"width":620,"height":540}} fills=fill_8690abb2 strokes=fill_62008434 strokeWeight=1px strokeDashes=10,5 borderRadius=5px
+    [COMPONENT] "Mode=Dark, Style=Chrome" #510:78339 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":500,"y":140},"dimensions":{"width":100,"height":100}} fills=fill_ebaef1a5 effects=effect_218dee37
+    [COMPONENT] "Mode=IC - Dark, Style=Chrome" #3095:22065 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":500,"y":420},"dimensions":{"width":100,"height":100}} fills=fill_ebaef1a5 effects=effect_218dee37
+    [COMPONENT] "Mode=Dark, Style=Thick" #510:78341 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":380,"y":140},"dimensions":{"width":100,"height":100}} fills=fill_4cd5ff90 effects=effect_218dee37
+    [COMPONENT] "Mode=IC - Dark, Style=Thick" #3095:22066 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":380,"y":420},"dimensions":{"width":100,"height":100}} fills=fill_4cd5ff90 effects=effect_218dee37
+    [COMPONENT] "Mode=Dark, Style=Regular" #510:78343 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":260,"y":140},"dimensions":{"width":100,"height":100}} fills=fill_24288252 effects=effect_218dee37
+    [COMPONENT] "Mode=IC - Dark, Style=Regular" #3095:22067 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":260,"y":420},"dimensions":{"width":100,"height":100}} fills=fill_24288252 effects=effect_218dee37
+    [COMPONENT] "Mode=Dark, Style=Thin" #510:78345 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":140,"y":140},"dimensions":{"width":100,"height":100}} fills=fill_9e0322aa effects=effect_218dee37
+    [COMPONENT] "Mode=IC - Dark, Style=Thin" #3095:22068 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":140,"y":420},"dimensions":{"width":100,"height":100}} fills=fill_9e0322aa effects=effect_218dee37
+    [COMPONENT] "Mode=Dark, Style=Ultrathin" #510:78347 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":20,"y":140},"dimensions":{"width":100,"height":100}} fills=fill_19660d4e effects=effect_218dee37
+    [COMPONENT] "Mode=IC - Dark, Style=Ultrathin" #3095:22069 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":20,"y":420},"dimensions":{"width":100,"height":100}} fills=fill_19660d4e effects=effect_218dee37
+    [COMPONENT] "Mode=Light, Style=Chrome" #510:78337 layout={"mode":"column","alignItems":"center","sizing":{"horizontal":"fixed","vertical":"hug"},"locationRelativeToParent":{"x":500,"y":20},"dimensions":{"width":100}} fills=fill_80687602 effects=effect_b436d2d2
+    [COMPONENT] "Mode=IC - Light, Style=Chrome" #3095:22070 layout={"mode":"column","alignItems":"center","sizing":{"horizontal":"fixed","vertical":"hug"},"locationRelativeToParent":{"x":500,"y":300},"dimensions":{"width":100}} fills=fill_80687602 effects=effect_b436d2d2
+    [COMPONENT] "Mode=Light, Style=Thick" #510:78335 layout=layout_032f642d fills=fill_fc0466cf effects=effect_218dee37
+    [COMPONENT] "Mode=IC - Light, Style=Thick" #3095:22071 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":380,"y":300},"dimensions":{"width":100,"height":100}} fills=fill_fc0466cf effects=effect_218dee37
+    [COMPONENT] "Mode=Light, Style=Regular" #510:78333 layout=layout_bcddee50 fills=fill_656755c8 effects=effect_218dee37
+    [COMPONENT] "Mode=IC - Light, Style=Regular" #3095:22072 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":260,"y":300},"dimensions":{"width":100,"height":100}} fills=fill_656755c8 effects=effect_218dee37
+    [COMPONENT] "Mode=Light, Style=Thin" #510:78331 layout=layout_20fbc675 fills=fill_3f76c788 effects=effect_218dee37
+    [COMPONENT] "Mode=IC - Light, Style=Thin" #3095:22073 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":140,"y":300},"dimensions":{"width":100,"height":100}} fills=fill_3f76c788 effects=effect_218dee37
+    [COMPONENT] "Mode=Light, Style=Ultrathin" #510:78329 layout=layout_4c8c9926 fills=fill_7d710495 effects=effect_218dee37
+    [COMPONENT] "Mode=IC - Light, Style=Ultrathin" #3095:22074 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":20,"y":300},"dimensions":{"width":100,"height":100}} fills=fill_7d710495 effects=effect_218dee37
+  [COMPONENT_SET] "_Materials" #510:79105 layout={"mode":"none","sizing":{},"dimensions":{"width":620,"height":140}} fills=fill_8690abb2 strokes=fill_62008434 strokeWeight=1px strokeDashes=10,5 borderRadius=5px
+    [COMPONENT] "Style=Chrome" #510:79106 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":500,"y":20},"dimensions":{"width":100,"height":100}}
+      [INSTANCE] "Chrome" #510:79115 layout={"mode":"column","alignItems":"center","sizing":{"horizontal":"fixed","vertical":"hug"},"locationRelativeToParent":{"x":0,"y":0},"dimensions":{"width":100}} fills=fill_80687602 effects=effect_b436d2d2 componentId=510:78337
+    [COMPONENT] "Style=Thick" #510:79108 layout=layout_032f642d
+      [INSTANCE] "Thick" #510:79116 layout=layout_81c62857 fills=fill_fc0466cf effects=effect_218dee37 componentId=510:78335
+    [COMPONENT] "Style=Regular" #510:79110 layout=layout_bcddee50
+      [INSTANCE] "Regular" #510:79117 layout=layout_81c62857 fills=fill_656755c8 effects=effect_218dee37 componentId=510:78333
+    [COMPONENT] "Style=Thin" #510:79112 layout=layout_20fbc675
+      [INSTANCE] "Thin" #510:79118 layout=layout_81c62857 fills=fill_3f76c788 effects=effect_218dee37 componentId=510:78331
+    [COMPONENT] "Style=Ultrathin" #510:79104 layout=layout_4c8c9926
+      [INSTANCE] "Ultrathin" #510:79114 layout=layout_81c62857 fills=fill_7d710495 effects=effect_218dee37 componentId=510:78329
+  [FRAME] "Ultrathin - Dark" #224:56307 template=EL-b73a15a5
+    [INSTANCE] "Wallpaper" #510:82658 template=EL-658f080a
+    [INSTANCE] "Material" #510:82530 template=EL-ccabaa75
+      [INSTANCE] "_Materials/Mode Options" #I510:82530;510:79114 layout=layout_bf5a86c0 fills=fill_19660d4e effects=effect_218dee37 componentId=510:78347
+    [TEXT] #0:1910 template=EL-ed707dcc
+    [RECTANGLE] "System Background Primary Light" #0:1911 template=EL-7add299e
+    [TEXT] #0:1912 template=EL-995d7a65
+    [TEXT] #0:1913 template=EL-ec54997c
+    [TEXT] #0:1914 template=EL-264d7d92
+    [TEXT] #0:1915 template=EL-32d4b362
+    [RECTANGLE] "System Background Tertiary Light" #0:1916 template=EL-e0609912
+    [RECTANGLE] "System Background Secondary Light " #0:1917 template=EL-e58638a6
+    [RECTANGLE] "System Background Primary Light" #0:1918 template=EL-080dc972
+    [TEXT] #0:1919 template=EL-9eac4bbb
+    [TEXT] #0:1920 template=EL-5bfb62a1
+    [TEXT] #0:1921 template=EL-f333d028
+    [TEXT] #0:1922 template=EL-1eb3910b
+    [RECTANGLE] "System Background Tertiary Light" #0:1923 template=EL-7b5bf1c2
+    [RECTANGLE] "System Background Secondary Light " #0:1924 template=EL-d2738a0f
+    [RECTANGLE] "System Background Primary Light" #0:1925 template=EL-e9dd7750
+  [FRAME] "Thin - Dark" #224:56306 template=EL-b73a15a5
+    [INSTANCE] "Wallpaper" #510:82659 template=EL-658f080a
+    [INSTANCE] "Material" #510:82526 template=EL-9a8d00e5
+      [INSTANCE] "_Materials/Mode Options" #I510:82526;510:79118 layout=layout_bf5a86c0 fills=fill_9e0322aa effects=effect_218dee37 componentId=510:78345
+    [TEXT] #0:1876 template=EL-ed707dcc
+    [RECTANGLE] "System Background Primary Light" #0:1877 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":60,"y":306.92},"dimensions":{"width":500,"height":0.46}} fills=fill_aaa5ba5c borderRadius=10px
+    [TEXT] #0:1878 template=EL-995d7a65
+    [TEXT] #0:1879 template=EL-ec54997c
+    [TEXT] #0:1880 template=EL-264d7d92
+    [TEXT] #0:1881 template=EL-32d4b362
+    [RECTANGLE] "System Background Tertiary Light" #0:1882 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":340,"y":203.33},"dimensions":{"width":40,"height":36.67}} fills="Vibrant Fills/Dark/Vibrant Tertiary" borderRadius=10px
+    [RECTANGLE] "System Background Secondary Light " #0:1883 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":340,"y":157.5},"dimensions":{"width":40,"height":36.67}} fills="Vibrant Fills/Dark/Vibrant Tertiary" borderRadius=10px
+    [RECTANGLE] "System Background Primary Light" #0:1884 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":340,"y":111.67},"dimensions":{"width":40,"height":36.67}} fills="Vibrant Fills/Dark/Vibrant Primary" borderRadius=10px
+    [TEXT] #0:1885 template=EL-9eac4bbb
+    [TEXT] #0:1886 template=EL-5bfb62a1
+    [TEXT] #0:1887 template=EL-f333d028
+    [TEXT] #0:1888 template=EL-1eb3910b
+    [RECTANGLE] "System Background Tertiary Light" #0:1889 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":80,"y":203.33},"dimensions":{"width":40,"height":36.67}} fills="Vibrant Labels/Dark/Vibrant Tertiary" borderRadius=10px
+    [RECTANGLE] "System Background Secondary Light " #0:1890 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":80,"y":157.5},"dimensions":{"width":40,"height":36.67}} fills="Vibrant Labels/Dark/Vibrant Secondary" borderRadius=10px
+    [RECTANGLE] "System Background Primary Light" #0:1891 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":80,"y":111.67},"dimensions":{"width":40,"height":36.67}} fills="Vibrant Labels/Dark/Vibrant Primary" borderRadius=10px
+  [FRAME] "Regular (Default) - Dark" #224:56305 template=EL-b73a15a5
+    [INSTANCE] "Wallpaper" #510:82660 template=EL-658f080a
+    [INSTANCE] "Material" #510:82523 template=EL-8e5169bf
+      [INSTANCE] "_Materials/Mode Options" #I510:82523;510:79117 layout=layout_bf5a86c0 fills=fill_24288252 effects=effect_218dee37 componentId=510:78343
+    [TEXT] #0:1838 template=EL-ed707dcc
+    [RECTANGLE] "System Background Primary Light" #0:1839 template=EL-7add299e
+    [TEXT] #0:1840 template=EL-995d7a65
+    [TEXT] #0:1841 template=EL-ec54997c
+    [TEXT] #0:1842 template=EL-264d7d92
+    [TEXT] #0:1843 template=EL-32d4b362
+    [RECTANGLE] "System Background Tertiary Light" #0:1844 template=EL-e0609912
+    [RECTANGLE] "System Background Secondary Light " #0:1845 template=EL-e58638a6
+    [RECTANGLE] "System Background Primary Light" #0:1846 template=EL-080dc972
+    [TEXT] #0:1847 template=EL-9eac4bbb
+    [TEXT] #0:1848 template=EL-5bfb62a1
+    [TEXT] #0:1849 template=EL-ba1a3f2a
+    [TEXT] #0:1850 template=EL-f333d028
+    [TEXT] #0:1851 template=EL-1eb3910b
+    [RECTANGLE] "System Background Tertiary Light" #0:1852 template=EL-7b5bf1c2
+    [RECTANGLE] "System Background Tertiary Light" #0:1853 template=EL-3fa24d66
+    [RECTANGLE] "System Background Secondary Light " #0:1854 template=EL-d2738a0f
+    [RECTANGLE] "System Background Primary Light" #0:1855 template=EL-e9dd7750
+  [FRAME] "Thick - Dark" #224:56300 template=EL-b73a15a5
+    [INSTANCE] "Wallpaper" #510:82613 template=EL-658f080a
+    [INSTANCE] "Material" #510:79123 template=EL-f382d307
+      [INSTANCE] "Thick" #I510:79123;510:79116 layout=layout_bf5a86c0 fills=fill_4cd5ff90 effects=effect_218dee37 componentId=510:78341
+    [TEXT] #0:1796 template=EL-ed707dcc
+    [RECTANGLE] "System Background Primary Light" #57:56699 template=EL-7add299e
+    [TEXT] #0:1797 template=EL-995d7a65
+    [TEXT] #0:1798 template=EL-ec54997c
+    [TEXT] #0:1799 template=EL-264d7d92
+    [TEXT] #0:1800 template=EL-32d4b362
+    [RECTANGLE] "System Background Tertiary Light" #0:1801 template=EL-e0609912
+    [RECTANGLE] "System Background Secondary Light " #0:1802 template=EL-e58638a6
+    [RECTANGLE] "System Background Primary Light" #0:1803 template=EL-080dc972
+    [TEXT] #0:1804 template=EL-9eac4bbb
+    [TEXT] #0:1805 template=EL-5bfb62a1
+    [TEXT] #0:1806 template=EL-ba1a3f2a
+    [TEXT] #0:1807 template=EL-f333d028
+    [TEXT] #0:1808 template=EL-1eb3910b
+    [RECTANGLE] "System Background Tertiary Light" #0:1809 template=EL-7b5bf1c2
+    [RECTANGLE] "System Background Tertiary Light" #0:1810 template=EL-3fa24d66
+    [RECTANGLE] "System Background Secondary Light " #0:1811 template=EL-d2738a0f
+    [RECTANGLE] "System Background Primary Light" #0:1812 template=EL-e9dd7750
+  [FRAME] "Ultrathin - Light" #224:56301 template=EL-b73a15a5
+    [INSTANCE] "Wallpaper" #510:82650 template=EL-658f080a
+    [INSTANCE] "Material" #510:82539 template=EL-ccabaa75
+      [INSTANCE] "Ultrathin" #I510:82539;510:79114 layout=layout_bf5a86c0 fills=fill_7d710495 effects=effect_218dee37 componentId=510:78329
+    [TEXT] #0:1927 template=EL-07a904b7
+    [RECTANGLE] "System Background Primary Light" #0:1928 template=EL-0239d89b
+    [TEXT] #0:1929 template=EL-06ccf2b4
+    [TEXT] #0:1930 template=EL-882622f1
+    [TEXT] #0:1931 template=EL-2028cf2e
+    [TEXT] #0:1932 template=EL-e20f3a0f
+    [RECTANGLE] "System Background Tertiary Light" #0:1933 template=EL-a5c59020
+    [RECTANGLE] "System Background Secondary Light " #0:1934 template=EL-6e2bb4fd
+    [RECTANGLE] "System Background Primary Light" #0:1935 template=EL-d247d387
+    [TEXT] #0:1936 template=EL-91865fd2
+    [TEXT] #0:1937 template=EL-684b1476
+    [TEXT] #0:1938 template=EL-a6e94428
+    [TEXT] #0:1939 template=EL-1be47bc5
+    [RECTANGLE] "System Background Tertiary Light" #0:1940 template=EL-872d15ca
+    [RECTANGLE] "System Background Secondary Light " #0:1941 template=EL-cd2fe8cf
+    [RECTANGLE] "System Background Primary Light" #0:1942 template=EL-77c690b0
+  [FRAME] "Thin - Light" #224:56302 template=EL-b73a15a5
+    [INSTANCE] "Wallpaper" #510:82651 template=EL-658f080a
+    [INSTANCE] "Material" #510:82537 template=EL-9a8d00e5
+      [INSTANCE] "Thin" #I510:82537;510:79118 layout=layout_bf5a86c0 fills=fill_3f76c788 effects=effect_218dee37 componentId=510:78331
+    [TEXT] #0:1893 template=EL-07a904b7
+    [RECTANGLE] "System Background Primary Light" #0:1894 template=EL-0239d89b
+    [TEXT] #0:1895 template=EL-06ccf2b4
+    [TEXT] #0:1896 template=EL-882622f1
+    [TEXT] #0:1897 template=EL-2028cf2e
+    [TEXT] #0:1898 template=EL-e20f3a0f
+    [RECTANGLE] "System Background Tertiary Light" #0:1899 template=EL-a5c59020
+    [RECTANGLE] "System Background Secondary Light " #0:1900 template=EL-6e2bb4fd
+    [RECTANGLE] "System Background Primary Light" #0:1901 template=EL-d247d387
+    [TEXT] #0:1902 template=EL-91865fd2
+    [TEXT] #0:1903 template=EL-684b1476
+    [TEXT] #0:1904 template=EL-a6e94428
+    [TEXT] #0:1905 template=EL-1be47bc5
+    [RECTANGLE] "System Background Tertiary Light" #0:1906 template=EL-872d15ca
+    [RECTANGLE] "System Background Secondary Light " #0:1907 template=EL-cd2fe8cf
+    [RECTANGLE] "System Background Primary Light" #0:1908 template=EL-77c690b0
+  [FRAME] "Regular (Default) - Light" #224:56303 template=EL-b73a15a5
+    [INSTANCE] "Wallpaper" #510:82652 template=EL-658f080a
+    [INSTANCE] "Material" #510:82535 template=EL-8e5169bf
+      [INSTANCE] "Regular" #I510:82535;510:79117 layout=layout_bf5a86c0 fills=fill_656755c8 effects=effect_218dee37 componentId=510:78333
+    [TEXT] #0:1857 template=EL-07a904b7
+    [RECTANGLE] "System Background Primary Light" #0:1858 template=EL-0239d89b
+    [TEXT] #0:1859 template=EL-06ccf2b4
+    [TEXT] #0:1860 template=EL-882622f1
+    [TEXT] #0:1861 template=EL-2028cf2e
+    [TEXT] #0:1862 template=EL-e20f3a0f
+    [RECTANGLE] "System Background Tertiary Light" #0:1863 template=EL-a5c59020
+    [RECTANGLE] "System Background Secondary Light " #0:1864 template=EL-6e2bb4fd
+    [RECTANGLE] "System Background Primary Light" #0:1865 template=EL-d247d387
+    [TEXT] #0:1866 template=EL-91865fd2
+    [TEXT] #0:1867 template=EL-684b1476
+    [TEXT] #0:1868 layout=layout_091bcddb fills="Vibrant Labels/Light/Vibrant Quaternary" textStyle=style_31db97df text="Vibrant Quarternary Text"
+    [TEXT] #0:1869 template=EL-a6e94428
+    [TEXT] #0:1870 template=EL-1be47bc5
+    [RECTANGLE] "System Background Tertiary Light" #0:1871 template=EL-872d15ca
+    [RECTANGLE] "System Background Tertiary Light" #0:1872 layout=layout_cb588cd6 fills="Vibrant Labels/Light/Vibrant Quaternary" borderRadius=10px
+    [RECTANGLE] "System Background Secondary Light " #0:1873 layout=layout_121e1e1f fills="Vibrant Labels/Light/Vibrant Secondary" borderRadius=10px
+    [RECTANGLE] "System Background Primary Light" #0:1874 template=EL-77c690b0
+  [FRAME] "Thick - Light" #224:56304 template=EL-b73a15a5
+    [INSTANCE] "Wallpaper" #510:82653 template=EL-658f080a
+    [INSTANCE] "Material" #510:82533 template=EL-f382d307
+      [INSTANCE] "Thick" #I510:82533;510:79116 layout=layout_bf5a86c0 fills=fill_fc0466cf effects=effect_218dee37 componentId=510:78335
+    [TEXT] #0:1819 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":80,"y":320},"dimensions":{"width":54,"height":13}} fills=fill_34dc0314 textStyle=style_31db97df text="Separator"
+    [RECTANGLE] "System Background Primary Light" #0:1820 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":60,"y":310.88},"dimensions":{"width":500,"height":0.5}} fills=fill_40f9bf4f borderRadius=10px
+    [TEXT] #0:1821 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":390,"y":212},"dimensions":{"width":104,"height":13}} fills=fill_34dc0314 textStyle=style_31db97df text="Vibrant Tertiary Fill"
+    [TEXT] #0:1822 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":390,"y":162},"dimensions":{"width":120,"height":13}} fills=fill_34dc0314 textStyle=style_31db97df text="Vibrant Secondary Fill"
+    [TEXT] #0:1823 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":390,"y":112},"dimensions":{"width":104,"height":13}} fills=fill_34dc0314 textStyle=style_31db97df text="Vibrant Primary Fill"
+    [RECTANGLE] "System Background Tertiary Light" #0:1825 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":340,"y":198.65},"dimensions":{"width":40,"height":39.73}} fills="Vibrant Fills/Light/Vibrant Tertiary" borderRadius=10px
+    [RECTANGLE] "System Background Secondary Light " #0:1826 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":340,"y":148.98},"dimensions":{"width":40,"height":39.73}} fills="Vibrant Fills/Light/Vibrant Secondary" borderRadius=10px
+    [RECTANGLE] "System Background Primary Light" #0:1827 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":340,"y":99.32},"dimensions":{"width":40,"height":39.73}} fills="Vibrant Fills/Light/Vibrant Primary" borderRadius=10px
+    [TEXT] #0:1829 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":130,"y":213},"dimensions":{"width":111,"height":13}} fills="Vibrant Labels/Light/Vibrant Tertiary" textStyle=style_31db97df text="Vibrant Tertiary Text"
+    [TEXT] #0:1830 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":130,"y":263},"dimensions":{"width":135,"height":13}} fills="Vibrant Labels/Light/Vibrant Quaternary" textStyle=style_31db97df text="Vibrant Quarternary Text"
+    [TEXT] #0:1831 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":130,"y":163},"dimensions":{"width":127,"height":13}} fills="Vibrant Labels/Light/Vibrant Secondary" textStyle=style_31db97df text="Vibrant Secondary Text"
+    [TEXT] #0:1832 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":130,"y":113},"dimensions":{"width":111,"height":13}} fills="Vibrant Labels/Light/Vibrant Primary" textStyle=style_31db97df text="Vibrant Primary Text"
+    [RECTANGLE] "System Background Tertiary Light" #0:1833 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":80,"y":198.65},"dimensions":{"width":40,"height":39.73}} fills="Vibrant Labels/Light/Vibrant Tertiary" borderRadius=10px
+    [RECTANGLE] "System Background Tertiary Light" #0:1834 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":80,"y":248.31},"dimensions":{"width":40,"height":39.73}} fills="Vibrant Labels/Light/Vibrant Quaternary" borderRadius=10px
+    [RECTANGLE] "System Background Secondary Light " #0:1835 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":80,"y":148.98},"dimensions":{"width":40,"height":39.73}} fills="Vibrant Labels/Light/Vibrant Secondary" borderRadius=10px
+    [RECTANGLE] "System Background Primary Light" #0:1836 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":80,"y":99.32},"dimensions":{"width":40,"height":39.73}} fills="Vibrant Labels/Light/Vibrant Primary" borderRadius=10px
+  [COMPONENT_SET] "Scroll Edge Effect - Soft" #5661:26943 layout={"mode":"none","sizing":{},"dimensions":{"width":240,"height":900}} strokes=fill_80258379 strokeWeight=1px strokeDashes=10,5 borderRadius=5px
+    [COMPONENT] "Edge=Leading" #5661:26942 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":20,"y":460},"dimensions":{"width":200,"height":200}} effects=effect_9257e533
+      [FRAME] "Gradient Mask" #5661:28841 layout=layout_67fce2fb fills=[{"type":"GRADIENT_LINEAR","gradient":"linear-gradient(90deg, rgba(255, 0, 0, 0.9) 0%, rgba(255, 0, 0, 0) 100%)"}]
+      [RECTANGLE] "Blur" #5661:28861 template=EL-e8a42385
+    [COMPONENT] "Edge=Trailing" #5661:26944 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":20,"y":680},"dimensions":{"width":200,"height":200}} effects=effect_9257e533
+      [FRAME] "Gradient Mask" #5661:28840 layout=layout_67fce2fb fills=[{"type":"GRADIENT_LINEAR","gradient":"linear-gradient(270deg, rgba(255, 0, 0, 0.9) 0%, rgba(255, 0, 0, 0) 100%)"}]
+      [RECTANGLE] "Blur" #5661:28859 template=EL-e8a42385
+    [COMPONENT] "Edge=Bottom" #5661:26968 layout=layout_cd6ed92e effects=effect_9257e533
+      [FRAME] "Gradient Mask" #5661:28842 layout=layout_67fce2fb fills=[{"type":"GRADIENT_LINEAR","gradient":"linear-gradient(0deg, rgba(255, 0, 0, 0.9) 0%, rgba(255, 0, 0, 0) 100%)"}]
+      [RECTANGLE] "Blur" #5661:28857 template=EL-e8a42385
+    [COMPONENT] "Edge=Top" #5661:26964 layout=layout_1c30b18f effects=effect_9257e533
+      [FRAME] "Gradient Mask" #5661:28843 layout=layout_67fce2fb fills=[{"type":"GRADIENT_LINEAR","gradient":"linear-gradient(180deg, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0) 100%)"}]
+      [RECTANGLE] "Blur" #5661:28853 template=EL-e8a42385
+  [COMPONENT_SET] "Scroll Edge Effect - Hard" #5661:26978 layout={"mode":"none","sizing":{},"dimensions":{"width":240,"height":460}} strokes=fill_80258379 strokeWeight=1px strokeDashes=10,5 borderRadius=5px
+    [COMPONENT] "Edge=Bottom" #5661:26984 layout=layout_cd6ed92e fills=fill_658ab2fa strokes=fill_40f9bf4f strokeWeight="1px 0px 0px" effects=effect_785970ec
+    [COMPONENT] "Edge=Top" #5661:26986 layout=layout_1c30b18f fills=fill_658ab2fa strokes=fill_40f9bf4f strokeWeight="0px 0px 1px" effects=effect_785970ec
+  [COMPONENT] "_Colors/Dark" #5584:32149 template=EL-d0202107
+    [RECTANGLE] "Color" #5584:32127 layout=layout_617da2ef fills=["#999999"]
+    [RECTANGLE] "Color" #5584:32145 template=EL-d199a456
+    [RECTANGLE] "Color" #5584:32123 template=EL-5f3516bd
+    [RECTANGLE] "Color" #5584:32124 template=EL-d7c41188
+    [RECTANGLE] "Color" #5584:32125 template=EL-63f84718
+    [RECTANGLE] "Color" #5584:32126 template=EL-e6e20302
+  [COMPONENT] "_Colors/Light" #5584:32148 template=EL-d0202107
+    [RECTANGLE] "Color" #5584:32140 layout=layout_617da2ef fills=["#666666"]
+    [RECTANGLE] "Color" #5584:32141 template=EL-c25602a5
+    [RECTANGLE] "Color" #5584:32142 template=EL-4dac909f
+    [RECTANGLE] "Color" #5584:32143 layout=layout_617da2ef fills=["#0B2489"]
+    [RECTANGLE] "Color" #5584:32144 layout=layout_617da2ef fills=["#0964B4"]
+    [RECTANGLE] "Color" #5584:32146 layout=layout_617da2ef fills=["#2CA462"]
+  [COMPONENT_SET] "Liquid Glass - Regular - Large" #5584:32504 template=EL-48bea0ea
+    [COMPONENT] "Mode=Dark" #5584:31860 template=EL-da9dce7d
+      [FRAME] "Fill + Shadow" #5607:25707 layout=layout_d07911e3 fills=fill_207bfefe effects=effect_13835b08 opacity=0.6700000166893005 borderRadius=34px
+      [FRAME] "Glass Effect" #5607:25699 template=EL-0b00eed4
+    [COMPONENT] "Mode=Light" #5584:31859 template=EL-588cc829
+      [FRAME] "Fill + Shadow" #5607:25683 layout=layout_d07911e3 fills=fill_5e7588a8 effects=effect_13835b08 borderRadius=34px
+      [FRAME] "Glass Effect" #5607:25691 template=EL-0b00eed4
+  [COMPONENT_SET] "Liquid Glass - Regular - Medium" #5584:32503 template=EL-48bea0ea
+    [COMPONENT] "Mode=Dark" #5584:31858 template=EL-da9dce7d
+      [FRAME] "Fill + Shadow" #5607:25810 layout=layout_d07911e3 fills=fill_af0b0cfd effects=effect_13835b08 opacity=0.6700000166893005 borderRadius=34px
+      [FRAME] "Glass Effect" #5607:25716 template=EL-0b00eed4
+    [COMPONENT] "Mode=Light" #5584:31857 template=EL-588cc829
+      [FRAME] "Fill + Shadow" #5607:25956 layout=layout_d07911e3 fills=fill_a9de6e35 effects=effect_13835b08 borderRadius=34px
+      [FRAME] "Glass Effect" #5607:25843 template=EL-0b00eed4
+  [COMPONENT_SET] "Liquid Glass - Regular - Small" #5584:32505 layout={"mode":"none","sizing":{},"dimensions":{"width":170,"height":170}} fills=fill_8690abb2 strokes=fill_62008434 strokeWeight=1px strokeDashes=10,5
+    [COMPONENT] "Mode=Dark, State=Primary" #5431:1764 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":100,"y":100},"dimensions":{"width":48,"height":48}}
+      [FRAME] "Tint + Shadow" #5609:49572 template=EL-36690ee2
+      [FRAME] "Glass Effect" #5609:49417 template=EL-f1bbbde9
+    [COMPONENT] "Mode=Dark, State=Default" #5426:6767 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":100,"y":20},"dimensions":{"width":48,"height":48}}
+      [FRAME] "Fill + Shadow" #5607:79976 layout=layout_0171b919 fills=fill_4f7f82ae effects=effect_13835b08 opacity=0.6700000166893005 borderRadius=1000px
+      [FRAME] "Glass Effect" #5607:78589 layout=layout_0171b919 fills=fill_d316f320 borderRadius=296px
+    [COMPONENT] "Mode=Light, State=Primary" #5564:42807 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":20,"y":100},"dimensions":{"width":48,"height":48}}
+      [FRAME] "Tint + Shadow" #5607:78140 template=EL-36690ee2
+      [FRAME] "Glass Effect" #5607:77747 template=EL-f1bbbde9
+    [COMPONENT] "Mode=Light, State=Default" #5564:42811 layout={"mode":"none","sizing":{},"locationRelativeToParent":{"x":20,"y":20},"dimensions":{"width":48,"height":48}}
+      [FRAME] "Fill + Shadow" #6491:20172 layout=layout_0171b919 fills=fill_9501dffe effects=effect_13835b08 borderRadius=296px
+      [FRAME] "Glass Effect" #6491:20173 template=EL-f1bbbde9
+  [COMPONENT] "Liquid Glass - Clear/Light" #5914:23547 layout={"mode":"none","sizing":{},"dimensions":{"width":160,"height":160}}
+    [FRAME] "Glass Effect" #5914:23552 layout=layout_d07911e3 fills=["rgba(255, 255, 255, 0.07)"] effects={"boxShadow":"0px 8px 40px 0px rgba(0, 0, 0, 0.2)"} borderRadius=24px
+  [FRAME] "Dark" #5583:28439 layout=layout_138a5e54 fills=fill_34dc0314
+    [INSTANCE] "_Colors/Light" #5584:32200 layout=layout_0d80f04d componentId=5584:32148
+      [RECTANGLE] "Color" #I5584:32200;5584:32140 template=EL-1636a092
+      [RECTANGLE] "Color" #I5584:32200;5584:32141 template=EL-c25602a5
+      [RECTANGLE] "Color" #I5584:32200;5584:32142 template=EL-4dac909f
+      [RECTANGLE] "Color" #I5584:32200;5584:32143 layout=layout_617da2ef fills=["#4F0F9E"]
+      [RECTANGLE] "Color" #I5584:32200;5584:32144 layout=layout_617da2ef fills=["#0F51CD"]
+      [RECTANGLE] "Color" #I5584:32200;5584:32146 layout=layout_617da2ef fills=["#19B516"]
+    [FRAME] "Frame" #5583:28440 template=EL-cb6ff5cb
+      [FRAME] "Frame" #5584:32257 template=EL-41c19056
+        [INSTANCE] "BG - Small UI" #5584:32016 template=EL-7965946f
+          [FRAME] "Fill + Shadow" #I5584:32016;5607:79976 template=EL-ce35bc01
+          [FRAME] "Glass Effect" #I5584:32016;5607:78589 template=EL-9e7b46b0
+        [INSTANCE] "BG - Small UI" #5584:32258 template=EL-7965946f
+          [FRAME] "Fill + Shadow" #I5584:32258;5607:79976 template=EL-ce35bc01
+          [FRAME] "Glass Effect" #I5584:32258;5607:78589 template=EL-9e7b46b0
+        [INSTANCE] "BG - Small UI" #5584:32265 template=EL-7965946f
+          [FRAME] "Fill + Shadow" #I5584:32265;5607:79976 template=EL-ce35bc01
+          [FRAME] "Glass Effect" #I5584:32265;5607:78589 template=EL-9e7b46b0
+        [INSTANCE] "BG - Small UI" #5584:32272 template=EL-7965946f
+          [FRAME] "Fill + Shadow" #I5584:32272;5607:79976 template=EL-ce35bc01
+          [FRAME] "Glass Effect" #I5584:32272;5607:78589 template=EL-9e7b46b0
+        [INSTANCE] "BG - Small UI" #5584:32279 template=EL-7965946f
+          [FRAME] "Fill + Shadow" #I5584:32279;5607:79976 template=EL-ce35bc01
+          [FRAME] "Glass Effect" #I5584:32279;5607:78589 template=EL-9e7b46b0
+        [INSTANCE] "BG - Small UI" #5584:32286 template=EL-7965946f
+          [FRAME] "Fill + Shadow" #I5584:32286;5607:79976 template=EL-ce35bc01
+          [FRAME] "Glass Effect" #I5584:32286;5607:78589 template=EL-9e7b46b0
+      [TEXT] #5583:28442 template=EL-c2bb9826
+    [FRAME] "Frame" #5584:31991 template=EL-cb6ff5cb
+      [FRAME] "Frame" #5584:32256 template=EL-41c19056
+        [INSTANCE] "BG - Small UI - Tinted" #5584:32024 template=EL-325cff8c
+          [FRAME] "Tint + Shadow" #I5584:32024;5609:49572 template=EL-ec332f4c
+          [FRAME] "Glass Effect" #I5584:32024;5609:49417 template=EL-64e90333
+        [INSTANCE] "BG - Small UI - Tinted" #5584:32293 template=EL-325cff8c
+          [FRAME] "Tint + Shadow" #I5584:32293;5609:49572 template=EL-ec332f4c
+          [FRAME] "Glass Effect" #I5584:32293;5609:49417 template=EL-64e90333
+        [INSTANCE] "BG - Small UI - Tinted" #5584:32300 template=EL-325cff8c
+          [FRAME] "Tint + Shadow" #I5584:32300;5609:49572 template=EL-ec332f4c
+          [FRAME] "Glass Effect" #I5584:32300;5609:49417 template=EL-64e90333
+        [INSTANCE] "BG - Small UI - Tinted" #5584:32307 template=EL-325cff8c
+          [FRAME] "Tint + Shadow" #I5584:32307;5609:49572 template=EL-ec332f4c
+          [FRAME] "Glass Effect" #I5584:32307;5609:49417 template=EL-64e90333
+        [INSTANCE] "BG - Small UI - Tinted" #5584:32314 template=EL-325cff8c
+          [FRAME] "Tint + Shadow" #I5584:32314;5609:49572 template=EL-ec332f4c
+          [FRAME] "Glass Effect" #I5584:32314;5609:49417 template=EL-64e90333
+        [INSTANCE] "BG - Small UI - Tinted" #5584:32321 template=EL-325cff8c
+          [FRAME] "Tint + Shadow" #I5584:32321;5609:49572 template=EL-ec332f4c
+          [FRAME] "Glass Effect" #I5584:32321;5609:49417 template=EL-64e90333
+      [TEXT] #5584:31998 template=EL-c2bb9826
+    [FRAME] "Frame" #5583:28446 template=EL-cb6ff5cb
+      [FRAME] "Frame" #5584:32255 template=EL-3da1c847
+        [INSTANCE] "BG - Medium UI" #5713:51288 layout=layout_8ce81c93 componentId=5584:31858
+          [FRAME] "Fill + Shadow" #I5713:51288;5607:25810 layout=layout_a741192f fills=fill_af0b0cfd effects=effect_13835b08 opacity=0.6700000166893005 borderRadius=34px
+          [FRAME] "Glass Effect" #I5713:51288;5607:25716 template=EL-62b5dd74
+      [TEXT] #5583:28448 layout=layout_46f0edc3 fills=fill_658ab2fa textStyle=style_93a79d2b text="Medium UI\\nDark Mode"
+    [FRAME] "Frame" #5583:28449 template=EL-cb6ff5cb
+      [FRAME] "Frame" #5584:32254 template=EL-3da1c847
+        [INSTANCE] "Liquid Glass - Regular - Large" #5584:32056 layout=layout_97c09b80 componentId=5584:31860
+          [FRAME] "Fill + Shadow" #I5584:32056;5607:25707 layout=layout_4a87b6d3 fills=fill_207bfefe effects=effect_13835b08 opacity=0.6700000166893005 borderRadius=34px
+          [FRAME] "Glass Effect" #I5584:32056;5607:25699 template=EL-19d2c006
+      [TEXT] #5583:28451 layout=layout_46f0edc3 fills=fill_658ab2fa textStyle=style_93a79d2b text="Large UI\\nDark Mode"
+  [FRAME] "Light" #5583:28429 layout=layout_138a5e54 fills=fill_658ab2fa
+    [INSTANCE] "_Colors/Dark" #5584:32157 layout=layout_0d80f04d componentId=5584:32149
+      [RECTANGLE] "Color" #I5584:32157;5584:32127 template=EL-1636a092
+      [RECTANGLE] "Color" #I5584:32157;5584:32145 template=EL-d199a456
+      [RECTANGLE] "Color" #I5584:32157;5584:32123 template=EL-5f3516bd
+      [RECTANGLE] "Color" #I5584:32157;5584:32124 template=EL-d7c41188
+      [RECTANGLE] "Color" #I5584:32157;5584:32125 template=EL-63f84718
+      [RECTANGLE] "Color" #I5584:32157;5584:32126 template=EL-e6e20302
+    [FRAME] "Frame" #5583:28427 template=EL-cb6ff5cb
+      [FRAME] "Frame" #5584:32208 layout={"mode":"row","padding":"0px 30px","alignItems":"center","gap":"20px","sizing":{"horizontal":"hug","vertical":"hug"}}
+        [INSTANCE] "BG - Small UI" #5584:32008 template=EL-859ef22a
+          [FRAME] "Fill + Shadow" #I5584:32008;6491:20172 template=EL-0ca83a03
+          [FRAME] "Glass Effect" #I5584:32008;6491:20173 template=EL-64e90333
+        [INSTANCE] "BG - Small UI" #5584:32165 template=EL-859ef22a
+          [FRAME] "Fill + Shadow" #I5584:32165;6491:20172 template=EL-0ca83a03
+          [FRAME] "Glass Effect" #I5584:32165;6491:20173 template=EL-64e90333
+        [INSTANCE] "BG - Small UI" #5584:32172 template=EL-859ef22a
+          [FRAME] "Fill + Shadow" #I5584:32172;6491:20172 template=EL-0ca83a03
+          [FRAME] "Glass Effect" #I5584:32172;6491:20173 template=EL-64e90333
+        [INSTANCE] "BG - Small UI" #5584:32179 template=EL-859ef22a
+          [FRAME] "Fill + Shadow" #I5584:32179;6491:20172 template=EL-0ca83a03
+          [FRAME] "Glass Effect" #I5584:32179;6491:20173 template=EL-64e90333
+        [INSTANCE] "BG - Small UI" #5584:32186 template=EL-859ef22a
+          [FRAME] "Fill + Shadow" #I5584:32186;6491:20172 template=EL-0ca83a03
+          [FRAME] "Glass Effect" #I5584:32186;6491:20173 template=EL-64e90333
+        [INSTANCE] "BG - Small UI" #5584:32209 template=EL-859ef22a
+          [FRAME] "Fill + Shadow" #I5584:32209;6491:20172 template=EL-0ca83a03
+          [FRAME] "Glass Effect" #I5584:32209;6491:20173 template=EL-64e90333
+      [TEXT] #5583:28424 template=EL-327b738a
+    [FRAME] "Frame" #5584:31982 template=EL-cb6ff5cb
+      [FRAME] "Frame" #5584:32216 template=EL-41c19056
+        [INSTANCE] "BG - Small UI - Tinted" #5584:32000 template=EL-33d51684
+          [FRAME] "Tint + Shadow" #I5584:32000;5607:78140 template=EL-ec332f4c
+          [FRAME] "Glass Effect" #I5584:32000;5607:77747 template=EL-64e90333
+        [INSTANCE] "BG - Small UI - Tinted" #5584:32217 template=EL-33d51684
+          [FRAME] "Tint + Shadow" #I5584:32217;5607:78140 template=EL-ec332f4c
+          [FRAME] "Glass Effect" #I5584:32217;5607:77747 template=EL-64e90333
+        [INSTANCE] "BG - Small UI - Tinted" #5584:32224 template=EL-33d51684
+          [FRAME] "Tint + Shadow" #I5584:32224;5607:78140 template=EL-ec332f4c
+          [FRAME] "Glass Effect" #I5584:32224;5607:77747 template=EL-64e90333
+        [INSTANCE] "BG - Small UI - Tinted" #5584:32231 template=EL-33d51684
+          [FRAME] "Tint + Shadow" #I5584:32231;5607:78140 template=EL-ec332f4c
+          [FRAME] "Glass Effect" #I5584:32231;5607:77747 template=EL-64e90333
+        [INSTANCE] "BG - Small UI - Tinted" #5584:32238 template=EL-33d51684
+          [FRAME] "Tint + Shadow" #I5584:32238;5607:78140 template=EL-ec332f4c
+          [FRAME] "Glass Effect" #I5584:32238;5607:77747 template=EL-64e90333
+        [INSTANCE] "BG - Small UI - Tinted" #5584:32245 template=EL-33d51684
+          [FRAME] "Tint + Shadow" #I5584:32245;5607:78140 template=EL-ec332f4c
+          [FRAME] "Glass Effect" #I5584:32245;5607:77747 template=EL-64e90333
+      [TEXT] #5584:31989 template=EL-327b738a
+    [FRAME] "Frame" #5583:28430 template=EL-cb6ff5cb
+      [FRAME] "Frame" #5584:32252 template=EL-3da1c847
+        [INSTANCE] "BG - Medium UI" #5584:32032 layout=layout_8ce81c93 componentId=5584:31857
+          [FRAME] "Fill + Shadow" #I5584:32032;5607:25956 layout=layout_a741192f fills=fill_a9de6e35 effects=effect_13835b08 borderRadius=34px
+          [FRAME] "Glass Effect" #I5584:32032;5607:25843 template=EL-62b5dd74
+      [TEXT] #5583:28432 layout=layout_46f0edc3 fills=fill_34dc0314 textStyle=style_93a79d2b text="Medium UI\\nLight Mode"
+    [FRAME] "Frame" #5583:28433 template=EL-cb6ff5cb
+      [FRAME] "Frame" #5584:32253 template=EL-3da1c847
+        [INSTANCE] "BG - Large UI" #5713:51267 layout=layout_97c09b80 componentId=5584:31859
+          [FRAME] "Fill + Shadow" #I5713:51267;5607:25683 layout=layout_4a87b6d3 fills=fill_5e7588a8 effects=effect_13835b08 borderRadius=34px
+          [FRAME] "Glass Effect" #I5713:51267;5607:25691 template=EL-19d2c006
+      [TEXT] #5583:28435 layout=layout_46f0edc3 fills=fill_34dc0314 textStyle=style_93a79d2b text="Large UI\\nLight Mode"
+  [INSTANCE] "Header" #544:193109 layout={"mode":"column","alignItems":"stretch","gap":"32px","sizing":{"horizontal":"fixed","vertical":"hug"},"dimensions":{"width":1400}} componentId=507:29149 componentProperties={"Link 2":"Human Interface Guidelines","Show Link 2":false,"Show Link 1":true,"Description":"A material is a visual effect that creates a sense of depth, layering, and hierarchy between foreground and background elements.","Component name":"Materials","Show Description":true,"Link 1":"Human Interface Guidelines 􀄫 Materials"}
+    [TEXT] #I544:193109;507:29150 layout={"mode":"none","sizing":{"horizontal":"fill","vertical":"fixed"},"dimensions":{"height":60}} fills=fill_34dc0314 componentPropertyReferences={"text":"Component name"} textStyle={"fontFamily":"SF Pro","fontStyle":"Bold","fontWeight":700,"fontSize":56,"lineHeight":"60px","letterSpacing":"-0.005em","textAlignHorizontal":"LEFT","textAlignVertical":"CENTER"} text="Materials"
+    [TEXT] #I544:193109;507:29151 layout={"mode":"none","sizing":{"horizontal":"fill","vertical":"hug"}} fills=fill_34dc0314 componentPropertyReferences={"visible":"Show Description","text":"Description"} textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":28,"lineHeight":"34px","textAlignHorizontal":"LEFT","textAlignVertical":"TOP"} text="A material is a visual effect that creates a sense of depth, layering, and hierarchy between foreground and background elements."
+    [FRAME] "Frame" #I544:193109;540:190144 layout={"mode":"column","alignSelf":"stretch","padding":"8px 0px","gap":"16px","sizing":{"horizontal":"fill","vertical":"hug"}}
+      [TEXT] #I544:193109;507:29154 layout={"mode":"none","sizing":{"horizontal":"fill","vertical":"fixed"},"dimensions":{"height":34}} fills=["#0088FF"] componentPropertyReferences={"visible":"Show Link 1","text":"Link 1"} textStyle={"fontFamily":"SF Pro","fontStyle":"Regular","fontWeight":400,"fontSize":28,"lineHeight":"34px","textAlignHorizontal":"LEFT","textAlignVertical":"CENTER","hyperlink":{"type":"URL","url":"https://developer.apple.com/design/human-interface-guidelines/materials"}} text="Human Interface Guidelines 􀄫 Materials"
