@@ -65,6 +65,7 @@ impl Window {
         )
     }
 
+    #[cfg(test)]
     #[inline]
     pub fn pixel_to_cell(&self, x: f32, y: f32) -> (u8, u8) {
         let c = (self.c0 as f32 + (x / CELL).floor()).max(0.0) as u32;
@@ -489,6 +490,287 @@ pub fn first_free(
     )
 }
 
+// ---------- Вытеснение соседей ----------
+
+/// Цена каждой ячейки расстояния от виджета до желаемой точки.
+const NEAR: f32 = 1.5;
+/// Штраф за каждого сдвинутого соседа.
+const PUSH_EACH: f32 = 1.0;
+/// Штраф за каждую ячейку сдвига соседа (по Манхэттену).
+const PUSH_CELL: f32 = 0.05;
+
+/// Итог постановки виджета с вытеснением соседей.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Resolved {
+    /// Новая раскладка целиком (скрытые и пропущенные виджеты не тронуты).
+    pub entries: Vec<Entry>,
+    /// Где встал сам виджет.
+    pub col: u8,
+    pub row: u8,
+    /// Сколько соседей сдвинуто.
+    pub pushed: u8,
+    /// Стоимость: взвешенное расстояние до желаемой ячейки плюс штрафы за вытеснение.
+    pub cost: f32,
+}
+
+/// Прямоугольник виджета в ячейках со знаком (для сдвигов за край без переполнения).
+#[derive(Clone, Copy)]
+struct Bx {
+    c: i32,
+    r: i32,
+    w: i32,
+    h: i32,
+}
+
+impl Bx {
+    fn of(spec: &TabSpec, e: &Entry) -> Bx {
+        let s = spec.specs[e.idx].sizes[e.size];
+        Bx { c: e.col as i32, r: e.row as i32, w: s.w as i32, h: s.h as i32 }
+    }
+
+    fn hits(&self, o: &Bx) -> bool {
+        self.c < o.c + o.w && o.c < self.c + self.w && self.r < o.r + o.h && o.r < self.r + self.h
+    }
+
+    fn inside(&self, win: Window) -> bool {
+        self.c >= win.c0 as i32 && self.r >= win.r0 as i32 && self.c + self.w <= win.c1 as i32 && self.r + self.h <= win.r1 as i32
+    }
+}
+
+/// Направление волны вытеснения.
+#[derive(Clone, Copy)]
+enum Dir {
+    Down,
+    Right,
+    Up,
+    Left,
+}
+
+#[inline]
+fn active(skip: u32, e: &Entry) -> bool {
+    !e.hidden && !skipped(skip, e.idx)
+}
+
+/// Волна в направлении `dir`: якорь `anchor` стоит на месте, остальные видимые виджеты обходятся
+/// по порядку вдоль направления, и каждый, кто упирается в уже расставленных, едет в этом
+/// направлении до первого свободного места. Так сдвинутый сосед толкает следующего (каскад),
+/// а кто никому не мешает, остаётся на месте. `None` — кто-то выехал за окно.
+fn sweep(win: Window, spec: &TabSpec, skip: u32, entries: &[Entry], anchor: usize, dir: Dir) -> Option<Vec<Entry>> {
+    let mut out = entries.to_vec();
+    let a = out.iter().position(|e| e.idx == anchor)?;
+    let mut placed = vec![Bx::of(spec, &out[a])];
+    let mut order: Vec<usize> = (0..out.len()).filter(|&i| i != a && active(skip, &out[i])).collect();
+    order.sort_by_key(|&i| {
+        let b = Bx::of(spec, &out[i]);
+        match dir {
+            Dir::Down => (b.r, b.c),
+            Dir::Up => (-(b.r + b.h), b.c),
+            Dir::Right => (b.c, b.r),
+            Dir::Left => (-(b.c + b.w), b.r),
+        }
+    });
+    let (dc, dr) = match dir {
+        Dir::Down => (0, 1),
+        Dir::Up => (0, -1),
+        Dir::Right => (1, 0),
+        Dir::Left => (-1, 0),
+    };
+    for i in order {
+        let mut b = Bx::of(spec, &out[i]);
+        while placed.iter().any(|p| p.hits(&b)) {
+            b.c += dc;
+            b.r += dr;
+            if !b.inside(win) {
+                return None;
+            }
+        }
+        out[i].col = b.c as u8;
+        out[i].row = b.r as u8;
+        placed.push(b);
+    }
+    Some(out)
+}
+
+/// Переселение: соседи, на которых стоит якорь, уходят каждый на ближайшее свободное место
+/// (крупные первыми). Остальные не двигаются. Так виджеты разного размера меняются местами.
+fn relocate(win: Window, spec: &TabSpec, skip: u32, entries: &[Entry], anchor: usize) -> Option<Vec<Entry>> {
+    let mut out = entries.to_vec();
+    let a = Bx::of(spec, out.iter().find(|e| e.idx == anchor)?);
+    let mut hit: Vec<usize> = (0..out.len())
+        .filter(|&i| out[i].idx != anchor && active(skip, &out[i]) && Bx::of(spec, &out[i]).hits(&a))
+        .collect();
+    // Свободных ячеек меньше, чем нужно вытесненным, — искать нечего.
+    let area = |i: usize| {
+        let b = Bx::of(spec, &out[i]);
+        b.w * b.h
+    };
+    let busy: i32 = (0..out.len()).filter(|&i| active(skip, &out[i]) && !hit.contains(&i)).map(area).sum();
+    let need: i32 = hit.iter().map(|&i| area(i)).sum();
+    if need > win.cols() as i32 * win.rows() as i32 - busy {
+        return None;
+    }
+    hit.sort_by_key(|&i| (-area(i), out[i].row, out[i].col));
+    for &i in &hit {
+        out[i].hidden = true;
+    }
+    for &i in &hit {
+        let e = out[i];
+        let (col, row) = nearest_free_in_window(win, spec, skip, &out, e.idx, e.size, e.col, e.row)?;
+        out[i].col = col;
+        out[i].row = row;
+        out[i].hidden = false;
+    }
+    Some(out)
+}
+
+/// Сколько соседей сдвинуто и во что это обходится.
+fn displacement(skip: u32, base: &[Entry], out: &[Entry], anchor: usize) -> (u8, f32) {
+    let mut n = 0u8;
+    let mut cost = 0.0;
+    for (b, o) in base.iter().zip(out) {
+        if b.idx == anchor || !active(skip, b) || (b.col, b.row) == (o.col, o.row) {
+            continue;
+        }
+        n += 1;
+        let shift = (b.col as i32 - o.col as i32).abs() + (b.row as i32 - o.row as i32).abs();
+        cost += PUSH_EACH + PUSH_CELL * shift as f32;
+    }
+    (n, cost)
+}
+
+/// Ставит виджет `idx` размера `size` в ячейку `(col, row)` (якорь не двигается) и расталкивает
+/// соседей так, чтобы никто не пересекался и все остались в окне. Из волн во все стороны и
+/// переселения берётся самая дешёвая. Без помех — раскладка с одним сдвинутым виджетом и
+/// нулевой стоимостью. `None` — расставить всех нельзя.
+#[allow(clippy::too_many_arguments)]
+pub fn push(win: Window, spec: &TabSpec, skip: u32, base: &[Entry], idx: usize, size: usize, col: u8, row: u8) -> Option<Resolved> {
+    let sz = spec.specs[idx].sizes[size];
+    if !win.contains_cell(col, row, sz.w, sz.h) {
+        return None;
+    }
+    let mut entries = base.to_vec();
+    let e = entries.iter_mut().find(|e| e.idx == idx)?;
+    *e = Entry { idx, size, col, row, hidden: false };
+    if can_place_in_window(win, spec, skip, &entries, idx, size, col, row) {
+        return Some(Resolved { entries, col, row, pushed: 0, cost: 0.0 });
+    }
+    let mut best: Option<Resolved> = None;
+    let tries = [Dir::Down, Dir::Right, Dir::Up, Dir::Left]
+        .into_iter()
+        .map(|d| sweep(win, spec, skip, &entries, idx, d))
+        .chain(std::iter::once_with(|| relocate(win, spec, skip, &entries, idx)));
+    for out in tries.flatten() {
+        let (pushed, cost) = displacement(skip, base, &out, idx);
+        if best.as_ref().is_none_or(|b| cost < b.cost - 1e-4) {
+            best = Some(Resolved { entries: out, col, row, pushed, cost });
+        }
+    }
+    best
+}
+
+/// Куда встанет перетаскиваемый виджет `idx` размера `size`, если курсор держит его над ячейкой
+/// `want`. Считается всегда от раскладки `base` на начало жеста, поэтому одна и та же цель даёт
+/// одну и ту же раскладку, а ушедший курсор возвращает соседей на места.
+///
+/// Ячейки окна перебираются по возрастанию расстояния до `want`; стоимость кандидата — расстояние
+/// плюс штрафы за вытеснение. Стоимость не меньше расстояния, поэтому перебор останавливается,
+/// как только расстояние догоняет лучшую найденную стоимость. Близкая прямая постановка
+/// побеждает вытеснение, а курсор прямо над соседом меняет их местами.
+/// `None` — в окне для виджета нет места вообще.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_drop(
+    win: Window,
+    spec: &TabSpec,
+    skip: u32,
+    base: &[Entry],
+    idx: usize,
+    size: usize,
+    want: (u8, u8),
+) -> Option<Resolved> {
+    let sz = spec.specs[idx].sizes[size];
+    if sz.w > win.cols() || sz.h > win.rows() {
+        return None;
+    }
+    let mut cands = Vec::with_capacity((win.cols() - sz.w + 1) as usize * (win.rows() - sz.h + 1) as usize);
+    for r in win.r0..=win.r1 - sz.h {
+        for c in win.c0..=win.c1 - sz.w {
+            let dist = NEAR * (c as f32 - want.0 as f32).hypot(r as f32 - want.1 as f32);
+            cands.push((dist, r, c));
+        }
+    }
+    cands.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    let others: Vec<Bx> = base.iter().filter(|e| e.idx != idx && active(skip, e)).map(|e| Bx::of(spec, e)).collect();
+    let mut best: Option<Resolved> = None;
+    for (dist, r, c) in cands {
+        let bound = best.as_ref().map_or(f32::INFINITY, |b| b.cost - 1e-4);
+        if dist >= bound {
+            break;
+        }
+        // Каждого, на кого встаёт виджет, придётся сдвинуть: дешевле лучшего так не выйдет.
+        let me = Bx { c: c as i32, r: r as i32, w: sz.w as i32, h: sz.h as i32 };
+        let hits = others.iter().filter(|o| o.hits(&me)).count();
+        if dist + hits as f32 * PUSH_EACH >= bound {
+            continue;
+        }
+        if let Some(mut res) = push(win, spec, skip, base, idx, size, c, r) {
+            res.cost += dist;
+            if best.as_ref().is_none_or(|b| res.cost < b.cost - 1e-4) {
+                best = Some(res);
+            }
+        }
+    }
+    best
+}
+
+/// Новый размер виджета `idx` под угловой ручкой: размеры перебираются по близости к желаемому
+/// прямоугольнику `want_w` × `want_h` (с гистерезисом в пользу `prefer`), левый верхний угол
+/// стоит на месте (сдвигается, только если иначе виджет вылезает за окно), соседи расталкиваются.
+/// Первый размер, который удаётся разместить, и есть ответ. Считается от `base` на начало жеста.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_resize(
+    win: Window,
+    spec: &TabSpec,
+    skip: u32,
+    base: &[Entry],
+    idx: usize,
+    want_w: f32,
+    want_h: f32,
+    prefer: usize,
+) -> Option<Resolved> {
+    let cur = *base.iter().find(|e| e.idx == idx)?;
+    size_order(spec, idx, want_w, want_h, prefer)
+        .into_iter()
+        .find_map(|size| push_at(win, spec, skip, base, idx, size, cur.col, cur.row))
+}
+
+/// Размеры виджета `idx` по близости к прямоугольнику `want_w` × `want_h` (первый — тот, что
+/// под курсором), с гистерезисом в пользу `prefer`.
+pub fn size_order(spec: &TabSpec, idx: usize, want_w: f32, want_h: f32, prefer: usize) -> Vec<usize> {
+    let mut sizes: Vec<(f32, usize)> = spec.specs[idx]
+        .sizes
+        .iter()
+        .enumerate()
+        .map(|(size, s)| {
+            let cost = (s.pixel_w() - want_w).abs() + (s.pixel_h() - want_h).abs();
+            (if size == prefer { cost - 2.0 } else { cost }, size)
+        })
+        .collect();
+    sizes.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    sizes.into_iter().map(|(_, size)| size).collect()
+}
+
+/// `push` с якорем у ячейки `(col, row)`, придвинутым внутрь окна, если виджет за него вылезает.
+#[allow(clippy::too_many_arguments)]
+fn push_at(win: Window, spec: &TabSpec, skip: u32, base: &[Entry], idx: usize, size: usize, col: u8, row: u8) -> Option<Resolved> {
+    let s = spec.specs[idx].sizes[size];
+    if s.w > win.cols() || s.h > win.rows() {
+        return None;
+    }
+    let col = col.clamp(win.c0, win.c1 - s.w);
+    let row = row.clamp(win.r0, win.r1 - s.h);
+    push(win, spec, skip, base, idx, size, col, row)
+}
+
 impl Layout {
     /// Раскладка по умолчанию: все виджеты видимы, стоят на позициях из `Spec`.
     pub fn default_for(spec: &TabSpec) -> Layout {
@@ -717,7 +999,8 @@ impl Layout {
         self.place_new_in_window(Window { c0: 0, r0: 0, c1: spec.cols, r1: spec.rows }, spec, skip, idx)
     }
 
-    /// Следующий по кругу размер виджета внутри окна `win`. `false` — менять некуда.
+    /// Следующий по кругу размер виджета внутри окна `win`: виджет растёт на месте и расталкивает
+    /// соседей, а если так не выходит — переезжает в ближайшее свободное место. `false` — менять некуда.
     pub fn cycle_size_in_window(&mut self, win: Window, spec: &TabSpec, skip: u32, idx: usize) -> bool {
         let Some(cur) = self.entry(idx).copied() else { return false };
         let n = spec.specs[idx].sizes.len();
@@ -726,11 +1009,9 @@ impl Layout {
         }
         for step in 1..n {
             let size = (cur.size + step) % n;
-            if can_place_in_window(win, spec, skip, &self.entries, idx, size, cur.col, cur.row) {
-                if let Some(e) = self.entry_mut(idx) {
-                    e.size = size;
-                    return true;
-                }
+            if let Some(res) = push_at(win, spec, skip, &self.entries, idx, size, cur.col, cur.row) {
+                self.entries = res.entries;
+                return true;
             }
             if let Some((col, row)) = nearest_free_in_window(win, spec, skip, &self.entries, idx, size, cur.col, cur.row) {
                 if let Some(e) = self.entry_mut(idx) {
@@ -752,71 +1033,13 @@ impl Layout {
         self.cycle_size_in_window(Window { c0: 0, r0: 0, c1: spec.cols, r1: spec.rows }, spec, skip, idx)
     }
 
-    /// Размер виджета, ближайший к желаемому прямоугольнику `want_w` × `want_h` внутри окна `win`.
-    #[allow(clippy::too_many_arguments)]
-    pub fn resized_to_in_window(
-        &self,
-        win: Window,
-        spec: &TabSpec,
-        skip: u32,
-        idx: usize,
-        want_w: f32,
-        want_h: f32,
-    ) -> Option<Layout> {
-        let cur = self.entry(idx)?;
-        let mut best: Option<(f32, Layout)> = None;
-        for (size, s) in spec.specs[idx].sizes.iter().enumerate() {
-            let pw = s.pixel_w();
-            let ph = s.pixel_h();
-            let mut cost = (pw - want_w).abs() + (ph - want_h).abs();
-            if size == cur.size {
-                cost -= 2.0; // Гистерезис в пользу текущего размера
-            }
-            if best.as_ref().is_some_and(|(c, _)| *c <= cost) {
-                continue;
-            }
-            if can_place_in_window(win, spec, skip, &self.entries, idx, size, cur.col, cur.row) {
-                let mut lay = self.clone();
-                if let Some(e) = lay.entry_mut(idx) {
-                    e.size = size;
-                }
-                best = Some((cost, lay));
-            } else if let Some((col, row)) = nearest_free_in_window(win, spec, skip, &self.entries, idx, size, cur.col, cur.row) {
-                // Если сдвиг небольшой (до 1 ячейки по каждой оси), разрешаем его при ресайзе
-                if (col as i32 - cur.col as i32).abs() <= 1 && (row as i32 - cur.row as i32).abs() <= 1 {
-                    let mut lay = self.clone();
-                    if let Some(e) = lay.entry_mut(idx) {
-                        e.size = size;
-                        e.col = col;
-                        e.row = row;
-                    }
-                    best = Some((cost + 4.0, lay));
-                }
-            }
-        }
-        best.map(|(_, l)| l)
-    }
-
     /// Размер виджета, ближайший к желаемому прямоугольнику `want_w` × `want_h` (угловая ручка),
-    /// из тех, при которых он помещается на сетку. `None` — ни один размер не подходит.
+    /// с вытеснением соседей на всей сетке. `None` — ни один размер не подходит.
     #[cfg(test)]
-    #[inline]
-    pub fn resized_to(
-        &self,
-        spec: &TabSpec,
-        skip: u32,
-        idx: usize,
-        want_w: f32,
-        want_h: f32,
-    ) -> Option<Layout> {
-        self.resized_to_in_window(
-            Window { c0: 0, r0: 0, c1: spec.cols, r1: spec.rows },
-            spec,
-            skip,
-            idx,
-            want_w,
-            want_h,
-        )
+    pub fn resized_to(&self, spec: &TabSpec, skip: u32, idx: usize, want_w: f32, want_h: f32) -> Option<Layout> {
+        let win = Window { c0: 0, r0: 0, c1: spec.cols, r1: spec.rows };
+        let prefer = self.entry(idx)?.size;
+        resolve_resize(win, spec, skip, &self.entries, idx, want_w, want_h, prefer).map(|r| Layout { entries: r.entries })
     }
 }
 
@@ -909,6 +1132,377 @@ mod tests {
         let a = lay.entry(0).unwrap();
         assert_eq!(a.size, 2);
         assert!(no_overlap(&lay.pack(&SPEC, 0)));
+    }
+
+    // ---------- Вытеснение ----------
+
+    static T42: [Size; 1] = [sz(4, 2)];
+    static T43: [Size; 1] = [sz(4, 3)];
+    static GROW: [Size; 2] = [sz(4, 2), sz(8, 2)];
+
+    /// Окно на всю сетку вкладки.
+    fn full(spec: &TabSpec) -> Window {
+        Window { c0: 0, r0: 0, c1: spec.cols, r1: spec.rows }
+    }
+
+    fn at(idx: usize, col: u8, row: u8) -> Entry {
+        Entry { idx, size: 0, col, row, hidden: false }
+    }
+
+    fn pos(r: &Resolved, idx: usize) -> (u8, u8) {
+        let e = r.entries.iter().find(|e| e.idx == idx).unwrap();
+        (e.col, e.row)
+    }
+
+    /// Инварианты результата: нет пересечений, всё видимое в окне, скрытые и пропущенные не тронуты,
+    /// размеры соседей прежние, перемещён только виджет `idx` и те, кого он вытеснил.
+    fn check(win: Window, spec: &TabSpec, skip: u32, base: &[Entry], idx: usize, r: &Resolved) {
+        assert_eq!(r.entries.len(), base.len());
+        let act: Vec<&Entry> = r.entries.iter().filter(|e| !e.hidden && !skipped(skip, e.idx)).collect();
+        for (i, a) in act.iter().enumerate() {
+            let sa = spec.specs[a.idx].sizes[a.size];
+            assert!(win.contains_cell(a.col, a.row, sa.w, sa.h), "{a:?} вне окна {win:?}");
+            for b in &act[i + 1..] {
+                assert!(!Bx::of(spec, a).hits(&Bx::of(spec, b)), "{a:?} пересекает {b:?}");
+            }
+        }
+        let mut moved = 0;
+        for (b, o) in base.iter().zip(&r.entries) {
+            assert_eq!(b.idx, o.idx);
+            if b.idx == idx {
+                assert_eq!((o.col, o.row), (r.col, r.row));
+                continue;
+            }
+            assert_eq!(b.size, o.size, "у соседа сменился размер");
+            assert_eq!(b.hidden, o.hidden);
+            if b.hidden || skipped(skip, b.idx) {
+                assert_eq!(b, o, "скрытый или пропущенный виджет сдвинут");
+            } else if (b.col, b.row) != (o.col, o.row) {
+                moved += 1;
+            }
+        }
+        assert_eq!(moved, r.pushed);
+    }
+
+    #[test]
+    fn drop_into_free_cell_moves_nobody() {
+        let base = Layout::default_for(&SPEC).entries;
+        let r = resolve_drop(full(&SPEC), &SPEC, 0, &base, 0, 1, (0, 4)).unwrap();
+        assert_eq!(pos(&r, 0), (0, 4));
+        assert_eq!(r.pushed, 0);
+        assert_eq!(r.cost, 0.0);
+        check(full(&SPEC), &SPEC, 0, &base, 0, &r);
+    }
+
+    #[test]
+    fn push_down_first() {
+        static S: TabSpec = TabSpec {
+            cols: 4,
+            rows: 6,
+            min_cols: 4,
+            min_rows: 2,
+            specs: &[
+                Spec { key: "a", title: "A", sizes: &T42, size: 0, col: 0, row: 0 },
+                Spec { key: "b", title: "B", sizes: &T42, size: 0, col: 0, row: 2 },
+            ],
+        };
+        let base = vec![at(0, 0, 0), at(1, 0, 2)];
+        // Вверх и вниз сдвиг одинаковый: побеждает «вниз»
+        let r = push(full(&S), &S, 0, &base, 0, 0, 0, 2).unwrap();
+        assert_eq!(pos(&r, 1), (0, 4));
+        assert_eq!(r.pushed, 1);
+        check(full(&S), &S, 0, &base, 0, &r);
+    }
+
+    #[test]
+    fn push_right_when_down_is_blocked() {
+        static S: TabSpec = TabSpec {
+            cols: 12,
+            rows: 2,
+            min_cols: 4,
+            min_rows: 2,
+            specs: &[
+                Spec { key: "a", title: "A", sizes: &T42, size: 0, col: 0, row: 0 },
+                Spec { key: "b", title: "B", sizes: &T42, size: 0, col: 4, row: 0 },
+            ],
+        };
+        let base = vec![at(0, 0, 0), at(1, 4, 0)];
+        let r = push(full(&S), &S, 0, &base, 0, 0, 4, 0).unwrap();
+        assert_eq!(pos(&r, 1), (8, 0));
+        check(full(&S), &S, 0, &base, 0, &r);
+    }
+
+    #[test]
+    fn push_left_and_up_at_window_edge() {
+        static ROW: TabSpec = TabSpec {
+            cols: 8,
+            rows: 2,
+            min_cols: 4,
+            min_rows: 2,
+            specs: &[
+                Spec { key: "a", title: "A", sizes: &T42, size: 0, col: 0, row: 0 },
+                Spec { key: "b", title: "B", sizes: &T42, size: 0, col: 4, row: 0 },
+            ],
+        };
+        // Обмен местами в тесном ряду: B уходит влево, на место A
+        let base = vec![at(0, 0, 0), at(1, 4, 0)];
+        let r = push(full(&ROW), &ROW, 0, &base, 0, 0, 4, 0).unwrap();
+        assert_eq!(pos(&r, 1), (0, 0));
+        check(full(&ROW), &ROW, 0, &base, 0, &r);
+
+        static COL: TabSpec = TabSpec {
+            cols: 4,
+            rows: 4,
+            min_cols: 4,
+            min_rows: 2,
+            specs: &[
+                Spec { key: "a", title: "A", sizes: &T42, size: 0, col: 0, row: 0 },
+                Spec { key: "b", title: "B", sizes: &T42, size: 0, col: 0, row: 2 },
+            ],
+        };
+        let base = vec![at(0, 0, 0), at(1, 0, 2)];
+        let r = push(full(&COL), &COL, 0, &base, 0, 0, 0, 2).unwrap();
+        assert_eq!(pos(&r, 1), (0, 0));
+        check(full(&COL), &COL, 0, &base, 0, &r);
+    }
+
+    #[test]
+    fn push_cascades() {
+        static S: TabSpec = TabSpec {
+            cols: 4,
+            rows: 7,
+            min_cols: 4,
+            min_rows: 2,
+            specs: &[
+                Spec { key: "a", title: "A", sizes: &T42, size: 0, col: 0, row: 5 },
+                Spec { key: "b", title: "B", sizes: &T43, size: 0, col: 0, row: 0 },
+                Spec { key: "c", title: "C", sizes: &T42, size: 0, col: 0, row: 3 },
+            ],
+        };
+        // A наверх: B (4×3) в освободившиеся 2 ряда не влезает, поэтому B толкает C вниз
+        let base = vec![at(0, 0, 5), at(1, 0, 0), at(2, 0, 3)];
+        let r = push(full(&S), &S, 0, &base, 0, 0, 0, 0).unwrap();
+        assert_eq!(pos(&r, 1), (0, 2));
+        assert_eq!(pos(&r, 2), (0, 5));
+        assert_eq!(r.pushed, 2);
+        check(full(&S), &S, 0, &base, 0, &r);
+    }
+
+    #[test]
+    fn relocate_swaps_into_vacated_spot() {
+        static S: TabSpec = TabSpec {
+            cols: 8,
+            rows: 4,
+            min_cols: 4,
+            min_rows: 2,
+            specs: &[
+                Spec { key: "a", title: "A", sizes: &T42, size: 0, col: 0, row: 2 },
+                Spec { key: "b", title: "B", sizes: &T42, size: 0, col: 4, row: 0 },
+                Spec { key: "c", title: "C", sizes: &T42, size: 0, col: 0, row: 0 },
+                Spec { key: "d", title: "D", sizes: &T42, size: 0, col: 4, row: 2 },
+            ],
+        };
+        // Окно занято целиком, волны упираются в края; B уходит на освободившееся место A
+        let base = vec![at(0, 0, 2), at(1, 4, 0), at(2, 0, 0), at(3, 4, 2)];
+        let r = push(full(&S), &S, 0, &base, 0, 0, 4, 0).unwrap();
+        assert_eq!(pos(&r, 1), (0, 2));
+        assert_eq!(r.pushed, 1);
+        check(full(&S), &S, 0, &base, 0, &r);
+    }
+
+    #[test]
+    fn drop_rejects_blocked_targets_and_keeps_place() {
+        use crate::tabs::controls::SPEC as C;
+        // «Управление» по умолчанию занимает всё окно: Wi-Fi чуть правее своего места
+        // не может растолкать соседей и остаётся где был.
+        let base = Layout::default_for(&C).entries;
+        let win = fit_window(&base, &C, 0, C.min_cols, C.min_rows);
+        let r = resolve_drop(win, &C, 0, &base, 0, 1, (2, 0)).unwrap();
+        assert_eq!(pos(&r, 0), (0, 0));
+        assert_eq!(r.pushed, 0);
+        assert_eq!(r.entries, base);
+    }
+
+    #[test]
+    fn drop_over_neighbour_swaps() {
+        use crate::tabs::controls::SPEC as C;
+        let base = Layout::default_for(&C).entries;
+        let win = fit_window(&base, &C, 0, C.min_cols, C.min_rows);
+        // Wi-Fi прямо над Bluetooth: меняются местами
+        let r = resolve_drop(win, &C, 0, &base, 0, 1, (8, 0)).unwrap();
+        assert_eq!(pos(&r, 0), (8, 0));
+        assert_eq!(pos(&r, 1), (0, 0));
+        assert_eq!(r.pushed, 1);
+        check(win, &C, 0, &base, 0, &r);
+    }
+
+    #[test]
+    fn drop_big_widget_reflows_neighbours() {
+        use crate::tabs::controls::SPEC as C;
+        let base = Layout::default_for(&C).entries;
+        let win = fit_window(&base, &C, 0, C.min_cols, C.min_rows);
+        // Плеер 24×6 наверх: плитки и ползунок уезжают вниз, в окно 24×16 влезают все
+        let media = 7;
+        let size = base[media].size;
+        let r = resolve_drop(win, &C, 0, &base, media, size, (0, 0)).unwrap();
+        assert_eq!(pos(&r, media), (0, 0));
+        assert!(r.pushed > 0);
+        check(win, &C, 0, &base, media, &r);
+    }
+
+    #[test]
+    fn drop_none_when_window_is_full() {
+        static S: TabSpec = TabSpec {
+            cols: 4,
+            rows: 2,
+            min_cols: 4,
+            min_rows: 2,
+            specs: &[
+                Spec { key: "a", title: "A", sizes: &T42, size: 0, col: 0, row: 0 },
+                Spec { key: "b", title: "B", sizes: &T42, size: 0, col: 0, row: 0 },
+            ],
+        };
+        let base = vec![at(0, 0, 0), Entry { hidden: true, ..at(1, 0, 0) }];
+        assert_eq!(resolve_drop(full(&S), &S, 0, &base, 1, 0, (0, 0)), None);
+        // Виджет больше окна
+        let tiny = Window { c0: 0, r0: 0, c1: 2, r1: 2 };
+        assert_eq!(resolve_drop(tiny, &S, 0, &base, 0, 0, (0, 0)), None);
+    }
+
+    #[test]
+    fn drop_is_deterministic_and_returns_home() {
+        use crate::tabs::controls::SPEC as C;
+        let base = Layout::default_for(&C).entries;
+        let win = fit_window(&base, &C, 0, C.min_cols, C.min_rows);
+        let first = resolve_drop(win, &C, 0, &base, 0, 1, (8, 0));
+        let _ = resolve_drop(win, &C, 0, &base, 0, 1, (16, 3));
+        let _ = resolve_drop(win, &C, 0, &base, 0, 1, (0, 10));
+        assert_eq!(resolve_drop(win, &C, 0, &base, 0, 1, (8, 0)), first);
+        // Обратно в исходную ячейку — исходная раскладка
+        let home = resolve_drop(win, &C, 0, &base, 0, 1, (0, 0)).unwrap();
+        assert_eq!(home.entries, base);
+        assert_eq!(home.pushed, 0);
+    }
+
+    #[test]
+    fn drop_ignores_hidden_and_skipped() {
+        let mut lay = Layout::default_for(&SPEC);
+        lay.hide(3); // D скрыт
+        let skip = 0b0010; // B недоступен
+        let base = lay.entries.clone();
+        let win = full(&SPEC);
+        for r in 0..SPEC.rows {
+            for c in 0..SPEC.cols {
+                let res = resolve_drop(win, &SPEC, skip, &base, 0, 1, (c, r)).unwrap();
+                check(win, &SPEC, skip, &base, 0, &res);
+            }
+        }
+    }
+
+    #[test]
+    fn resolved_layout_survives_text_roundtrip() {
+        use crate::tabs::controls::SPEC as C;
+        let base = Layout::default_for(&C).entries;
+        let win = fit_window(&base, &C, 0, C.min_cols, C.min_rows);
+        let r = resolve_drop(win, &C, 0, &base, 7, base[7].size, (0, 0)).unwrap();
+        let lay = Layout { entries: r.entries };
+        assert_eq!(Layout::parse(&C, &lay.to_text(&C)), lay);
+    }
+
+    /// Все виджеты настоящих вкладок над каждой ячейкой окна: виджет всегда куда-то встаёт,
+    /// раскладка корректна, паники нет. Раскладка по умолчанию занимает окно целиком, поэтому
+    /// вторая — с половиной скрытых виджетов, где есть куда вытеснять.
+    #[test]
+    fn real_tabs_always_resolve() {
+        use crate::tabs::{controls, stats, today};
+        for spec in [&controls::SPEC, &today::SPEC, &stats::SPEC] {
+            let full_lay = Layout::default_for(spec);
+            let mut half = full_lay.clone();
+            for i in (1..spec.specs.len()).step_by(2) {
+                half.hide(i);
+            }
+            let win = fit_window(&full_lay.entries, spec, 0, spec.min_cols, spec.min_rows);
+            for base in [full_lay.entries, half.entries] {
+                for e in base.iter().filter(|e| !e.hidden) {
+                    for r in win.r0..win.r1 {
+                        for c in win.c0..win.c1 {
+                            let res = resolve_drop(win, spec, 0, &base, e.idx, e.size, (c, r))
+                                .unwrap_or_else(|| panic!("{} не встал у {c},{r}", spec.specs[e.idx].key));
+                            check(win, spec, 0, &base, e.idx, &res);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resize_grow_pushes_neighbour() {
+        static S: TabSpec = TabSpec {
+            cols: 8,
+            rows: 4,
+            min_cols: 4,
+            min_rows: 2,
+            specs: &[
+                Spec { key: "a", title: "A", sizes: &GROW, size: 0, col: 0, row: 0 },
+                Spec { key: "b", title: "B", sizes: &T42, size: 0, col: 4, row: 0 },
+            ],
+        };
+        let base = vec![at(0, 0, 0), at(1, 4, 0)];
+        let r = resolve_resize(full(&S), &S, 0, &base, 0, GROW[1].pixel_w(), GROW[1].pixel_h(), 0).unwrap();
+        assert_eq!(r.entries[0].size, 1);
+        assert_eq!(pos(&r, 0), (0, 0));
+        assert_eq!(pos(&r, 1), (4, 2));
+        check(full(&S), &S, 0, &base, 0, &r);
+    }
+
+    #[test]
+    fn resize_at_edge_shifts_widget_itself() {
+        static S: TabSpec = TabSpec {
+            cols: 8,
+            rows: 2,
+            min_cols: 4,
+            min_rows: 2,
+            specs: &[Spec { key: "a", title: "A", sizes: &GROW, size: 0, col: 4, row: 0 }],
+        };
+        let base = vec![at(0, 4, 0)];
+        let r = resolve_resize(full(&S), &S, 0, &base, 0, GROW[1].pixel_w(), GROW[1].pixel_h(), 0).unwrap();
+        assert_eq!(r.entries[0].size, 1);
+        assert_eq!(pos(&r, 0), (0, 0));
+    }
+
+    #[test]
+    fn resize_impossible_size_falls_back() {
+        static S: TabSpec = TabSpec {
+            cols: 8,
+            rows: 2,
+            min_cols: 4,
+            min_rows: 2,
+            specs: &[
+                Spec { key: "a", title: "A", sizes: &GROW, size: 0, col: 0, row: 0 },
+                Spec { key: "b", title: "B", sizes: &T42, size: 0, col: 4, row: 0 },
+            ],
+        };
+        // Соседу некуда деться: остаётся прежний размер
+        let base = vec![at(0, 0, 0), at(1, 4, 0)];
+        let r = resolve_resize(full(&S), &S, 0, &base, 0, GROW[1].pixel_w(), GROW[1].pixel_h(), 0).unwrap();
+        assert_eq!(r.entries, base);
+    }
+
+    #[test]
+    fn cycle_size_pushes_neighbours() {
+        use crate::tabs::controls::SPEC as C;
+        let mut lay = Layout::default_for(&C);
+        let win = Window { c0: 0, r0: 0, c1: C.cols, r1: C.rows };
+        // Окно занято целиком; спрячем плеер, чтобы соседям было куда уйти
+        lay.hide(7);
+        let before = lay.clone();
+        // Wi-Fi 8×3 → 12×3 растёт на месте: Bluetooth и Аудио расталкиваются, Wi-Fi не переезжает
+        assert!(lay.cycle_size_in_window(win, &C, 0, 0));
+        let wifi = lay.entry(0).unwrap();
+        assert_eq!((wifi.size, wifi.col, wifi.row), (2, 0, 0));
+        assert_ne!(lay, before);
+        assert!(no_overlap(&lay.pack(&C, 0)));
     }
 
     #[test]

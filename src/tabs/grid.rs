@@ -23,6 +23,10 @@ pub const EXTRA: f32 = 32.0;
 const BAR_H: f32 = 22.0;
 /// Сдвиг курсора с нажатой кнопкой, после которого нажатие становится перетаскиванием.
 const MOVE_MIN: f32 = 4.0;
+/// Сколько секунд виджет должен продержаться над новой ячейкой, чтобы раскладка перестроилась.
+const DWELL: f32 = 0.09;
+/// Рывок дальше этого (в ячейках) перестраивает раскладку сразу, без выдержки.
+const JUMP: f32 = 1.5;
 const NOTE_SECS: f32 = 2.4;
 const BADGE_R: f32 = 8.0;
 const CHIP_H: f32 = 22.0;
@@ -109,8 +113,13 @@ struct Drag {
     live: bool,
     /// Где сейчас «плавающий» прямоугольник виджета (левый верх).
     float: (f32, f32),
-    /// Целевая ячейка сетки (тень-приёмник).
+    /// Куда виджет встанет, если отпустить (тень-приёмник); `None` — места нет совсем.
     target: Option<(u8, u8)>,
+    /// Ячейка под виджетом и сколько секунд он над ней держится.
+    hover: (u8, u8),
+    dwell: f32,
+    /// Ячейка, для которой посчитано текущее превью раскладки.
+    want: (u8, u8),
 }
 
 /// Нажатие на угловой ручке: короткое — смена размера по кругу, с движением — подбор размера.
@@ -121,6 +130,8 @@ struct Resize {
     from: (f32, f32),
     live: bool,
     before: Layout,
+    /// Размер под курсором не помещается даже с вытеснением (надпись уже показана).
+    refused: bool,
 }
 
 /// Нажатие/перетаскивание ручки растягивания окна сетки.
@@ -150,8 +161,9 @@ struct Tray {
 pub struct Grid {
     tab: usize,
     spec: &'static TabSpec,
+    /// Рабочая раскладка; пока виджет в руке, это превью: соседи уже стоят там, куда их вытеснили.
     lay: Layout,
-    /// Раскладка на начало перетаскивания: прерванный перенос возвращает её.
+    /// Раскладка на начало перетаскивания: от неё считается превью, прерванный перенос возвращает её.
     before: Option<Layout>,
     slots: Vec<Slot>,
     /// Прямоугольник, куда виджет встанет, если сейчас отпустить (тень-приёмник).
@@ -388,6 +400,9 @@ impl Grid {
         for g in &mut self.ghost {
             g.step(dt);
         }
+        if let Some(d) = self.drag.as_mut() {
+            d.dwell += dt;
+        }
         if self.editing || self.edit.value > 0.002 {
             self.phase = (self.phase + dt * 16.0) % TAU;
         }
@@ -441,12 +456,18 @@ impl Grid {
         self.note_left = NOTE_SECS;
     }
 
+    /// Прерывает перенос и ресайз: раскладка возвращается к той, что была на начало жеста.
     fn abort_drag(&mut self) {
         if let Some(before) = self.before.take() {
             self.lay = before;
         }
         if let Some(d) = self.drag.take() {
             self.slots[d.idx].follow(false);
+        }
+        if let Some(rs) = self.resizing.take() {
+            if rs.live {
+                self.lay = rs.before;
+            }
         }
         self.stretching = None;
         self.lift.target = 0.0;
@@ -541,7 +562,7 @@ impl Grid {
                 }
                 if self.resizing.is_none() && self.drag.is_none() && ui.is_dragging(id) {
                     let (ptr_x, ptr_y) = ptr;
-                    self.resizing = Some(Resize { idx, press: (ptr_x, ptr_y), from: (r.w, r.h), live: false, before: self.lay.clone() });
+                    self.resizing = Some(Resize { idx, press: (ptr_x, ptr_y), from: (r.w, r.h), live: false, before: self.lay.clone(), refused: false });
                 }
             }
         }
@@ -550,8 +571,18 @@ impl Grid {
             let r = self.slots[idx].rect();
             let _ = ui.click_area(id, r);
             if self.drag.is_none() && self.resizing.is_none() && ui.is_dragging(id) {
-                let target = self.lay.entry(idx).map(|e| (e.col, e.row));
-                self.drag = Some(Drag { idx, press: ptr, grab: (ptr.0 - r.x, ptr.1 - r.y), live: false, float: (r.x, r.y), target });
+                let home = self.lay.entry(idx).map_or((0, 0), |e| (e.col, e.row));
+                self.drag = Some(Drag {
+                    idx,
+                    press: ptr,
+                    grab: (ptr.0 - r.x, ptr.1 - r.y),
+                    live: false,
+                    float: (r.x, r.y),
+                    target: Some(home),
+                    hover: home,
+                    dwell: 0.0,
+                    want: home,
+                });
             }
         }
 
@@ -734,8 +765,28 @@ impl Grid {
         }
     }
 
+    /// Прямоугольник виджета `idx` в раскладке `lay` в пикселях слоя (для тени-приёмника).
+    fn cell_rect(&self, area: Rect, lay: &Layout, idx: usize) -> Option<[f32; 4]> {
+        let e = lay.entry(idx)?;
+        let sz = self.spec.specs[idx].sizes[e.size];
+        let (x, y) = self.window.cell_to_pixel(e.col, e.row);
+        Some([area.x + x, area.y + y, sz.pixel_w(), sz.pixel_h()])
+    }
+
+    /// Тень-приёмник едет к прямоугольнику `r`; `snap` — встаёт сразу (начало жеста).
+    fn aim_ghost(&mut self, r: [f32; 4], snap: bool) {
+        for (g, v) in self.ghost.iter_mut().zip(r) {
+            g.target = v;
+            if snap {
+                g.value = v;
+                g.snap();
+            }
+        }
+    }
+
     /// Угловая ручка: пока кнопка зажата и курсор двигается, виджет выбирает ближайший
-    /// допустимый размер из `Spec::sizes`.
+    /// допустимый размер из `Spec::sizes`, а соседи расступаются. Превью всегда считается
+    /// от раскладки на начало жеста, поэтому обратное движение возвращает соседей на места.
     fn resize_step(&mut self, ui: &mut Ui, area: Rect, skip: u32) {
         let spec = self.spec;
         let Some(mut rs) = self.resizing.take() else { return };
@@ -749,59 +800,45 @@ impl Grid {
         if !rs.live && (px - rs.press.0).hypot(py - rs.press.1) > MOVE_MIN {
             rs.live = true;
             self.tray_open = false;
-            if let Some(e) = self.lay.entry(rs.idx) {
-                let sz = spec.specs[rs.idx].sizes[e.size];
-                let gx = area.x + (e.col - self.window.c0) as f32 * CELL;
-                let gy = area.y + (e.row - self.window.r0) as f32 * CELL;
-                let gw = sz.pixel_w();
-                let gh = sz.pixel_h();
-                for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
-                    g.value = v;
-                    g.target = v;
-                    g.snap();
-                }
+            if let Some(r) = self.cell_rect(area, &self.lay, rs.idx) {
+                self.aim_ghost(r, true);
             }
         }
         if rs.live {
             let (w, h) = (rs.from.0 + px - rs.press.0, rs.from.1 + py - rs.press.1);
-            if let Some(lay) = self.lay.resized_to_in_window(self.window, spec, skip, rs.idx, w, h) {
-                self.lay = lay;
-            }
-            if let Some(e) = self.lay.entry(rs.idx) {
-                let sz = spec.specs[rs.idx].sizes[e.size];
-                let gx = area.x + (e.col - self.window.c0) as f32 * CELL;
-                let gy = area.y + (e.row - self.window.r0) as f32 * CELL;
-                let gw = sz.pixel_w();
-                let gh = sz.pixel_h();
-                for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
-                    g.target = v;
+            let prefer = self.lay.entry(rs.idx).map_or(0, |e| e.size);
+            if let Some(res) = layout::resolve_resize(self.window, spec, skip, &rs.before.entries, rs.idx, w, h, prefer) {
+                // Размер под курсором не встал даже с вытеснением: говорим об этом сразу, а не молчим.
+                let got = res.entries.iter().find(|e| e.idx == rs.idx).map(|e| e.size);
+                let refused = got != layout::size_order(spec, rs.idx, w, h, prefer).first().copied();
+                if refused && !rs.refused {
+                    self.say("Не хватает места");
                 }
+                rs.refused = refused;
+                if res.entries != self.lay.entries {
+                    self.lay = Layout { entries: res.entries };
+                }
+            }
+            if let Some(r) = self.cell_rect(area, &self.lay, rs.idx) {
+                self.aim_ghost(r, false);
             }
         }
         self.resizing = Some(rs);
     }
 
+    /// Перенос виджета. Пока он в руке, рабочая раскладка — превью от снимка на начало жеста:
+    /// соседи уже стоят там, куда их вытеснили, а тень показывает место виджета. Новая ячейка
+    /// принимается после короткой выдержки или сразу при рывке, чтобы раскладка не мигала.
     fn drag_step(&mut self, ui: &mut Ui, area: Rect, skip: u32) {
         let spec = self.spec;
         let Some(mut d) = self.drag.take() else { return };
         if !ui.is_dragging(self.wid(d.idx, 2)) {
-            // Кнопку отпустили: виджет встаёт на место цели тени-приёмника.
+            // Кнопку отпустили: раскладка уже равна превью, остаётся её сохранить.
             self.slots[d.idx].follow(false);
             self.lift.target = 0.0;
-            if d.live {
-                if let Some((col, row)) = d.target {
-                    if let Some(e) = self.lay.entry_mut(d.idx) {
-                        e.col = col;
-                        e.row = row;
-                    }
-                    if let Some(before) = self.before.take() {
-                        if before != self.lay {
-                            self.commit();
-                        }
-                    }
-                } else {
-                    self.abort_drag();
-                    self.say("Не хватает места");
+            if let Some(before) = self.before.take() {
+                if before != self.lay {
+                    self.commit();
                 }
             }
             return;
@@ -813,50 +850,63 @@ impl Grid {
             self.top = Some(d.idx);
             self.lift.target = 1.0;
             self.tray_open = false;
-            let s = &mut self.slots[d.idx];
-            s.follow(true);
-            let (x, y, w, h) = (s.x.value, s.y.value, s.w.value, s.h.value);
-            for (g, v) in self.ghost.iter_mut().zip([x, y, w, h]) {
-                g.value = v;
-                g.target = v;
-                g.snap();
+            self.slots[d.idx].follow(true);
+            if let Some(r) = self.cell_rect(area, &self.lay, d.idx) {
+                self.aim_ghost(r, true);
             }
         }
         if d.live {
-            let (w, h) = (self.slots[d.idx].w.target, self.slots[d.idx].h.target);
+            let size = self.lay.entry(d.idx).map_or(0, |e| e.size);
+            let sz = spec.specs[d.idx].sizes[size];
+            let (w, h) = (sz.pixel_w(), sz.pixel_h());
             let fx = (px - d.grab.0).clamp(area.x - 8.0, (area.right() - w + 8.0).max(area.x - 8.0));
             let fy = (py - d.grab.1).clamp(area.y - 8.0, (area.bottom() - h + 8.0).max(area.y - 8.0));
             d.float = (fx, fy);
-            let (want_col, want_row) = self.window.pixel_to_cell(fx - area.x + CELL / 2.0, fy - area.y + CELL / 2.0);
-            let cur_size = self.lay.entry(d.idx).map_or(0, |e| e.size);
-            let target = if layout::can_place_in_window(self.window, spec, skip, &self.lay.entries, d.idx, cur_size, want_col, want_row) {
-                Some((want_col, want_row))
-            } else {
-                None
-            };
-            d.target = target;
-            let sz = spec.specs[d.idx].sizes[cur_size];
-            let gw = sz.pixel_w();
-            let gh = sz.pixel_h();
-            if let Some((tc, tr)) = target {
-                let gx = area.x + (tc - self.window.c0) as f32 * CELL;
-                let gy = area.y + (tr - self.window.r0) as f32 * CELL;
-                for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
-                    g.target = v;
-                }
-            } else {
-                let max_c = self.window.c1.saturating_sub(sz.w);
-                let max_r = self.window.r1.saturating_sub(sz.h);
-                let clamp_c = want_col.clamp(self.window.c0, max_c.max(self.window.c0));
-                let clamp_r = want_row.clamp(self.window.r0, max_r.max(self.window.r0));
-                let gx = area.x + (clamp_c - self.window.c0) as f32 * CELL;
-                let gy = area.y + (clamp_r - self.window.r0) as f32 * CELL;
-                for (g, v) in self.ghost.iter_mut().zip([gx, gy, gw, gh]) {
-                    g.target = v;
-                }
+
+            // Ячейка под виджетом: его левый верх, округлённый до ближайшего узла, внутри окна.
+            let win = self.window;
+            let snap = |v: f32, lo: u8, hi: u8| (lo as f32 + (v / CELL).round()).clamp(lo as f32, hi.max(lo) as f32) as u8;
+            let cell = (
+                snap(fx - area.x, win.c0, win.c1.saturating_sub(sz.w)),
+                snap(fy - area.y, win.r0, win.r1.saturating_sub(sz.h)),
+            );
+            if cell != d.hover {
+                d.hover = cell;
+                d.dwell = 0.0;
+            }
+            let jump = (cell.0 as f32 - d.want.0 as f32).hypot(cell.1 as f32 - d.want.1 as f32) > JUMP;
+            if cell != d.want && (d.dwell >= DWELL || jump) {
+                d.want = cell;
+                self.preview(&mut d, skip);
+            }
+
+            let lay = if d.target.is_some() { &self.lay } else { self.before.as_ref().unwrap_or(&self.lay) };
+            if let Some(r) = self.cell_rect(area, lay, d.idx) {
+                self.aim_ghost(r, false);
             }
         }
         self.drag = Some(d);
+    }
+
+    /// Пересчитывает превью раскладки для ячейки `d.want` от снимка на начало жеста.
+    fn preview(&mut self, d: &mut Drag, skip: u32) {
+        let Some(before) = self.before.as_ref() else { return };
+        let size = before.entry(d.idx).map_or(0, |e| e.size);
+        match layout::resolve_drop(self.window, self.spec, skip, &before.entries, d.idx, size, d.want) {
+            Some(res) => {
+                d.target = Some((res.col, res.row));
+                if res.entries != self.lay.entries {
+                    self.lay = Layout { entries: res.entries };
+                }
+            }
+            None => {
+                // Места нет совсем: виджет остаётся на исходном месте, и об этом видно сразу.
+                self.lay = before.clone();
+                if d.target.take().is_some() {
+                    self.say("Не хватает места");
+                }
+            }
+        }
     }
 
     // ---------- Рисование ----------
@@ -871,7 +921,10 @@ impl Grid {
         let skip_changed = skip != self.last_skip;
         self.last_skip = skip;
         let mut refit = skip_changed;
-        if let Some(text) = self.pending.take() {
+        // Правку конфига снаружи применяем, когда в руке ничего нет: иначе превью и снимок жеста
+        // разошлись бы с новой раскладкой.
+        let gesture = self.drag.is_some() || self.resizing.is_some();
+        if let Some(text) = if gesture { None } else { self.pending.take() } {
             let lay = Layout::parse(spec, &text);
             self.lay = if lay.fits(spec, skip, area.h) { lay } else { Layout::default_for(spec) };
             refit = true;
@@ -930,18 +983,21 @@ impl Grid {
         };
         self.draw_grid_vertices(cv, area, focus);
 
-        // Тень-приёмник под поднятым виджетом или тень будущего размера при ресайзе.
-        if let (Some(_idx), true) = (live, self.lift.value > 0.01) {
-            let r = Rect::new(self.ghost[0].value, self.ghost[1].value, self.ghost[2].value.max(0.0), self.ghost[3].value.max(0.0));
-            let k = self.lift.value.clamp(0.0, 1.0);
-            let valid = self.drag.as_ref().is_some_and(|d| d.target.is_some());
-            let ghost_color = if valid { cv.accent } else { ui::status_red() };
-            cv.rr(r, 11.0, fade(ghost_color, 0.12 * k));
-            cv.rr_line(r, 11.0, fade(ghost_color, 0.55 * k), 1.2);
+        // Тень-приёмник: место, куда встанет поднятый виджет, или его будущий размер при ресайзе.
+        // Красная — только когда места нет совсем.
+        let ghost_k = if live.is_some() {
+            self.lift.value.clamp(0.0, 1.0)
         } else if self.resizing.as_ref().is_some_and(|rs| rs.live) {
+            1.0
+        } else {
+            0.0
+        };
+        if ghost_k > 0.01 {
             let r = Rect::new(self.ghost[0].value, self.ghost[1].value, self.ghost[2].value.max(0.0), self.ghost[3].value.max(0.0));
-            cv.rr(r, 11.0, fade(cv.accent, 0.12));
-            cv.rr_line(r, 11.0, fade(cv.accent, 0.55), 1.2);
+            let refused = self.drag.as_ref().is_some_and(|d| d.live && d.target.is_none());
+            let c = if refused { ui::status_red() } else { cv.accent };
+            cv.rr(r, 11.0, fade(c, 0.20 * ghost_k));
+            cv.rr_line(r, 11.0, fade(c, 0.75 * ghost_k), 1.5);
         }
 
         // Порядок рисования: как в раскладке, а поднятый (и летящий на место) виджет — последним.
@@ -1017,7 +1073,8 @@ impl Grid {
         }
 
         let size = self.lay.entry(idx).map_or(self.spec.specs[idx].size, |e| e.size);
-        let sub = Canvas { g: cv.g, alpha: cv.alpha * a, accent: cv.accent };
+        // Поднятый виджет чуть прозрачный: сквозь него видно тень-приёмник.
+        let sub = Canvas { g: cv.g, alpha: cv.alpha * a * (1.0 - 0.12 * lift.clamp(0.0, 1.0)), accent: cv.accent };
         let mute = self.editing || e > 0.002 || s.a.target < 0.5;
         let prev = if mute { Some(ui.mute()) } else { None };
         paint(ui, &sub, &Item { idx, size, rect: r });
