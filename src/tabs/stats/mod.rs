@@ -376,9 +376,9 @@ impl Stats {
         let f = &cv.g.fonts;
         let c = &self.cur;
         let (label, value) = match i {
-            DISK => ("ДИСК C:", format!("{:.0} / {:.0} {}", c.disk_used / GB, c.disk_total / GB, crate::i18n::pick("ГБ", "GB"))),
-            NET => ("СЕТЬ", format!("↓{}  ↑{}", fmt_rate(c.rx_bps), fmt_rate(c.tx_bps))),
-            _ => ("В РАБОТЕ", fmt_uptime(c.uptime_s)),
+            DISK => ("Диск C:", format!("{:.0} / {:.0} {}", c.disk_used / GB, c.disk_total / GB, crate::i18n::pick("ГБ", "GB"))),
+            NET => ("Сеть", format!("↓{}  ↑{}", fmt_rate(c.rx_bps), fmt_rate(c.tx_bps))),
+            _ => ("В работе", fmt_uptime(c.uptime_s)),
         };
         cv.card(r);
         cv.text(label, Rect::new(r.x + 12.0, r.y + 15.0, r.w - 20.0, 11.0), &f.caps, dim());

@@ -287,9 +287,8 @@ const TABLE: &[(&str, &str)] = &[
     ("Язык", "Language"),
     ("Авто", "Auto"),
     // Stats
-    ("ДИСК C:", "DISK C:"),
-    ("СЕТЬ", "NETWORK"),
-    ("В РАБОТЕ", "UPTIME"),
+    ("Диск C:", "Disk C:"),
+    ("В работе", "Uptime"),
     ("Собираю данные…", "Collecting data…"),
     ("Скорость сети", "Network speed"),
     ("Мбит/с ↓", "Mbit/s ↓"),

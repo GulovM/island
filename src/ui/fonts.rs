@@ -187,6 +187,8 @@ impl Fonts {
     pub unsafe fn new(f: &IDWriteFactory) -> Result<Self> {
         // Segoe UI Variable Text (Windows 11) — оптимизирован для мелкого размера; запасной — Segoe UI.
         let ui = if font_exists(f, w!("Segoe UI Variable Text")) { w!("Segoe UI Variable Text") } else { w!("Segoe UI") };
+        // Крупные цифры и заголовки — оптическое начертание Display (плотнее на крупном кегле, как SF Pro Display).
+        let display = if font_exists(f, w!("Segoe UI Variable Display")) { w!("Segoe UI Variable Display") } else { ui };
         let icons = if font_exists(f, w!("Segoe Fluent Icons")) { w!("Segoe Fluent Icons") } else { w!("Segoe MDL2 Assets") };
         let reg = DWRITE_FONT_WEIGHT_REGULAR;
         let semi_590 = WEIGHT_EMPHASIZED;
@@ -206,10 +208,10 @@ impl Fonts {
         let caps = fmt(f, ui, semi_590, 7.0, false)?;
         let caps_c = fmt(f, ui, semi_590, 6.5, true)?;
         let icon_small = fmt(f, icons, reg, 7.5, true)?;
-        let title = fmt(f, ui, bold, 12.5, false)?;
-        let num = fmt(f, ui, bold, 15.0, false)?;
-        let num_c = fmt(f, ui, bold, 15.0, true)?;
-        let big_c = fmt(f, ui, bold, 26.0, true)?;
+        let title = fmt(f, display, bold, 12.5, false)?;
+        let num = fmt(f, display, bold, 15.0, false)?;
+        let num_c = fmt(f, display, bold, 15.0, true)?;
+        let big_c = fmt(f, display, bold, 26.0, true)?;
         let wrap_b = {
             let t = fmt(f, ui, semi_590, 9.0, true)?;
             t.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;

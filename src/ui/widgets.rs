@@ -94,15 +94,16 @@ impl Ui {
         let (bx, by) = (centered + (rect.x + 19.0 - centered) * full, rect.cy());
         cv.circle(bx, by, 11.0, mix(chip_bg(), mix(cv.accent, ink(), 0.16), ov));
         cv.glyph(glyph, Rect::new(bx - 11.0, by - 11.0, 22.0, 22.0), false, fg);
-        // Текст по центру между бейджем и стрелкой.
+        // Текст слева, сразу за бейджем (как плитки Пункта управления iOS): заголовок полужирный,
+        // подпись обычным начертанием — иерархия держится весом, а не только цветом.
         if full > 0.02 {
             let tcv = Canvas { g: cv.g, alpha: cv.alpha * full, accent: cv.accent };
-            let tx = rect.x + 32.0;
-            let tw = (rect.w - 32.0 - chev_w - 4.0).max(10.0);
+            let tx = rect.x + 38.0;
+            let tw = (rect.w - 38.0 - chev_w - 4.0).max(10.0);
             let fonts = &cv.g.fonts;
-            let tf = if cv.text_w(title, &fonts.body_c) > tw { &fonts.small_c } else { &fonts.body_c };
+            let tf = if cv.text_w(title, &fonts.body) > tw { &fonts.small_b } else { &fonts.body };
             tcv.text(title, Rect::new(tx, rect.cy() - 12.0, tw, 13.0), tf, fg);
-            tcv.text(sub, Rect::new(tx, rect.cy() + 1.0, tw, 11.0), &fonts.small_c, sub_c);
+            tcv.text(sub, Rect::new(tx, rect.cy() + 1.0, tw, 11.0), &fonts.small, sub_c);
         }
         if chevron != Chevron::None {
             if chevron == Chevron::Divided {
