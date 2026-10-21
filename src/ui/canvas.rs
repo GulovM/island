@@ -79,13 +79,8 @@ impl Canvas<'_> {
 
     /// Скруглённый прямоугольник с вертикальным градиентом (обложка трека в плеере).
     pub unsafe fn gradient_rr(&self, r: Rect, radius: f32, top: D2D1_COLOR_F, bottom: D2D1_COLOR_F) {
-        let stops = [
-            D2D1_GRADIENT_STOP { position: 0.0, color: self.col(top) },
-            D2D1_GRADIENT_STOP { position: 1.0, color: self.col(bottom) },
-        ];
-        let Ok(coll) = ID2D1RenderTarget::CreateGradientStopCollection(&self.g.dc, &stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) else { return };
-        let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: pt(r.x, r.y), endPoint: pt(r.right(), r.bottom()) };
-        let Ok(br) = self.g.dc.CreateLinearGradientBrush(&props, None, &coll) else { return };
+        let stops = [(0.0, self.col(top)), (1.0, self.col(bottom))];
+        let Some(br) = self.g.linear_gradient(pt(r.x, r.y), pt(r.right(), r.bottom()), &stops) else { return };
         let rad = radius.min(r.w / 2.0).min(r.h / 2.0).max(0.0);
         self.g.dc.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r.d2d(), radiusX: rad, radiusY: rad }, &br);
     }
@@ -93,12 +88,9 @@ impl Canvas<'_> {
     /// Скруглённый прямоугольник с линейным градиентом из нескольких остановок (палитра цвета):
     /// `horizontal` — слева направо, иначе сверху вниз. Цвета могут быть полупрозрачными.
     pub unsafe fn gradient_stops(&self, r: Rect, radius: f32, stops: &[(f32, D2D1_COLOR_F)], horizontal: bool) {
-        let list: Vec<D2D1_GRADIENT_STOP> =
-            stops.iter().map(|(p, c)| D2D1_GRADIENT_STOP { position: *p, color: self.col(*c) }).collect();
-        let Ok(coll) = ID2D1RenderTarget::CreateGradientStopCollection(&self.g.dc, &list, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) else { return };
+        let list: Vec<(f32, D2D1_COLOR_F)> = stops.iter().map(|&(p, c)| (p, self.col(c))).collect();
         let (a, b) = if horizontal { (pt(r.x, r.y), pt(r.right(), r.y)) } else { (pt(r.x, r.y), pt(r.x, r.bottom())) };
-        let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: a, endPoint: b };
-        let Ok(br) = self.g.dc.CreateLinearGradientBrush(&props, None, &coll) else { return };
+        let Some(br) = self.g.linear_gradient(a, b, &list) else { return };
         let rad = radius.min(r.w / 2.0).min(r.h / 2.0).max(0.0);
         self.g.dc.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r.d2d(), radiusX: rad, radiusY: rad }, &br);
     }

@@ -3,6 +3,8 @@
 //!
 //! Прототип: `scratchpad/proto/src/main.rs`, режим 7 — рабочее поведение на Win11 26300.
 
+use std::cell::Cell;
+
 use windows::core::*;
 use windows::Graphics::IGeometrySource2D;
 use windows::Win32::Foundation::*;
@@ -59,6 +61,11 @@ pub(crate) struct Backdrop {
     _comp: Compositor,
     /// Спрайт-шейп для маски тени (обновляется при смене геометрии).
     _sprite_shape: CompositionSpriteShape,
+    /// Последний размер визуалов и маски: пересоздавать поверхность маски на каждом кадре анимации
+    /// незачем, окно подложки меняет размер только при смене DPI.
+    size: Cell<(f32, f32)>,
+    /// Последние параметры тени (смещение, размытие, непрозрачность): `set_shadow` зовётся каждый кадр.
+    shadow: Cell<(f32, f32, f32)>,
 }
 
 impl Backdrop {
@@ -142,6 +149,8 @@ impl Backdrop {
             _sprite_shape: sprite_shape,
             _target: target,
             _comp: comp,
+            size: Cell::new((1.0, 1.0)),
+            shadow: Cell::new((8.0, 40.0, 0.35)),
         })
     }
 
@@ -158,17 +167,24 @@ impl Backdrop {
         let path = CompositionPath::Create(&src)?;
         self.geo.SetPath(&path)?;
 
-        // Размеры визуала тени и поверхности маски.
-        let sz = Vector2 { X: w, Y: h };
-        self.shadow_v.SetSize(sz)?;
-        self.shape_v.SetSize(sz)?;
-        self.vs.SetSourceSize(sz)?;
+        // Размеры визуала тени и поверхности маски — только когда они изменились.
+        if self.size.get() != (w, h) {
+            let sz = Vector2 { X: w, Y: h };
+            self.shadow_v.SetSize(sz)?;
+            self.shape_v.SetSize(sz)?;
+            self.vs.SetSourceSize(sz)?;
+            self.size.set((w, h));
+        }
         Ok(())
     }
 
     /// Настраивает параметры тени: `dy` — смещение вниз (px), `blur` — радиус размытия (px),
     /// `opacity` — непрозрачность (0.0..1.0).
     pub(crate) fn set_shadow(&self, dy: f32, blur: f32, opacity: f32) -> Result<()> {
+        if self.shadow.get() == (dy, blur, opacity) {
+            return Ok(());
+        }
+        self.shadow.set((dy, blur, opacity));
         self.ds.SetBlurRadius(blur)?;
         self.ds.SetOffset(Vector3 {
             X: 0.0,

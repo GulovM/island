@@ -13,8 +13,43 @@ use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::*;
 use windows_numerics::Vector2;
 
+use std::cell::RefCell;
+
 use crate::ui::{self, Fonts};
 use crate::{log, sys, theme};
+
+/// Сколько градиентных кистей держать между кадрами: тело, кромка, капля и градиенты вкладок.
+const GRADIENT_CACHE: usize = 16;
+/// Сколько контуров тела держать: за кадр их до четырёх (тело, кромка, подсветка, свечение).
+const PATH_CACHE: usize = 8;
+
+/// Несколько последних ресурсов D2D между кадрами: поиск перебором, при переполнении вытесняется
+/// самый давно использованный. Живёт в `Gfx`, поэтому пропадает вместе с устройством.
+pub(crate) struct Recent<K, V> {
+    cap: usize,
+    items: Vec<(K, V)>,
+}
+
+impl<K: PartialEq, V: Clone> Recent<K, V> {
+    pub(crate) fn new(cap: usize) -> Self {
+        Self { cap: cap.max(1), items: Vec::with_capacity(cap.max(1)) }
+    }
+
+    pub(crate) fn get(&mut self, key: &K) -> Option<V> {
+        let i = self.items.iter().position(|(k, _)| k == key)?;
+        let item = self.items.remove(i);
+        let v = item.1.clone();
+        self.items.push(item);
+        Some(v)
+    }
+
+    pub(crate) fn put(&mut self, key: K, v: V) {
+        if self.items.len() >= self.cap {
+            self.items.remove(0);
+        }
+        self.items.push((key, v));
+    }
+}
 
 pub(crate) struct Gfx {
     pub(crate) device: ID3D11Device,
@@ -28,6 +63,13 @@ pub(crate) struct Gfx {
     pub(crate) fonts: Fonts,
     /// Штрих с круглыми концами для дуг-колец.
     pub(crate) round: ID2D1StrokeStyle1,
+    /// Градиентные кисти: ключ — остановки с альфой, нормированной на самую плотную (общая
+    /// прозрачность уходит в `SetOpacity`), поэтому затухание не создаёт новых текстур градиента.
+    gradients: RefCell<Recent<Vec<u32>, ID2D1LinearGradientBrush>>,
+    /// Контуры тела острова (ключ — точные параметры формы): в простое кадр их не перестраивает.
+    pub(crate) paths: RefCell<Recent<[u32; 6], ID2D1PathGeometry1>>,
+    /// Маска тени капли под выбранной вкладкой (вычитание геометрий — дорогая операция на CPU).
+    pub(crate) pill_masks: RefCell<Recent<[u32; 6], ID2D1Geometry>>,
     pub(crate) _dcomp: IDCompositionDevice,
     pub(crate) _dcomp_target: IDCompositionTarget,
     pub(crate) _visual: IDCompositionVisual,
@@ -134,6 +176,9 @@ impl Gfx {
             text,
             fonts,
             round,
+            gradients: RefCell::new(Recent::new(GRADIENT_CACHE)),
+            paths: RefCell::new(Recent::new(PATH_CACHE)),
+            pill_masks: RefCell::new(Recent::new(2)),
             _dcomp: dcomp,
             _dcomp_target: dcomp_target,
             _visual: visual,
@@ -176,6 +221,39 @@ impl Gfx {
         self.device.GetDeviceRemovedReason().is_err()
     }
 
+    /// Линейный градиент от `a` к `b`; цвета остановок уже с нужной прозрачностью. Кисть берётся из
+    /// кэша: альфа остановок нормируется на самую плотную, а общий множитель ставится в `SetOpacity`
+    /// (для линейной интерполяции это то же самое), поэтому плавное затухание и сдвиг концов не
+    /// создают новых коллекций остановок. `None` — градиент полностью прозрачен или D2D отказал.
+    pub(crate) unsafe fn linear_gradient(&self, a: Vector2, b: Vector2, stops: &[(f32, D2D1_COLOR_F)]) -> Option<ID2D1LinearGradientBrush> {
+        let peak = stops.iter().fold(0.0f32, |m, s| m.max(s.1.a));
+        if peak <= 0.0 {
+            return None;
+        }
+        // Шаг 1/4096 — тоньше 8-битного канала: на экране неотличимо, а ключ не «дрожит» от округлений.
+        let q = |v: f32| (v.clamp(0.0, 1.0) * 4096.0).round() as u32;
+        let key: Vec<u32> = stops.iter().flat_map(|&(p, c)| [q(p), q(c.r), q(c.g), q(c.b), q(c.a / peak)]).collect();
+        let mut cache = self.gradients.borrow_mut();
+        let br = match cache.get(&key) {
+            Some(br) => br,
+            None => {
+                let list: Vec<D2D1_GRADIENT_STOP> = stops
+                    .iter()
+                    .map(|&(position, c)| D2D1_GRADIENT_STOP { position, color: D2D1_COLOR_F { a: c.a / peak, ..c } })
+                    .collect();
+                let coll = ID2D1RenderTarget::CreateGradientStopCollection(&self.dc, &list, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP).ok()?;
+                let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: a, endPoint: b };
+                let br = self.dc.CreateLinearGradientBrush(&props, None, &coll).ok()?;
+                cache.put(key, br.clone());
+                br
+            }
+        };
+        br.SetStartPoint(a);
+        br.SetEndPoint(b);
+        br.SetOpacity(peak.min(1.0));
+        Some(br)
+    }
+
     pub(crate) unsafe fn draw_text(&self, s: &str, x: f32, y: f32, w: f32, h: f32, color: D2D1_COLOR_F) {
         self.brush.SetColor(&color);
         if let Some(layout) = self.fonts.layout(s, &self.text, w, h) {
@@ -192,5 +270,24 @@ impl Gfx {
                 DWRITE_MEASURING_MODE_NATURAL,
             );
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Recent;
+
+    #[test]
+    fn recent_evicts_least_recently_used() {
+        let mut c = Recent::new(2);
+        c.put(1, "a");
+        c.put(2, "b");
+        // Обращение к 1 делает её свежей: вытесняется 2.
+        assert_eq!(c.get(&1), Some("a"));
+        c.put(3, "c");
+        assert_eq!(c.get(&2), None);
+        assert_eq!(c.get(&1), Some("a"));
+        assert_eq!(c.get(&3), Some("c"));
+        assert_eq!(c.items.len(), 2);
     }
 }

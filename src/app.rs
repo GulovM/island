@@ -456,7 +456,7 @@ impl App {
         self.live.set_media_enabled(self.cfg.live_media);
         self.tabs.apply_config(&self.cfg);
         self.register_hotkey();
-        SetTimer(Some(self.hwnd), ENV_TIMER, self.cfg.env_poll_ms, None);
+        start_env_timer(self.hwnd, self.cfg.env_poll_ms);
         self.retarget();
         self.w.snap();
         self.h.snap();

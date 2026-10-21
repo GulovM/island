@@ -229,59 +229,50 @@ impl App {
                     radiusX: ph / 2.0 + shadow_blur,
                     radiusY: ph / 2.0 + shadow_blur,
                 };
-                if let (Ok(pill_geo), Ok(outer_geo)) = (
-                    g.d2d.CreateRoundedRectangleGeometry(&rr),
-                    g.d2d.CreateRoundedRectangleGeometry(&outer_rr),
-                ) {
-                    if let Ok(mask_geo) = g.d2d.CreatePathGeometry() {
-                        if let Ok(sink) = mask_geo.Open() {
-                            let combine_res = outer_geo.CombineWithGeometry(
-                                &pill_geo,
-                                D2D1_COMBINE_MODE_EXCLUDE,
-                                None,
-                                D2D1_DEFAULT_FLATTENING_TOLERANCE,
-                                &sink,
-                            );
-                            if combine_res.is_ok() && sink.Close().is_ok() {
-                                if let Ok(geom_mask) = mask_geo.cast::<ID2D1Geometry>() {
-                                    let params = D2D1_LAYER_PARAMETERS1 {
-                                        contentBounds: D2D_RECT_F { left: f32::MIN, top: f32::MIN, right: f32::MAX, bottom: f32::MAX },
-                                        geometricMask: std::mem::ManuallyDrop::new(Some(geom_mask)),
-                                        maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-                                        maskTransform: ui::matrix(1.0, 0.0, 0.0),
-                                        opacity: 1.0,
-                                        opacityBrush: std::mem::ManuallyDrop::new(None),
-                                        layerOptions: D2D1_LAYER_OPTIONS1_NONE,
-                                    };
-                                    g.dc.PushLayer(&params, None);
+                // Маска зависит только от места и размера капли: между кадрами она берётся из кэша.
+                let mask_key = [px, py, pw, ph, shadow_dy, shadow_blur].map(f32::to_bits);
+                let cached = g.pill_masks.borrow_mut().get(&mask_key);
+                let geom_mask = cached.or_else(|| {
+                    let m = pill_shadow_mask(g, &rr, &outer_rr)?;
+                    g.pill_masks.borrow_mut().put(mask_key, m.clone());
+                    Some(m)
+                });
+                if let Some(geom_mask) = geom_mask {
+                    // Границы слоя — по маске: вне её ничего не рисуется, а слой во всё окно дороже.
+                    let params = D2D1_LAYER_PARAMETERS1 {
+                        contentBounds: outer_rr.rect,
+                        geometricMask: std::mem::ManuallyDrop::new(Some(geom_mask)),
+                        maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                        maskTransform: ui::matrix(1.0, 0.0, 0.0),
+                        opacity: 1.0,
+                        opacityBrush: std::mem::ManuallyDrop::new(None),
+                        layerOptions: D2D1_LAYER_OPTIONS1_NONE,
+                    };
+                    g.dc.PushLayer(&params, None);
 
-                                    const PILL_SHADOW_STEPS: usize = 4;
-                                    for step in 1..=PILL_SHADOW_STEPS {
-                                        let t = step as f32 / PILL_SHADOW_STEPS as f32;
-                                        let weight = (1.0 - t * 0.6) / PILL_SHADOW_STEPS as f32;
-                                        let step_alpha = shadow_base_alpha * pill_a * weight * 1.5;
-                                        let grow = shadow_blur * t;
-                                        let dy = shadow_dy * t;
-                                        let step_rr = D2D1_ROUNDED_RECT {
-                                            rect: D2D_RECT_F {
-                                                left: px - grow,
-                                                top: py - grow + dy,
-                                                right: px + pw + grow,
-                                                bottom: py + ph + grow + dy,
-                                            },
-                                            radiusX: ph / 2.0 + grow,
-                                            radiusY: ph / 2.0 + grow,
-                                        };
-                                        g.brush.SetColor(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: step_alpha });
-                                        g.dc.FillRoundedRectangle(&step_rr, &g.brush);
-                                    }
-
-                                    g.dc.PopLayer();
-                                    drop(std::mem::ManuallyDrop::into_inner(params.geometricMask));
-                                }
-                            }
-                        }
+                    const PILL_SHADOW_STEPS: usize = 4;
+                    for step in 1..=PILL_SHADOW_STEPS {
+                        let t = step as f32 / PILL_SHADOW_STEPS as f32;
+                        let weight = (1.0 - t * 0.6) / PILL_SHADOW_STEPS as f32;
+                        let step_alpha = shadow_base_alpha * pill_a * weight * 1.5;
+                        let grow = shadow_blur * t;
+                        let dy = shadow_dy * t;
+                        let step_rr = D2D1_ROUNDED_RECT {
+                            rect: D2D_RECT_F {
+                                left: px - grow,
+                                top: py - grow + dy,
+                                right: px + pw + grow,
+                                bottom: py + ph + grow + dy,
+                            },
+                            radiusX: ph / 2.0 + grow,
+                            radiusY: ph / 2.0 + grow,
+                        };
+                        g.brush.SetColor(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: step_alpha });
+                        g.dc.FillRoundedRectangle(&step_rr, &g.brush);
                     }
+
+                    g.dc.PopLayer();
+                    drop(std::mem::ManuallyDrop::into_inner(params.geometricMask));
                 }
 
                 let mut c = if self.cfg.accent_pill {
@@ -402,9 +393,16 @@ impl App {
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
             // Со стеклом маска тела нужна всегда (если r > 0), чтобы содержимое не вылезало за
             // скруглённые углы полупрозрачного тела; без стекла — только при большом радиусе (> 16 px).
+            let content_clip = D2D_RECT_F {
+                left: x0 + 6.0 * s,
+                top: 31.0 * s,
+                right: x0 + aw - 6.0 * s,
+                bottom: (ah - 4.0 * s).max(31.0 * s),
+            };
             let mask = if (self.cfg.glass && r > 0.0) || r > 16.0 * s {
+                // Границы слоя совпадают с клипом содержимого ниже: вне его ничего не рисуется.
                 let params = D2D1_LAYER_PARAMETERS1 {
-                    contentBounds: D2D_RECT_F { left: f32::MIN, top: f32::MIN, right: f32::MAX, bottom: f32::MAX },
+                    contentBounds: content_clip,
                     geometricMask: std::mem::ManuallyDrop::new(Some(body.cast::<ID2D1Geometry>()?)),
                     maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
                     maskTransform: ui::matrix(1.0, 0.0, 0.0),
@@ -417,15 +415,7 @@ impl App {
             } else {
                 None
             };
-            g.dc.PushAxisAlignedClip(
-                &D2D_RECT_F {
-                    left: x0 + 6.0 * s,
-                    top: 31.0 * s,
-                    right: x0 + aw - 6.0 * s,
-                    bottom: (ah - 4.0 * s).max(31.0 * s),
-                },
-                D2D1_ANTIALIAS_MODE_ALIASED,
-            );
+            g.dc.PushAxisAlignedClip(&content_clip, D2D1_ANTIALIAS_MODE_ALIASED);
             let fade = self.tab_t.value.clamp(0.0, 1.0);
             let centre = self.win_w as f32 / s / 2.0;
             let layer = |id: usize, alpha: f32, dx: f32, interactive: bool, ui: &mut Ui, tabs: &mut tabs::Tabs| {
@@ -555,6 +545,19 @@ impl App {
     /// `outline` — открытый контур без верхней грани (для свечения): сверху остров упирается в край экрана.
     #[allow(clippy::too_many_arguments)]
     pub(crate) unsafe fn body_path(&self, g: &Gfx, x0: f32, aw: f32, ah: f32, ear: f32, r: f32, outline: bool) -> Result<ID2D1PathGeometry1> {
+        // Тот же контур (точные значения) берётся из кэша: в кадре тело и подложка делят один путь,
+        // а когда форма не меняется (наведение, прокрутка, мини-плеер), путь не строится заново.
+        let key = [x0.to_bits(), aw.to_bits(), ah.to_bits(), ear.to_bits(), r.to_bits(), outline as u32];
+        if let Some(geo) = g.paths.borrow_mut().get(&key) {
+            return Ok(geo);
+        }
+        let geo = Self::build_body_path(g, x0, aw, ah, ear, r, outline)?;
+        g.paths.borrow_mut().put(key, geo.clone());
+        Ok(geo)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn build_body_path(g: &Gfx, x0: f32, aw: f32, ah: f32, ear: f32, r: f32, outline: bool) -> Result<ID2D1PathGeometry1> {
         let pt = |x: f32, y: f32| Vector2 { X: x, Y: y };
         let arc = |x: f32, y: f32, radius: f32, dir: D2D1_SWEEP_DIRECTION| D2D1_ARC_SEGMENT {
             point: pt(x, y),
@@ -589,8 +592,18 @@ impl App {
 
 /// Линейный градиент между двумя точками (физические пиксели окна); цвета уже с нужной прозрачностью.
 unsafe fn gradient_brush(g: &Gfx, a: (f32, f32), b: (f32, f32), stops: &[(f32, D2D1_COLOR_F)]) -> Option<ID2D1LinearGradientBrush> {
-    let list: Vec<D2D1_GRADIENT_STOP> = stops.iter().map(|&(position, color)| D2D1_GRADIENT_STOP { position, color }).collect();
-    let coll = ID2D1RenderTarget::CreateGradientStopCollection(&g.dc, &list, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP).ok()?;
-    let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: Vector2 { X: a.0, Y: a.1 }, endPoint: Vector2 { X: b.0, Y: b.1 } };
-    g.dc.CreateLinearGradientBrush(&props, None, &coll).ok()
+    g.linear_gradient(Vector2 { X: a.0, Y: a.1 }, Vector2 { X: b.0, Y: b.1 }, stops)
+}
+
+/// Маска тени капли: скруглённый прямоугольник `outer` без самой капли `pill`.
+unsafe fn pill_shadow_mask(g: &Gfx, pill: &D2D1_ROUNDED_RECT, outer: &D2D1_ROUNDED_RECT) -> Option<ID2D1Geometry> {
+    let pill_geo = g.d2d.CreateRoundedRectangleGeometry(pill).ok()?;
+    let outer_geo = g.d2d.CreateRoundedRectangleGeometry(outer).ok()?;
+    let mask = g.d2d.CreatePathGeometry().ok()?;
+    let sink = mask.Open().ok()?;
+    outer_geo
+        .CombineWithGeometry(&pill_geo, D2D1_COMBINE_MODE_EXCLUDE, None, D2D1_DEFAULT_FLATTENING_TOLERANCE, &sink)
+        .ok()?;
+    sink.Close().ok()?;
+    mask.cast().ok()
 }

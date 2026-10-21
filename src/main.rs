@@ -149,6 +149,13 @@ pub(crate) const CMD_RELOAD: usize = 2;
 pub(crate) const CMD_AUTOSTART: usize = 3;
 pub(crate) const CMD_EXIT: usize = 4;
 
+/// Запускает (или перезапускает) опрос окружения. Таймер работает всё время, поэтому ему дан допуск:
+/// Windows объединяет его пробуждения с другими системными таймерами, и в простое процессор
+/// просыпается реже, а реакция запаздывает не больше чем на четверть периода (до 100 мс).
+pub(crate) unsafe fn start_env_timer(hwnd: HWND, ms: u32) {
+    SetCoalescableTimer(Some(hwnd), ENV_TIMER, ms, None, (ms / 4).min(100));
+}
+
 
 
 fn main() {
@@ -246,7 +253,7 @@ fn run() -> Result<()> {
         if let Err(e) = &key_hook {
             log::error(&format!("не удалось поставить хук клавиатуры: {e}"));
         }
-        SetTimer(Some(app.hwnd), ENV_TIMER, app.cfg.env_poll_ms, None);
+        start_env_timer(app.hwnd, app.cfg.env_poll_ms);
         SetTimer(Some(app.hwnd), UPDATE_TIMER, update::ms_to_next_hour(), None);
         update::tick(app.cfg.auto_update);
 
