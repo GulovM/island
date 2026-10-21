@@ -168,9 +168,9 @@ impl Default for Tabs {
 const NON_GRID_SIZES: [(f32, f32); 5] = [
     (590.0, 300.0), // CLIPBOARD
     (480.0, 420.0), // APPS
-    (700.0, 236.0), // WALLPAPER
+    (560.0, 236.0), // WALLPAPER
     (420.0, 112.0), // POWER
-    (620.0, 476.0), // SETTINGS
+    (600.0, 476.0), // SETTINGS
 ];
 
 impl Tabs {
@@ -453,9 +453,9 @@ mod tests {
         // Вкладки без сетки:
         assert_eq!(tabs.island_size(CLIPBOARD), (590.0, 300.0));
         assert_eq!(tabs.island_size(APPS), (480.0, 420.0));
-        assert_eq!(tabs.island_size(WALLPAPER), (700.0, 236.0));
+        assert_eq!(tabs.island_size(WALLPAPER), (560.0, 236.0));
         assert_eq!(tabs.island_size(POWER), (420.0, 112.0));
-        assert_eq!(tabs.island_size(SETTINGS), (620.0, 476.0));
+        assert_eq!(tabs.island_size(SETTINGS), (600.0, 476.0));
     }
 
     #[test]

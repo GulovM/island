@@ -25,7 +25,8 @@ use windows::Win32::UI::Shell::{
     SIGDN_FILESYSPATH,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateIcon, GetForegroundWindow, GetSystemMetrics, GetWindowThreadProcessId, HICON, SM_CMONITORS, SW_SHOWNORMAL,
+    CreateIcon, CreateWindowExW, DestroyWindow, GetForegroundWindow, GetSystemMetrics, GetWindowThreadProcessId, HICON,
+    SM_CMONITORS, SW_SHOWNORMAL, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use super::wz;
@@ -203,6 +204,7 @@ pub fn pick_folder(initial: Option<&str>) -> Option<String> {
     unsafe {
         // Парный CoUninitialize нужен и при S_FALSE; при RPC_E_CHANGED_MODE (is_err) — нет.
         let inited = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
+        let mut owner: Option<HWND> = None;
         let path = (|| {
             let dlg: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
             let opts = dlg.GetOptions().ok()?;
@@ -213,14 +215,34 @@ pub fn pick_folder(initial: Option<&str>) -> Option<String> {
                     let _ = dlg.SetFolder(&item);
                 }
             }
+            // Остров лежит поверх всех окон, и диалог без владельца открывается позади него:
+            // владелец-невидимка с флагом topmost поднимает диалог над островом.
+            owner = CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                w!(""),
+                WS_POPUP,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+            )
+            .ok();
             // Отмена тоже возвращает ошибку (ERROR_CANCELLED) — это не сбой.
-            dlg.Show(None).ok()?;
+            dlg.Show(owner).ok()?;
             let item = dlg.GetResult().ok()?;
             let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
             let s = name.to_string().ok();
             CoTaskMemFree(Some(name.0 as *const _));
             s
         })();
+        if let Some(h) = owner {
+            let _ = DestroyWindow(h);
+        }
         if inited {
             CoUninitialize();
         }

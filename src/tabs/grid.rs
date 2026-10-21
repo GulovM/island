@@ -223,8 +223,14 @@ impl Grid {
         self.spec = spec;
         self.lay = Layout::default_for(spec);
         self.slots = spec.specs.iter().map(|_| Slot::new()).collect();
+        // Раскладку из конфига применяем сразу: размер острова берётся из окна сетки ещё до первой
+        // отрисовки вкладки, и окно от раскладки по умолчанию давало лишнюю высоту.
+        let lay = Layout::parse(spec, text);
+        if lay.fits(spec, 0, 0.0) {
+            self.lay = lay;
+        }
         self.window = layout::fit_window(&self.lay.entries, spec, 0, self.min_cols.max(spec.min_cols), self.eff_min_rows());
-        self.pending = Some(text.to_string());
+        self.pending = None;
         self.snap = true;
     }
 
@@ -232,6 +238,13 @@ impl Grid {
     #[inline]
     pub fn window(&self) -> Window {
         self.window
+    }
+
+    /// Область под виджеты в слое шириной `w`: по центру, потому что остров бывает шире окна сетки
+    /// (ряд вкладок шире сетки, а у вкладки сетка ограничена максимумом колонок).
+    pub fn area(&self, w: f32) -> Rect {
+        let cw = self.window.content_w();
+        Rect::new(((w - cw) / 2.0).max(super::PAD), super::TOP, cw, self.window.content_h())
     }
 
     /// Число рядов окна, запрошенное открытым оверлеем (список устройств, месячный календарь).
@@ -657,7 +670,7 @@ impl Grid {
             self.tray_open = false;
         }
         if st.live {
-            let layer_w = area.w + 2.0 * super::PAD;
+            let layer_w = area.w + 2.0 * area.x;
             let new_win = layout::stretch_window(st.side, (px, py), st.press_pos, st.initial_window, spec, layer_w);
             if new_win != self.window {
                 self.window = new_win;
@@ -855,12 +868,21 @@ impl Grid {
         if spec.specs.is_empty() || self.slots.len() != spec.specs.len() {
             return;
         }
+        let skip_changed = skip != self.last_skip;
         self.last_skip = skip;
+        let mut refit = skip_changed;
         if let Some(text) = self.pending.take() {
             let lay = Layout::parse(spec, &text);
             self.lay = if lay.fits(spec, skip, area.h) { lay } else { Layout::default_for(spec) };
-            if !self.editing {
-                self.window = layout::fit_window(&self.lay.entries, spec, skip, self.min_cols, self.eff_min_rows());
+            refit = true;
+        }
+        // Раскладка из конфига или набор доступных виджетов изменились: окно обтягивает их заново,
+        // а остров подстраивает размер (иначе он остаётся от прежнего окна).
+        if !self.editing && refit {
+            let win = layout::fit_window(&self.lay.entries, spec, skip, self.min_cols, self.eff_min_rows());
+            if win != self.window {
+                self.window = win;
+                self.resize = true;
             }
         }
         if self.editing && ui.focus.is_some() {

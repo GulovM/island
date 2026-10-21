@@ -165,6 +165,8 @@ impl App {
             Ev::SysColors => self.on_sys_colors(),
             Ev::SysColorsRetry => self.on_sys_colors_retry(),
             Ev::Volume(level, muted) => {
+                // Вкладка Controls берёт значения из снимка: обновляем его сразу, а не по секундному опросу.
+                bg::send(bg::Cmd::Tick);
                 if self.live.volume_changed(level, muted) {
                     self.show_toast(live::Toast::Volume { level, muted })
                 } else {

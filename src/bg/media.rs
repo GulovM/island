@@ -33,6 +33,9 @@ pub struct Media {
     pub pos: f32,
     pub dur: f32,
     pub at: Instant,
+    /// Скорость воспроизведения: 1 — обычная, 0 — плеер стоит (пауза или буферизация видео,
+    /// при которой статус остаётся «играет»).
+    pub rate: f32,
     /// Обложка: пиксели BGRA premultiplied `ART`×`ART` (если у приложения есть).
     pub art: Option<Arc<Vec<u8>>>,
     /// Ключ трека (хэш названия и исполнителя), по нему кэшируется битмап и сверяется смена трека.
@@ -47,7 +50,7 @@ pub struct Media {
 impl Media {
     /// Позиция с поправкой на прошедшее с момента опроса время, пока играет.
     pub fn position_now(&self) -> f32 {
-        let p = if self.playing { self.pos + self.at.elapsed().as_secs_f32() } else { self.pos };
+        let p = if self.playing { self.pos + self.at.elapsed().as_secs_f32() * self.rate } else { self.pos };
         if self.dur > 0.0 {
             p.min(self.dur)
         } else {
@@ -262,21 +265,43 @@ pub(super) unsafe fn refresh_media() {
 pub(super) unsafe fn media_command(cmd: Cmd) {
     let Some(mgr) = media_manager() else { return };
     let Ok(s) = mgr.GetCurrentSession() else { return };
+    // Браузеры (YouTube) часто отвечают `false` на «переключить» и принимают только явные команды;
+    // если сессия не приняла ничего, шлём системную медиа-клавишу — её обрабатывает та же сессия.
+    let ok = |r: windows::core::Result<bool>| r.unwrap_or(false);
     match cmd {
         Cmd::PlayPause => {
-            let _ = wait(s.TryTogglePlayPauseAsync());
+            let playing = s.GetPlaybackInfo().ok().and_then(|i| i.PlaybackStatus().ok()) == Some(Status::Playing);
+            let done = if playing {
+                ok(wait(s.TryPauseAsync()))
+            } else {
+                ok(wait(s.TryPlayAsync()))
+            } || ok(wait(s.TryTogglePlayPauseAsync()));
+            if !done {
+                media_key(0xB3);
+            }
         }
         Cmd::Next => {
-            let _ = wait(s.TrySkipNextAsync());
+            if !ok(wait(s.TrySkipNextAsync())) {
+                media_key(0xB0);
+            }
         }
         Cmd::Prev => {
-            let _ = wait(s.TrySkipPreviousAsync());
+            if !ok(wait(s.TrySkipPreviousAsync())) {
+                media_key(0xB1);
+            }
         }
         Cmd::Seek(pos) => {
             seek_session(&s, pos);
         }
         _ => {}
     }
+}
+
+/// Нажимает системную медиа-клавишу (VK_MEDIA_NEXT_TRACK 0xB0, PREV_TRACK 0xB1, PLAY_PAUSE 0xB3).
+unsafe fn media_key(vk: u8) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, KEYEVENTF_KEYUP};
+    keybd_event(vk, 0, Default::default(), 0);
+    keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
 }
 
 /// Перематывает трек текущей сессии на позицию в секундах от начала, если поддерживается.
@@ -322,6 +347,12 @@ pub(super) unsafe fn read_media() -> Option<Media> {
         .as_ref()
         .and_then(|i| i.PlaybackStatus().ok())
         == Some(Status::Playing);
+    // Не у всех плееров скорость заполнена: тогда считаем, что она обычная.
+    let rate = playback_info
+        .as_ref()
+        .and_then(|i| i.PlaybackRate().ok())
+        .and_then(|r| r.Value().ok())
+        .map_or(1.0, |r| r.clamp(0.0, 4.0) as f32);
     let can_seek_ctrl = playback_info
         .as_ref()
         .and_then(|i| i.Controls().ok())
@@ -352,7 +383,7 @@ pub(super) unsafe fn read_media() -> Option<Media> {
                     + UNIX_OFFSET;
                 let behind = now - t.UniversalTime as f64 / 1e7;
                 if (0.0..43_200.0).contains(&behind) {
-                    p += behind;
+                    p += behind * rate as f64;
                 }
             }
         }
@@ -381,6 +412,7 @@ pub(super) unsafe fn read_media() -> Option<Media> {
         pos: pos.max(0.0),
         dur,
         at: Instant::now(),
+        rate,
         art,
         key,
         can_seek,

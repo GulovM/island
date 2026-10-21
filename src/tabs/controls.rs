@@ -13,7 +13,7 @@ use crate::ui::{icon, mix, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink,
 
 use super::grid::{Grid, Item};
 use super::layout::{sz, Size, Spec, TabSpec, CELL, GAP};
-use super::{id, CONTROLS, PAD, TOP};
+use super::{id, CONTROLS};
 
 /// Сколько после перетаскивания слайдера не принимать громкость из снимка (иначе ползунок дёргается).
 const HOLD: Duration = Duration::from_millis(700);
@@ -257,7 +257,7 @@ impl Controls {
         let seeking = self.seek_hold.is_some_and(|t| Instant::now() < t);
         self.media = match (s.media, self.media.take()) {
             (Some(mut new), Some(old)) if new.key == old.key => {
-                if seeking || (new.playing && old.playing && (new.position_now() - old.position_now()).abs() < 2.0) {
+                if seeking || (new.playing && old.playing && new.rate == old.rate && (new.position_now() - old.position_now()).abs() < 2.0) {
                     new.pos = old.pos;
                     new.at = old.at;
                 }
@@ -275,7 +275,7 @@ impl Controls {
 
     /// Рисует вкладку: виджеты по сетке, а поверх них — выпадающий список устройств. `h` — высота
     /// панели без полосы правки.
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, _w: f32, _h: f32) {
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, _h: f32) {
         if let Some(kind) = self.open {
             self.shown = Some(kind);
         }
@@ -293,7 +293,7 @@ impl Controls {
         };
         grid.set_overlay_rows(overlay_rows);
 
-        let area = Rect::new(PAD, TOP, grid.window().content_w(), grid.window().content_h());
+        let area = grid.area(w);
         let skip = if crate::bright::available() { 0 } else { 1 << BRIGHTNESS };
         // Виджеты под списком гаснут и не принимают нажатий (иначе они перехватят их у строк списка).
         let cover = (self.list_t.0.value > 0.004).then(|| self.list_rect(area, low));
@@ -406,6 +406,11 @@ impl Controls {
                 };
                 if ui.slider_bar(cv, id(CONTROLS, 10), r, g, &mut self.volume) {
                     self.hold_until = Some(Instant::now() + HOLD);
+                    // Как в Windows: громкость выше нуля снимает «без звука».
+                    if self.muted && self.volume > 0.0 {
+                        self.muted = false;
+                        bg::send(Cmd::Mute(false));
+                    }
                     bg::send(Cmd::Volume(self.volume));
                 }
             }

@@ -385,7 +385,7 @@ impl Wall {
         let (cx, cy) = (w / 2.0, TOP + 108.0);
         let mut vis: Vec<(usize, f32)> = (0..n)
             .map(|p| (p, p as f32 - self.offset.value))
-            .filter(|(_, r)| r.abs() < 4.6)
+            .filter(|(_, r)| r.abs() < 3.4)
             .collect();
         vis.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -404,7 +404,7 @@ impl Wall {
             let xc = cx + if r < 0.0 { -d } else { d };
             // Центр параллелограмма по середине высоты, нижняя грань левее верхней на SLANT.
             let rect = Rect::new(xc - cw / 2.0 - SLANT / 2.0, cy - ch / 2.0, cw, ch);
-            let fade = (1.0 - (r.abs() - 3.6).max(0.0)).clamp(0.0, 1.0);
+            let fade = (1.0 - (r.abs() - 2.4).max(0.0)).clamp(0.0, 1.0);
 
             let fi = items[pos];
             if r.abs() < 0.5 {

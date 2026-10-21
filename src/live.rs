@@ -31,6 +31,7 @@ pub enum Form {
 pub enum Toast {
     Timer,
     Volume { level: f32, muted: bool },
+    Brightness { level: f32 },
     Charging { on: bool, percent: u8 },
     LowBattery(u8),
 }
@@ -40,7 +41,7 @@ impl Toast {
     pub fn lifetime(&self) -> Duration {
         Duration::from_millis(match self {
             Toast::Timer => 6000,
-            Toast::Volume { .. } => 1700,
+            Toast::Volume { .. } | Toast::Brightness { .. } => 1700,
             Toast::Charging { .. } => 3000,
             Toast::LowBattery(_) => 5000,
         })
@@ -72,6 +73,7 @@ pub struct Live {
     ac: Option<bool>,
     low: bool,
     volume: Option<(f32, bool)>,
+    brightness: Option<f32>,
     /// Начало отсчёта анимации эквалайзера.
     t0: Instant,
 }
@@ -89,6 +91,7 @@ impl Live {
             ac: None,
             low: false,
             volume: None,
+            brightness: None,
             t0: Instant::now(),
         };
         // Начальное состояние питания запоминаем без уведомления.
@@ -125,7 +128,7 @@ impl Live {
         let mut new = snap.media.clone();
         // Позиция трека у приложений приходит неточной: пока трек тот же, остаёмся на своём отсчёте.
         if let (Some(n), Some(o)) = (&mut new, &old) {
-            if n.key == o.key && n.playing && o.playing && (n.position_now() - o.position_now()).abs() < 2.0 {
+            if n.key == o.key && n.playing && o.playing && n.rate == o.rate && (n.position_now() - o.position_now()).abs() < 2.0 {
                 n.pos = o.pos;
                 n.at = o.at;
             }
@@ -155,6 +158,14 @@ impl Live {
             Some((l, m)) => m != muted || (l - level).abs() > 0.004,
         };
         self.volume = Some((level, muted));
+        changed
+    }
+
+    /// Яркость изменилась по сравнению с прошлой известной. Первое чтение — только запоминается:
+    /// при запуске приложения показывать нечего.
+    pub fn brightness_changed(&mut self, level: f32) -> bool {
+        let changed = self.brightness.is_some_and(|l| (l - level).abs() > 0.004);
+        self.brightness = Some(level);
         changed
     }
 
@@ -277,6 +288,11 @@ impl Live {
                 value(&if muted { "Выкл".to_string() } else { format!("{}%", (level * 100.0).round() as i32) });
                 cv.progress(Rect::new(tx, cy - 1.5, right - 46.0 - tx, 3.0), if muted { 0.0 } else { level }, cv.accent);
             }
+            Toast::Brightness { level } => {
+                cv.glyph(icon::BRIGHTNESS, ic, false, txt());
+                value(&format!("{}%", (level * 100.0).round() as i32));
+                cv.progress(Rect::new(tx, cy - 1.5, right - 46.0 - tx, 3.0), level, cv.accent);
+            }
             Toast::Charging { on, percent } => {
                 self.battery(cv, ic, percent, if on { status_green() } else { txt() });
                 cv.text(if on { "Зарядка" } else { "От батареи" }, Rect::new(tx, cy - 8.0, right - 44.0 - tx, 16.0), &f.body, txt());
@@ -316,6 +332,7 @@ mod tests {
                 pos: 1.0,
                 dur: 100.0,
                 at: std::time::Instant::now(),
+                rate: 1.0,
                 art: None,
                 key,
                 can_seek: true,

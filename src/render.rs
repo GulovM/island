@@ -54,7 +54,9 @@ impl App {
         let span_w = (content_w - base_w).max(1.0);
         let w_prog = ((aw - base_w) / span_w).clamp(0.0, 1.0);
 
-        let raw_prog = open.min(h_prog).min(w_prog);
+        // Только по размеру тела: пружина `open` при сворачивании убывает быстрее размеров, и тело
+        // с кромкой гасли, пока остров ещё большой (оставался обрезанный по прямой контент и подложка).
+        let raw_prog = h_prog.min(w_prog);
         const EXPAND_THRESHOLD: f32 = 0.08;
         let p = if raw_prog > EXPAND_THRESHOLD {
             ((raw_prog - EXPAND_THRESHOLD) / (1.0 - EXPAND_THRESHOLD)).clamp(0.0, 1.0)
@@ -199,21 +201,6 @@ impl App {
         }
 
         if p > 0.001 {
-            // Точка слева в ряду вкладок: режим полоски включён.
-            if self.cfg.strip_over_maximized {
-                g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
-                let mut c = accent;
-                c.a = p;
-                g.brush.SetColor(&c);
-                g.dc.FillEllipse(
-                    &D2D1_ELLIPSE {
-                        point: Vector2 { X: x0 + 7.0 * s, Y: (TAB_TOP + TAB_H / 2.0) * s },
-                        radiusX: 2.2 * s,
-                        radiusY: 2.2 * s,
-                    },
-                    &g.brush,
-                );
-            }
             let rects = self.tab_rects();
             let pill_a = self.pill_a.value.clamp(0.0, 1.0) * p;
             if self.cfg.glass && pill_a > 0.01 {

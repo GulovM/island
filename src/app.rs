@@ -53,6 +53,9 @@ pub struct App {
     /// Активна полноэкранная игра (D3D): остров скрыт совсем.
     pub(crate) hidden: bool,
     pub(crate) leave_armed: bool,
+    /// Позиция курсора в момент смены размера острова (настройки, вкладка, правка): пока мышь
+    /// не двинулась и не вернулась на остров, он не сворачивается из-за того, что сам съёжился.
+    pub(crate) leave_hold: Option<POINT>,
     /// Свернулись и успокоились — пора сбросить рабочий набор.
     pub(crate) trim_pending: bool,
     /// Последний применённый регион окна: (left, right, bottom) в пикселях окна.
@@ -244,6 +247,7 @@ impl App {
                 covered: false,
                 hidden: false,
                 leave_armed: false,
+                leave_hold: None,
                 trim_pending: true,
                 rgn: (-1, -1, -1),
                 tab: initial_tab,
@@ -366,7 +370,16 @@ impl App {
         self.tab_t.value = 0.0;
         self.tab_t.target = 1.0;
         self.ui.blur();
+        self.hold_leave();
         self.retarget();
+    }
+
+    /// Остров сам меняет размер под неподвижным курсором (шестерёнка стоит у края, а страница
+    /// уже): запоминаем место курсора, и до первого движения мыши остров не сворачивается.
+    pub(crate) fn hold_leave(&mut self) {
+        let mut p = POINT::default();
+        // SAFETY: простой вызов Win32 без указателей на чужую память.
+        self.leave_hold = unsafe { GetCursorPos(&mut p) }.ok().map(|_| p);
     }
 
     /// Применяет настройки со страницы: внешний вид живьём, запись в файл — когда мышь отпущена.

@@ -22,7 +22,7 @@ use crate::ui::{dim, icon, Canvas, Rect, Ui};
 
 use super::grid::{Grid, Item};
 use super::layout::{sz, Size, Spec, TabSpec};
-use super::{id, PAD, TODAY, TOP};
+use super::{id, TODAY};
 use alarm::play_alarm;
 use calendar::MonthCache;
 use todo::RowAnim;
@@ -256,13 +256,13 @@ impl Today {
 
     /// Рисует вкладку по сетке; месячный календарь раскрывается поверх неё. `h` — высота панели
     /// без полосы правки.
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, _w: f32, _h: f32) {
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, _h: f32) {
         self.month_t.target = if self.month_open { 1.0 } else { 0.0 };
         let month_active = self.month_open || self.month_t.value > 0.0;
         let overlay_rows = if month_active { today_overlay_rows(MONTH_H) } else { 0 };
         grid.set_overlay_rows(overlay_rows);
 
-        let area = Rect::new(PAD, TOP, grid.window().content_w(), grid.window().content_h());
+        let area = grid.area(w);
         let t = GetLocalTime();
         let dow = (t.wDayOfWeek as usize + 6) % 7;
         let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);

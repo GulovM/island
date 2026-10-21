@@ -204,6 +204,26 @@ impl Ui {
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn text_field_at(&mut self, cv: &Canvas, id: u32, r: Rect, placeholder: &str, glyph: &str, submit: Submit, left: f32, right: f32) {
         self.fields.entry(id).or_default().submit = submit;
+        // В полях поиска справа появляется «×»: очищает введённый текст одним нажатием.
+        let clearable = glyph == super::icon::SEARCH;
+        let right = if clearable { right.max(26.0) } else { right };
+        let mut clear_hot = false;
+        if clearable && self.fields.get(&id).is_some_and(|f| !f.chars.is_empty()) {
+            let cr = Rect::new(r.right() - 24.0, r.y, 22.0, r.h);
+            let (hot, clicked) = self.interact(id ^ 0x4000_0000, cr);
+            clear_hot = hot;
+            if clicked {
+                if let Some(f) = self.fields.get_mut(&id) {
+                    f.chars.clear();
+                    f.caret = 0;
+                    f.anchor = 0;
+                    f.scroll = 0.0;
+                }
+                self.focus = Some(id);
+                self.focus_claimed = true;
+                self.caret_on = true;
+            }
+        }
         let (hover, _) = self.interact(id, r);
         let inner = Rect::new(r.x + left, r.y, (r.w - left - right).max(1.0), r.h);
         let w = self.widget(id);
@@ -298,6 +318,11 @@ impl Ui {
             cv.rr(Rect::new(inner.x + caret_x - f.scroll, r.cy() - 6.0, 1.2, 12.0), 0.6, txt());
         }
         cv.g.dc.PopAxisAlignedClip();
+
+        if clearable && !text.is_empty() {
+            let cr = Rect::new(r.right() - 24.0, r.y, 22.0, r.h);
+            cv.glyph(super::icon::CLOSE, cr.inset(5.0), false, mix(dim(), txt(), if clear_hot { 1.0 } else { 0.35 }));
+        }
 
         if focused {
             self.ime_pos = Some((origin_x + inner.x + caret_x - f.scroll, r.bottom()));

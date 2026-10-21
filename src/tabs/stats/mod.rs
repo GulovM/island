@@ -29,7 +29,7 @@ use crate::{icons, sys};
 
 use super::grid::Grid;
 use super::layout::{sz, Size, Spec, TabSpec};
-use super::{ago, id, PAD, STATS, TOP};
+use super::{ago, id, STATS};
 
 mod format;
 use format::*;
@@ -296,8 +296,8 @@ impl Stats {
     }
 
     /// Рисует вкладку по сетке. `h` — высота панели без полосы правки.
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, _w: f32, _h: f32) {
-        let area = Rect::new(PAD, TOP, grid.window().content_w(), grid.window().content_h());
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, _h: f32) {
+        let area = grid.area(w);
         grid.draw(ui, cv, area, 0, |ui, cv, it| match it.idx {
             CPU | GPU | RAM => self.ring_card(cv, it.rect, it.size, it.idx),
             DISK | NET | UPTIME => self.info_card(cv, it.rect, it.size, it.idx),

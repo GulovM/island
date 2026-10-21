@@ -140,6 +140,7 @@ impl App {
             self.ensure_topmost(true);
         }
         self.expanded = expanded;
+        self.leave_hold = None;
         if expanded && self.live.clear_toast() {
             let _ = KillTimer(Some(self.hwnd), TOAST_TIMER);
         }
@@ -351,6 +352,16 @@ impl App {
     /// вернулся — отменяем. Вызывается и на каждом кадре, потому что область меняется
     /// (смена вкладки, анимация), а мышь при этом может стоять на месте.
     pub(crate) unsafe fn check_hover(&mut self) {
+        if let Some(held) = self.leave_hold {
+            let mut p = POINT::default();
+            let moved = GetCursorPos(&mut p).is_ok() && (p.x != held.x || p.y != held.y);
+            if moved || self.cursor_inside() {
+                self.leave_hold = None;
+            } else {
+                self.disarm_leave();
+                return;
+            }
+        }
         // Перетаскивание ползунка и ввод текста не должны сворачивать остров.
         if self.expanded && !self.cursor_inside() && !self.ui.holds_pointer() {
             self.arm_leave();
@@ -374,7 +385,7 @@ impl App {
 
     pub(crate) unsafe fn on_leave_timer(&mut self) -> bool {
         self.disarm_leave();
-        if self.expanded && !self.cursor_inside() && !self.ui.holds_pointer() {
+        if self.expanded && self.leave_hold.is_none() && !self.cursor_inside() && !self.ui.holds_pointer() {
             self.set_expanded(false);
             return true;
         }
@@ -438,6 +449,14 @@ impl App {
             return false;
         };
         let mut changed = false;
+        // У яркости нет системного события, как у громкости: встроенную панель читаем на каждом опросе.
+        if !self.hidden {
+            if let Some(level) = crate::bright::get_panel() {
+                if self.live.brightness_changed(level) {
+                    changed |= self.show_toast(live::Toast::Brightness { level });
+                }
+            }
+        }
         // Раскладка клавиатуры окна в фокусе: событий об её смене нет, проверяем вместе с окружением.
         if self.face.visible() && self.face.poll_lang() {
             changed = true;

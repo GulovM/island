@@ -10,6 +10,7 @@ impl App {
         self.tab_t.target = 1.0;
         self.tab = i;
         self.settings_open = false;
+        self.hold_leave();
         self.ui.blur();
         if let Some(&id) = self.order.get(i) {
             crate::state::set_last_tab(TABS[id]);
@@ -50,6 +51,7 @@ impl App {
     /// Включает или выключает режим правки текущей вкладки; остров подстраивает высоту под полосу кнопок.
     pub(crate) fn toggle_edit(&mut self) {
         if self.tabs.toggle_edit(self.normal_id()) {
+            self.hold_leave();
             self.ui.blur();
             self.retarget();
         }

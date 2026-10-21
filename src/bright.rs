@@ -36,6 +36,15 @@ pub fn get() -> Option<f32> {
     unsafe { lcd_get().or_else(|| ddc_get()) }
 }
 
+/// Яркость встроенной панели без DDC/CI (быстрый вызов, годится для опроса из главного потока).
+/// У внешнего монитора `None`: DDC слишком медленный для частого чтения.
+pub fn get_panel() -> Option<f32> {
+    if !available() {
+        return None;
+    }
+    unsafe { lcd_get() }
+}
+
 /// Устанавливает яркость, 0..=1.
 pub fn set(v: f32) {
     let pct = (v.clamp(0.0, 1.0) * 100.0).round() as u8;
