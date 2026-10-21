@@ -148,6 +148,9 @@ pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
     let dark = !light;
     let fg: Rgb = if light { [0.0, 0.0, 0.0] } else { [1.0, 1.0, 1.0] };
     let on = |t: f32| col(mix3(bg, fg, t));
+    // Поверхности поверх тела — полупрозрачная вуаль цвета текста: на сплошном теле даёт тот же цвет,
+    // что `on(t)`, а на стекле пропускает размытый фон (непрозрачная плашка глушила стекло).
+    let veil = |t: f32| rgba(fg, t);
 
     // Тёмная надпись на светлом акценте, светлая — на тёмном.
     let ink_for = |acc: Rgb| if is_light(acc) { [0.10, 0.085, 0.05] } else { [0.97, 0.97, 0.97] };
@@ -163,16 +166,16 @@ pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
         fg: col(fg),
         text: on(if light { 0.90 } else { 0.945 }),
         dim: on(0.78),
-        card: on(0.058),
-        track: on(0.128),
-        chip: on(0.105),
-        inset: on(0.095),
+        card: veil(0.058),
+        track: veil(0.128),
+        chip: veil(0.105),
+        inset: veil(0.095),
         ink: col(ink_for(accent)),
         rim_hi: rgba(WHITE, rim_hi_a),
         rim_mid: rgba(WHITE, rim_mid_a),
         rim_lo: rgba(rim_lo_col, rim_lo_a),
         sheen: rgba(WHITE, sheen_a),
-        pill: on(if light { 0.08 } else { 0.16 }),
+        pill: veil(if light { 0.08 } else { 0.16 }),
         hairline: D2D1_COLOR_F { a: if light { 0.08 } else { 0.07 }, ..col(fg) },
     };
 
@@ -265,11 +268,17 @@ pub fn get() -> Palette {
 mod tests {
     use super::*;
 
+    /// Полупрозрачный цвет поверх сплошного фона — то, что видно на непрозрачном теле.
+    fn over(c: D2D1_COLOR_F, bg: Rgb) -> Rgb {
+        [bg[0] + (c.r - bg[0]) * c.a, bg[1] + (c.g - bg[1]) * c.a, bg[2] + (c.b - bg[2]) * c.a]
+    }
+
     #[test]
     fn default_palette_matches_original_look() {
         let p = derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows);
+        let r = |c: D2D1_COLOR_F| over(c, DEFAULT_BG)[0];
         // Исходные константы: CARD 0.105, TRACK 0.17, CHIP 0.15, INSET 0.14, TEXT 0.95, DIM 0.58 (с тех пор осветлён: серый текст терялся на стекле).
-        for (got, want) in [(p.card.r, 0.105), (p.track.r, 0.17), (p.chip.r, 0.15), (p.inset.r, 0.14), (p.text.r, 0.95), (p.dim.r, 0.79)] {
+        for (got, want) in [(r(p.card), 0.105), (r(p.track), 0.17), (r(p.chip), 0.15), (r(p.inset), 0.14), (p.text.r, 0.95), (p.dim.r, 0.79)] {
             assert!((got - want).abs() < 0.01, "{got} против {want}");
         }
         // Тёмная надпись на золотом акценте.
@@ -281,13 +290,13 @@ mod tests {
         // Тёмная тема: капля светлее фона острова.
         let dark = derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows);
         assert!(!is_light(DEFAULT_BG));
-        assert!(luminance([dark.pill.r, dark.pill.g, dark.pill.b]) > luminance(DEFAULT_BG));
+        assert!(luminance(over(dark.pill, DEFAULT_BG)) > luminance(DEFAULT_BG));
 
         // Светлая тема: капля темнее фона острова.
         let light_bg = [0.95, 0.95, 0.96];
         let light = derive(light_bg, DEFAULT_ACCENT, PaletteStyle::Windows);
         assert!(is_light(light_bg));
-        assert!(luminance([light.pill.r, light.pill.g, light.pill.b]) < luminance(light_bg));
+        assert!(luminance(over(light.pill, light_bg)) < luminance(light_bg));
     }
 
     #[test]
@@ -302,7 +311,7 @@ mod tests {
             // Блик белый в обеих темах.
             assert!(p.rim_hi.r == 1.0 && p.rim_hi.g == 1.0 && p.rim_hi.b == 1.0);
             // Капля отличается от фона в сторону текста: светлее на тёмном, темнее на светлом.
-            let (pl, bl) = (luminance([p.pill.r, p.pill.g, p.pill.b]), luminance(bg));
+            let (pl, bl) = (luminance(over(p.pill, bg)), luminance(bg));
             if is_light(bg) {
                 assert!(pl < bl, "{bg:?}");
             } else {
@@ -314,7 +323,7 @@ mod tests {
     #[test]
     fn light_background_flips_text() {
         let p = derive([0.95, 0.95, 0.96], [0.1, 0.4, 0.8], PaletteStyle::Windows);
-        assert!(p.text.r < 0.3 && p.card.r < 0.95);
+        assert!(p.text.r < 0.3 && over(p.card, [0.95, 0.95, 0.96])[0] < 0.95);
         // Светлая надпись на тёмном акценте.
         assert!(p.ink.r > 0.9);
     }
