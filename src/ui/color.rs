@@ -12,6 +12,7 @@ pub const BAR_GREEN: D2D1_COLOR_F = rgb(0.55, 0.76, 0.29);
 pub const VIOLET: D2D1_COLOR_F = rgb(0.78, 0.61, 0.91);
 pub const ORANGE: D2D1_COLOR_F = rgb(0.95, 0.63, 0.14);
 pub const PINK: D2D1_COLOR_F = rgb(0.91, 0.42, 0.60);
+pub const RED: D2D1_COLOR_F = rgb(0.93, 0.36, 0.33);
 
 // Цвета темы (см. `theme`): меняются на лету, поэтому это функции, а не константы.
 
@@ -80,18 +81,63 @@ pub fn is_ios_palette() -> bool {
     crate::theme::get().style == crate::theme::PaletteStyle::Ios
 }
 
+fn status_color(sys_color: crate::ios::SysColor, fallback: D2D1_COLOR_F) -> D2D1_COLOR_F {
+    if is_ios_palette() {
+        let p = crate::theme::get();
+        let dark = !crate::theme::is_light([p.bg.r, p.bg.g, p.bg.b]);
+        crate::ios::to_d2d(crate::ios::sys(sys_color, dark), 1.0)
+    } else {
+        fallback
+    }
+}
+
+/// Статусный зелёный (батарея, задачи):
+/// в стиле Windows — константа `GREEN`,
+/// в стиле iOS — `ios::sys(Green, dark)`.
+pub fn status_green() -> D2D1_COLOR_F {
+    status_color(crate::ios::SysColor::Green, GREEN)
+}
+
+/// Статусный зелёный полосы (график в stats):
+/// в стиле Windows — константа `BAR_GREEN`,
+/// в стиле iOS — `ios::sys(Green, dark)`.
+pub fn status_bar_green() -> D2D1_COLOR_F {
+    status_color(crate::ios::SysColor::Green, BAR_GREEN)
+}
+
+/// Статусный фиолетовый (GPU в stats):
+/// в стиле Windows — константа `VIOLET`,
+/// в стиле iOS — `ios::sys(Purple, dark)`.
+pub fn status_violet() -> D2D1_COLOR_F {
+    status_color(crate::ios::SysColor::Purple, VIOLET)
+}
+
+/// Статусный оранжевый (таймер, предупреждение о батарее, заметка в grid):
+/// в стиле Windows — константа `ORANGE`,
+/// в стиле iOS — `ios::sys(Orange, dark)`.
+pub fn status_orange() -> D2D1_COLOR_F {
+    status_color(crate::ios::SysColor::Orange, ORANGE)
+}
+
+/// Статусный розовый/красный (события календаря):
+/// в стиле Windows — константа `PINK`,
+/// в стиле iOS — `ios::sys(Red, dark)` (календарь в iOS красный).
+pub fn status_pink() -> D2D1_COLOR_F {
+    status_color(crate::ios::SysColor::Red, PINK)
+}
+
+/// Статусный красный (критический заряд батареи, индикатор удаления в grid):
+/// в стиле Windows — константа `RED`,
+/// в стиле iOS — `ios::sys(Red, dark)`.
+pub fn status_red() -> D2D1_COLOR_F {
+    status_color(crate::ios::SysColor::Red, RED)
+}
+
 /// Цвет переключателя во включённом состоянии:
 /// в стиле палитры iOS — системный зелёный `ios::sys(Green, dark)`,
 /// в стиле Windows — текущий цвет акцента.
 pub fn switch_on_color(accent: D2D1_COLOR_F) -> D2D1_COLOR_F {
-    let p = crate::theme::get();
-    if is_ios_palette() {
-        let dark = !crate::theme::is_light([p.bg.r, p.bg.g, p.bg.b]);
-        let green = crate::ios::sys(crate::ios::SysColor::Green, dark);
-        crate::ios::to_d2d(green, 1.0)
-    } else {
-        accent
-    }
+    status_color(crate::ios::SysColor::Green, accent)
 }
 
 #[cfg(test)]
@@ -124,5 +170,61 @@ mod tests {
 
         // Восстанавливаем палитру по умолчанию
         crate::theme::set(p_win);
+    }
+
+    #[test]
+    fn test_status_colors_styles_and_themes() {
+        use crate::theme::{derive, DEFAULT_ACCENT, DEFAULT_BG, PaletteStyle};
+        let bg_dark = DEFAULT_BG;
+        let bg_light = [0.95, 0.95, 0.95];
+
+        // 1. Windows стиль, тёмная тема: константы
+        let p_win_dark = derive(bg_dark, DEFAULT_ACCENT, PaletteStyle::Windows);
+        crate::theme::set(p_win_dark);
+        assert!(!is_ios_palette());
+        assert_eq!(status_green(), GREEN);
+        assert_eq!(status_bar_green(), BAR_GREEN);
+        assert_eq!(status_violet(), VIOLET);
+        assert_eq!(status_orange(), ORANGE);
+        assert_eq!(status_pink(), PINK);
+        assert_eq!(status_red(), RED);
+
+        // 2. Windows стиль, светлая тема: константы
+        let p_win_light = derive(bg_light, DEFAULT_ACCENT, PaletteStyle::Windows);
+        crate::theme::set(p_win_light);
+        assert!(!is_ios_palette());
+        assert_eq!(status_green(), GREEN);
+        assert_eq!(status_bar_green(), BAR_GREEN);
+        assert_eq!(status_violet(), VIOLET);
+        assert_eq!(status_orange(), ORANGE);
+        assert_eq!(status_pink(), PINK);
+        assert_eq!(status_red(), RED);
+
+        // 3. iOS стиль, тёмная тема: ios::sys(..., true)
+        let p_ios_dark = derive(bg_dark, DEFAULT_ACCENT, PaletteStyle::Ios);
+        crate::theme::set(p_ios_dark);
+        assert!(is_ios_palette());
+        let to_d2d = |c| crate::ios::to_d2d(crate::ios::sys(c, true), 1.0);
+        assert_eq!(status_green(), to_d2d(crate::ios::SysColor::Green));
+        assert_eq!(status_bar_green(), to_d2d(crate::ios::SysColor::Green));
+        assert_eq!(status_violet(), to_d2d(crate::ios::SysColor::Purple));
+        assert_eq!(status_orange(), to_d2d(crate::ios::SysColor::Orange));
+        assert_eq!(status_pink(), to_d2d(crate::ios::SysColor::Red));
+        assert_eq!(status_red(), to_d2d(crate::ios::SysColor::Red));
+
+        // 4. iOS стиль, светлая тема: ios::sys(..., false)
+        let p_ios_light = derive(bg_light, DEFAULT_ACCENT, PaletteStyle::Ios);
+        crate::theme::set(p_ios_light);
+        assert!(is_ios_palette());
+        let to_d2d_l = |c| crate::ios::to_d2d(crate::ios::sys(c, false), 1.0);
+        assert_eq!(status_green(), to_d2d_l(crate::ios::SysColor::Green));
+        assert_eq!(status_bar_green(), to_d2d_l(crate::ios::SysColor::Green));
+        assert_eq!(status_violet(), to_d2d_l(crate::ios::SysColor::Purple));
+        assert_eq!(status_orange(), to_d2d_l(crate::ios::SysColor::Orange));
+        assert_eq!(status_pink(), to_d2d_l(crate::ios::SysColor::Red));
+        assert_eq!(status_red(), to_d2d_l(crate::ios::SysColor::Red));
+
+        // Восстанавливаем палитру по умолчанию
+        crate::theme::set(p_win_dark);
     }
 }

@@ -91,6 +91,20 @@ pub struct BodyLayers {
     pub shadow: ShadowLayer,
 }
 
+/// Базовые параметры кромки `(hi_alpha, mid_alpha, lo_color, lo_alpha)` для тёмной/светлой темы.
+pub fn rim_alphas(dark: bool) -> (f32, f32, [f32; 3], f32) {
+    if dark {
+        (0.50, 0.05, [1.0, 1.0, 1.0], 0.22) // подобрано
+    } else {
+        (0.70, 0.08, [0.0, 0.0, 0.0], 0.10) // подобрано
+    }
+}
+
+/// Базовая непрозрачность осветления сверху (sheen) для тёмной/светлой темы.
+pub fn sheen_alpha(dark: bool) -> f32 {
+    if dark { 0.07 } else { 0.30 } // подобрано
+}
+
 /// Вычисляет все визуальные слои тела острова: тинт, осветление, кромку и тень.
 /// Чистая функция без вызовов Win32 API.
 #[allow(clippy::too_many_arguments)]
@@ -139,23 +153,24 @@ pub fn body_layers(
         0.0
     };
 
-    // 1. Осветление сверху (sheen): в светлой теме 0.30, в тёмной 0.07 // подобрано
-    let base_sheen_a = if dark { 0.07 } else { 0.30 }; // подобрано
+    // 1. Осветление сверху (sheen)
+    let base_sheen_a = sheen_alpha(dark);
     let sheen = SheenLayer {
         color: [1.0, 1.0, 1.0],
         alpha: base_sheen_a * glass_factor,
         height_fraction: 0.45, // подобрано
     };
 
-    // 2. Зеркальная кромка (rim): блик слева-сверху и дуга справа-снизу // подобрано
+    // 2. Зеркальная кромка (rim): блик слева-сверху и дуга справа-снизу
+    let (rim_hi_a, rim_mid_a, rim_lo_col, rim_lo_a) = rim_alphas(dark);
     let rim = RimLayer {
         width: 1.2, // подобрано
         hi_color: [1.0, 1.0, 1.0],
-        hi_alpha: (if dark { 0.50 } else { 0.70 }) * glass_factor, // подобрано
+        hi_alpha: rim_hi_a * glass_factor,
         mid_color: [1.0, 1.0, 1.0],
-        mid_alpha: (if dark { 0.05 } else { 0.08 }) * glass_factor, // подобрано
-        lo_color: if dark { [1.0, 1.0, 1.0] } else { [0.0, 0.0, 0.0] }, // подобрано
-        lo_alpha: (if dark { 0.22 } else { 0.10 }) * glass_factor, // подобрано
+        mid_alpha: rim_mid_a * glass_factor,
+        lo_color: rim_lo_col,
+        lo_alpha: rim_lo_a * glass_factor,
         inner_highlight_alpha: (if dark { 0.12 } else { 0.20 }) * glass_factor, // подобрано
     };
 
@@ -508,5 +523,24 @@ mod tests {
         assert_eq!(disabled.sheen.alpha, 0.0);
         assert_eq!(disabled.rim.hi_alpha, 0.0);
         assert_eq!(disabled.shadow.alpha, 0.0);
+    }
+
+    #[test]
+    fn test_rim_alphas_and_sheen_alpha() {
+        // Тёмная тема:
+        assert_eq!(sheen_alpha(true), 0.07);
+        let (hi_d, mid_d, lo_col_d, lo_a_d) = rim_alphas(true);
+        assert_eq!(hi_d, 0.50);
+        assert_eq!(mid_d, 0.05);
+        assert_eq!(lo_col_d, [1.0, 1.0, 1.0]);
+        assert_eq!(lo_a_d, 0.22);
+
+        // Светлая тема:
+        assert_eq!(sheen_alpha(false), 0.30);
+        let (hi_l, mid_l, lo_col_l, lo_a_l) = rim_alphas(false);
+        assert_eq!(hi_l, 0.70);
+        assert_eq!(mid_l, 0.08);
+        assert_eq!(lo_col_l, [0.0, 0.0, 0.0]);
+        assert_eq!(lo_a_l, 0.10);
     }
 }

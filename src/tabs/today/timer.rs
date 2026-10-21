@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use super::Today;
 use crate::tabs::{id, TODAY};
-use crate::ui::{chip_bg, dim, icon, ink, txt, Canvas, Rect, Submit, Ui, ORANGE};
+use crate::ui::{chip_bg, dim, icon, ink, status_orange, txt, Canvas, Rect, Submit, Ui};
 
 const PRESETS: [u32; 5] = [1, 5, 10, 15, 20];
 
@@ -144,7 +144,7 @@ impl Today {
             ui.blur();
         }
         let radius = if compact { 22.0 } else { 24.0 };
-        cv.ring(cx, cy, radius, 3.0, self.ring.value, ORANGE);
+        cv.ring(cx, cy, radius, 3.0, self.ring.value, status_orange());
         let secs = rem.as_secs_f32().ceil() as u64;
         let label = if secs >= 3600 {
             format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
@@ -161,7 +161,7 @@ impl Today {
             let by = tm.cy() - 13.0;
             let bx = tm.x + ox + 78.0;
             let start = if self.deadline.is_some() { "Пауза" } else { "Старт" };
-            if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, by, 68.0, 26.0), start, ORANGE, ink(), 6.0) {
+            if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, by, 68.0, 26.0), start, status_orange(), ink(), 6.0) {
                 self.toggle_run();
             }
             if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + 74.0, by, 68.0, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
@@ -196,14 +196,14 @@ impl Today {
         // Пресеты.
         for (i, m) in PRESETS.iter().enumerate() {
             let r = Rect::new(bx + i as f32 * 29.0, tm.y + 48.0, 25.0, 18.0);
-            if ui.chip_ex(cv, id(TODAY, i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, Some(ORANGE)) {
+            if ui.chip_ex(cv, id(TODAY, i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, Some(status_orange())) {
                 self.set_preset(i);
             }
         }
 
         // Старт / пауза и сброс.
         let start = if self.deadline.is_some() { "Пауза" } else { "Старт" };
-        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 76.0, 68.0, 26.0), start, ORANGE, ink(), 6.0) {
+        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 76.0, 68.0, 26.0), start, status_orange(), ink(), 6.0) {
             self.toggle_run();
         }
         if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + 74.0, tm.y + 76.0, 68.0, 26.0), "Сброс", chip_bg(), txt(), 6.0) {

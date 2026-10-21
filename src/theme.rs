@@ -152,6 +152,9 @@ pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
     // Тёмная надпись на светлом акценте, светлая — на тёмном.
     let ink_for = |acc: Rgb| if is_light(acc) { [0.10, 0.085, 0.05] } else { [0.97, 0.97, 0.97] };
 
+    let (rim_hi_a, rim_mid_a, rim_lo_col, rim_lo_a) = crate::glass::rim_alphas(dark);
+    let sheen_a = crate::glass::sheen_alpha(dark);
+
     // Базовая палитра (стиль Windows).
     let mut p = Palette {
         style,
@@ -165,10 +168,10 @@ pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
         chip: on(0.105),
         inset: on(0.095),
         ink: col(ink_for(accent)),
-        rim_hi: rgba(WHITE, if light { 0.70 } else { 0.50 }),
-        rim_mid: rgba(WHITE, if light { 0.08 } else { 0.05 }),
-        rim_lo: if light { rgba([0.0; 3], 0.10) } else { rgba(WHITE, 0.22) },
-        sheen: rgba(WHITE, if light { 0.30 } else { 0.07 }),
+        rim_hi: rgba(WHITE, rim_hi_a),
+        rim_mid: rgba(WHITE, rim_mid_a),
+        rim_lo: rgba(rim_lo_col, rim_lo_a),
+        sheen: rgba(WHITE, sheen_a),
         pill: on(if light { 0.08 } else { 0.16 }),
         hairline: D2D1_COLOR_F { a: if light { 0.08 } else { 0.07 }, ..col(fg) },
     };

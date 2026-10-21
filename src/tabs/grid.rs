@@ -29,7 +29,6 @@ const CHIP_H: f32 = 22.0;
 const TRAY_PAD: f32 = 8.0;
 const TRAY_GAP: f32 = 6.0;
 
-const RED: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.92, g: 0.27, b: 0.27, a: 1.0 };
 const BLACK: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
 
 fn fade(c: D2D1_COLOR_F, k: f32) -> D2D1_COLOR_F {
@@ -914,7 +913,7 @@ impl Grid {
             let r = Rect::new(self.ghost[0].value, self.ghost[1].value, self.ghost[2].value.max(0.0), self.ghost[3].value.max(0.0));
             let k = self.lift.value.clamp(0.0, 1.0);
             let valid = self.drag.as_ref().is_some_and(|d| d.target.is_some());
-            let ghost_color = if valid { cv.accent } else { RED };
+            let ghost_color = if valid { cv.accent } else { ui::status_red() };
             cv.rr(r, 11.0, fade(ghost_color, 0.12 * k));
             cv.rr_line(r, 11.0, fade(ghost_color, 0.55 * k), 1.2);
         } else if self.resizing.as_ref().is_some_and(|rs| rs.live) {
@@ -1015,7 +1014,7 @@ impl Grid {
                 let bh = ui.hover_of(self.wid(idx, 0));
                 let (bx, by) = (r.x + 2.0, r.y + 2.0);
                 let br = BADGE_R * e.max(0.0) * (1.0 + 0.1 * bh);
-                bcv.circle(bx, by, br, RED);
+                bcv.circle(bx, by, br, ui::status_red());
                 let half = 3.2 * e.max(0.0);
                 bcv.stroke_line((bx - half, by), (bx + half, by), 1.7, ui::WHITE);
                 if self.spec.specs[idx].sizes.len() > 1 {
@@ -1093,7 +1092,7 @@ impl Grid {
         let nk = self.note.value.clamp(0.0, 1.0);
         if nk > 0.01 && !self.note_text.is_empty() {
             let ncv = Canvas { g: cv.g, alpha: bcv.alpha * nk, accent: cv.accent };
-            ncv.text(&tr(self.note_text), bar.note, &f.small_c, ui::ORANGE);
+            ncv.text(&tr(self.note_text), bar.note, &f.small_c, ui::status_orange());
         }
 
         // Лоток: карточка с чипами, по одному на скрытый виджет.

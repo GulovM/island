@@ -24,7 +24,7 @@ use windows::Win32::System::Threading::GetSystemTimes;
 
 use crate::anim::Spring;
 use crate::online::{self, Online};
-use crate::ui::{icon, Canvas, Rect, Ui, BAR_GREEN, chip_bg, dim, GREEN, ink, txt, track, VIOLET};
+use crate::ui::{chip_bg, dim, icon, ink, status_bar_green, status_green, status_violet, track, txt, Canvas, Rect, Ui};
 use crate::{icons, sys};
 
 use super::grid::Grid;
@@ -329,13 +329,13 @@ impl Stats {
                 } else {
                     Vec::new()
                 };
-                ("GPU", if h.gpu_name.is_empty() { "—".to_string() } else { short_gpu(&h.gpu_name) }, chips, VIOLET)
+                ("GPU", if h.gpu_name.is_empty() { "—".to_string() } else { short_gpu(&h.gpu_name) }, chips, status_violet())
             }
             _ => (
                 "RAM",
                 format!("{} / {} {}", gb(c.ram_used), gb(c.ram_total), crate::i18n::pick("ГБ", "GB")),
                 vec![format!("{} {}", gb((c.ram_total - c.ram_used).max(0.0)), crate::i18n::pick("ГБ своб.", "GB free"))],
-                GREEN,
+                status_green(),
             ),
         };
         cv.card(r);
@@ -426,7 +426,7 @@ impl Stats {
             cv.text(&value, Rect::new(r.right() - 68.0, y - 2.0, 56.0, 13.0), &f.small_r, dim());
             let bar = Rect::new(r.x + 38.0, y + 14.0, r.w - 50.0, 3.0);
             cv.rr(bar, 1.5, track());
-            cv.rr(Rect::new(bar.x, bar.y, (bar.w * (*v / max) as f32).max(3.0), 3.0), 1.5, BAR_GREEN);
+            cv.rr(Rect::new(bar.x, bar.y, (bar.w * (*v / max) as f32).max(3.0), 3.0), 1.5, status_bar_green());
         }
         if list.is_empty() {
             cv.text("Собираю данные…", Rect::new(r.x + 12.0, r.y + 34.0, r.w - 24.0, 12.0), &f.small, dim());

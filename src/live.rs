@@ -11,14 +11,13 @@ use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 
 use crate::anim::Spring;
 use crate::bg::{self, Media, Snapshot};
-use crate::ui::{icon, Canvas, Rect, Ui, dim, GREEN, ORANGE, txt, WHITE};
+use crate::ui::{dim, icon, status_green, status_orange, status_red, txt, Canvas, Rect, Ui, WHITE};
 
 /// Размеры форм (логические пиксели). Ширина не меньше ширины свёрнутого острова.
 pub const MINI: (f32, f32) = (252.0, 36.0);
 pub const TOAST: (f32, f32) = (232.0, 36.0);
 /// Заряд, ниже которого (и без питания от сети) показывается предупреждение.
 const LOW_PCT: u8 = 20;
-const RED: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.93, g: 0.36, b: 0.33, a: 1.0 };
 
 /// Какую форму принимает свёрнутый остров.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -279,13 +278,13 @@ impl Live {
                 cv.progress(Rect::new(tx, cy - 1.5, right - 46.0 - tx, 3.0), if muted { 0.0 } else { level }, cv.accent);
             }
             Toast::Charging { on, percent } => {
-                self.battery(cv, ic, percent, if on { GREEN } else { txt() });
+                self.battery(cv, ic, percent, if on { status_green() } else { txt() });
                 cv.text(if on { "Зарядка" } else { "От батареи" }, Rect::new(tx, cy - 8.0, right - 44.0 - tx, 16.0), &f.body, txt());
                 value(&format!("{percent}%"));
             }
             Toast::LowBattery(percent) => {
-                self.battery(cv, ic, percent, RED);
-                cv.text("Низкий заряд", Rect::new(tx, cy - 8.0, right - 44.0 - tx, 16.0), &f.body, ORANGE);
+                self.battery(cv, ic, percent, status_red());
+                cv.text("Низкий заряд", Rect::new(tx, cy - 8.0, right - 44.0 - tx, 16.0), &f.body, status_orange());
                 value(&format!("{percent}%"));
             }
         }

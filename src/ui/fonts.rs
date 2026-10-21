@@ -40,7 +40,7 @@ pub const WEIGHT_EMPHASIZED: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT(590);
 /// | icon_small  | Не текст              | 7.5         | Regular(400)            | 0.0          | Иконки Segoe MDL2 / Fluent              |
 /// | icon        | Не текст              | 9.0         | Regular(400)            | 0.0          | Иконки Segoe MDL2 / Fluent              |
 /// | icon_big    | Не текст              | 12.0        | Regular(400)            | 0.0          | Иконки Segoe MDL2 / Fluent              |
-#[allow(dead_code)]
+#[cfg(test)]
 pub const FORMAT_ROLE_MAP: &[(&str, Option<TextRole>, f32, u32)] = &[
     ("body", Some(TextRole::Headline), 9.0, 590),
     ("body_c", Some(TextRole::Headline), 9.0, 590),

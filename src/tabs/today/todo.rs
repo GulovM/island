@@ -5,7 +5,7 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use super::Today;
 use crate::anim::Spring;
 use crate::tabs::{id, read_lines, write_lines, TODAY};
-use crate::ui::{chip_bg, dim, fg, icon, ink, inset, mix, track, txt, Canvas, Rect, Submit, Ui, GREEN};
+use crate::ui::{chip_bg, dim, fg, icon, ink, inset, mix, status_green, track, txt, Canvas, Rect, Submit, Ui};
 
 const MAX_TODO: usize = 100;
 
@@ -65,7 +65,7 @@ impl Today {
         let (bx, by) = (card.right() - 21.0, card.y + 18.0);
         cv.circle(bx, by, 9.0, chip_bg());
         if !self.todo.is_empty() {
-            cv.ring(bx, by, 8.0, 1.4, done as f32 / self.todo.len() as f32, GREEN);
+            cv.ring(bx, by, 8.0, 1.4, done as f32 / self.todo.len() as f32, status_green());
         }
         cv.text(&format!("{done}/{}", self.todo.len()), Rect::new(bx - 9.0, by - 6.0, 18.0, 12.0), &f.caps_c, txt());
 
@@ -185,7 +185,7 @@ impl Today {
                 cv.rr_line(Rect::new(cx - 6.0, cy - 6.0, 12.0, 12.0), 6.0, ring, 1.2);
             }
             if dn > 0.01 {
-                cv.circle(cx, cy, 6.0 * (0.5 + 0.5 * dn), D2D1_COLOR_F { a: dn, ..GREEN });
+                cv.circle(cx, cy, 6.0 * (0.5 + 0.5 * dn), D2D1_COLOR_F { a: dn, ..status_green() });
                 cv.text(icon::CHECK, Rect::new(cx - 6.0, cy - 6.0, 12.0, 12.0), &f.icon_small, D2D1_COLOR_F { a: ink().a * dn, ..ink() });
             }
             let th = lines as f32 * lh;
