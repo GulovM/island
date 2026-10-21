@@ -55,7 +55,7 @@ impl Today {
         // Значок, температура, описание и город (его нет, пока погода не загружена).
         let (glyph, col, temp, tcol, desc, city) = match &self.online.weather {
             Some(wt) => {
-                let (g, col) = if wt.code <= 1 { (icon::SUN, SUN_COLOR) } else { (icon::CLOUD, mix(dim(), txt(), 0.5)) };
+                let (g, col) = if wt.code <= 1 { (icon::SUN, crate::ui::hue(crate::ios::SysColor::Yellow, SUN_COLOR)) } else { (icon::CLOUD, mix(dim(), txt(), 0.5)) };
                 (g, col, format!("{}°C", wt.temp.round() as i32), txt(), online::weather_text(wt.code).to_string(), wt.city.clone())
             }
             None => {

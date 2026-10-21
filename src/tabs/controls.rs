@@ -9,7 +9,8 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use crate::anim::Spring;
 use crate::bg::{self, Cmd, DevItem, ListKind, Media, Timeline};
 use crate::sys;
-use crate::ui::{icon, mix, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink, txt, WHITE};
+use crate::ios::SysColor;
+use crate::ui::{hue, icon, mix, on_color, slider_fill, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink, txt, WHITE};
 
 use super::grid::{Grid, Item};
 use super::layout::{sz, Size, Spec, TabSpec, CELL, GAP};
@@ -342,7 +343,7 @@ impl Controls {
         match it.idx {
             WIFI => {
                 let sub = if self.wifi { self.ssid.clone().unwrap_or_else(|| "Вкл".into()) } else { "Выкл".into() };
-                let hit = ui.tile_wide(cv, id(CONTROLS, 0), r, icon::WIFI, "Wi-Fi", &sub, &mut self.wifi, Chevron::Plain);
+                let hit = ui.tile_wide(cv, id(CONTROLS, 0), r, icon::WIFI, "Wi-Fi", &sub, &mut self.wifi, Chevron::Plain, hue(SysColor::Blue, cv.accent));
                 if hit.toggled {
                     bg::send(Cmd::Wifi(self.wifi));
                 }
@@ -351,7 +352,7 @@ impl Controls {
                 }
             }
             BLUETOOTH => {
-                let hit = ui.tile_wide(cv, id(CONTROLS, 1), r, icon::BLUETOOTH, "Bluetooth", state(self.bluetooth), &mut self.bluetooth, Chevron::Divided);
+                let hit = ui.tile_wide(cv, id(CONTROLS, 1), r, icon::BLUETOOTH, "Bluetooth", state(self.bluetooth), &mut self.bluetooth, Chevron::Divided, hue(SysColor::Blue, cv.accent));
                 if hit.toggled {
                     bg::send(Cmd::Bluetooth(self.bluetooth));
                 }
@@ -362,7 +363,7 @@ impl Controls {
             AUDIO => {
                 let mut sound = !self.muted;
                 let sub = if sound { self.device() } else { "Без звука".into() };
-                let hit = ui.tile_wide(cv, id(CONTROLS, 3), r, icon::VOLUME, "Аудио", &sub, &mut sound, Chevron::Divided);
+                let hit = ui.tile_wide(cv, id(CONTROLS, 3), r, icon::VOLUME, "Аудио", &sub, &mut sound, Chevron::Divided, hue(SysColor::Pink, cv.accent));
                 if hit.toggled {
                     self.muted = !sound;
                     bg::send(Cmd::Mute(self.muted));
@@ -378,7 +379,7 @@ impl Controls {
                     Some(on) => state(on),
                     None => "Параметры",
                 };
-                let hit = ui.tile_wide(cv, id(CONTROLS, 4), r, icon::MOON, "Ночной свет", sub, &mut night, Chevron::Plain);
+                let hit = ui.tile_wide(cv, id(CONTROLS, 4), r, icon::MOON, "Ночной свет", sub, &mut night, Chevron::Plain, hue(SysColor::Orange, cv.accent));
                 if hit.chevron || (hit.toggled && self.night.is_none()) {
                     sys::open("ms-settings:nightlight");
                 } else if hit.toggled {
@@ -389,7 +390,7 @@ impl Controls {
                 }
             }
             DARK => {
-                let hit = ui.tile_wide(cv, id(CONTROLS, 2), r, icon::CONTRAST, "Тёмная тема", state(self.dark), &mut self.dark, Chevron::None);
+                let hit = ui.tile_wide(cv, id(CONTROLS, 2), r, icon::CONTRAST, "Тёмная тема", state(self.dark), &mut self.dark, Chevron::None, hue(SysColor::Indigo, cv.accent));
                 if hit.toggled {
                     let dark = self.dark;
                     // Рассылка WM_SETTINGCHANGE может занять время — не в потоке интерфейса.
@@ -404,7 +405,7 @@ impl Controls {
                     v if v < 0.67 => icon::VOLUME2,
                     _ => icon::VOLUME3,
                 };
-                if ui.slider_bar(cv, id(CONTROLS, 10), r, g, &mut self.volume) {
+                if ui.slider_bar(cv, id(CONTROLS, 10), r, g, &mut self.volume, slider_fill(cv.accent)) {
                     self.hold_until = Some(Instant::now() + HOLD);
                     // Как в Windows: громкость выше нуля снимает «без звука».
                     if self.muted && self.volume > 0.0 {
@@ -415,7 +416,7 @@ impl Controls {
                 }
             }
             BRIGHTNESS => {
-                if ui.slider_bar(cv, id(CONTROLS, 11), r, icon::BRIGHTNESS, &mut self.brightness) {
+                if ui.slider_bar(cv, id(CONTROLS, 11), r, icon::BRIGHTNESS, &mut self.brightness, slider_fill(cv.accent)) {
                     self.bright_hold = Some(Instant::now() + HOLD);
                     bg::send(Cmd::Brightness(self.brightness));
                 }
@@ -477,7 +478,13 @@ impl Controls {
                 ListKind::Wifi if it.id.is_empty() && it.extra.starts_with("WPA") => icon::LOCK,
                 _ => glyph,
             };
-            if ui.row_compact(cv, id(CONTROLS, 100 + i as u32), row, lead, true, &it.name, &it.sub, 4.0, it.active, false) {
+            // Плашка значка — цветом функции, подключённое устройство — зелёной с галочкой.
+            let tint = match kind {
+                _ if it.active => hue(SysColor::Green, cv.accent),
+                ListKind::Audio => hue(SysColor::Pink, cv.accent),
+                ListKind::Wifi | ListKind::Bluetooth => hue(SysColor::Blue, cv.accent),
+            };
+            if ui.row_compact_tinted(cv, id(CONTROLS, 100 + i as u32), row, lead, true, &it.name, &it.sub, 4.0, it.active, false, Some(tint)) {
                 chosen = Some(i);
             }
         }
@@ -670,7 +677,7 @@ impl Controls {
             self.apply_seek(tl.relative(-10.0), true);
         }
         let toggle = if playing { icon::PAUSE } else { icon::PLAY_SOLID };
-        if Self::round_button(ui, cv, id(CONTROLS, 21), xs[2], cy, play_rad, toggle, cv.accent, ink()) {
+        if Self::round_button(ui, cv, id(CONTROLS, 21), xs[2], cy, play_rad, toggle, slider_fill(cv.accent), on_color(slider_fill(cv.accent))) {
             bg::send(Cmd::PlayPause);
         }
         if tl.can_seek
@@ -731,7 +738,7 @@ impl Controls {
     ) {
         if !tl.can_seek || tl.dur <= 0.0 {
             // Сессия не поддерживает перемотку — безопасная деградация в статический прогресс-бар.
-            cv.progress(bar, tl.frac(), if tl.dur > 0.0 { cv.accent } else { dim() });
+            cv.progress(bar, tl.frac(), if tl.dur > 0.0 { slider_fill(cv.accent) } else { dim() });
             return;
         }
 
@@ -764,13 +771,13 @@ impl Controls {
 
         let fw = (bar.w * frac).max(h);
         let fill_rect = Rect::new(bar.x, bar.cy() - h / 2.0, fw, h);
-        cv.rr(fill_rect, h / 2.0, cv.accent);
+        cv.rr(fill_rect, h / 2.0, slider_fill(cv.accent));
 
         let active = hv.max(if dragging { 1.0 } else { 0.0 });
         if active > 0.01 {
             let thumb_r = 3.2 + 1.6 * active;
             let thumb_x = (bar.x + bar.w * frac).clamp(bar.x, bar.right());
-            cv.circle(thumb_x, bar.cy(), thumb_r, cv.accent);
+            cv.circle(thumb_x, bar.cy(), thumb_r, slider_fill(cv.accent));
             if crate::theme::glass() {
                 cv.circle(thumb_x, bar.cy(), thumb_r * 0.4, WHITE);
             }

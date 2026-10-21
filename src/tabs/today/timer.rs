@@ -151,8 +151,9 @@ impl Today {
         } else {
             format!("{:02}:{:02}", secs / 60, secs % 60)
         };
-        cv.text(&label, Rect::new(cx - 24.0, cy - 8.0, 48.0, 16.0), &f.body_c, txt());
-        if ui.icon_button(cv, id(TODAY, 21), Rect::new(tm.x + ox + 5.0, tm.y + 5.0, 16.0, 16.0), icon::RINGER, self.sound) {
+        // Оставшееся время — крупными табличными цифрами: главное в карточке.
+        cv.text(&label, Rect::new(cx - 24.0, cy - 10.0, 48.0, 20.0), &f.title_c, txt());
+        if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(tm.x + ox + 5.0, tm.y + 5.0, 16.0, 16.0), icon::RINGER, self.sound, status_orange()) {
             self.sound = !self.sound;
             self.save_timer();
         }

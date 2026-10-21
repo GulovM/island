@@ -10,54 +10,74 @@ use windows::Win32::Graphics::DirectWrite::*;
 
 use crate::ios::{self, TextRole};
 
-/// Вес Semibold (590) согласно спецификации iOS 26 для ролей Headline и Emphasized.
-/// Значение передаётся в `CreateTextFormat` для соответствия спецификации; DirectWrite выбирает
-/// ближайший доступный именованный экземпляр шрифта (на практике Semibold 600, визуально идентичен).
+/// Вес Semibold (590) согласно спецификации iOS 26 для ролей Headline и Emphasized (запасной путь
+/// без вариативного шрифта: DirectWrite берёт ближайшее начертание, Semibold 600).
+#[cfg(test)]
 pub const WEIGHT_EMPHASIZED: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT(590);
 
+/// Веса ролей по оси `wght` Segoe UI Variable. Иерархия держится весом, как в SF Pro: основной
+/// текст средний (не полужирный — иначе всё одинаково «кричит»), заголовки и кнопки полужирные,
+/// вторичный текст чуть плотнее Regular, чтобы не таял на размытом стекле.
+pub mod weight {
+    /// Основной текст: строки списков, подписи настроек, поля ввода.
+    pub const BODY: u32 = 540;
+    /// Акцентный текст: заголовки плиток, кнопки, подписи по центру.
+    pub const EMPHASIZED: u32 = 600;
+    /// Вторичный текст: подзаголовки, время, пояснения.
+    pub const SECONDARY: u32 = 430;
+    /// Мелкие заголовки секций прописными.
+    pub const CAPS: u32 = 660;
+    /// Абзац задач и превью.
+    pub const PARAGRAPH: u32 = 500;
+    /// Заголовок трека и крупные числа.
+    pub const TITLE: u32 = 690;
+    /// Цифры часов: крупный кегль Display легче — как часы экрана блокировки iOS.
+    pub const CLOCK: u32 = 620;
+}
+
 /// Таблица соответствия форматов острова шкале типографики Apple iOS 26 (в масштабе острова 9/17).
-/// В колонке веса указано значение по спецификации (590); DirectWrite привязывает его к ближайшему
-/// именованному экземпляру шрифта (Semibold 600).
+/// Вес — значение оси `wght` (на Windows 10 без вариативного шрифта — ближайшее начертание).
+/// Трекинг (px) в кегле острова; «tnum» — табличные цифры, чтобы меняющиеся числа не дрожали.
 ///
-/// | Имя формата | Роль iOS              | Размер (px) | Вес (исходный -> новый) | Трекинг (px) | Примечание                              |
-/// |-------------|-----------------------|-------------|-------------------------|--------------|-----------------------------------------|
-/// | body        | Headline / Body (emp) | 9.0         | SemiBold(600) -> 590*   | -0.2277      | Основной текст (*экземпляр 600)         |
-/// | body_c      | Headline / Body (emp) | 9.0         | SemiBold(600) -> 590*   | -0.2277      | Основной по центру                      |
-/// | small       | Subheadline (reg)     | 8.0         | Regular(400)            | -0.1224      | Вторичный текст                         |
-/// | small_c     | Subheadline (emp)     | 8.0         | SemiBold(600) -> 590*   | -0.1224      | Вторичный по центру                     |
-/// | small_b     | Subheadline (emp)     | 8.0         | SemiBold(600) -> 590*   | -0.1224      | Мелкий жирный слева                     |
-/// | small_r     | Subheadline (reg)     | 8.0         | Regular(400)            | -0.1224      | Вторичный справа                        |
-/// | body_r      | Callout (emp)         | 8.5         | SemiBold(600) -> 590*   | -0.1649      | Процент громкости справа                |
-/// | caps        | Footnote (emp)        | 7.0         | SemiBold(600) -> 590*   | -0.0434      | Мелкие заголовки секций                 |
-/// | caps_c      | Caption1 (emp)        | 6.5         | SemiBold(600) -> 590*   | 0.0          | Мелкие подписи по центру                |
-/// | num         | Title1 (emp)          | 15.0        | Bold(700)               | 0.0          | Крупные числа слева                     |
-/// | num_c       | Title1 (emp)          | 15.0        | Bold(700)               | 0.0          | Крупные числа по центру                 |
-/// | wrap_b      | Headline / Body (emp) | 9.0         | SemiBold(600) -> 590*   | -0.2277      | Абзац по центру с переносом             |
-/// | wrap_l      | Subheadline (emp)     | 8.0         | SemiBold(600) -> 590*   | -0.1224      | Абзац слева с переносом                 |
-/// | tab         | Callout (emp)         | 8.5         | SemiBold(600) -> 590*   | -0.1649      | Метки вкладок (gfx::make_text)          |
-/// | title       | Неоднозначно (T2/T1)  | 12.5        | Bold(700) [не менялся]  | 0.0          | Заголовок трека (между 11.6 и 14.8 px)  |
-/// | big_c       | Неоднозначно (Display)| 26.0        | Bold(700) [не менялся]  | 0.0          | Цифры часов (> LargeTitle 18 px)        |
-/// | icon_small  | Не текст              | 7.5         | Regular(400)            | 0.0          | Иконки Segoe MDL2 / Fluent              |
-/// | icon        | Не текст              | 9.0         | Regular(400)            | 0.0          | Иконки Segoe MDL2 / Fluent              |
-/// | icon_big    | Не текст              | 12.0        | Regular(400)            | 0.0          | Иконки Segoe MDL2 / Fluent              |
+/// | Имя формата | Роль iOS              | Размер (px) | Вес | Трекинг     | Примечание                          |
+/// |-------------|-----------------------|-------------|-----|-------------|-------------------------------------|
+/// | body        | Body                  | 9.0         | 540 | Body        | Основной текст                      |
+/// | body_c      | Headline              | 9.0         | 600 | Headline    | Основной по центру, кнопки          |
+/// | small       | Subheadline           | 8.0         | 430 | Subheadline | Вторичный текст                     |
+/// | small_c     | Subheadline (emp)     | 8.0         | 600 | Subheadline | Чипы и кнопки                       |
+/// | small_b     | Subheadline (emp)     | 8.0         | 600 | Subheadline | Мелкий жирный слева                 |
+/// | small_r     | Subheadline           | 8.0         | 430 | Subheadline | Вторичный справа, tnum              |
+/// | body_r      | Callout (emp)         | 8.5         | 600 | Callout     | Процент громкости, tnum             |
+/// | caps        | Footnote (emp)        | 7.0         | 660 | +0.04 em    | Заголовки секций прописными         |
+/// | caps_c      | Caption1 (emp)        | 6.5         | 600 | +0.02 em    | Мелкие подписи по центру, tnum      |
+/// | num         | Title1 (emp)          | 15.0        | 690 | 0           | Крупные числа слева, tnum           |
+/// | num_c       | Title1 (emp)          | 15.0        | 690 | 0           | Крупные числа по центру, tnum       |
+/// | wrap_b      | Body                  | 9.0         | 540 | Body        | Абзац по центру с переносом         |
+/// | wrap_l      | Subheadline           | 8.0         | 500 | Subheadline | Абзац слева с переносом (задачи)    |
+/// | tab         | Callout (emp)         | 8.5         | 600 | Callout     | Метки вкладок (gfx::make_text)      |
+/// | title       | Title2 (emp)          | 12.5        | 690 | Title2      | Заголовок трека и метрик            |
+/// | title_c     | Title2 (emp)          | 12.5        | 690 | Title2      | Время таймера по центру, tnum       |
+/// | big_c       | Display               | 26.0        | 620 | −0.012 em   | Цифры часов, tnum                   |
+/// | icon_*      | Не текст              | 7.5–12      | 400 | 0           | Запасные глифы Segoe Fluent         |
 #[cfg(test)]
 pub const FORMAT_ROLE_MAP: &[(&str, Option<TextRole>, f32, u32)] = &[
-    ("body", Some(TextRole::Headline), 9.0, 590),
-    ("body_c", Some(TextRole::Headline), 9.0, 590),
-    ("small", Some(TextRole::Subheadline), 8.0, 400),
-    ("small_c", Some(TextRole::Subheadline), 8.0, 590),
-    ("small_b", Some(TextRole::Subheadline), 8.0, 590),
-    ("small_r", Some(TextRole::Subheadline), 8.0, 400),
-    ("body_r", Some(TextRole::Callout), 8.5, 590),
-    ("caps", Some(TextRole::Footnote), 7.0, 590),
-    ("caps_c", Some(TextRole::Caption1), 6.5, 590),
-    ("num", Some(TextRole::Title1), 15.0, 700),
-    ("num_c", Some(TextRole::Title1), 15.0, 700),
-    ("wrap_b", Some(TextRole::Headline), 9.0, 590),
-    ("wrap_l", Some(TextRole::Subheadline), 8.0, 590),
-    ("tab", Some(TextRole::Callout), 8.5, 590),
-    ("title", None, 12.5, 700),
-    ("big_c", None, 26.0, 700),
+    ("body", Some(TextRole::Body), 9.0, weight::BODY),
+    ("body_c", Some(TextRole::Headline), 9.0, weight::EMPHASIZED),
+    ("small", Some(TextRole::Subheadline), 8.0, weight::SECONDARY),
+    ("small_c", Some(TextRole::Subheadline), 8.0, weight::EMPHASIZED),
+    ("small_b", Some(TextRole::Subheadline), 8.0, weight::EMPHASIZED),
+    ("small_r", Some(TextRole::Subheadline), 8.0, weight::SECONDARY),
+    ("body_r", Some(TextRole::Callout), 8.5, weight::EMPHASIZED),
+    ("caps", Some(TextRole::Footnote), 7.0, weight::CAPS),
+    ("caps_c", Some(TextRole::Caption1), 6.5, weight::EMPHASIZED),
+    ("num", Some(TextRole::Title1), 15.0, weight::TITLE),
+    ("num_c", Some(TextRole::Title1), 15.0, weight::TITLE),
+    ("wrap_b", Some(TextRole::Body), 9.0, weight::BODY),
+    ("wrap_l", Some(TextRole::Subheadline), 8.0, weight::PARAGRAPH),
+    ("tab", Some(TextRole::Callout), 8.5, weight::EMPHASIZED),
+    ("title", None, 12.5, weight::TITLE),
+    ("title_c", None, 12.5, weight::TITLE),
+    ("big_c", None, 26.0, weight::CLOCK),
     ("icon_small", None, 7.5, 400),
     ("icon", None, 9.0, 400),
     ("icon_big", None, 12.0, 400),
@@ -97,6 +117,8 @@ pub struct Fonts {
     pub icon_small: IDWriteTextFormat,
     /// Заголовок трека.
     pub title: IDWriteTextFormat,
+    /// Заголовочный кегль по центру с табличными цифрами (время в кольце таймера).
+    pub title_c: IDWriteTextFormat,
     /// Крупные числа: скорость интернета (слева) и температура (по центру).
     pub num: IDWriteTextFormat,
     pub num_c: IDWriteTextFormat,
@@ -110,6 +132,8 @@ pub struct Fonts {
     pub icon_big: IDWriteTextFormat,
     /// Добавочный трекинг (letter-spacing) в пикселях по указателю формата (`as_raw() as usize`).
     tracking: RefCell<HashMap<usize, f32>>,
+    /// Форматы с табличными цифрами (`tnum`) по указателю.
+    tabular: std::collections::HashSet<usize>,
     /// Готовые раскладки текста: `DrawText` строит её заново при каждом вызове, а в кадре
     /// десятки строк, которые не меняются от кадра к кадру.
     layouts: RefCell<HashMap<u64, (String, IDWriteTextLayout)>>,
@@ -129,6 +153,57 @@ pub unsafe fn font_exists(f: &IDWriteFactory, name: windows::core::PCWSTR) -> bo
     col.FindFamilyName(name, &mut idx, &mut exists).is_ok() && exists.as_bool()
 }
 
+/// Оптический размер (ось `opsz` Segoe UI Variable, в пунктах) для кегля в логических пикселях:
+/// холст масштабируется DPI и масштабом интерфейса (~1,5 при 125 %), поэтому реальный кегль
+/// крупнее логического. Мелкие подписи получают начертание Small (шире, крупнее очко),
+/// цифры часов — Display (плотнее), как оптические размеры SF Pro Text/Display.
+pub fn optical_size(size: f32) -> f32 {
+    (size * 1.15).clamp(8.0, 36.0)
+}
+
+/// Формат на вариативном Segoe UI Variable: точный вес по оси `wght` (не ближайшее именованное
+/// начертание) и оптический размер по кеглю. Без вариативного шрифта (Windows 10) — `fmt` с
+/// семейством `legacy` и ближайшим весом.
+pub(crate) unsafe fn fmt_var(
+    f: &IDWriteFactory,
+    legacy: windows::core::PCWSTR,
+    weight: u32,
+    size: f32,
+    center: bool,
+) -> Result<IDWriteTextFormat> {
+    if font_exists(f, w!("Segoe UI Variable Text")) {
+        if let Ok(f6) = f.cast::<IDWriteFactory6>() {
+            let axes = [
+                DWRITE_FONT_AXIS_VALUE { axisTag: DWRITE_FONT_AXIS_TAG_WEIGHT, value: weight as f32 },
+                DWRITE_FONT_AXIS_VALUE { axisTag: DWRITE_FONT_AXIS_TAG_OPTICAL_SIZE, value: optical_size(size) },
+            ];
+            if let Ok(t) = f6.CreateTextFormat(w!("Segoe UI Variable"), None, &axes, size, w!("ru-RU")) {
+                let t: IDWriteTextFormat = t.cast()?;
+                setup(f, &t, center)?;
+                return Ok(t);
+            }
+        }
+    }
+    fmt(f, legacy, DWRITE_FONT_WEIGHT(weight as i32), size, center)
+}
+
+/// Вес формата: ось `wght` у вариативного, иначе `GetFontWeight`.
+#[cfg(test)]
+pub unsafe fn weight_of(t: &IDWriteTextFormat) -> u32 {
+    if let Ok(t3) = t.cast::<IDWriteTextFormat3>() {
+        let n = t3.GetFontAxisValueCount() as usize;
+        if n > 0 {
+            let mut v = vec![DWRITE_FONT_AXIS_VALUE::default(); n];
+            if t3.GetFontAxisValues(&mut v).is_ok() {
+                if let Some(a) = v.iter().find(|a| a.axisTag == DWRITE_FONT_AXIS_TAG_WEIGHT) {
+                    return a.value.round() as u32;
+                }
+            }
+        }
+    }
+    t.GetFontWeight().0 as u32
+}
+
 unsafe fn fmt(
     f: &IDWriteFactory,
     family: windows::core::PCWSTR,
@@ -145,14 +220,19 @@ unsafe fn fmt(
         size,
         w!("ru-RU"),
     )?;
+    setup(f, &t, center)?;
+    Ok(t)
+}
+
+unsafe fn setup(f: &IDWriteFactory, t: &IDWriteTextFormat, center: bool) -> Result<()> {
     t.SetTextAlignment(if center { DWRITE_TEXT_ALIGNMENT_CENTER } else { DWRITE_TEXT_ALIGNMENT_LEADING })?;
     t.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
     t.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
     // Не влезающий текст заканчивается многоточием, как в макете.
-    let sign = f.CreateEllipsisTrimmingSign(&t)?;
+    let sign = f.CreateEllipsisTrimmingSign(t)?;
     let trim = DWRITE_TRIMMING { granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER, delimiter: 0, delimiterCount: 0 };
     t.SetTrimming(&trim, &sign)?;
-    Ok(t)
+    Ok(())
 }
 
 /// Обрезает `s` до `units` единиц UTF-16 (границы строк DirectWrite) и ставит «…» вместо
@@ -191,39 +271,34 @@ impl Fonts {
         let display = if font_exists(f, w!("Segoe UI Variable Display")) { w!("Segoe UI Variable Display") } else { ui };
         let icons = if font_exists(f, w!("Segoe Fluent Icons")) { w!("Segoe Fluent Icons") } else { w!("Segoe MDL2 Assets") };
         let reg = DWRITE_FONT_WEIGHT_REGULAR;
-        let semi_590 = WEIGHT_EMPHASIZED;
-        let bold = DWRITE_FONT_WEIGHT_BOLD;
         let right = |t: IDWriteTextFormat| -> Result<IDWriteTextFormat> {
             t.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING)?;
             Ok(t)
         };
+        let wrap = |t: IDWriteTextFormat| -> Result<IDWriteTextFormat> {
+            t.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
+            t.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
+            Ok(t)
+        };
+        use weight as wt;
 
-        let body = fmt(f, ui, semi_590, 9.0, false)?;
-        let body_c = fmt(f, ui, semi_590, 9.0, true)?;
-        let small = fmt(f, ui, reg, 8.0, false)?;
-        let small_c = fmt(f, ui, semi_590, 8.0, true)?;
-        let small_b = fmt(f, ui, semi_590, 8.0, false)?;
-        let small_r = right(fmt(f, ui, reg, 8.0, false)?)?;
-        let body_r = right(fmt(f, ui, semi_590, 8.5, false)?)?;
-        let caps = fmt(f, ui, semi_590, 7.0, false)?;
-        let caps_c = fmt(f, ui, semi_590, 6.5, true)?;
+        let body = fmt_var(f, ui, wt::BODY, 9.0, false)?;
+        let body_c = fmt_var(f, ui, wt::EMPHASIZED, 9.0, true)?;
+        let small = fmt_var(f, ui, wt::SECONDARY, 8.0, false)?;
+        let small_c = fmt_var(f, ui, wt::EMPHASIZED, 8.0, true)?;
+        let small_b = fmt_var(f, ui, wt::EMPHASIZED, 8.0, false)?;
+        let small_r = right(fmt_var(f, ui, wt::SECONDARY, 8.0, false)?)?;
+        let body_r = right(fmt_var(f, ui, wt::EMPHASIZED, 8.5, false)?)?;
+        let caps = fmt_var(f, ui, wt::CAPS, 7.0, false)?;
+        let caps_c = fmt_var(f, ui, wt::EMPHASIZED, 6.5, true)?;
         let icon_small = fmt(f, icons, reg, 7.5, true)?;
-        let title = fmt(f, display, bold, 12.5, false)?;
-        let num = fmt(f, display, bold, 15.0, false)?;
-        let num_c = fmt(f, display, bold, 15.0, true)?;
-        let big_c = fmt(f, display, bold, 26.0, true)?;
-        let wrap_b = {
-            let t = fmt(f, ui, semi_590, 9.0, true)?;
-            t.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
-            t.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
-            t
-        };
-        let wrap_l = {
-            let t = fmt(f, ui, semi_590, 8.0, false)?;
-            t.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
-            t.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
-            t
-        };
+        let title = fmt_var(f, display, wt::TITLE, 12.5, false)?;
+        let title_c = fmt_var(f, display, wt::TITLE, 12.5, true)?;
+        let num = fmt_var(f, display, wt::TITLE, 15.0, false)?;
+        let num_c = fmt_var(f, display, wt::TITLE, 15.0, true)?;
+        let big_c = fmt_var(f, display, wt::CLOCK, 26.0, true)?;
+        let wrap_b = wrap(fmt_var(f, ui, wt::BODY, 9.0, true)?)?;
+        let wrap_l = wrap(fmt_var(f, ui, wt::PARAGRAPH, 8.0, false)?)?;
         let icon = fmt(f, icons, reg, 9.0, true)?;
         let icon_big = fmt(f, icons, reg, 12.0, true)?;
 
@@ -234,17 +309,24 @@ impl Fonts {
             }
         };
 
-        reg_track(&body, ios::tracking_px(TextRole::Headline, 9.0));
+        reg_track(&body, ios::tracking_px(TextRole::Body, 9.0));
         reg_track(&body_c, ios::tracking_px(TextRole::Headline, 9.0));
         reg_track(&small, ios::tracking_px(TextRole::Subheadline, 8.0));
         reg_track(&small_c, ios::tracking_px(TextRole::Subheadline, 8.0));
         reg_track(&small_b, ios::tracking_px(TextRole::Subheadline, 8.0));
         reg_track(&small_r, ios::tracking_px(TextRole::Subheadline, 8.0));
         reg_track(&body_r, ios::tracking_px(TextRole::Callout, 8.5));
-        reg_track(&caps, ios::tracking_px(TextRole::Footnote, 7.0));
-        reg_track(&caps_c, ios::tracking_px(TextRole::Caption1, 6.5));
-        reg_track(&wrap_b, ios::tracking_px(TextRole::Headline, 9.0));
+        // Прописные читаются только с разрядкой: у мелких заголовков секций трекинг положительный.
+        reg_track(&caps, 0.04 * 7.0);
+        reg_track(&caps_c, 0.02 * 6.5);
+        reg_track(&title, ios::tracking_px(TextRole::Title2, 12.5));
+        reg_track(&title_c, ios::tracking_px(TextRole::Title2, 12.5));
+        reg_track(&big_c, -0.012 * 26.0);
+        reg_track(&wrap_b, ios::tracking_px(TextRole::Body, 9.0));
         reg_track(&wrap_l, ios::tracking_px(TextRole::Subheadline, 8.0));
+
+        // Табличные цифры там, где числа меняются на глазах: проценты, время, скорость, часы.
+        let tabular = [&small_r, &body_r, &caps_c, &title_c, &num, &num_c, &big_c].iter().map(|t| t.as_raw() as usize).collect();
 
         Ok(Fonts {
             factory: f.clone(),
@@ -259,6 +341,7 @@ impl Fonts {
             caps_c,
             icon_small,
             title,
+            title_c,
             num,
             num_c,
             big_c,
@@ -267,6 +350,7 @@ impl Fonts {
             icon,
             icon_big,
             tracking: RefCell::new(tracking),
+            tabular,
             layouts: RefCell::new(HashMap::new()),
         })
     }
@@ -311,9 +395,16 @@ impl Fonts {
             map.clear();
         }
         let tracking = self.tracking_for(f);
+        let tabular = self.tabular.contains(&(f.as_raw() as usize));
         let layout = crate::sys::with_utf16(s, |wide| -> Result<IDWriteTextLayout> {
             let layout = self.factory.CreateTextLayout(wide, f, w, h)?;
-            apply_tracking(&layout, tracking, wide.len() as u32);
+            let range = DWRITE_TEXT_RANGE { startPosition: 0, length: wide.len() as u32 };
+            apply_tracking(&layout, tracking, range.length);
+            if tabular && s.bytes().any(|b| b.is_ascii_digit()) {
+                let typo = self.factory.CreateTypography()?;
+                typo.AddFontFeature(DWRITE_FONT_FEATURE { nameTag: DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, parameter: 1 })?;
+                layout.SetTypography(&typo, range)?;
+            }
             Ok(layout)
         }).ok()?;
         map.insert(key, (s.to_string(), layout.clone()));
@@ -378,6 +469,7 @@ mod tests {
                 "wrap_l" => &fonts.wrap_l,
                 "tab" => &tab_fmt,
                 "title" => &fonts.title,
+                "title_c" => &fonts.title_c,
                 "big_c" => &fonts.big_c,
                 "icon_small" => &fonts.icon_small,
                 "icon" => &fonts.icon,
@@ -392,11 +484,10 @@ mod tests {
                 "Формат '{name}': GetFontSize()={actual_size} не совпадает с табличным {expected_size}"
             );
 
-            let actual_weight = unsafe { fmt.GetFontWeight() };
+            let actual_weight = unsafe { weight_of(fmt) };
             assert_eq!(
-                actual_weight,
-                DWRITE_FONT_WEIGHT(expected_weight as i32),
-                "Формат '{name}': GetFontWeight()={actual_weight:?} не совпадает с табличным {expected_weight}"
+                actual_weight, expected_weight,
+                "Формат '{name}': вес {actual_weight} не совпадает с табличным {expected_weight}"
             );
 
             match role {
@@ -413,14 +504,14 @@ mod tests {
                 None => {
                     unmapped_count += 1;
                     assert!(
-                        ["title", "big_c", "icon_small", "icon", "icon_big"].contains(&name),
+                        ["title", "title_c", "big_c", "icon_small", "icon", "icon_big"].contains(&name),
                         "Неожиданный не сопоставленный формат: {name}"
                     );
                 }
             }
         }
         assert_eq!(mapped_count, 14);
-        assert_eq!(unmapped_count, 5);
+        assert_eq!(unmapped_count, 6);
     }
 
     #[test]

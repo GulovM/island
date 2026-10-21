@@ -45,21 +45,25 @@ impl Power {
     }
 
     pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, w: f32) {
+        use crate::ios::SysColor;
+        // У каждого действия свой цвет значка: по нарастанию «опасности» — от синего к красному.
         let items = [
-            (icon::LOCK, "Блокировка"),
-            (icon::MOON, "Сон"),
-            (icon::RESTART, "Перезагрузка"),
-            (icon::POWER, "Выключение"),
+            (icon::LOCK, "Блокировка", SysColor::Blue),
+            (icon::MOON, "Сон", SysColor::Indigo),
+            (icon::RESTART, "Перезагрузка", SysColor::Orange),
+            (icon::POWER, "Выключение", SysColor::Red),
         ];
         let gap = 10.0;
         let bw = (w - 2.0 * PAD - 3.0 * gap) / 4.0;
-        for (i, (g, l)) in items.iter().enumerate() {
+        for (i, (g, l, c)) in items.iter().enumerate() {
             let r = Rect::new(PAD + i as f32 * (bw + gap), TOP, bw, 56.0);
             let armed = self.armed.is_some_and(|(a, _)| a == i);
             let label = if armed { "Подтвердить" } else { l };
-            let clicked = ui.button(cv, id(POWER, i as u32), r, g, label);
+            let tint = crate::ui::hue(*c, cv.accent);
+            let clicked = ui.button_tinted(cv, id(POWER, i as u32), r, g, label, Some(tint));
             if armed {
-                cv.rr_line(r, crate::ui::card_radius(), cv.accent, 1.5);
+                // Рамка подтверждения — цветом самого действия (в стиле Windows — акцент).
+                cv.rr_line(r, crate::ui::card_radius(), tint, 1.5);
             }
             if clicked {
                 self.press(i);

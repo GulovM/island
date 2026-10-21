@@ -70,6 +70,8 @@ pub(crate) struct Gfx {
     pub(crate) paths: RefCell<Recent<[u32; 6], ID2D1PathGeometry1>>,
     /// Маска тени капли под выбранной вкладкой (вычитание геометрий — дорогая операция на CPU).
     pub(crate) pill_masks: RefCell<Recent<[u32; 6], ID2D1Geometry>>,
+    /// Векторные значки (`ui::symbols`) по коду глифа: строятся один раз, `None` — значка нет.
+    pub(crate) symbols: RefCell<std::collections::HashMap<u32, Option<ID2D1Geometry>>>,
     pub(crate) _dcomp: IDCompositionDevice,
     pub(crate) _dcomp_target: IDCompositionTarget,
     pub(crate) _visual: IDCompositionVisual,
@@ -77,17 +79,18 @@ pub(crate) struct Gfx {
 
 pub(crate) unsafe fn make_text(dwrite: &IDWriteFactory, scale: f32) -> Result<IDWriteTextFormat> {
     let family = if ui::font_exists(dwrite, w!("Segoe UI Variable Text")) { w!("Segoe UI Variable Text") } else { w!("Segoe UI") };
-    let text = dwrite.CreateTextFormat(
-        family,
-        None,
-        ui::WEIGHT_EMPHASIZED,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
-        8.5 * scale,
-        w!("ru-RU"),
-    )?;
-    text.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
-    text.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+    // Подписи вкладок рисуются без трансформации (кегль уже в физических пикселях), поэтому
+    // оптический размер считается от логического кегля 8.5, а не от `8.5 * scale`.
+    let text = ui::fmt_var(dwrite, family, ui::weight::EMPHASIZED, 8.5 * scale, true)?;
+    if let Ok(t3) = text.cast::<IDWriteTextFormat3>() {
+        let axes = [
+            DWRITE_FONT_AXIS_VALUE { axisTag: DWRITE_FONT_AXIS_TAG_WEIGHT, value: ui::weight::EMPHASIZED as f32 },
+            DWRITE_FONT_AXIS_VALUE { axisTag: DWRITE_FONT_AXIS_TAG_OPTICAL_SIZE, value: ui::optical_size(8.5) },
+        ];
+        let _ = t3.SetFontAxisValues(&axes);
+    }
+    // Подпись вкладки не обрезается многоточием (ширина вкладки подобрана под текст).
+    text.SetTrimming(&DWRITE_TRIMMING::default(), None)?;
     Ok(text)
 }
 
@@ -179,6 +182,7 @@ impl Gfx {
             gradients: RefCell::new(Recent::new(GRADIENT_CACHE)),
             paths: RefCell::new(Recent::new(PATH_CACHE)),
             pill_masks: RefCell::new(Recent::new(2)),
+            symbols: RefCell::new(std::collections::HashMap::new()),
             _dcomp: dcomp,
             _dcomp_target: dcomp_target,
             _visual: visual,

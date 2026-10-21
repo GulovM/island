@@ -321,7 +321,7 @@ impl Stats {
                     chips.push(format!("{:.1} {}", c.mhz as f32 / 1000.0, crate::i18n::pick("ГГц", "GHz")));
                 }
                 chips.push(format!("{} {}", c.procs, crate::i18n::pick("проц.", "cores")));
-                ("CPU", self.cpu_name.clone(), chips, cv.accent)
+                ("CPU", self.cpu_name.clone(), chips, crate::ui::hue(crate::ios::SysColor::Blue, cv.accent))
             }
             GPU => {
                 let chips = if h.vram_total > 0.0 {
@@ -372,7 +372,7 @@ impl Stats {
     }
 
     /// Диск, сеть и аптайм: подпись и значение; в широкой карточке значение крупнее.
-    unsafe fn info_card(&self, cv: &Canvas, r: Rect, size: usize, i: usize) {
+    unsafe fn info_card(&self, cv: &Canvas, r: Rect, _size: usize, i: usize) {
         let f = &cv.g.fonts;
         let c = &self.cur;
         let (label, value) = match i {
@@ -382,8 +382,8 @@ impl Stats {
         };
         cv.card(r);
         cv.text(label, Rect::new(r.x + 12.0, r.y + 15.0, r.w - 20.0, 11.0), &f.caps, dim());
-        let font = if size == 0 { &f.body } else { &f.title };
-        cv.text(&value, Rect::new(r.x + 12.0, r.y + 36.0, r.w - 18.0, 18.0), font, txt());
+        // Значение — главное в карточке: крупным заголовком при любом размере (как виджеты iOS).
+        cv.text(&value, Rect::new(r.x + 12.0, r.y + 34.0, r.w - 18.0, 20.0), &f.title, txt());
     }
 
     unsafe fn top_apps(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect) {
@@ -402,6 +402,8 @@ impl Stats {
         let list = if self.top_by_cpu { &self.heavy.top_cpu } else { &self.heavy.top_ram };
         let max = list.first().map(|x| x.1).unwrap_or(0.0).max(1e-9);
         let rows = (((r.h - 32.0) / 22.0).floor() as usize).clamp(1, 5);
+        // Полосы — цветом выбранной метрики, как её кольцо: CPU синий, RAM зелёный.
+        let bar_col = if self.top_by_cpu { crate::ui::hue(crate::ios::SysColor::Blue, cv.accent) } else { status_bar_green() };
         for (k, (name, v)) in list.iter().take(rows).enumerate() {
             let y = r.y + 28.0 + k as f32 * 22.0;
             let tile = Rect::new(r.x + 12.0, y, 19.0, 19.0);
@@ -426,7 +428,7 @@ impl Stats {
             cv.text(&value, Rect::new(r.right() - 68.0, y - 2.0, 56.0, 13.0), &f.small_r, dim());
             let bar = Rect::new(r.x + 38.0, y + 14.0, r.w - 50.0, 3.0);
             cv.rr(bar, 1.5, track());
-            cv.rr(Rect::new(bar.x, bar.y, (bar.w * (*v / max) as f32).max(3.0), 3.0), 1.5, status_bar_green());
+            cv.rr(Rect::new(bar.x, bar.y, (bar.w * (*v / max) as f32).max(3.0), 3.0), 1.5, bar_col);
         }
         if list.is_empty() {
             cv.text("Собираю данные…", Rect::new(r.x + 12.0, r.y + 34.0, r.w - 24.0, 12.0), &f.small, dim());

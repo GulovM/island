@@ -91,6 +91,43 @@ fn status_color(sys_color: crate::ios::SysColor, fallback: D2D1_COLOR_F) -> D2D1
     }
 }
 
+/// Смысловой цвет функции: у каждой своя краска, как у модулей Пункта управления и приложений iOS
+/// (Wi-Fi и Bluetooth — синие, звук — розовый, ночной свет — оранжевый, календарь — красный…).
+/// В стиле Windows всё красится акцентом `fallback`, как раньше.
+pub fn hue(c: crate::ios::SysColor, fallback: D2D1_COLOR_F) -> D2D1_COLOR_F {
+    status_color(c, fallback)
+}
+
+/// Относительная яркость по WCAG (с линеаризацией sRGB).
+fn rel_luminance(c: D2D1_COLOR_F) -> f32 {
+    let lin = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+    0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+}
+
+/// Надпись на сплошной заливке `fill`: белая или почти чёрная — что контрастнее. Насыщенным
+/// системным цветам iOS (синий, красный, фиолетовый) достаётся белая, как в iOS; светлым
+/// (жёлтый, мятный, белая заливка ползунка) — тёмная.
+pub fn on_color(fill: D2D1_COLOR_F) -> D2D1_COLOR_F {
+    let l = rel_luminance(fill);
+    // Порог чуть сдвинут в пользу белого (как в iOS): чёрный только если он заметно контрастнее.
+    if (l + 0.05) / 0.05 > 1.35 * (1.05 / (l + 0.05)) {
+        rgb(0.11, 0.11, 0.12)
+    } else {
+        WHITE
+    }
+}
+
+/// Заливка ползунков громкости, яркости и перемотки: в стиле iOS на тёмном острове — белая, как
+/// в Пункте управления; на светлом и в стиле Windows — акцент.
+pub fn slider_fill(accent: D2D1_COLOR_F) -> D2D1_COLOR_F {
+    let p = crate::theme::get();
+    if is_ios_palette() && !crate::theme::is_light([p.bg.r, p.bg.g, p.bg.b]) {
+        D2D1_COLOR_F { a: 0.96, ..WHITE }
+    } else {
+        accent
+    }
+}
+
 /// Статусный зелёный (батарея, задачи):
 /// в стиле Windows — константа `GREEN`,
 /// в стиле iOS — `ios::sys(Green, dark)`.

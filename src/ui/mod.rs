@@ -15,6 +15,9 @@ pub use color::*;
 mod glyphs;
 pub use glyphs::icon;
 
+mod symbols;
+pub(crate) use symbols::{ICON, ICON_BIG};
+
 mod geom;
 pub use geom::*;
 

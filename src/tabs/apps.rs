@@ -18,9 +18,6 @@ const FILE: &str = "apps.txt";
 const HIDDEN_FILE: &str = "apps_hidden.txt";
 const MAX_DEPTH: u32 = 4;
 const RECENT_COUNT: usize = 5;
-/// Глиф «молния» для быстрых ссылок.
-const BOLT: &str = "\u{E945}";
-
 struct Entry {
     name: String,
     lower: String,
@@ -317,7 +314,7 @@ impl Apps {
                 let hv = ui.hover_of(pid);
                 cv.rr(r, 10.0, mix(card(), fg(), 0.06 * hv));
                 cv.circle(r.x + 10.0, r.cy(), 6.5, mix(card(), cv.accent, 0.3));
-                cv.text(BOLT, Rect::new(r.x + 3.5, r.y, 13.0, r.h), &f.icon, cv.accent);
+                cv.symbol(icon::BOLT, Rect::new(r.x + 3.5, r.y, 13.0, r.h), 9.0, cv.accent);
                 cv.text(name, Rect::new(r.x + 21.0, r.y, pw - 23.0, r.h), &f.small_b, txt());
                 if clicked {
                     launch = Some(Item::Snippet(i));
@@ -354,7 +351,7 @@ impl Apps {
                 continue;
             }
             if let Some(title) = head {
-                cv.text(title, Rect::new(view.x + 6.0, yy + 4.0, view.w, 12.0), &f.caps, bare());
+                cv.text(title, Rect::new(view.x + 6.0, yy + 4.0, view.w, 12.0), &f.caps, crate::ui::dim());
                 continue;
             }
             let (it, _) = items[p];
@@ -398,7 +395,8 @@ impl Apps {
                     // Звезда видна у избранного и при наведении на строку.
                     if show {
                         let glyph = if e.fav { icon::STAR_FILL } else { icon::STAR };
-                        if ui.icon_button(cv, sid_star, star, glyph, e.fav) {
+                        // Звезда избранного — жёлтая, как в iOS.
+                        if ui.icon_button_tinted(cv, sid_star, star, glyph, e.fav, crate::ui::hue(crate::ios::SysColor::Yellow, cv.accent)) {
                             fav = Some(i);
                         }
                     }
@@ -406,7 +404,7 @@ impl Apps {
                 Item::Snippet(i) => {
                     let (name, _) = &self.snippets[i];
                     let right = if selected { "↵ Открыть" } else { "Ссылка" };
-                    if ui.row_compact(cv, rid, r, icon::LINK, true, name, right, 26.0, selected, false) {
+                    if ui.row_compact_tinted(cv, rid, r, icon::LINK, true, name, right, 26.0, selected, false, Some(crate::ui::hue(crate::ios::SysColor::Blue, cv.accent))) {
                         launch = Some(it);
                     }
                 }

@@ -53,4 +53,5 @@ pub mod icon {
     pub const CLOUD: &str = "\u{E753}";
     pub const FORWARD: &str = "\u{E72A}";
     pub const TEXT_DOC: &str = "\u{E8A5}";
+    pub const BOLT: &str = "\u{E945}";
 }

@@ -5,7 +5,7 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use super::Today;
 use crate::anim::Spring;
 use crate::tabs::{id, read_lines, write_lines, TODAY};
-use crate::ui::{chip_bg, dim, fg, icon, ink, inset, mix, status_green, track, txt, Canvas, Rect, Submit, Ui};
+use crate::ui::{chip_bg, dim, fg, icon, inset, mix, status_green, track, txt, Canvas, Rect, Submit, Ui};
 
 const MAX_TODO: usize = 100;
 
@@ -85,10 +85,12 @@ impl Today {
         let cancel_clicked = editing && ui.click_area(id(TODAY, 32), cancel).1;
         // Справа поверх поля лежат кнопки: текст до них не доходит.
         ui.text_field_pad(cv, fid, field, hint, glyph, Submit::Clear, if editing { 45.0 } else { 28.0 });
-        cv.rr_line(field, 8.0, if editing { cv.accent } else { track() }, 1.0);
+        // Задачи — синие, как Напоминания iOS (в стиле Windows — акцент).
+        let rem = crate::ui::hue(crate::ios::SysColor::Blue, cv.accent);
+        cv.rr_line(field, 8.0, if editing { rem } else { track() }, 1.0);
         let hv = ui.hover_of(id(TODAY, 31));
-        cv.rr(add, 4.0, mix(cv.accent, fg(), 0.12 * hv));
-        cv.glyph(if editing { icon::CHECK } else { icon::FORWARD }, add, false, ink());
+        cv.rr(add, 4.0, mix(rem, fg(), 0.12 * hv));
+        cv.glyph(if editing { icon::CHECK } else { icon::FORWARD }, add, false, crate::ui::on_color(rem));
         if editing {
             // Отмена правки: поле очищается, задача остаётся прежней.
             let hv = ui.hover_of(id(TODAY, 32));
@@ -176,7 +178,7 @@ impl Today {
             let hv = ui.hover_of(rid);
             cv.rr(r, 8.0, mix(inset(), fg(), 0.035 * hv));
             if self.edit == Some(i) {
-                cv.rr_line(r, 8.0, cv.accent, 1.0);
+                cv.rr_line(r, 8.0, crate::ui::hue(crate::ios::SysColor::Blue, cv.accent), 1.0);
             }
             let (cx, cy) = (r.x + 13.0, r.y + ROW / 2.0);
             // Отметка выполнения проявляется плавно: кольцо гаснет, зелёный круг с галочкой нарастает.
@@ -186,7 +188,8 @@ impl Today {
             }
             if dn > 0.01 {
                 cv.circle(cx, cy, 6.0 * (0.5 + 0.5 * dn), D2D1_COLOR_F { a: dn, ..status_green() });
-                cv.text(icon::CHECK, Rect::new(cx - 6.0, cy - 6.0, 12.0, 12.0), &f.icon_small, D2D1_COLOR_F { a: ink().a * dn, ..ink() });
+                let mark = crate::ui::on_color(status_green());
+                cv.symbol(icon::CHECK, Rect::new(cx - 6.0, cy - 6.0, 12.0, 12.0), 9.0 * (0.6 + 0.4 * dn), D2D1_COLOR_F { a: dn, ..mark });
             }
             let th = lines as f32 * lh;
             let tr = Rect::new(r.x + 25.0, r.y + (r.h - th) / 2.0, text_w, th + 2.0);
@@ -201,10 +204,13 @@ impl Today {
                 toggled = Some(i);
             }
             if show {
-                for (bid, rect, glyph, active) in [(eid, edit, icon::EDIT, self.edit == Some(i)), (did, del, icon::DELETE, false)] {
+                // Правка подсвечивается синим, удаление при наведении — красным (разрушительное действие).
+                let rem = crate::ui::hue(crate::ios::SysColor::Blue, cv.accent);
+                let hot = [txt(), crate::ui::status_red()];
+                for (k, (bid, rect, glyph, active)) in [(eid, edit, icon::EDIT, self.edit == Some(i)), (did, del, icon::DELETE, false)].into_iter().enumerate() {
                     let h = ui.hover_of(bid);
                     cv.rr(rect, 9.0, D2D1_COLOR_F { a: 0.10 * h, ..fg() });
-                    cv.glyph(glyph, rect, false, if active { cv.accent } else { mix(dim(), txt(), h) });
+                    cv.glyph(glyph, rect, false, if active { rem } else { mix(dim(), hot[k], h) });
                 }
             }
             if del_clicked {

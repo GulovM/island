@@ -375,24 +375,30 @@ impl Clip {
                 continue;
             }
             if let Some(title) = head {
-                cv.text(title, Rect::new(list.x + 5.0, yy + 3.0, list.w, 11.0), &f.caps, bare());
+                // Заголовок секции — вторичным цветом, как в списках iOS: не спорит с записями.
+                cv.text(title, Rect::new(list.x + 5.0, yy + 3.0, list.w, 11.0), &f.caps, crate::ui::dim());
                 continue;
             }
             let n = order[p];
             let it = &self.items[n];
-            let g = if it.pinned {
-                icon::PIN
+            // Тип записи виден по цвету плашки: закреплённое — оранжевое, картинка — фиолетовая,
+            // ссылка — синяя, текст — серый.
+            use crate::ios::SysColor;
+            let (g, tint) = if it.pinned {
+                (icon::PIN, crate::ui::hue(SysColor::Orange, cv.accent))
             } else if it.is_image() {
-                icon::PICTURE
+                (icon::PICTURE, crate::ui::hue(SysColor::Purple, cv.accent))
             } else if it.is_link() {
-                icon::LINK
+                (icon::LINK, crate::ui::hue(SysColor::Blue, cv.accent))
             } else {
-                icon::TEXT_DOC
+                let p = crate::theme::get();
+                let dark = !crate::theme::is_light([p.bg.r, p.bg.g, p.bg.b]);
+                (icon::TEXT_DOC, crate::ios::to_d2d(crate::ios::gray(crate::ios::GrayToken::Gray, dark), 1.0))
             };
             let r = Rect::new(list.x, yy, list.w - 3.0, ROW);
             let sel = selected_pos == Some(p);
             let label = it.label();
-            if ui.row_compact(cv, id(CLIPBOARD, 200 + p as u32), r, g, true, &label, &short_ago(now, it.ts), 0.0, sel, !sel) {
+            if ui.row_compact_tinted(cv, id(CLIPBOARD, 200 + p as u32), r, g, true, &label, &short_ago(now, it.ts), 0.0, sel, !sel, Some(tint)) {
                 clicked = Some(n);
             }
         }

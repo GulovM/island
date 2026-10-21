@@ -228,9 +228,19 @@ impl Canvas<'_> {
         }
     }
 
-    /// Иконка-глиф по центру прямоугольника.
+    /// Значок по центру прямоугольника: векторный (`symbols`), для неизвестного кода — глиф шрифта.
     pub unsafe fn glyph(&self, g: &str, r: Rect, big: bool, c: D2D1_COLOR_F) {
-        let f = if big { &self.g.fonts.icon_big } else { &self.g.fonts.icon };
+        let size = if big { super::ICON_BIG } else { super::ICON };
+        self.symbol(g, r, size, c);
+    }
+
+    /// Значок кеглем `size` (не больше прямоугольника `r`).
+    pub unsafe fn symbol(&self, g: &str, r: Rect, size: f32, c: D2D1_COLOR_F) {
+        self.g.brush.SetColor(&self.col(c));
+        if super::symbols::draw(self.g, g, r, size.min(r.w).min(r.h)) {
+            return;
+        }
+        let f = if size > super::ICON { &self.g.fonts.icon_big } else { &self.g.fonts.icon };
         self.text(g, r, f, c);
     }
 

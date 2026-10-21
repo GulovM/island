@@ -5,7 +5,7 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use super::Today;
 use crate::online::{self, civil_from_days, days_from_civil, weekday, DayEvent, Event};
 use crate::tabs::{id, TODAY};
-use crate::ui::{dim, fg, icon, ink, inset, mix, status_pink, txt, Canvas, Rect, Submit, Ui};
+use crate::ui::{dim, fg, icon, inset, mix, status_pink, txt, Canvas, Rect, Submit, Ui};
 
 /// Даты текущей недели с понедельника: (день, месяц).
 fn week_dates(y: i32, m: u32, d: u32) -> [(u32, u32); 7] {
@@ -273,12 +273,14 @@ impl Today {
             let cid = id(TODAY, 80 + i as u32);
             let (_, clicked) = ui.click_area(cid, b);
             let hv = ui.hover_of(cid);
+            // Сегодня — красным, как в Календаре iOS (в стиле Windows — акцент).
+            let cal = crate::ui::hue(crate::ios::SysColor::Red, cv.accent);
             if is_today {
-                cv.rr(b, 5.0, cv.accent);
+                cv.rr(b, 5.0, cal);
             } else if hv > 0.01 {
                 cv.rr(b, 5.0, D2D1_COLOR_F { a: 0.07 * hv, ..fg() });
             }
-            cv.text(&day.to_string(), b, &f.body_c, if is_today { ink() } else { txt() });
+            cv.text(&day.to_string(), b, &f.body_c, if is_today { crate::ui::on_color(cal) } else { txt() });
             if clicked {
                 self.open_month(monday + i as i64);
             }
@@ -436,8 +438,9 @@ impl Today {
             let row_r = Rect::new(box_r.x + 4.0, ry, box_r.w - 8.0, EVENT_ROW_H - 2.0);
 
             let (strip_color, time_color, title_color) = if item.highlighted {
-                cv.rr(row_r, 4.0, D2D1_COLOR_F { a: 0.08, ..cv.accent });
-                (cv.accent, cv.accent, txt())
+                let cal = crate::ui::hue(crate::ios::SysColor::Red, cv.accent);
+                cv.rr(row_r, 4.0, D2D1_COLOR_F { a: 0.10, ..cal });
+                (cal, cal, txt())
             } else if item.status == EventStatus::Past {
                 (D2D1_COLOR_F { a: 0.35, ..status_pink() }, dim(), mix(dim(), crate::ui::card(), 0.3))
             } else {
@@ -682,22 +685,23 @@ impl Today {
             let (_, clicked) = ui.click_area(cid, b);
             let hv = ui.hover_of(cid);
             let is_today = day == today;
+            let cal = crate::ui::hue(crate::ios::SysColor::Red, cv.accent);
             if is_today {
-                cv.rr(b, 5.0, cv.accent);
+                cv.rr(b, 5.0, cal);
             } else {
                 if hv > 0.01 {
                     cv.rr(b, 5.0, D2D1_COLOR_F { a: 0.07 * hv, ..fg() });
                 }
                 if day == self.sel {
-                    cv.rr_line(b, 5.0, cv.accent, 1.2);
+                    cv.rr_line(b, 5.0, cal, 1.2);
                 }
             }
-            let col = if is_today { ink() } else if mm == vm { txt() } else { mix(dim(), crate::ui::card(), 0.3) };
+            let col = if is_today { crate::ui::on_color(cal) } else if mm == vm { txt() } else { mix(dim(), crate::ui::card(), 0.3) };
             cv.text(&dd.to_string(), Rect::new(b.x, b.y - 1.0, b.w, 15.0), &f.body_c, col);
             let n = evs[idx].len().min(3);
             for k in 0..n {
                 let dx = (k as f32 - (n as f32 - 1.0) / 2.0) * 4.5;
-                cv.circle(b.cx() + dx, b.y + 16.0, 1.5, if is_today { ink() } else { status_pink() });
+                cv.circle(b.cx() + dx, b.y + 16.0, 1.5, if is_today { crate::ui::on_color(cal) } else { status_pink() });
             }
             if clicked {
                 pick = Some(day);

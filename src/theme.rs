@@ -152,8 +152,14 @@ pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
     // что `on(t)`, а на стекле пропускает размытый фон (непрозрачная плашка глушила стекло).
     let veil = |t: f32| rgba(fg, t);
 
-    // Тёмная надпись на светлом акценте, светлая — на тёмном.
-    let ink_for = |acc: Rgb| if is_light(acc) { [0.10, 0.085, 0.05] } else { [0.97, 0.97, 0.97] };
+    // Тёмная надпись на светлом акценте, светлая — на тёмном: выбор по контрасту WCAG (яркость
+    // с линеаризацией sRGB), а не по средней яркости — иначе на бирюзовом и мятном акценте
+    // оставался белый текст с контрастом ~2,5:1. Порог чуть в пользу белого, как в iOS.
+    let ink_for = |acc: Rgb| {
+        let lin = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+        let l = 0.2126 * lin(acc[0]) + 0.7152 * lin(acc[1]) + 0.0722 * lin(acc[2]);
+        if (l + 0.05) / 0.05 > 1.35 * (1.05 / (l + 0.05)) { [0.10, 0.085, 0.05] } else { [0.97, 0.97, 0.97] }
+    };
 
     let (rim_hi_a, rim_mid_a, rim_lo_col, rim_lo_a) = crate::glass::rim_alphas(dark);
     let sheen_a = crate::glass::sheen_alpha(dark);
@@ -182,6 +188,9 @@ pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
     if style == PaletteStyle::Ios {
         // Текст: основной — Label Primary (непрозрачный).
         p.text = ios::label_primary(dark);
+        // Вторичный — как Secondary Label (60 %), но непрозрачный и чуть ярче: полупрозрачный серый
+        // на размытом стекле терялся, а 78 % почти сливался с основным и ломал иерархию.
+        p.dim = on(if light { 0.60 } else { 0.64 });
 
         // Поверхности по смыслу и визуальной иерархии iOS:
         // card — Quaternary Fill (самая нежная заливка подложки крупных карточек);
@@ -344,11 +353,11 @@ mod tests {
         assert_eq!(light_p.text, ios::label_primary(false));
         assert!(light_p.text.r < 0.1, "текст на светлом фоне должен быть тёмным");
 
-        // dim в стиле iOS совпадает с Windows-стилем
+        // dim в стиле iOS приглушённее Windows-стиля (иерархия как у Secondary Label), но читаем.
         let dark_win = derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows);
         let light_win = derive(light_bg, custom_accent, PaletteStyle::Windows);
-        assert_eq!(dark_p.dim, dark_win.dim);
-        assert_eq!(light_p.dim, light_win.dim);
+        assert!(dark_p.dim.r < dark_win.dim.r && dark_p.dim.r > 0.6);
+        assert!(light_p.dim.r > light_win.dim.r && light_p.dim.r < 0.45);
 
         // pill в стиле iOS равен полупрозрачному fill_primary
         assert_eq!(dark_p.pill, ios::fill_primary(true));
@@ -409,8 +418,9 @@ mod tests {
             assert_eq!([ios.accent.r, ios.accent.g, ios.accent.b], custom_accent);
             assert_eq!(win.ink, ios.ink);
 
-            // dim настроен под стекло одинаково в обоих стилях
-            assert_eq!(win.dim, ios.dim);
+            // dim непрозрачный в обоих стилях; в iOS дальше от основного текста.
+            assert!(win.dim.a == 1.0 && ios.dim.a == 1.0);
+            assert!((ios.dim.r - ios.text.r).abs() > (win.dim.r - win.text.r).abs());
 
             // Текст: в Windows mix(bg, fg), в iOS label_primary
             if dark {

@@ -29,7 +29,10 @@ impl Ui {
     // --- примитивы ---
 
     /// Плитка-кнопка (Power): иконка сверху, жирная подпись под ней.
-    pub unsafe fn button(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, label: &str) -> bool {
+    /// Плитка-кнопка, у которой значок окрашен цветом действия `tint` (в стиле iOS): блокировка,
+    /// сон, перезагрузка и выключение различаются с первого взгляда. Подпись остаётся основным цветом.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn button_tinted(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, label: &str, tint: Option<D2D1_COLOR_F>) -> bool {
         let (_, clicked) = self.interact(id, r);
         let w = self.widget(id);
         let (hv, pr) = (w.hover.value, w.press.value);
@@ -37,13 +40,14 @@ impl Ui {
         let rad = super::card_radius();
         cv.rr(bg_rect, rad, mix(card(), fg(), 0.055 * hv + 0.03 * pr));
         cv.hairline(bg_rect, rad);
+        let mark = tint.filter(|_| super::color::is_ios_palette()).unwrap_or_else(txt);
         if label.is_empty() {
-            cv.glyph(glyph, r, false, txt());
+            cv.glyph(glyph, r, false, mark);
         } else if glyph.is_empty() {
             cv.text(label, r, &cv.g.fonts.body_c, txt());
         } else {
-            cv.glyph(glyph, Rect::new(r.x, r.cy() - 18.0, r.w, 18.0), false, txt());
-            cv.text(label, Rect::new(r.x, r.cy() + 1.0, r.w, 16.0), &cv.g.fonts.body_c, txt());
+            cv.symbol(glyph, Rect::new(r.x, r.cy() - 22.0, r.w, 22.0), 17.0, mark);
+            cv.text(label, Rect::new(r.x, r.cy() + 2.0, r.w, 16.0), &cv.g.fonts.body_c, txt());
         }
         clicked
     }
@@ -52,6 +56,9 @@ impl Ui {
     /// центру, справа может быть стрелка «⌄» (с разделителем или без). При «вкл» плитка залита
     /// акцентом с тёмным текстом. Узкая плитка (одна колонка сетки) — только бейдж по центру и
     /// узкая стрелка; длинный заголовок уменьшается до мелкого шрифта.
+    /// `tint` — цвет функции во включённом состоянии (`hue`): в стиле iOS им заливается только
+    /// бейдж, а плитка остаётся стеклом с лёгким оттенком (как модули Пункта управления iOS 26) —
+    /// текст на любом цвете читается; в стиле Windows плитка заливается целиком.
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn tile_wide(
         &mut self,
@@ -63,6 +70,7 @@ impl Ui {
         sub: &str,
         on: &mut bool,
         chevron: Chevron,
+        tint: D2D1_COLOR_F,
     ) -> TileHit {
         // Доля «полной» плитки: при перетекании сетки ширина меняется плавно, текст гаснет вместе с ней.
         let full = ((r.w - NARROW_TILE) / TILE_FADE).clamp(0.0, 1.0);
@@ -84,16 +92,24 @@ impl Ui {
         w.on.target = if *on { 1.0 } else { 0.0 };
         let (hv, pr, ov) = (w.hover.value, w.press.value, w.on.value);
         let rect = r.inset(0.8 * pr);
-        let fill = mix(mix(card(), fg(), 0.05 * hv.max(chev_hv)), mix(cv.accent, fg(), 0.06 * hv), ov);
+        let ios = super::color::is_ios_palette();
+        let base = mix(card(), fg(), 0.05 * hv.max(chev_hv));
+        let (fill, fg, sub_c, badge, mark) = if ios {
+            let wash = D2D1_COLOR_F { a: 0.30, ..tint };
+            let badge = mix(chip_bg(), mix(tint, fg(), 0.08 * hv), ov);
+            (mix(base, wash, 0.5 * ov), txt(), dim(), badge, mix(txt(), super::color::on_color(tint), ov))
+        } else {
+            let label = mix(txt(), ink(), ov);
+            let sub_c = mix(dim(), D2D1_COLOR_F { a: 1.0, ..mix(ink(), tint, 0.35) }, ov);
+            (mix(base, mix(tint, fg(), 0.06 * hv), ov), label, sub_c, mix(chip_bg(), mix(tint, ink(), 0.16), ov), label)
+        };
         cv.rr(rect, 10.0, fill);
         cv.hairline(rect, 10.0);
-        let fg = mix(txt(), ink(), ov);
-        let sub_c = mix(dim(), D2D1_COLOR_F { a: 1.0, ..mix(ink(), cv.accent, 0.35) }, ov);
         // Бейдж: у узкой плитки по центру свободного места, у широкой слева.
         let centered = rect.x + (rect.w - chev_w) / 2.0;
         let (bx, by) = (centered + (rect.x + 19.0 - centered) * full, rect.cy());
-        cv.circle(bx, by, 11.0, mix(chip_bg(), mix(cv.accent, ink(), 0.16), ov));
-        cv.glyph(glyph, Rect::new(bx - 11.0, by - 11.0, 22.0, 22.0), false, fg);
+        cv.circle(bx, by, 11.0, badge);
+        cv.glyph(glyph, Rect::new(bx - 11.0, by - 11.0, 22.0, 22.0), false, mark);
         // Текст слева, сразу за бейджем (как плитки Пункта управления iOS): заголовок полужирный,
         // подпись обычным начертанием — иерархия держится весом, а не только цветом.
         if full > 0.02 {
@@ -118,9 +134,9 @@ impl Ui {
         hit
     }
 
-    /// Полоса-слайдер из макета: тёмная дорожка, акцентная заливка от левого края с иконкой,
-    /// процент справа.
-    pub unsafe fn slider_bar(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, value: &mut f32) -> bool {
+    /// Полоса-слайдер из макета: тёмная дорожка, заливка `fill` от левого края с иконкой, процент
+    /// справа. Значок и процент поверх заливки — цветом, контрастным к ней (`on_color`).
+    pub unsafe fn slider_bar(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, value: &mut f32, fill: D2D1_COLOR_F) -> bool {
         let hit = Rect::new(r.x, r.y - 4.0, r.w, r.h + 8.0);
         let _ = self.interact(id, hit);
         let mut changed = false;
@@ -136,30 +152,36 @@ impl Ui {
         let v = value.clamp(0.0, 1.0);
         cv.rr(r, r.h / 2.0, mix(card(), fg(), 0.04 * hv));
         cv.hairline(r, r.h / 2.0);
+        let on_fill = super::color::on_color(fill);
         if v > 0.0 {
-            let fill = Rect::new(r.x, r.y, (r.w * v).max(r.h), r.h);
-            cv.rr(fill, r.h / 2.0, cv.accent);
+            let fr = Rect::new(r.x, r.y, (r.w * v).max(r.h), r.h);
+            cv.rr(fr, r.h / 2.0, fill);
             if crate::theme::glass() {
                 // Мягкий блик сверху заполненной части.
                 let top = D2D1_COLOR_F { a: 0.10, ..crate::theme::get().rim_hi };
-                cv.gradient_stops(fill, r.h / 2.0, &[(0.0, top), (0.6, D2D1_COLOR_F { a: 0.0, ..top })], false);
+                cv.gradient_stops(fr, r.h / 2.0, &[(0.0, top), (0.6, D2D1_COLOR_F { a: 0.0, ..top })], false);
             }
         }
-        cv.glyph(glyph, Rect::new(r.x + 6.0, r.y, 18.0, r.h), false, if v > 0.04 { ink() } else { txt() });
-        let col = if v > 0.93 { ink() } else { txt() };
+        cv.glyph(glyph, Rect::new(r.x + 6.0, r.y, 18.0, r.h), false, if v > 0.04 { on_fill } else { txt() });
+        let col = if v > 0.93 { on_fill } else { txt() };
         cv.text(&format!("{}%", (v * 100.0).round() as i32), Rect::new(r.right() - 52.0, r.y, 42.0, r.h), &cv.g.fonts.body_r, col);
         changed
     }
 
     /// Прозрачная кнопка-иконка (звезда, крестик): `active` красит её акцентом.
     pub unsafe fn icon_button(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, active: bool) -> bool {
+        self.icon_button_tinted(cv, id, r, glyph, active, cv.accent)
+    }
+
+    /// Кнопка-иконка, которая во включённом состоянии красится цветом `tint` (жёлтая звезда избранного).
+    pub unsafe fn icon_button_tinted(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, active: bool, tint: D2D1_COLOR_F) -> bool {
         let (_, clicked) = self.interact(id, r);
         let w = self.widget(id);
         let (hv, pr) = (w.hover.value, w.press.value);
         let mut bg = fg();
         bg.a = 0.10 * hv;
         cv.rr(r, r.h / 2.0, bg);
-        let col = if active { cv.accent } else { mix(dim(), txt(), hv) };
+        let col = if active { tint } else { mix(dim(), txt(), hv) };
         cv.glyph(glyph, r.inset(1.0 * pr), false, col);
         clicked
     }
@@ -181,6 +203,26 @@ impl Ui {
         selected: bool,
         centered: bool,
     ) -> bool {
+        self.row_compact_tinted(cv, id, r, lead, lead_is_glyph, title, right, right_pad, selected, centered, None)
+    }
+
+    /// Как `row_compact`, но значок слева на квадратике цвета `tint` (белый значок на цветной
+    /// плашке, как строки Настроек iOS): по цвету сразу видно, что это — сеть, ссылка, картинка.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn row_compact_tinted(
+        &mut self,
+        cv: &Canvas,
+        id: u32,
+        r: Rect,
+        lead: &str,
+        lead_is_glyph: bool,
+        title: &str,
+        right: &str,
+        right_pad: f32,
+        selected: bool,
+        centered: bool,
+        tint: Option<D2D1_COLOR_F>,
+    ) -> bool {
         let (_, clicked) = self.interact(id, r);
         let w = self.widget(id);
         w.on.target = if selected { 1.0 } else { 0.0 };
@@ -195,19 +237,27 @@ impl Ui {
         }
         let ts = (r.h - 7.0).clamp(12.0, 17.0);
         let tile = Rect::new(r.x + 6.0, r.cy() - ts / 2.0, ts, ts);
-        cv.rr(tile, 4.0, mix(chip_bg(), mix(cv.accent, chip_bg(), 0.45), ov));
-        if lead_is_glyph {
-            cv.glyph(lead, tile, false, mix(dim(), txt(), ov));
-        } else {
-            cv.text(lead, tile, &cv.g.fonts.small_c, txt());
+        match tint.filter(|_| lead_is_glyph && super::color::is_ios_palette()) {
+            Some(t) => {
+                cv.rr(tile, 4.5, t);
+                cv.symbol(lead, tile, ts * 0.78, super::color::on_color(t));
+            }
+            None => {
+                cv.rr(tile, 4.0, mix(chip_bg(), mix(cv.accent, chip_bg(), 0.45), ov));
+                if lead_is_glyph {
+                    cv.symbol(lead, tile, ts * 0.78, mix(dim(), txt(), ov));
+                } else {
+                    cv.text(lead, tile, &cv.g.fonts.small_c, txt());
+                }
+            }
         }
         let tx = tile.right() + 8.0;
         let rw = if right.is_empty() { 0.0 } else { cv.text_w(right, &cv.g.fonts.small_r) + 6.0 };
         let tw = (r.right() - tx - right_pad - rw - 8.0).max(10.0);
         let font = if centered { &cv.g.fonts.body_c } else { &cv.g.fonts.body };
         cv.text(title, Rect::new(tx, r.y, tw, r.h), font, txt());
-        // У строки нет своего фона (только подсветка при наведении): подпись — как текст на теле острова.
-        cv.text(right, Rect::new(r.right() - right_pad - rw - 6.0, r.y, rw, r.h), &cv.g.fonts.small_r, super::bare());
+        // Подпись справа — вторичная (тип, время): приглушённая, чтобы не спорить с заголовком.
+        cv.text(right, Rect::new(r.right() - right_pad - rw - 6.0, r.y, rw, r.h), &cv.g.fonts.small_r, dim());
         clicked
     }
 
