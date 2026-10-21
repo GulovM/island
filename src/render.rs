@@ -80,69 +80,6 @@ impl App {
         // Тело острова рисуется по BodyLayers (тинт материала или фона)
         let body = self.body_path(g, x0, aw, ah, ear, r, false)?;
 
-        // Мягкая тень стекла: ios::GLASS_SHADOW (0 8 40 rgba(0,0,0,0.12)) вниз и по бокам.
-        // Верх острова упирается в край экрана (y = 0), поэтому тень не распространяется вверх.
-        // Запас окна WIN_LOGICAL (800×530) при максимальном острове (700×476) оставляет снизу 54 px и по бокам 42 px,
-        // поэтому полная тень (40 px по бокам и 48 px снизу) помещается целиком.
-        // Адаптивное ограничение max_spread оставлено как страховка на случай нестандартных геометрий.
-        // Тень вычитает геометрию тела (CombineWithGeometry с D2D1_COMBINE_MODE_EXCLUDE) через PushLayer,
-        // чтобы не рисоваться под полупрозрачным телом.
-        if layers.shadow.alpha > 0.005 {
-            let avail_bottom = (self.win_h as f32 - ah).max(0.0);
-            let avail_side = (x0 - ear).max(0.0);
-            let max_spread = (avail_bottom - 2.0 * s)
-                .min(avail_side - 2.0 * s)
-                .clamp(2.0 * s, layers.shadow.blur_radius * s);
-            let eff_dy = (layers.shadow.offset_y * s) * (max_spread / (layers.shadow.blur_radius * s));
-
-            let max_x0 = x0 - max_spread;
-            let max_aw = aw + 2.0 * max_spread;
-            let max_ah = ah + eff_dy + max_spread;
-            let max_ear = (ear - max_spread).max(0.0);
-            let max_r = r + max_spread;
-
-            if let Ok(outer_geo) = self.body_path(g, max_x0, max_aw, max_ah, max_ear, max_r, false) {
-                let mask_geo = g.d2d.CreatePathGeometry()?;
-                let sink = mask_geo.Open()?;
-                outer_geo.CombineWithGeometry(&body, D2D1_COMBINE_MODE_EXCLUDE, None, D2D1_DEFAULT_FLATTENING_TOLERANCE, &sink)?;
-                sink.Close()?;
-
-                let params = D2D1_LAYER_PARAMETERS1 {
-                    contentBounds: D2D_RECT_F { left: f32::MIN, top: f32::MIN, right: f32::MAX, bottom: f32::MAX },
-                    geometricMask: std::mem::ManuallyDrop::new(Some(mask_geo.cast::<ID2D1Geometry>()?)),
-                    maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-                    maskTransform: ui::matrix(1.0, 0.0, 0.0),
-                    opacity: 1.0,
-                    opacityBrush: std::mem::ManuallyDrop::new(None),
-                    layerOptions: D2D1_LAYER_OPTIONS1_NONE,
-                };
-                g.dc.PushLayer(&params, None);
-
-                const SHADOW_RINGS: usize = 24;
-                let rings = crate::glass::shadow_rings(max_spread, layers.shadow.alpha, SHADOW_RINGS);
-                for &(grow, ring_alpha) in &rings {
-                    let dy = eff_dy * (grow / max_spread);
-                    let s_x0 = x0 - grow;
-                    let s_aw = aw + 2.0 * grow;
-                    let s_ah = ah + dy + grow;
-                    let s_ear = (ear - grow).max(0.0);
-                    let s_r = r + grow;
-                    if let Ok(shadow_geo) = self.body_path(g, s_x0, s_aw, s_ah, s_ear, s_r, false) {
-                        g.brush.SetColor(&D2D1_COLOR_F {
-                            r: layers.shadow.color[0],
-                            g: layers.shadow.color[1],
-                            b: layers.shadow.color[2],
-                            a: ring_alpha,
-                        });
-                        g.dc.FillGeometry(&shadow_geo, &g.brush, None);
-                    }
-                }
-
-                g.dc.PopLayer();
-                drop(std::mem::ManuallyDrop::into_inner(params.geometricMask));
-            }
-        }
-
         g.brush.SetColor(&D2D1_COLOR_F {
             r: layers.tint_color[0],
             g: layers.tint_color[1],
@@ -537,7 +474,7 @@ impl App {
     /// Подложка стекла: окно с размытием фона под телом острова.
     /// В Windows 11 с поддержкой DWM-скругления (`self.blur_round`) окно подложки позиционируется
     /// как скруглённый DWM-прямоугольник (`glass::blur_plate`), вписанный в тело острова.
-    /// Прямоугольный регион `SetWindowRgn` отключает системную тень DWM, не влияя на скругление размытия.
+    /// Окно подложки сохраняет мягкую системную тень DWM (без SetWindowRgn).
     /// На Windows 10 форма окна по-прежнему вырезается регионом `SetWindowRgn` по `glass::body_outline`.
     unsafe fn apply_blur(&self, x0: f32, aw: f32, ah: f32, ear: f32, r: f32, on: bool) {
         if self.blur_round {
@@ -564,8 +501,6 @@ impl App {
                 height,
                 SWP_NOACTIVATE | SWP_SHOWWINDOW,
             );
-            let rgn = CreateRectRgn(0, 0, width, height);
-            SetWindowRgn(self.glass_wnd, Some(rgn), true);
         } else {
             let shape = crate::glass::BlurShape::from_outline(&crate::glass::body_outline(x0, aw, ah, ear, r, 1.0));
             let (gx, gy) = (self.win_x + shape.left, self.win_y + shape.top);

@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use windows::Win32::Graphics::Dwm::{
-    DwmSetWindowAttribute, DWMNCRP_DISABLED, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
-    DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
+    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
 };
 
 use super::*;
@@ -443,8 +443,8 @@ pub(crate) unsafe fn enable_blur_behind(hwnd: HWND) -> bool {
 
 /// Включает родное скругление DWM для окна подложки (Windows 11).
 /// DWMWA_WINDOW_CORNER_PREFERENCE (33) = DWMWCP_ROUND (2) скругляет и окно, и DWM-размытие.
-/// Убирает рамку DWM (DWMWA_BORDER_COLOR 34 = DWMWA_COLOR_NONE)
-/// и пробует отключить тень окна (DWMWA_NCRENDERING_POLICY 2 = DWMNCRP_DISABLED).
+/// Убирает рамку DWM (DWMWA_BORDER_COLOR 34 = DWMWA_COLOR_NONE).
+/// Окно подложки сохраняет мягкую системную тень DWM.
 /// Возвращает `true`, только если вызов 33 вернул S_OK (Windows 11 22000+).
 pub(crate) unsafe fn enable_round_blur(hwnd: HWND) -> bool {
     let round = DWMWCP_ROUND;
@@ -467,22 +467,10 @@ pub(crate) unsafe fn enable_round_blur(hwnd: HWND) -> bool {
         size_of_val(&border) as u32,
     );
 
-    let shadow = DWMNCRP_DISABLED;
-    let r_shadow = DwmSetWindowAttribute(
-        hwnd,
-        DWMWA_NCRENDERING_POLICY,
-        &shadow as *const _ as *const std::ffi::c_void,
-        size_of_val(&shadow) as u32,
-    );
-
     let border_msg = match r_border {
         Ok(()) => "рамка S_OK".to_string(),
         Err(ref e) => format!("рамка 0x{:08X}", e.code().0),
     };
-    let shadow_msg = match r_shadow {
-        Ok(()) => "тень S_OK".to_string(),
-        Err(ref e) => format!("тень 0x{:08X}", e.code().0),
-    };
-    log::info(&format!("стекло: DWM-скругление S_OK ({border_msg}, {shadow_msg})"));
+    log::info(&format!("стекло: DWM-скругление S_OK ({border_msg})"));
     true
 }

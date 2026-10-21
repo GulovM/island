@@ -1,4 +1,4 @@
-//! Стекло острова без Win32: слои тела острова (тинт, осветление, кромка, тень) и
+//! Стекло острова без Win32: слои тела острова (тинт, осветление, кромка) и
 //! точный контур окна-подложки с размытием. Всё — чистые функции, их проверяют тесты.
 
 use std::f32::consts::{FRAC_PI_2, PI};
@@ -60,19 +60,6 @@ pub struct RimLayer {
     pub inner_highlight_alpha: f32,
 }
 
-/// Параметры внешней тени стеклянного тела (shadow).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ShadowLayer {
-    /// Цвет тени (чёрный).
-    pub color: [f32; 3],
-    /// Прозрачность тени (с учётом p · k и включённого размытия).
-    pub alpha: f32,
-    /// Смещение вниз в логических пикселях (из ios::GLASS_SHADOW).
-    pub offset_y: f32,
-    /// Радиус размытия в логических пикселях (из ios::GLASS_SHADOW).
-    pub blur_radius: f32,
-}
-
 /// Полный набор визуальных слоёв стеклянного тела острова.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BodyLayers {
@@ -86,8 +73,6 @@ pub struct BodyLayers {
     pub sheen: SheenLayer,
     /// Слой кромки и бликов (rim).
     pub rim: RimLayer,
-    /// Слой мягкой тени (shadow).
-    pub shadow: ShadowLayer,
 }
 
 /// Базовые параметры кромки `(hi_alpha, mid_alpha, lo_color, lo_alpha)` для тёмной/светлой темы.
@@ -104,7 +89,7 @@ pub fn sheen_alpha(dark: bool) -> f32 {
     if dark { 0.07 } else { 0.30 } // подобрано
 }
 
-/// Вычисляет все визуальные слои тела острова: тинт, осветление, кромку и тень.
+/// Вычисляет все визуальные слои тела острова: тинт, осветление и кромку.
 /// Чистая функция без вызовов Win32 API.
 #[allow(clippy::too_many_arguments)]
 pub fn body_layers(
@@ -132,10 +117,10 @@ pub fn body_layers(
     // При сжатии в полоску (k < 1) фон пропорционально темнеет к чистому чёрному.
     let tint_color = [bg[0] * k, bg[1] * k, bg[2] * k];
 
-    // Множитель стеклянных эффектов (осветление сверху, кромка, тень).
+    // Множитель стеклянных эффектов (осветление сверху, кромка).
     // Полоска (k = 0), свёрнутый остров (p = 0) или выключенное стекло гасят эффекты в ноль,
     // сохраняя прежний вид. Без «Эффектов прозрачности» (blur = false) стекло остаётся стеклом
-    // (кромка, блик, тень сохраняются, но тело плотнее).
+    // (кромка и блик сохраняются, но тело плотнее).
     let glass_factor = if translucent {
         (p * k).clamp(0.0, 1.0)
     } else {
@@ -163,99 +148,13 @@ pub fn body_layers(
         inner_highlight_alpha: (if dark { 0.12 } else { 0.20 }) * glass_factor, // подобрано
     };
 
-    // 3. Тень стекла: ios::GLASS_SHADOW (0 8 40 rgba(0,0,0,0.12))
-    let shadow = ShadowLayer {
-        color: [ios::GLASS_SHADOW.color.r, ios::GLASS_SHADOW.color.g, ios::GLASS_SHADOW.color.b],
-        alpha: ios::GLASS_SHADOW.color.a * glass_factor,
-        offset_y: ios::GLASS_SHADOW.offset_y,
-        blur_radius: ios::GLASS_SHADOW.blur_radius,
-    };
-
     BodyLayers {
         tint_color,
         tint_alpha,
         min_alpha,
         sheen,
         rim,
-        shadow,
     }
-}
-
-/// Приближение дополнительной функции ошибок erfc(x) = 1 - erf(x)
-/// по формуле Абрамовица–Стегуна 7.1.26 с максимальной абсолютной погрешностью <= 1.5e-7.
-/// Не требует внешних крейтов.
-#[allow(clippy::excessive_precision)]
-pub fn erfc(x: f32) -> f32 {
-    if x < 0.0 {
-        return 2.0 - erfc(-x);
-    }
-    const P: f32 = 0.3275911;
-    const A1: f32 = 0.254829592;
-    const A2: f32 = -0.284496736;
-    const A3: f32 = 1.421413741;
-    const A4: f32 = -1.453152027;
-    const A5: f32 = 1.061405429;
-
-    let t = 1.0 / (1.0 + P * x);
-    let poly = ((((A5 * t + A4) * t + A3) * t + A2) * t + A1) * t;
-    poly * (-x * x).exp()
-}
-
-/// Вычисляет кольца мягкой тени тела острова с плавным гауссовым профилем (Задача T11).
-/// Возвращает вектор пар `(grow_px, alpha)` от тела наружу:
-/// `grow_px` равномерно от `blur_px / n` до `blur_px`, `n >= 24`.
-///
-/// Целевая накопленная непрозрачность на расстоянии `d` от тела:
-/// гауссов профиль размытия полуплоскости (erfc) со `sigma = blur_px / 2.5`.
-/// Профиль нормирован так, чтобы на границе тела (d = 0) накопленная непрозрачность
-/// составляла `peak_alpha` (как в ios::GLASS_SHADOW):
-/// `A(d) = peak_alpha · erfc(d / (sigma · sqrt(2)))`.
-///
-/// Так как заливки в Direct2D накладываются мультипликативно (1 - prod(1 - a_i)),
-/// альфы вычисляются изнутри наружу с конца:
-/// `a_N = A(d_N)` для самого внешнего кольца,
-/// `a_k = 1 - (1 - A(d_k)) / (1 - A(d_{k+1}))` для внутренних колец,
-/// а для внутреннего края у тела (d = 0) используется `A(0) = peak_alpha`,
-/// что обеспечивает точное совпадение накопленной непрозрачности у тела с `peak_alpha`.
-pub fn shadow_rings(blur_px: f32, peak_alpha: f32, n: usize) -> Vec<(f32, f32)> {
-    if n == 0 || blur_px <= 0.0 || peak_alpha <= 0.0 {
-        return Vec::new();
-    }
-    let peak_alpha = peak_alpha.clamp(0.0, 1.0);
-    let sigma = blur_px / 2.5;
-    let inv_sigma_sqrt2 = 1.0 / (sigma * std::f32::consts::SQRT_2);
-
-    let a_target = |d: f32| -> f32 {
-        (peak_alpha * erfc(d * inv_sigma_sqrt2)).clamp(0.0, 1.0)
-    };
-
-    let mut rings = Vec::with_capacity(n);
-    let mut alphas = vec![0.0f32; n];
-
-    let d = |k: usize| -> f32 {
-        k as f32 * blur_px / n as f32
-    };
-
-    // Внешнее кольцо (k = n, индекс n - 1)
-    alphas[n - 1] = a_target(d(n));
-
-    // Внутренние кольца с конца от n - 2 вниз до 0.
-    // При k = 0 (самое первое кольцо у тела) целевая непрозрачность берётся при d = 0,
-    // чтобы накопленная непрозрачность на теле в точности равнялась peak_alpha.
-    for k in (0..n - 1).rev() {
-        let a_curr = if k == 0 { a_target(0.0) } else { a_target(d(k)) };
-        let a_next = a_target(d(k + 1));
-        let one_minus_next = (1.0 - a_next).max(1e-7);
-        let ratio = ((1.0 - a_curr) / one_minus_next).clamp(0.0, 1.0);
-        alphas[k] = (1.0 - ratio).clamp(0.0, 1.0);
-    }
-
-    for (i, &alpha) in alphas.iter().enumerate() {
-        let grow = d(i + 1);
-        rings.push((grow, alpha));
-    }
-
-    rings
 }
 
 /// Контур тела острова (как в `body_path`: плоский верх на краю экрана, вогнутые «ушки» радиуса `ear`,
@@ -527,15 +426,11 @@ mod tests {
                     // При translucent слои активны независимо от blur (без blur стекло плотнее, но со слоями)
                     assert!(layers.sheen.alpha > 0.0);
                     assert!(layers.rim.hi_alpha > 0.0);
-                    assert!(layers.shadow.alpha > 0.0);
-                    assert_eq!(layers.shadow.offset_y, 8.0);
-                    assert_eq!(layers.shadow.blur_radius, 40.0);
 
                     // При выключенном стекле (translucent = false) слои выключены
                     let off = body_layers(m, bg, false, blur, 0.0, 1.0, 1.0);
                     assert_eq!(off.sheen.alpha, 0.0);
                     assert_eq!(off.rim.hi_alpha, 0.0);
-                    assert_eq!(off.shadow.alpha, 0.0);
                     assert_eq!(off.tint_color, bg);
                 }
             }
@@ -579,7 +474,6 @@ mod tests {
         assert_eq!(strip.tint_alpha, 1.0);
         assert_eq!(strip.sheen.alpha, 0.0);
         assert_eq!(strip.rim.hi_alpha, 0.0);
-        assert_eq!(strip.shadow.alpha, 0.0);
         assert_eq!(strip.tint_color, [0.0, 0.0, 0.0]);
 
         // Свёрнутое состояние (p = 0): сплошное тело (alpha = 1.0), эффекты погашены
@@ -587,7 +481,6 @@ mod tests {
         assert_eq!(collapsed.tint_alpha, 1.0);
         assert_eq!(collapsed.sheen.alpha, 0.0);
         assert_eq!(collapsed.rim.hi_alpha, 0.0);
-        assert_eq!(collapsed.shadow.alpha, 0.0);
         assert_eq!(collapsed.tint_color, bg);
 
         // Выключенное стекло (translucent = false): плоское тело (alpha = 1.0), эффекты погашены
@@ -595,7 +488,6 @@ mod tests {
         assert_eq!(disabled.tint_alpha, 1.0);
         assert_eq!(disabled.sheen.alpha, 0.0);
         assert_eq!(disabled.rim.hi_alpha, 0.0);
-        assert_eq!(disabled.shadow.alpha, 0.0);
         assert_eq!(disabled.tint_color, bg);
     }
 
@@ -703,79 +595,5 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn erfc_abramowitz_stegun_values() {
-        assert!((erfc(0.0) - 1.0).abs() < 1e-6);
-        assert!((erfc(1.0) - 0.1572992).abs() < 1e-5);
-        assert!((erfc(2.0) - 0.0046777).abs() < 1e-5);
-        assert!((erfc(3.0) - 0.00002209).abs() < 1e-6);
-        assert!((erfc(-1.0) - (2.0 - 0.1572992)).abs() < 1e-5);
-    }
-
-    #[test]
-    fn shadow_rings_invariants_and_tolerances() {
-        // Проверка для различных параметров (включая стандартный ios::GLASS_SHADOW 0 8 40 rgba(0,0,0,0.12))
-        for blur in [20.0f32, 40.0, 50.0] {
-            for peak in [0.05f32, 0.12, 0.25] {
-                for n in [24usize, 32, 48, 64] {
-                    let rings = shadow_rings(blur, peak, n);
-
-                    // 1. n колец
-                    assert_eq!(rings.len(), n, "blur={blur}, peak={peak}, n={n}: число колец");
-
-                    // 2. Монотонность grow: строго возрастает от blur/n до blur
-                    let mut prev_grow = 0.0f32;
-                    for (i, &(grow, _alpha)) in rings.iter().enumerate() {
-                        assert!(
-                            grow > prev_grow,
-                            "blur={blur}, peak={peak}, n={n}, ring={i}: grow={grow} <= prev={prev_grow}"
-                        );
-                        let expected = (i + 1) as f32 * blur / n as f32;
-                        assert!((grow - expected).abs() < 1e-5);
-                        prev_grow = grow;
-                    }
-                    assert!((rings[0].0 - blur / n as f32).abs() < 1e-5);
-                    assert!((rings[n - 1].0 - blur).abs() < 1e-5);
-
-                    // 3. Все альфы в 0..1
-                    for (i, &(_grow, alpha)) in rings.iter().enumerate() {
-                        assert!(
-                            (0.0..=1.0).contains(&alpha),
-                            "blur={blur}, peak={peak}, n={n}, ring={i}: alpha={alpha} вне 0..1"
-                        );
-                    }
-
-                    // 4. Внешнее кольцо должно иметь альфу < 0.004 (иначе виден резкий край)
-                    let outer_alpha = rings[n - 1].1;
-                    assert!(
-                        outer_alpha < 0.004,
-                        "blur={blur}, peak={peak}, n={n}: внешняя альфа {outer_alpha} >= 0.004"
-                    );
-
-                    // 5. Накопленная непрозрачность на нулевом расстоянии ≈ peak_alpha (допуск 3%)
-                    let acc_zero = 1.0 - rings.iter().fold(1.0f32, |prod, &(_, a)| prod * (1.0 - a));
-                    let diff_pct = (acc_zero - peak).abs() / peak;
-                    assert!(
-                        diff_pct <= 0.03,
-                        "blur={blur}, peak={peak}, n={n}: накопленная альфа на теле {acc_zero} отличается от {peak} на {:.2}% (> 3%)",
-                        diff_pct * 100.0
-                    );
-
-                    // Сумма альф близка к peak_alpha
-                    let sum_alpha: f32 = rings.iter().map(|&(_, a)| a).sum();
-                    assert!(sum_alpha >= peak * 0.95 && sum_alpha <= peak * 1.20);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn shadow_rings_edge_cases() {
-        assert!(shadow_rings(0.0, 0.12, 24).is_empty());
-        assert!(shadow_rings(40.0, 0.0, 24).is_empty());
-        assert!(shadow_rings(40.0, -0.5, 24).is_empty());
-        assert!(shadow_rings(40.0, 0.12, 0).is_empty());
     }
 }
