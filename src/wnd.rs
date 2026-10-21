@@ -67,6 +67,8 @@ pub(crate) enum Ev {
     SysColors,
     /// Повторная проверка системных цветов (отложенный опрос реестра после смены темы/обоев).
     SysColorsRetry,
+    /// Нажат PrtSc или Win+Shift+S: остров прячется на время скриншота.
+    Shot,
     /// Кнопку удерживают дольше `LONG_MS`.
     LongPress,
 }
@@ -92,6 +94,23 @@ pub(crate) unsafe extern "system" fn on_win_event(
 ) {
     let main = MAIN_WND.with(|w| w.get());
     let _ = PostMessageW(Some(main), WM_RECHECK, WPARAM(0), LPARAM(0));
+}
+
+/// Хук клавиатуры: PrtSc и Win+Shift+S будят главное окно, чтобы остров ушёл с экрана до съёмки.
+/// Клавиши хук не съедает (`CallNextHookEx`), в колбэке только `PostMessageW`.
+pub(crate) unsafe extern "system" fn on_key_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LWIN, VK_RWIN, VK_SHIFT, VK_SNAPSHOT};
+    use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_SYSKEYDOWN};
+    if code >= 0 && (wp.0 as u32 == WM_KEYDOWN || wp.0 as u32 == WM_SYSKEYDOWN) {
+        let vk = (*(lp.0 as *const KBDLLHOOKSTRUCT)).vkCode;
+        let down = |k: u16| GetAsyncKeyState(k as i32) < 0;
+        let win_shift_s = vk == 0x53 && (down(VK_LWIN.0) || down(VK_RWIN.0)) && down(VK_SHIFT.0);
+        if vk == VK_SNAPSHOT.0 as u32 || win_shift_s {
+            let main = MAIN_WND.with(|w| w.get());
+            let _ = PostMessageW(Some(main), WM_SHOT, WPARAM(0), LPARAM(0));
+        }
+    }
+    CallNextHookEx(None, code, wp, lp)
 }
 
 /// Проверяет, относится ли сообщение `WM_SETTINGCHANGE` к смене обоев или системного оформления.
@@ -139,6 +158,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_RECHECK => {
             push(Ev::Recheck);
+            LRESULT(0)
+        }
+        WM_SHOT => {
+            push(Ev::Shot);
             LRESULT(0)
         }
         WM_TRAY => {

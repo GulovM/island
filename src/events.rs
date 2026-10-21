@@ -121,6 +121,10 @@ impl App {
             Ev::Tray(_) => false,
             Ev::Hot(h) => self.on_hot(h),
             Ev::Hotkey => self.on_hotkey(),
+            Ev::Shot => {
+                self.hide_for_shot();
+                false
+            }
             Ev::Display => self.reconfigure(),
             Ev::Resume => self.on_resume(),
             Ev::Lock => self.on_lock(),

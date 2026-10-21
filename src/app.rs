@@ -52,6 +52,8 @@ pub struct App {
     pub(crate) covered: bool,
     /// Активна полноэкранная игра (D3D): остров скрыт совсем.
     pub(crate) hidden: bool,
+    /// Остров спрятан на время скриншота до этого момента.
+    pub(crate) shot_until: Option<Instant>,
     pub(crate) leave_armed: bool,
     /// Позиция курсора в момент смены размера острова (настройки, вкладка, правка): пока мышь
     /// не двинулась и не вернулась на остров, он не сворачивается из-за того, что сам съёжился.
@@ -246,6 +248,7 @@ impl App {
                 expanded: false,
                 covered: false,
                 hidden: false,
+                shot_until: None,
                 leave_armed: false,
                 leave_hold: None,
                 trim_pending: true,

@@ -443,8 +443,48 @@ impl App {
         Some((ctx.covered, game))
     }
 
+    /// Скриншот: остров сворачивается и скрывается вместе с подложкой, чтобы не попасть в кадр
+    /// и не перекрыть окно выбора области. Через `SHOT_HIDE_MS` он вернётся (`restore_after_shot`).
+    pub(crate) unsafe fn hide_for_shot(&mut self) {
+        if self.hidden {
+            return;
+        }
+        self.disarm_leave();
+        self.set_expanded(false);
+        self.w.snap();
+        self.h.snap();
+        self.shot_until = Some(Instant::now() + std::time::Duration::from_millis(SHOT_HIDE_MS));
+        self.hide_glass();
+        let _ = ShowWindow(self.hwnd, SW_HIDE);
+        for z in &self.hot {
+            let _ = ShowWindow(z.hwnd, SW_HIDE);
+        }
+    }
+
+    /// Возвращает остров после скриншота, когда время вышло.
+    unsafe fn restore_after_shot(&mut self) -> bool {
+        match self.shot_until {
+            Some(t) if Instant::now() >= t => {
+                self.shot_until = None;
+                if !self.hidden {
+                    let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
+                    for z in &self.hot {
+                        let _ = ShowWindow(z.hwnd, SW_SHOWNOACTIVATE);
+                    }
+                    self.place_window(true);
+                    self.ensure_topmost(true);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Возвращает `true`, если нужно перерисовать.
     pub(crate) unsafe fn refresh_environment(&mut self) -> bool {
+        if self.shot_until.is_some() {
+            return self.restore_after_shot();
+        }
         let Some((covered, game)) = self.probe() else {
             return false;
         };

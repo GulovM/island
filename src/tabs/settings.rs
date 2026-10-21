@@ -607,8 +607,11 @@ impl Settings {
         y += 18.0;
         let cur_mat_idx = material_idx(self.cfg.material);
         let mut mcx = x;
+        // Чипы ужимаются, чтобы весь ряд помещался в карточку.
+        let chips_w: f32 = MATERIAL_CHIP_WIDTHS.iter().sum::<f32>() + 4.0 * (MATERIAL_CHIP_WIDTHS.len() - 1) as f32;
+        let mat_k = (iw / chips_w).min(1.0);
         for (k, &(_, label)) in MATERIALS.iter().enumerate() {
-            let mw = MATERIAL_CHIP_WIDTHS[k];
+            let mw = MATERIAL_CHIP_WIDTHS[k] * mat_k;
             let mr = Rect::new(mcx, y, mw, 18.0);
             let sel = cur_mat_idx == k;
             if glass_on {

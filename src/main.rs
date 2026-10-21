@@ -101,6 +101,10 @@ pub(crate) const WTS_SESSION_LOCK: usize = 7;
 pub(crate) const WTS_SESSION_UNLOCK: usize = 8;
 /// Будит главный цикл из хука окон (колбэк хука сам сообщение не возвращает из `GetMessage`).
 pub(crate) const WM_RECHECK: u32 = WM_APP + 1;
+/// Нажата клавиша скриншота (из хука клавиатуры).
+pub(crate) const WM_SHOT: u32 = WM_APP + 5;
+/// Сколько остров остаётся спрятанным после клавиши скриншота.
+pub(crate) const SHOT_HIDE_MS: u64 = 8000;
 /// Сообщение от значка в трее.
 pub(crate) const WM_TRAY: u32 = WM_APP + 2;
 pub(crate) const LEAVE_TIMER: usize = 1;
@@ -234,6 +238,15 @@ fn run() -> Result<()> {
                 WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
             ),
         ];
+        let key_hook = windows::Win32::UI::WindowsAndMessaging::SetWindowsHookExW(
+            windows::Win32::UI::WindowsAndMessaging::WH_KEYBOARD_LL,
+            Some(wnd::on_key_hook),
+            None,
+            0,
+        );
+        if let Err(e) = &key_hook {
+            log::error(&format!("не удалось поставить хук клавиатуры: {e}"));
+        }
         SetTimer(Some(app.hwnd), ENV_TIMER, app.cfg.env_poll_ms, None);
         SetTimer(Some(app.hwnd), UPDATE_TIMER, UPDATE_TICK_MS, None);
         update::tick(app.cfg.auto_update);

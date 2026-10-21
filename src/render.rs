@@ -4,7 +4,7 @@ impl App {
     /// Тулкит и состояние вкладок на время кадра выносятся из `self`, чтобы рисовать с `&self`.
     pub(crate) unsafe fn render(&mut self) -> Result<()> {
         // Окно спрятано на время полноэкранной игры: кадры никто не увидит, GPU игре нужнее.
-        if self.hidden {
+        if self.hidden || self.shot_until.is_some() {
             return Ok(());
         }
         let mut ui = std::mem::take(&mut self.ui);
