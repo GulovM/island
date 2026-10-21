@@ -62,35 +62,142 @@ impl App {
             0.0
         };
 
-        // Тело — подкладка цвета фона поверх размытия (как материал iOS 26: blur + тёмная заливка 41%).
-        // Ползунок: 0 — самая прозрачная подкладка (MIN_BODY_ALPHA), 100 — сплошное тело. Без размытия
-        // подложка скрыта, а подкладка плотнее. Свёрнутый остров и полоска сплошные.
+        // Вычисление всех слоёв тела острова: тинт материала/фона, осветление сверху, кромка и тень.
         let real = self.real_glass();
-        let body_a = crate::glass::body_alpha(self.cfg.glass, real, self.cfg.glass_opacity, p, k);
-        g.brush.SetColor(&D2D1_COLOR_F { r: pal.bg.r * k, g: pal.bg.g * k, b: pal.bg.b * k, a: body_a });
+        let bg_rgb = [pal.bg.r, pal.bg.g, pal.bg.b];
+        let layers = crate::glass::body_layers(
+            self.cfg.material,
+            self.cfg.palette_style,
+            bg_rgb,
+            self.cfg.glass,
+            real,
+            self.cfg.glass_opacity,
+            p,
+            k,
+        );
+
         self.apply_blur(x0, aw, ah, ear, r, real && p > 0.001 && k > 0.01);
+
+        // Тело острова рисуется по BodyLayers (тинт материала или фона)
         let body = self.body_path(g, x0, aw, ah, ear, r, false)?;
+
+        // Мягкая тень стекла: ios::GLASS_SHADOW (0 8 40 rgba(0,0,0,0.12)) вниз и по бокам.
+        // Верх острова упирается в край экрана (y = 0), поэтому тень не распространяется вверх.
+        // Запас окна WIN_LOGICAL (800×530) при максимальном острове (700×476) оставляет снизу 54 px и по бокам 42 px,
+        // поэтому полная тень (40 px по бокам и 48 px снизу) помещается целиком.
+        // Адаптивное ограничение max_spread оставлено как страховка на случай нестандартных геометрий.
+        // Тень вычитает геометрию тела (CombineWithGeometry с D2D1_COMBINE_MODE_EXCLUDE) через PushLayer,
+        // чтобы не рисоваться под полупрозрачным телом.
+        if layers.shadow.alpha > 0.005 {
+            let avail_bottom = (self.win_h as f32 - ah).max(0.0);
+            let avail_side = (x0 - ear).max(0.0);
+            let max_spread = (avail_bottom - 2.0 * s)
+                .min(avail_side - 2.0 * s)
+                .clamp(2.0 * s, layers.shadow.blur_radius * s);
+            let eff_dy = (layers.shadow.offset_y * s) * (max_spread / (layers.shadow.blur_radius * s));
+
+            let max_x0 = x0 - max_spread;
+            let max_aw = aw + 2.0 * max_spread;
+            let max_ah = ah + eff_dy + max_spread;
+            let max_ear = (ear - max_spread).max(0.0);
+            let max_r = r + max_spread;
+
+            if let Ok(outer_geo) = self.body_path(g, max_x0, max_aw, max_ah, max_ear, max_r, false) {
+                let mask_geo = g.d2d.CreatePathGeometry()?;
+                let sink = mask_geo.Open()?;
+                outer_geo.CombineWithGeometry(&body, D2D1_COMBINE_MODE_EXCLUDE, None, D2D1_DEFAULT_FLATTENING_TOLERANCE, &sink)?;
+                sink.Close()?;
+
+                let params = D2D1_LAYER_PARAMETERS1 {
+                    contentBounds: D2D_RECT_F { left: f32::MIN, top: f32::MIN, right: f32::MAX, bottom: f32::MAX },
+                    geometricMask: std::mem::ManuallyDrop::new(Some(mask_geo.cast::<ID2D1Geometry>()?)),
+                    maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                    maskTransform: ui::matrix(1.0, 0.0, 0.0),
+                    opacity: 1.0,
+                    opacityBrush: std::mem::ManuallyDrop::new(None),
+                    layerOptions: D2D1_LAYER_OPTIONS1_NONE,
+                };
+                g.dc.PushLayer(&params, None);
+
+                const SHADOW_STEPS: usize = 6;
+                for step in 1..=SHADOW_STEPS {
+                    let t = step as f32 / SHADOW_STEPS as f32;
+                    // Квадратичное затухание прозрачности к наружному краю
+                    let weight = (1.0 - t * 0.7) / SHADOW_STEPS as f32;
+                    let step_alpha = layers.shadow.alpha * weight * 1.5; // подобрано
+                    let grow = max_spread * t;
+                    let dy = eff_dy * t;
+                    let s_x0 = x0 - grow;
+                    let s_aw = aw + 2.0 * grow;
+                    let s_ah = ah + dy + grow;
+                    let s_ear = (ear - grow).max(0.0);
+                    let s_r = r + grow;
+                    if let Ok(shadow_geo) = self.body_path(g, s_x0, s_aw, s_ah, s_ear, s_r, false) {
+                        g.brush.SetColor(&D2D1_COLOR_F {
+                            r: layers.shadow.color[0],
+                            g: layers.shadow.color[1],
+                            b: layers.shadow.color[2],
+                            a: step_alpha,
+                        });
+                        g.dc.FillGeometry(&shadow_geo, &g.brush, None);
+                    }
+                }
+
+                g.dc.PopLayer();
+                drop(std::mem::ManuallyDrop::into_inner(params.geometricMask));
+            }
+        }
+
+        g.brush.SetColor(&D2D1_COLOR_F {
+            r: layers.tint_color[0],
+            g: layers.tint_color[1],
+            b: layers.tint_color[2],
+            a: layers.tint_alpha,
+        });
         g.dc.FillGeometry(&body, &g.brush, None);
 
-        // Стекло раскрытого острова: осветление сверху и блик на кромке (слева-сверху). Свёрнутая «чёлка»
-        // и полоска остаются плоскими: множитель `p · k` гасит эффект вместе со сворачиванием.
-        let glass = if self.cfg.glass { p * k } else { 0.0 };
-        if glass > 0.01 {
-            let fade = |c: D2D1_COLOR_F, a: f32| D2D1_COLOR_F { a: c.a * a, ..c };
-            if let Some(br) = gradient_brush(g, (0.0, 0.0), (0.0, ah * 0.45), &[(0.0, fade(pal.sheen, glass)), (1.0, fade(pal.sheen, 0.0))]) {
+        // Осветление сверху (sheen)
+        if layers.sheen.alpha > 0.005 {
+            let top_color = D2D1_COLOR_F {
+                r: layers.sheen.color[0],
+                g: layers.sheen.color[1],
+                b: layers.sheen.color[2],
+                a: layers.sheen.alpha,
+            };
+            let bot_color = D2D1_COLOR_F { a: 0.0, ..top_color };
+            let sheen_h = ah * layers.sheen.height_fraction;
+            if let Some(br) = gradient_brush(g, (0.0, 0.0), (0.0, sheen_h), &[(0.0, top_color), (1.0, bot_color)]) {
                 g.dc.FillGeometry(&body, &br, None);
             }
-            // Линия идёт по центру контура, поэтому контур сдвинут внутрь на полтолщины.
-            let half = 0.6 * s;
+        }
+
+        // Зеркальная кромка (rim): блик слева-сверху и мягкая дуга справа-снизу
+        if layers.rim.hi_alpha > 0.005 || layers.rim.lo_alpha > 0.005 {
+            let half = (layers.rim.width * 0.5) * s;
             let rim = self.body_path(g, x0 + half, aw - 2.0 * half, ah - half, ear, crate::ui::inner_radius(r, half), true)?;
             let stops = [
-                (0.00, fade(pal.rim_hi, glass)),
-                (0.35, fade(pal.rim_mid, glass)),
-                (0.65, fade(pal.rim_mid, glass)),
-                (1.00, fade(pal.rim_lo, glass)),
+                (0.00, D2D1_COLOR_F { r: layers.rim.hi_color[0], g: layers.rim.hi_color[1], b: layers.rim.hi_color[2], a: layers.rim.hi_alpha }),
+                (0.35, D2D1_COLOR_F { r: layers.rim.mid_color[0], g: layers.rim.mid_color[1], b: layers.rim.mid_color[2], a: layers.rim.mid_alpha }),
+                (0.65, D2D1_COLOR_F { r: layers.rim.mid_color[0], g: layers.rim.mid_color[1], b: layers.rim.mid_color[2], a: layers.rim.mid_alpha }),
+                (1.00, D2D1_COLOR_F { r: layers.rim.lo_color[0], g: layers.rim.lo_color[1], b: layers.rim.lo_color[2], a: layers.rim.lo_alpha }),
             ];
             if let Some(br) = gradient_brush(g, (x0, 0.0), (x0 + aw, ah), &stops) {
                 g.dc.DrawGeometry(&rim, &br, 2.0 * half, None);
+            }
+
+            // Тонкая внутренняя подсветка по верхней половине (подобрано).
+            if layers.rim.inner_highlight_alpha > 0.005 {
+                let inner_inset = half + 0.8 * s; // подобрано
+                if let Ok(inner_rim) = self.body_path(g, x0 + inner_inset, aw - 2.0 * inner_inset, ah - inner_inset, ear, crate::ui::inner_radius(r, inner_inset), true) {
+                    let inner_stops = [
+                        (0.00, D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: layers.rim.inner_highlight_alpha }),
+                        (0.50, D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 0.0 }),
+                        (1.00, D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 0.0 }),
+                    ];
+                    if let Some(ibr) = gradient_brush(g, (x0, 0.0), (x0, ah * 0.6), &inner_stops) {
+                        g.dc.DrawGeometry(&inner_rim, &ibr, 1.0 * s, None);
+                    }
+                }
             }
         }
 

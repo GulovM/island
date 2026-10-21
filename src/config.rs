@@ -40,11 +40,11 @@ system_colors = 0
 # Скругление нижних углов острова, пиксели (0–30)
 corner_radius = 14
 
-# 1 — эффект стекла у раскрытого острова: размытый фон просвечивает сквозь тело, на кромке блик,
-# сверху мягкое осветление, у выбранной вкладки подвижная «капля». 0 — прежний плоский вид.
-# Под телом размытый фон (как стекло в iOS 26); если в Windows выключены «Эффекты прозрачности»,
+# 1 — эффект стекла у раскрытого острова (включённое стекло iOS 26): размытый фон просвечивает сквозь тело,
+# на кромке блик, сверху мягкое осветление, у выбранной вкладки подвижная «капля». 0 — прежний плоский вид.
+# Под телом размытый фон; если в Windows выключены «Эффекты прозрачности»,
 # размытия нет и тело плотнее. Меняется и в Настройках.
-glass = 0
+glass = 1
 
 # Прозрачность стекла: 0 — самое прозрачное из допустимого (чёрная подкладка 41% поверх размытия),
 # 100 — сплошное тело (0–100). Меняется и в Настройках.
@@ -199,7 +199,7 @@ impl Default for Config {
             bg: theme::DEFAULT_BG,
             system_colors: false,
             corner_radius: DEFAULT_RADIUS,
-            glass: false,
+            glass: true,
             glass_opacity: DEFAULT_GLASS_OPACITY,
             material: Material::Regular,
             palette_style: PaletteStyle::Windows,
@@ -599,7 +599,7 @@ pub fn parse(text: &str) -> Config {
             ("", "idle_face", Value::Num(v)) => cfg.idle_face = v != 0.0,
             ("", "auto_update", Value::Num(v)) => cfg.auto_update = v != 0.0,
             ("", "corner_radius", Value::Num(v)) => cfg.corner_radius = (v as f32).clamp(0.0, MAX_RADIUS),
-            ("", "glass", _) => {} // режим стекла на доработке: всегда выключен
+            ("", "glass", Value::Num(v)) => cfg.glass = v != 0.0,
             ("", "glass_opacity", Value::Num(v)) => cfg.glass_opacity = (v as f32).clamp(0.0, 100.0),
             ("", "material", Value::Str(s)) => cfg.material = Material::parse(&s),
             ("", "material", _) => cfg.material = Material::Regular,
@@ -764,7 +764,7 @@ mod tests {
         assert_eq!(c.collapsed, (180.0, 24.0));
         assert_eq!(c.tabs.len(), 7);
         assert_eq!(c.key("weather"), None);
-        assert!(!c.glass);
+        assert!(c.glass);
         assert!(!c.accent_pill);
         assert_eq!(c.palette_style, PaletteStyle::Windows);
         assert_eq!(c.material, Material::Regular);
@@ -1086,6 +1086,16 @@ gmail = \"https://mail.google.com\"
         assert_eq!(super::decode(&b), "glass = 0");
         assert!(!super::decode(&[b'a', b' ', 0xff, b'=']).is_empty());
         assert!(!parse(&super::decode(&b)).glass);
+    }
+
+    #[test]
+    fn glass_key_parses() {
+        assert!(parse("glass = 1\n").glass);
+        assert!(!parse("glass = 0\n").glass);
+        assert!(parse("glass = true\n").glass);
+        assert!(!parse("glass = false\n").glass);
+        // Неизвестное/нечисловое значение не перезаписывает значение по умолчанию
+        assert!(parse("glass = \"yes\"\n").glass);
     }
 
     #[test]

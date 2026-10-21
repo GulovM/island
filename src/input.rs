@@ -172,7 +172,7 @@ mod tests {
     fn pencil_and_gear_layout_no_overlap() {
         // Проверяем взаимное расположение кнопок справа и ряда вкладок:
         // шестерёнка справа, карандаш левее шестерёнки, ряд вкладок не налезает на карандаш.
-        let win_w = 760.0;
+        let win_w = crate::WIN_LOGICAL.0;
         let total = 400.0;
         let island_w = total + TAB_SIDE_LEFT + TAB_SIDE_RIGHT;
         let half = island_w / 2.0;

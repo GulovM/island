@@ -1,25 +1,180 @@
-//! Стекло острова без Win32: прозрачность тела и точный контур окна-подложки с размытием.
-//! Всё — чистые функции, их проверяют тесты.
+//! Стекло острова без Win32: слои тела острова (тинт, осветление, кромка, тень) и
+//! точный контур окна-подложки с размытием. Всё — чистые функции, их проверяют тесты.
 
 use std::f32::consts::{FRAC_PI_2, PI};
 
+use crate::config::Material;
+use crate::config::PaletteStyle;
+use crate::ios;
+use crate::theme;
+
 /// Самое прозрачное тело при настоящем размытии под островом (0% на ползунке): чёрная подкладка 41%,
 /// как у материала «Regular» (тёмный) в iOS 26 UI Kit — `backdrop-blur 50px` + `rgba(0, 0, 0, 0.41)`.
+#[cfg(test)]
 pub const MIN_BODY_ALPHA: f32 = 0.41;
 /// Без размытия (в Windows выключены «Эффекты прозрачности» или blur-behind недоступен) фон за телом
 /// остаётся чётким, поэтому предел плотнее: иначе текст не читается. Подбирается на экране.
 pub const MIN_BODY_ALPHA_NO_BLUR: f32 = 0.60;
 
-/// Фактическая непрозрачность тела острова. `translucent` — стекло включено (`cfg.glass`), `blur` —
-/// под телом настоящее размытие, `opacity` — ползунок 0–100 (0 → предел прозрачности, 100 → сплошное),
+/// Фактическая непрозрачность тела острова. `translucent` — стекло включено (`cfg.glass`),
+/// `min_alpha` — нижний предел непрозрачности (из спецификации материала и наличия размытия),
+/// `opacity` — ползунок 0–100 (0 → min_alpha, 100 → 1.0),
 /// `p` — прогресс раскрытия, `k` — 1 − «полоска». Свёрнутый остров и полоска всегда сплошные.
-pub fn body_alpha(translucent: bool, blur: bool, opacity: f32, p: f32, k: f32) -> f32 {
+pub fn body_alpha(translucent: bool, min_alpha: f32, opacity: f32, p: f32, k: f32) -> f32 {
     if !translucent || p <= 0.001 {
         return 1.0;
     }
-    let min = if blur { MIN_BODY_ALPHA } else { MIN_BODY_ALPHA_NO_BLUR };
+    let min = min_alpha.clamp(0.0, 1.0);
     let base = min + (1.0 - min) * (opacity / 100.0).clamp(0.0, 1.0);
     1.0 - (1.0 - base) * p.clamp(0.0, 1.0) * k.clamp(0.0, 1.0)
+}
+
+/// Параметры осветления сверху (sheen).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SheenLayer {
+    /// Цвет осветления (обычно белый).
+    pub color: [f32; 3],
+    /// Прозрачность у верхнего края острова (0.0..1.0).
+    pub alpha: f32,
+    /// Доля высоты острова, на которую распространяется осветление (0.0..1.0).
+    pub height_fraction: f32,
+}
+
+/// Параметры зеркальной кромки и бликов (rim).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RimLayer {
+    /// Толщина линии кромки в логических пикселях (подобрано).
+    pub width: f32,
+    /// Цвет блика слева-сверху (подобрано).
+    pub hi_color: [f32; 3],
+    /// Прозрачность блика слева-сверху (подобрано).
+    pub hi_alpha: f32,
+    /// Цвет средней части кромки (подобрано).
+    pub mid_color: [f32; 3],
+    /// Прозрачность средней части кромки (подобрано).
+    pub mid_alpha: f32,
+    /// Цвет дуги справа-снизу (подобрано).
+    pub lo_color: [f32; 3],
+    /// Прозрачность дуги справа-снизу (подобрано).
+    pub lo_alpha: f32,
+    /// Тонкая внутренняя подсветка по верхней половине (подобрано).
+    pub inner_highlight_alpha: f32,
+}
+
+/// Параметры внешней тени стеклянного тела (shadow).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShadowLayer {
+    /// Цвет тени (чёрный).
+    pub color: [f32; 3],
+    /// Прозрачность тени (с учётом p · k и включённого размытия).
+    pub alpha: f32,
+    /// Смещение вниз в логических пикселях (из ios::GLASS_SHADOW).
+    pub offset_y: f32,
+    /// Радиус размытия в логических пикселях (из ios::GLASS_SHADOW).
+    pub blur_radius: f32,
+}
+
+/// Полный набор визуальных слоёв стеклянного тела острова.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BodyLayers {
+    /// RGB тинта тела острова.
+    pub tint_color: [f32; 3],
+    /// Итоговая альфа тинта тела острова.
+    pub tint_alpha: f32,
+    /// Минимальная альфа для данного материала и режима размытия.
+    pub min_alpha: f32,
+    /// Слой осветления сверху (sheen).
+    pub sheen: SheenLayer,
+    /// Слой кромки и бликов (rim).
+    pub rim: RimLayer,
+    /// Слой мягкой тени (shadow).
+    pub shadow: ShadowLayer,
+}
+
+/// Вычисляет все визуальные слои тела острова: тинт, осветление, кромку и тень.
+/// Чистая функция без вызовов Win32 API.
+#[allow(clippy::too_many_arguments)]
+pub fn body_layers(
+    material: Material,
+    style: PaletteStyle,
+    bg: [f32; 3],
+    translucent: bool,
+    blur: bool,
+    opacity: f32,
+    p: f32,
+    k: f32,
+) -> BodyLayers {
+    let dark = !theme::is_light(bg);
+    let (mat_rgb, base_alpha) = ios::body_tint(material, dark);
+
+    // Правило альфы: минимум = итоговая альфа материала; без blur — минимум не ниже MIN_BODY_ALPHA_NO_BLUR.
+    let min_alpha = if blur {
+        base_alpha
+    } else {
+        base_alpha.max(MIN_BODY_ALPHA_NO_BLUR)
+    };
+
+    let tint_alpha = body_alpha(translucent, min_alpha, opacity, p, k);
+
+    // Цвет RGB тинта: в стиле Windows — цвет фона острова (pal.bg); в стиле iOS — RGB тинта материала.
+    // Если стекло выключено, используется цвет фона острова (прежний плоский вид).
+    let tint_rgb = if !translucent {
+        bg
+    } else {
+        match style {
+            PaletteStyle::Windows => bg,
+            PaletteStyle::Ios => mat_rgb,
+        }
+    };
+    // При сжатии в полоску (k < 1) фон пропорционально темнеет к чистому чёрному.
+    let tint_color = [tint_rgb[0] * k, tint_rgb[1] * k, tint_rgb[2] * k];
+
+    // Множитель стеклянных эффектов (осветление сверху, кромка, тень).
+    // Полоска (k = 0), свёрнутый остров (p = 0) или выключенное стекло гасят эффекты в ноль,
+    // сохраняя прежний вид. Без «Эффектов прозрачности» (blur = false) стекло остаётся стеклом
+    // (кромка, блик, тень сохраняются, но тело плотнее).
+    let glass_factor = if translucent {
+        (p * k).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    // 1. Осветление сверху (sheen): в светлой теме 0.30, в тёмной 0.07 // подобрано
+    let base_sheen_a = if dark { 0.07 } else { 0.30 }; // подобрано
+    let sheen = SheenLayer {
+        color: [1.0, 1.0, 1.0],
+        alpha: base_sheen_a * glass_factor,
+        height_fraction: 0.45, // подобрано
+    };
+
+    // 2. Зеркальная кромка (rim): блик слева-сверху и дуга справа-снизу // подобрано
+    let rim = RimLayer {
+        width: 1.2, // подобрано
+        hi_color: [1.0, 1.0, 1.0],
+        hi_alpha: (if dark { 0.50 } else { 0.70 }) * glass_factor, // подобрано
+        mid_color: [1.0, 1.0, 1.0],
+        mid_alpha: (if dark { 0.05 } else { 0.08 }) * glass_factor, // подобрано
+        lo_color: if dark { [1.0, 1.0, 1.0] } else { [0.0, 0.0, 0.0] }, // подобрано
+        lo_alpha: (if dark { 0.22 } else { 0.10 }) * glass_factor, // подобрано
+        inner_highlight_alpha: (if dark { 0.12 } else { 0.20 }) * glass_factor, // подобрано
+    };
+
+    // 3. Тень стекла: ios::GLASS_SHADOW (0 8 40 rgba(0,0,0,0.12))
+    let shadow = ShadowLayer {
+        color: [ios::GLASS_SHADOW.color.r, ios::GLASS_SHADOW.color.g, ios::GLASS_SHADOW.color.b],
+        alpha: ios::GLASS_SHADOW.color.a * glass_factor,
+        offset_y: ios::GLASS_SHADOW.offset_y,
+        blur_radius: ios::GLASS_SHADOW.blur_radius,
+    };
+
+    BodyLayers {
+        tint_color,
+        tint_alpha,
+        min_alpha,
+        sheen,
+        rim,
+        shadow,
+    }
 }
 
 /// Контур тела острова (как в `body_path`: плоский верх на краю экрана, вогнутые «ушки» радиуса `ear`,
@@ -206,26 +361,152 @@ mod tests {
     #[test]
     fn body_alpha_rules() {
         // Без стекла и в свёрнутом виде — сплошное тело.
-        assert_eq!(body_alpha(false, true, 0.0, 1.0, 1.0), 1.0);
-        assert_eq!(body_alpha(true, true, 0.0, 0.0, 1.0), 1.0);
+        assert_eq!(body_alpha(false, MIN_BODY_ALPHA, 0.0, 1.0, 1.0), 1.0);
+        assert_eq!(body_alpha(true, MIN_BODY_ALPHA, 0.0, 0.0, 1.0), 1.0);
         // С размытием 0% — подкладка 41% как в Figma, 100% — сплошное тело.
-        assert!((body_alpha(true, true, 0.0, 1.0, 1.0) - MIN_BODY_ALPHA).abs() < 1e-6);
-        assert!((body_alpha(true, true, 100.0, 1.0, 1.0) - 1.0).abs() < 1e-6);
+        assert!((body_alpha(true, MIN_BODY_ALPHA, 0.0, 1.0, 1.0) - MIN_BODY_ALPHA).abs() < 1e-6);
+        assert!((body_alpha(true, MIN_BODY_ALPHA, 100.0, 1.0, 1.0) - 1.0).abs() < 1e-6);
         // Без размытия предел плотнее, ползунок по-прежнему тянется до сплошного.
-        assert!((body_alpha(true, false, 0.0, 1.0, 1.0) - MIN_BODY_ALPHA_NO_BLUR).abs() < 1e-6);
-        assert!((body_alpha(true, false, 100.0, 1.0, 1.0) - 1.0).abs() < 1e-6);
-        for blur in [true, false] {
-            let min = if blur { MIN_BODY_ALPHA } else { MIN_BODY_ALPHA_NO_BLUR };
+        assert!((body_alpha(true, MIN_BODY_ALPHA_NO_BLUR, 0.0, 1.0, 1.0) - MIN_BODY_ALPHA_NO_BLUR).abs() < 1e-6);
+        assert!((body_alpha(true, MIN_BODY_ALPHA_NO_BLUR, 100.0, 1.0, 1.0) - 1.0).abs() < 1e-6);
+        for min in [MIN_BODY_ALPHA, MIN_BODY_ALPHA_NO_BLUR] {
             let mut prev = 0.0;
             for o in 0..=100 {
-                let a = body_alpha(true, blur, o as f32, 1.0, 1.0);
-                assert!(a >= min - 1e-6 && a > prev, "{blur} {o}%: {a}");
+                let a = body_alpha(true, min, o as f32, 1.0, 1.0);
+                assert!(a >= min - 1e-6 && a > prev, "{min} {o}%: {a}");
                 prev = a;
             }
-            assert!(body_alpha(true, blur, -50.0, 1.0, 1.0) >= min - 1e-6);
+            assert!(body_alpha(true, min, -50.0, 1.0, 1.0) >= min - 1e-6);
             // В полоске (k = 0) тело сплошное, в середине раскрытия — плотнее, чем раскрытое.
-            assert_eq!(body_alpha(true, blur, 0.0, 1.0, 0.0), 1.0);
-            assert!(body_alpha(true, blur, 0.0, 0.5, 1.0) > body_alpha(true, blur, 0.0, 1.0, 1.0));
+            assert_eq!(body_alpha(true, min, 0.0, 1.0, 0.0), 1.0);
+            assert!(body_alpha(true, min, 0.0, 0.5, 1.0) > body_alpha(true, min, 0.0, 1.0, 1.0));
         }
+    }
+
+    #[test]
+    fn test_all_materials_themes_styles_blur_matrix() {
+        let materials = [
+            Material::Ultrathin,
+            Material::Thin,
+            Material::Regular,
+            Material::Thick,
+            Material::Chrome,
+        ];
+        let themes = [
+            (true, [0.05, 0.05, 0.05]),  // dark
+            (false, [0.95, 0.95, 0.95]), // light
+        ];
+        let styles = [PaletteStyle::Windows, PaletteStyle::Ios];
+
+        for m in materials {
+            for (dark, bg) in themes {
+                let (mat_rgb, mat_alpha) = ios::body_tint(m, dark);
+
+                for s in styles {
+                    for blur in [true, false] {
+                        let layers = body_layers(m, s, bg, true, blur, 0.0, 1.0, 1.0);
+
+                        // Проверка минимальной альфы:
+                        // Regular + dark + blur == 0.41 (MIN_BODY_ALPHA)
+                        if m == Material::Regular && dark && blur {
+                            assert!((layers.min_alpha - MIN_BODY_ALPHA).abs() < 1e-6, "Regular dark blur must be 0.41");
+                        }
+                        if m == Material::Regular && dark && !blur {
+                            assert!((layers.min_alpha - MIN_BODY_ALPHA_NO_BLUR).abs() < 1e-6, "Regular dark no-blur must be 0.60");
+                        }
+
+                        if blur {
+                            assert!((layers.min_alpha - mat_alpha).abs() < 1e-6);
+                        } else {
+                            assert!((layers.min_alpha - mat_alpha.max(MIN_BODY_ALPHA_NO_BLUR)).abs() < 1e-6);
+                        }
+
+                        // При opacity = 0, p = 1, k = 1: tint_alpha == min_alpha
+                        assert!((layers.tint_alpha - layers.min_alpha).abs() < 1e-6);
+
+                        // Проверка цвета тинта:
+                        match s {
+                            PaletteStyle::Windows => {
+                                assert_eq!(layers.tint_color, bg);
+                            }
+                            PaletteStyle::Ios => {
+                                for (c_layer, c_mat) in layers.tint_color.iter().zip(&mat_rgb) {
+                                    assert!((c_layer - c_mat).abs() < 1e-6);
+                                }
+                            }
+                        }
+
+                        // При translucent слои активны независимо от blur (без blur стекло плотнее, но со слоями)
+                        assert!(layers.sheen.alpha > 0.0);
+                        assert!(layers.rim.hi_alpha > 0.0);
+                        assert!(layers.shadow.alpha > 0.0);
+                        assert_eq!(layers.shadow.offset_y, 8.0);
+                        assert_eq!(layers.shadow.blur_radius, 40.0);
+
+                        // При выключенном стекле (translucent = false) слои выключены
+                        let off = body_layers(m, s, bg, false, blur, 0.0, 1.0, 1.0);
+                        assert_eq!(off.sheen.alpha, 0.0);
+                        assert_eq!(off.rim.hi_alpha, 0.0);
+                        assert_eq!(off.shadow.alpha, 0.0);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_opacity_slider_monotonicity() {
+        let materials = [
+            Material::Ultrathin,
+            Material::Thin,
+            Material::Regular,
+            Material::Thick,
+            Material::Chrome,
+        ];
+        for m in materials {
+            for dark in [true, false] {
+                let bg = if dark { [0.05; 3] } else { [0.95; 3] };
+                for blur in [true, false] {
+                    let mut prev = 0.0;
+                    for op in 0..=100 {
+                        let layers = body_layers(m, PaletteStyle::Ios, bg, true, blur, op as f32, 1.0, 1.0);
+                        assert!(layers.tint_alpha >= layers.min_alpha - 1e-6);
+                        assert!(layers.tint_alpha <= 1.0 + 1e-6);
+                        assert!(layers.tint_alpha >= prev, "opacity {}% not monotonic: {} < {}", op, layers.tint_alpha, prev);
+                        prev = layers.tint_alpha;
+                    }
+                    // 100% всегда даёт 1.0
+                    let full = body_layers(m, PaletteStyle::Ios, bg, true, blur, 100.0, 1.0, 1.0);
+                    assert!((full.tint_alpha - 1.0).abs() < 1e-6);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_strip_and_collapsed_states() {
+        let bg = [0.1, 0.1, 0.1];
+        // Полоска (k = 0): сплошное тело (alpha = 1.0), эффекты погашены, цвет затемнён в 0
+        let strip = body_layers(Material::Regular, PaletteStyle::Windows, bg, true, true, 50.0, 1.0, 0.0);
+        assert_eq!(strip.tint_alpha, 1.0);
+        assert_eq!(strip.sheen.alpha, 0.0);
+        assert_eq!(strip.rim.hi_alpha, 0.0);
+        assert_eq!(strip.shadow.alpha, 0.0);
+        assert_eq!(strip.tint_color, [0.0, 0.0, 0.0]);
+
+        // Свёрнутое состояние (p = 0): сплошное тело (alpha = 1.0), эффекты погашены
+        let collapsed = body_layers(Material::Regular, PaletteStyle::Windows, bg, true, true, 50.0, 0.0, 1.0);
+        assert_eq!(collapsed.tint_alpha, 1.0);
+        assert_eq!(collapsed.sheen.alpha, 0.0);
+        assert_eq!(collapsed.rim.hi_alpha, 0.0);
+        assert_eq!(collapsed.shadow.alpha, 0.0);
+        assert_eq!(collapsed.tint_color, bg);
+
+        // Выключенное стекло (translucent = false): плоское тело (alpha = 1.0), эффекты погашены
+        let disabled = body_layers(Material::Regular, PaletteStyle::Ios, bg, false, true, 50.0, 1.0, 1.0);
+        assert_eq!(disabled.tint_alpha, 1.0);
+        assert_eq!(disabled.sheen.alpha, 0.0);
+        assert_eq!(disabled.rim.hi_alpha, 0.0);
+        assert_eq!(disabled.shadow.alpha, 0.0);
     }
 }
