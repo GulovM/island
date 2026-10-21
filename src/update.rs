@@ -1,6 +1,6 @@
 //! Обновление программы через GitHub Releases. Проверка — один короткий поток с запросом
-//! `releases/latest`; автоматически не чаще раза в сутки (время последней проверки лежит в
-//! `update.txt`), остальное время — только по кнопке в Настройках. Установщик скачивается во
+//! `releases/latest`; автоматически — при запуске (если прошёл час с прошлой проверки, время
+//! лежит в `update.txt`) и в начале каждого часа по местному времени, ещё — по кнопке в Настройках. Установщик скачивается во
 //! временную папку, сверяется с `SHA256SUMS.txt` из того же релиза и запускается тихо: он сам
 //! закрывает остров, заменяет файлы и запускает его снова. В простое потоков нет.
 
@@ -19,7 +19,7 @@ const API: &str = "https://api.github.com/repos/GulovM/island/releases/latest";
 /// Скачивать можно только отсюда: ссылки из ответа API проверяются по этому префиксу.
 const DOWNLOADS: &str = "https://github.com/GulovM/island/releases/download/";
 const STAMP_FILE: &str = "update.txt";
-const DAY_SECS: u64 = 24 * 60 * 60;
+const HOUR_SECS: u64 = 60 * 60;
 const MAX_SETUP: usize = 128 << 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,15 +75,31 @@ fn last_check() -> u64 {
 }
 
 fn due(last: u64, now: u64) -> bool {
-    now.saturating_sub(last) >= DAY_SECS || last > now
+    now.saturating_sub(last) >= HOUR_SECS || last > now
 }
 
-/// Раз в сутки: если пора — проверяет обновления. При `auto_install` найденное ставится само.
-/// Зовётся при запуске и по часовому таймеру, поэтому сама дешёвая: без «пора» ничего не делает.
+/// При запуске: если с последней проверки прошёл час — проверяет обновления. При `auto_install`
+/// найденное ставится само.
 pub fn tick(auto_install: bool) {
     if !busy() && due(last_check(), now_secs()) {
         check(auto_install);
     }
+}
+
+/// По часовому таймеру (ровно в 00:00, 01:00, …): проверяет обновления без оглядки на прошлую проверку.
+pub fn hourly(auto_install: bool) {
+    if !busy() {
+        check(auto_install);
+    }
+}
+
+/// Миллисекунды до ближайшего начала часа по местному времени (с запасом в секунду,
+/// чтобы таймер не сработал чуть раньше границы и не повторился).
+pub fn ms_to_next_hour() -> u32 {
+    use windows::Win32::System::SystemInformation::GetLocalTime;
+    let t = unsafe { GetLocalTime() };
+    let past = (t.wMinute as u32 * 60 + t.wSecond as u32) * 1000 + t.wMilliseconds as u32;
+    3_600_000 - past + 1000
 }
 
 /// Проверяет обновления сейчас (кнопка в Настройках или суточная проверка).
@@ -285,8 +301,8 @@ mod tests {
     #[test]
     fn check_is_due_once_a_day() {
         assert!(due(0, 100_000));
-        assert!(!due(100_000, 100_000 + DAY_SECS - 1));
-        assert!(due(100_000, 100_000 + DAY_SECS));
+        assert!(!due(100_000, 100_000 + HOUR_SECS - 1));
+        assert!(due(100_000, 100_000 + HOUR_SECS));
         assert!(due(200_000, 100_000), "часы ушли назад — проверяем");
     }
 }

@@ -131,9 +131,8 @@ pub(crate) const LIVE_TICK_MS: u32 = 33;
 pub(crate) const FACE_TIMER: usize = 10;
 /// Файл в `%APPDATA%\island` с выбором режима полоски: «1» — включён.
 pub(crate) const STRIP_FILE: &str = "strip.txt";
-/// Раз в час проверяет, не прошли ли сутки с последней проверки обновлений.
+/// Срабатывает в начале каждого часа (00:00, 01:00, …) — проверка обновлений.
 pub(crate) const UPDATE_TIMER: usize = 11;
-pub(crate) const UPDATE_TICK_MS: u32 = 60 * 60 * 1000;
 /// Долгое нажатие на пустом месте вкладки включает режим правки виджетов.
 pub(crate) const LONG_TIMER: usize = 12;
 pub(crate) const LONG_MS: u32 = 520;
@@ -248,7 +247,7 @@ fn run() -> Result<()> {
             log::error(&format!("не удалось поставить хук клавиатуры: {e}"));
         }
         SetTimer(Some(app.hwnd), ENV_TIMER, app.cfg.env_poll_ms, None);
-        SetTimer(Some(app.hwnd), UPDATE_TIMER, UPDATE_TICK_MS, None);
+        SetTimer(Some(app.hwnd), UPDATE_TIMER, update::ms_to_next_hour(), None);
         update::tick(app.cfg.auto_update);
 
         let mut msg = MSG::default();

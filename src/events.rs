@@ -152,7 +152,9 @@ impl App {
                 tab || media || net || (self.expanded && self.settings_open)
             }
             Ev::UpdateTimer => {
-                update::tick(self.cfg.auto_update);
+                update::hourly(self.cfg.auto_update);
+                // Следующая проверка — в начале следующего часа, а не через 60 минут от этой.
+                SetTimer(Some(self.hwnd), UPDATE_TIMER, update::ms_to_next_hour(), None);
                 false
             }
             Ev::FaceTick => {
