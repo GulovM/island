@@ -75,6 +75,14 @@ features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
+    "UI",
+    "UI_Composition",
+    "UI_Composition_Desktop",
+    "System",
+    "Graphics",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Composition",
+    "Win32_System_WinRT_Graphics_Direct2D",
 ]
 
 [profile.release]

@@ -26,12 +26,15 @@ pub struct App {
     /// Последняя применённая форма подложки размытия (x, y, ширина, высота, отпечаток контура;
     /// `(0, 0, 0, 0, −1)` — скрыта) — чтобы не дёргать `SetWindowPos`/`SetWindowRgn` зря.
     pub(crate) blur_key: std::cell::Cell<(i32, i32, i32, i32, i32)>,
+    /// Последняя форма клипа подложки Composition (округлённые x0, aw, ah, ear, r).
+    pub(crate) glass_shape: std::cell::Cell<(i32, i32, i32, i32, i32)>,
     /// Вспомогательное окно под островом: на нём размытие (у основного окна без битмапа оно не обрезается регионом).
     pub(crate) glass_wnd: HWND,
-    /// Размытие доступно: окно подложки приняло blur-behind.
+    /// Размытие доступно: новый путь (Composition HostBackdropBrush) или старый (accent blur-behind).
     pub(crate) blur_ok: bool,
-    /// Родное скругление DWM поддерживается (Windows 11): подложка — скруглённый DWM-прямоугольник без SetWindowRgn.
-    pub(crate) blur_round: bool,
+    /// Подложка стекла через Windows.UI.Composition (`HostBackdropBrush` + клип по контуру тела).
+    /// `Some` — новый путь работает, `None` — откат к старому accent-размытию.
+    pub(crate) backdrop: Option<crate::backdrop::Backdrop>,
     /// Системные «Эффекты прозрачности» включены; иначе DWM рисует плоский фон вместо размытия.
     pub(crate) transparency: bool,
 
@@ -150,7 +153,7 @@ impl App {
                 ..Default::default()
             });
             let glass_wnd = CreateWindowExW(
-                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+                WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
                 w!("IslandGlass"),
                 w!(""),
                 WS_POPUP,
@@ -163,11 +166,36 @@ impl App {
                 Some(hinst),
                 None,
             )?;
-            let blur_ok = crate::wnd::enable_blur_behind(glass_wnd);
+
+            // Новый путь: Windows.UI.Composition HostBackdropBrush с клипом по контуру тела.
+            // DWMWA_USE_HOSTBACKDROPBRUSH (17) + LWA_ALPHA разрешают HostBackdropBrush в окне.
+            let _ = SetLayeredWindowAttributes(glass_wnd, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
+            let on = BOOL(1);
+            let _ = windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+                glass_wnd,
+                windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(17), // DWMWA_USE_HOSTBACKDROPBRUSH
+                &on as *const _ as _,
+                4,
+            );
+            let backdrop = match crate::backdrop::Backdrop::new(glass_wnd) {
+                Ok(b) => {
+                    log::info("стекло: подложка Composition HostBackdropBrush создана");
+                    Some(b)
+                }
+                Err(e) => {
+                    log::info(&format!("стекло: Composition недоступна ({e}), откат к accent-размытию"));
+                    None
+                }
+            };
+            // Если новый путь не удался — пробуем старый accent blur-behind.
+            let blur_ok = if backdrop.is_some() {
+                true
+            } else {
+                crate::wnd::enable_blur_behind(glass_wnd)
+            };
             if !blur_ok {
                 log::info("стекло: blur-behind недоступен, тело острова остаётся без размытия");
             }
-            let blur_round = blur_ok && crate::wnd::enable_round_blur(glass_wnd);
             MAIN_WND.with(|w| w.set(hwnd));
             TASKBAR_MSG.with(|c| c.set(RegisterWindowMessageW(w!("TaskbarCreated"))));
 
@@ -202,9 +230,10 @@ impl App {
                 win_h: ch,
                 placed: (i32::MIN, 0, 0, 0),
                 blur_key: std::cell::Cell::new((i32::MIN, 0, 0, 0, 0)),
+                glass_shape: std::cell::Cell::new((i32::MIN, 0, 0, 0, 0)),
                 glass_wnd,
                 blur_ok,
-                blur_round,
+                backdrop,
                 transparency: sys::transparency_enabled(),
                 dwrite,
                 gfx: Some(gfx),

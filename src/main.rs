@@ -2,6 +2,7 @@
 #![cfg_attr(test, allow(clippy::field_reassign_with_default))]
 
 mod anim;
+mod backdrop;
 mod bg;
 mod bright;
 mod config;

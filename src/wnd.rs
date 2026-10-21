@@ -1,10 +1,5 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use windows::Win32::Graphics::Dwm::{
-    DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
-    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
-};
-
 use super::*;
 
 // ---------- События от оконной процедуры к главному циклу ----------
@@ -417,6 +412,7 @@ pub(crate) unsafe fn measure_tabs(dwrite: &IDWriteFactory, scale: f32) -> Result
 /// Включает размытие фона за окном (акцент «blur behind» через `SetWindowCompositionAttribute`).
 /// Размывается вся область окна — форму задаёт `SetWindowRgn`.
 /// `false` — вызова нет или он не удался: размытия не будет.
+/// Используется как откат, когда Composition HostBackdropBrush недоступен.
 pub(crate) unsafe fn enable_blur_behind(hwnd: HWND) -> bool {
     #[repr(C)]
     struct Accent {
@@ -441,36 +437,3 @@ pub(crate) unsafe fn enable_blur_behind(hwnd: HWND) -> bool {
     f(hwnd, &mut d) != 0
 }
 
-/// Включает родное скругление DWM для окна подложки (Windows 11).
-/// DWMWA_WINDOW_CORNER_PREFERENCE (33) = DWMWCP_ROUND (2) скругляет и окно, и DWM-размытие.
-/// Убирает рамку DWM (DWMWA_BORDER_COLOR 34 = DWMWA_COLOR_NONE).
-/// Окно подложки сохраняет мягкую системную тень DWM.
-/// Возвращает `true`, только если вызов 33 вернул S_OK (Windows 11 22000+).
-pub(crate) unsafe fn enable_round_blur(hwnd: HWND) -> bool {
-    let round = DWMWCP_ROUND;
-    let r_round = DwmSetWindowAttribute(
-        hwnd,
-        DWMWA_WINDOW_CORNER_PREFERENCE,
-        &round as *const _ as *const std::ffi::c_void,
-        size_of_val(&round) as u32,
-    );
-    if let Err(e) = r_round {
-        log::info(&format!("стекло: DWM-скругление недоступно (код 0x{:08X})", e.code().0));
-        return false;
-    }
-
-    let border = DWMWA_COLOR_NONE;
-    let r_border = DwmSetWindowAttribute(
-        hwnd,
-        DWMWA_BORDER_COLOR,
-        &border as *const _ as *const std::ffi::c_void,
-        size_of_val(&border) as u32,
-    );
-
-    let border_msg = match r_border {
-        Ok(()) => "рамка S_OK".to_string(),
-        Err(ref e) => format!("рамка 0x{:08X}", e.code().0),
-    };
-    log::info(&format!("стекло: DWM-скругление S_OK ({border_msg})"));
-    true
-}

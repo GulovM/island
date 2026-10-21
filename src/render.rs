@@ -75,7 +75,7 @@ impl App {
             k,
         );
 
-        self.apply_blur(x0, aw, ah, ear, r, real && p > 0.001 && k > 0.01);
+        self.apply_blur(g, x0, aw, ah, ear, r, real && p > 0.001 && k > 0.01, !theme::is_light([pal.bg.r, pal.bg.g, pal.bg.b]));
 
         // Тело острова рисуется по BodyLayers (тинт материала или фона)
         let body = self.body_path(g, x0, aw, ah, ear, r, false)?;
@@ -472,52 +472,82 @@ impl App {
     }
 
     /// Подложка стекла: окно с размытием фона под телом острова.
-    /// В Windows 11 с поддержкой DWM-скругления (`self.blur_round`) окно подложки позиционируется
-    /// как скруглённый DWM-прямоугольник (`glass::blur_plate`), вписанный в тело острова.
-    /// Окно подложки сохраняет мягкую системную тень DWM (без SetWindowRgn).
-    /// На Windows 10 форма окна по-прежнему вырезается регионом `SetWindowRgn` по `glass::body_outline`.
-    unsafe fn apply_blur(&self, x0: f32, aw: f32, ah: f32, ear: f32, r: f32, on: bool) {
-        if self.blur_round {
-            let dpi = GetDpiForWindow(self.hwnd);
-            let dpi = if dpi == 0 { 96 } else { dpi };
-            let r_dwm = 8.0 * (dpi as f32 / 96.0);
-            let (left_off, width, height, _inset) = crate::glass::blur_plate(x0, aw, ah, r, r_dwm);
-            let (gx, gy) = (self.win_x + left_off, self.win_y);
-            let key = if on { (gx, gy, width, height, 0) } else { (0, 0, 0, 0, -1) };
-            if self.blur_key.get() == key {
+    /// Новый путь (Composition HostBackdropBrush): `Backdrop::set_shape` задаёт клип
+    /// по `body_path` — тому же D2D-контуру, что и тело острова. Окно подложки совпадает
+    /// с главным окном (позиция и размер), ставится сразу за `self.hwnd`.
+    /// Старый путь (Windows 10, accent blur-behind): форма вырезается `SetWindowRgn`.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn apply_blur(&self, g: &Gfx, x0: f32, aw: f32, ah: f32, ear: f32, r: f32, on: bool, dark: bool) {
+        if let Some(bd) = &self.backdrop {
+            // ---- Новый путь: Composition HostBackdropBrush ----
+            // Ключ формы: округлённые параметры контура, чтобы не дёргать WinRT на каждый кадр.
+            let round = |v: f32| (v * 4.0).round() as i32;
+            let shape_key = (round(x0), round(aw), round(ah), round(ear), round(r));
+            let key = (self.win_x, self.win_y, self.win_w, self.win_h, 0);
+            let prev = self.blur_key.get();
+            let pos_changed = key != prev;
+
+            if !on {
+                if prev != (0, 0, 0, 0, -1) {
+                    self.blur_key.set((0, 0, 0, 0, -1));
+                    let _ = bd.set_visible(false);
+                }
                 return;
             }
-            self.blur_key.set(key);
-            if !on || width <= 0 || height <= 0 {
-                let _ = ShowWindow(self.glass_wnd, SW_HIDE);
-                return;
+
+            // Позиция окна подложки — совпадает с главным окном, сразу за ним в Z-порядке.
+            if pos_changed {
+                self.blur_key.set(key);
+                let _ = SetWindowPos(
+                    self.glass_wnd,
+                    Some(self.hwnd),
+                    self.win_x,
+                    self.win_y,
+                    self.win_w,
+                    self.win_h,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+                let _ = bd.set_visible(true);
             }
-            let _ = SetWindowPos(
-                self.glass_wnd,
-                Some(self.hwnd),
-                gx,
-                gy,
-                width,
-                height,
-                SWP_NOACTIVATE | SWP_SHOWWINDOW,
-            );
+
+            // Форма клипа — обновляем только при смене контура или окна (пружины анимируют тело каждый кадр).
+            if pos_changed || self.glass_shape.get() != shape_key {
+                self.glass_shape.set(shape_key);
+                if let Ok(geo) = self
+                    .body_path(g, x0, aw, ah, ear, r, false)
+                    .and_then(|p| p.cast::<windows::Win32::Graphics::Direct2D::ID2D1Geometry>())
+                {
+                    let _ = bd.set_shape(&geo, self.win_w as f32, self.win_h as f32);
+                }
+            }
+
+            // Тень: параметры из ios::GLASS_SHADOW, масштабированные под остров.
+            let shadow = crate::ios::GLASS_SHADOW;
+            let scale = self.scale;
+            let dy = shadow.offset_y * scale;
+            let blur = shadow.blur_radius * scale;
+            // Непрозрачность тени (подобрано): тёмная тема — 0.35, светлая — 0.18.
+            let opacity = if dark { 0.35 } else { 0.18 };
+            let _ = bd.set_shadow(dy, blur, opacity);
         } else {
-            let shape = crate::glass::BlurShape::from_outline(&crate::glass::body_outline(x0, aw, ah, ear, r, 1.0));
-            let (gx, gy) = (self.win_x + shape.left, self.win_y + shape.top);
-            let key = if on { (gx, gy, shape.width, shape.height, shape.signature()) } else { (0, 0, 0, 0, -1) };
+            // ---- Старый путь: accent blur-behind + SetWindowRgn (Windows 10) ----
+            let shape = crate::glass::body_outline(x0, aw, ah, ear, r, 1.0);
+            let bs = crate::glass::BlurShape::from_outline(&shape);
+            let (gx, gy) = (self.win_x + bs.left, self.win_y + bs.top);
+            let key = if on { (gx, gy, bs.width, bs.height, bs.signature()) } else { (0, 0, 0, 0, -1) };
             if self.blur_key.get() == key {
                 return;
             }
             self.blur_key.set(key);
-            if !on || shape.points.len() < 3 {
+            if !on || bs.points.len() < 3 {
                 let _ = ShowWindow(self.glass_wnd, SW_HIDE);
                 return;
             }
 
             // Позиционируем окно подложки СТРОГО ДО SetWindowRgn, чтобы SetWindowPos не сбрасывал форму окна в DWM.
-            let _ = SetWindowPos(self.glass_wnd, Some(self.hwnd), gx, gy, shape.width, shape.height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            let _ = SetWindowPos(self.glass_wnd, Some(self.hwnd), gx, gy, bs.width, bs.height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 
-            let pts: Vec<POINT> = shape.points.iter().map(|&(x, y)| POINT { x, y }).collect();
+            let pts: Vec<POINT> = bs.points.iter().map(|&(x, y)| POINT { x, y }).collect();
             let rgn = windows::Win32::Graphics::Gdi::CreatePolygonRgn(&pts, windows::Win32::Graphics::Gdi::ALTERNATE);
             // bRedraw = true сообщает DWM о перерасчёте формы окна; система забирает владение регионом себе.
             SetWindowRgn(self.glass_wnd, Some(rgn), true);
@@ -527,6 +557,9 @@ impl App {
     /// Прячет подложку стекла (остров скрыт); следующий кадр покажет её снова.
     pub(crate) unsafe fn hide_glass(&self) {
         self.blur_key.set((i32::MIN, 0, 0, 0, 0));
+        if let Some(bd) = &self.backdrop {
+            let _ = bd.set_visible(false);
+        }
         let _ = ShowWindow(self.glass_wnd, SW_HIDE);
     }
 

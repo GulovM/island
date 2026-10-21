@@ -112,6 +112,55 @@
 `cargo build --release`, `cargo test`, `cargo clippy --all-targets -- -D warnings`; список мест, где остались
 жёстко заданные цвета/радиусы вне токенов; список отклонений от spec.
 
+### T13. Подложка стекла через Windows.UI.Composition (HostBackdropBrush) точно по контуру тела
+Проблема: DWM-размытие (accent 3/4, `DWMWA_WINDOW_CORNER_PREFERENCE`) не берёт форму из `SetWindowRgn`, поэтому
+сейчас подложка — прямоугольник со скруглением 8 px, вписанный в тело с отступом; по краям тела видна полоса
+неразмытого фона, а углы подложки не совпадают с углами тела. Решение проверено прототипом на Win11 26300
+(рабочий образец: `D:/GoTemp/claude/d--Desktop-Files-mainnew-island/943148af-4ab3-4003-980c-8bbe763acb2d/scratchpad/proto/src/main.rs`, режим 7): окно подложки рисует `HostBackdropBrush`
+(системное размытие того, что под окном) в `SpriteVisual`, обрезанном `CompositionGeometricClip` по
+`CompositionPathGeometry` из того же D2D-контура, что и тело острова; тень — `DropShadow` с маской той же формы.
+Окно с `WS_EX_LAYERED | WS_EX_TRANSPARENT` пропускает клики в чужие окна и рисует размытие корректно.
+
+1. `Cargo.toml`: добавить в features `windows` ровно эти: `"UI"`, `"UI_Composition"`, `"UI_Composition_Desktop"`,
+   `"System"`, `"Graphics"`, `"Win32_System_WinRT"`, `"Win32_System_WinRT_Composition"`,
+   `"Win32_System_WinRT_Graphics_Direct2D"`. Других изменений `Cargo.toml` нет.
+2. Новый модуль `src/backdrop.rs` (весь `unsafe` WinRT/Win32 здесь), по образцу прототипа:
+   - `struct Backdrop` — держит `DispatcherQueueController` (создаётся `CreateDispatcherQueueController` с
+     `DQTYPE_THREAD_CURRENT` + `DQTAT_COM_NONE`: главный поток уже в MTA), `Compositor`, `DesktopWindowTarget`
+     (`ICompositorDesktopInterop::CreateDesktopWindowTarget(hwnd, false)`), корневой `ContainerVisual`,
+     общий `CompositionPathGeometry` (один на клип и на маску тени), `SpriteVisual` с `CreateHostBackdropBrush()`
+     и `CreateGeometricClipWithGeometry(&geo)`, `SpriteVisual` тени (`DropShadow` + `SetMask` из
+     `CompositionSurfaceBrush` ← `CompositionVisualSurface` ← `ShapeVisual` с `CompositionSpriteShape` той же
+     геометрии, заливка чёрная). Тень вставляется под размытие (`InsertAtBottom`).
+   - `Backdrop::new(hwnd) -> Result<Self>`; `set_shape(&self, geo: &ID2D1Geometry, w: f32, h: f32) -> Result<()>` —
+     новая `CompositionPath` (обёртка `#[implement(IGeometrySource2D, IGeometrySource2DInterop)]` над
+     `ID2D1Geometry`, `TryGetGeometryUsingFactory` → `E_NOTIMPL`) и `geo.SetPath(..)`; размеры визуалов, маски
+     и `VisualSurface` — `w × h` (размер окна подложки); `set_shadow(&self, dy, blur, opacity)`;
+     `set_visible(&self, bool)` — `root.SetIsVisible`.
+   - Объекты WinRT живут в `App` всё время работы; при ошибке создания — `log::info` и откат к старому пути (п. 5).
+3. Окно подложки (`src/app.rs`, создание `glass_wnd`): стили `WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP |
+   WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT`, сразу
+   `SetLayeredWindowAttributes(glass_wnd, COLORREF(0), 255, LWA_ALPHA)` и `DwmSetWindowAttribute(glass_wnd,
+   DWMWINDOWATTRIBUTE(17) /* DWMWA_USE_HOSTBACKDROPBRUSH */, TRUE)`. Accent (`enable_blur_behind`) и
+   `enable_round_blur` для этого пути НЕ вызывать.
+4. `src/render.rs::apply_blur` для нового пути: окно подложки совпадает с главным окном
+   (`win_x, win_y, win_w, win_h`, ставится сразу под `self.hwnd` через `SetWindowPos(.., Some(self.hwnd), ..)`
+   только когда меняется ключ), форма — `body_path(g, x0, aw, ah, ear, r, false)` (тот же контур, что тело,
+   координаты окна в физических px), передаётся в `set_shape` только при смене формы (ключ из округлённых
+   `x0, aw, ah, ear, r`). Выкл (`on == false`) — `set_visible(false)` (окно не прятать, чтобы не мигало);
+   `hide_glass` — как сейчас прячет окно. Тень: `dy = ios::GLASS_SHADOW` смещение × масштаб острова,
+   `blur = blur_radius × масштаб`, `opacity` 0.35 тёмная / 0.18 светлая тема (подобрано). Сигнатуру
+   `apply_blur` можно расширить (нужны `g` и тема).
+5. Откат: если `Backdrop::new` не удался (Windows 10 до 1903 и т.п.) — прежний путь Windows 10 (accent-размытие +
+   `SetWindowRgn` по `glass::body_outline`) без изменений. Ветку `blur_round` (DWM-скругление 8 px) и
+   `glass::blur_plate`, `wnd::enable_round_blur` с их тестами удалить: новый путь их заменяет.
+6. `real_glass()` и правила `body_alpha` не менять. `self.blur_ok` = новый путь создан ИЛИ старый accent принят.
+7. `src/main.rs`: `mod backdrop;`. Памяти не терять: никаких `Box::leak`/`forget`.
+Файлы: `Cargo.toml`, `src/backdrop.rs` (новый), `src/app.rs`, `src/render.rs`, `src/glass.rs`, `src/wnd.rs`,
+`src/main.rs`, при необходимости `src/window.rs`.
+Проверка Claude: снимки поверх яркого фона — подложка без полос и выступов по всему контуру, «ушки» и нижние
+углы совпадают с телом, клики под островом проходят в окна ниже.
+
 ## Ссылки на выгрузку
 `docs/figma/materials.md`, `colors.md`, `typography.md`, `toggles.md`, `buttons.md`, `lists.md`, `tab_bars.md`,
 `segmented_controls.md`, `README.md` (индекс). Реф-сайт https://liquidglassdesign.com/what-is-liquid-glass —
