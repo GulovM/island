@@ -9,6 +9,7 @@ mod face;
 mod gfx;
 mod glass;
 mod i18n;
+mod ios;
 mod log;
 mod online;
 mod perf;
