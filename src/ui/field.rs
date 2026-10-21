@@ -5,7 +5,7 @@ use windows::Win32::Graphics::Direct2D::D2D1_ANTIALIAS_MODE_ALIASED;
 use windows::Win32::Graphics::DirectWrite::DWRITE_HIT_TEST_METRICS;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_SHIFT};
 
-use super::{card, fg, mix, rgb, txt, Canvas, Rect, Ui};
+use super::{card, dim, fg, mix, txt, Canvas, Rect, Ui};
 
 #[derive(Default)]
 pub(super) struct Field {
@@ -267,12 +267,13 @@ impl Ui {
 
         // Фон и рамка.
         cv.rr(r, 10.0, mix(card(), fg(), 0.035 * hv));
-        cv.glyph(glyph, Rect::new(r.x + 4.0, r.y, 26.0, r.h), r.h >= 27.0, mix(rgb(0.7, 0.7, 0.7), cv.accent, ov));
+        let icon_base = mix(dim(), txt(), 0.35);
+        cv.glyph(glyph, Rect::new(r.x + 4.0, r.y, 26.0, r.h), r.h >= 27.0, mix(icon_base, cv.accent, ov));
 
         // Текст, выделение и курсор — внутри клипа.
         cv.g.dc.PushAxisAlignedClip(&inner.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
         if text.is_empty() {
-            cv.text(placeholder, inner, &fonts.body, rgb(0.5, 0.5, 0.5));
+            cv.text(placeholder, inner, &fonts.body, mix(dim(), txt(), 0.25));
         } else if let Some(l) = &layout {
             if f.has_sel() {
                 let (lo, hi) = f.range();

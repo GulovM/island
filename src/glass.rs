@@ -4,7 +4,6 @@
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use crate::config::Material;
-use crate::config::PaletteStyle;
 use crate::ios;
 use crate::theme;
 
@@ -110,7 +109,6 @@ pub fn sheen_alpha(dark: bool) -> f32 {
 #[allow(clippy::too_many_arguments)]
 pub fn body_layers(
     material: Material,
-    style: PaletteStyle,
     bg: [f32; 3],
     translucent: bool,
     blur: bool,
@@ -119,7 +117,7 @@ pub fn body_layers(
     k: f32,
 ) -> BodyLayers {
     let dark = !theme::is_light(bg);
-    let (mat_rgb, base_alpha) = ios::body_tint(material, dark);
+    let (_mat_rgb, base_alpha) = ios::body_tint(material, dark);
 
     // Правило альфы: минимум = итоговая альфа материала; без blur — минимум не ниже MIN_BODY_ALPHA_NO_BLUR.
     let min_alpha = if blur {
@@ -130,18 +128,9 @@ pub fn body_layers(
 
     let tint_alpha = body_alpha(translucent, min_alpha, opacity, p, k);
 
-    // Цвет RGB тинта: в стиле Windows — цвет фона острова (pal.bg); в стиле iOS — RGB тинта материала.
-    // Если стекло выключено, используется цвет фона острова (прежний плоский вид).
-    let tint_rgb = if !translucent {
-        bg
-    } else {
-        match style {
-            PaletteStyle::Windows => bg,
-            PaletteStyle::Ios => mat_rgb,
-        }
-    };
+    // Цвет RGB тинта: всегда цвет фона острова (bg) для обоих стилей.
     // При сжатии в полоску (k < 1) фон пропорционально темнеет к чистому чёрному.
-    let tint_color = [tint_rgb[0] * k, tint_rgb[1] * k, tint_rgb[2] * k];
+    let tint_color = [bg[0] * k, bg[1] * k, bg[2] * k];
 
     // Множитель стеклянных эффектов (осветление сверху, кромка, тень).
     // Полоска (k = 0), свёрнутый остров (p = 0) или выключенное стекло гасят эффекты в ноль,
@@ -429,59 +418,48 @@ mod tests {
             (true, [0.05, 0.05, 0.05]),  // dark
             (false, [0.95, 0.95, 0.95]), // light
         ];
-        let styles = [PaletteStyle::Windows, PaletteStyle::Ios];
 
         for m in materials {
             for (dark, bg) in themes {
-                let (mat_rgb, mat_alpha) = ios::body_tint(m, dark);
+                let (_mat_rgb, mat_alpha) = ios::body_tint(m, dark);
 
-                for s in styles {
-                    for blur in [true, false] {
-                        let layers = body_layers(m, s, bg, true, blur, 0.0, 1.0, 1.0);
+                for blur in [true, false] {
+                    let layers = body_layers(m, bg, true, blur, 0.0, 1.0, 1.0);
 
-                        // Проверка минимальной альфы:
-                        // Regular + dark + blur == 0.41 (MIN_BODY_ALPHA)
-                        if m == Material::Regular && dark && blur {
-                            assert!((layers.min_alpha - MIN_BODY_ALPHA).abs() < 1e-6, "Regular dark blur must be 0.41");
-                        }
-                        if m == Material::Regular && dark && !blur {
-                            assert!((layers.min_alpha - MIN_BODY_ALPHA_NO_BLUR).abs() < 1e-6, "Regular dark no-blur must be 0.60");
-                        }
-
-                        if blur {
-                            assert!((layers.min_alpha - mat_alpha).abs() < 1e-6);
-                        } else {
-                            assert!((layers.min_alpha - mat_alpha.max(MIN_BODY_ALPHA_NO_BLUR)).abs() < 1e-6);
-                        }
-
-                        // При opacity = 0, p = 1, k = 1: tint_alpha == min_alpha
-                        assert!((layers.tint_alpha - layers.min_alpha).abs() < 1e-6);
-
-                        // Проверка цвета тинта:
-                        match s {
-                            PaletteStyle::Windows => {
-                                assert_eq!(layers.tint_color, bg);
-                            }
-                            PaletteStyle::Ios => {
-                                for (c_layer, c_mat) in layers.tint_color.iter().zip(&mat_rgb) {
-                                    assert!((c_layer - c_mat).abs() < 1e-6);
-                                }
-                            }
-                        }
-
-                        // При translucent слои активны независимо от blur (без blur стекло плотнее, но со слоями)
-                        assert!(layers.sheen.alpha > 0.0);
-                        assert!(layers.rim.hi_alpha > 0.0);
-                        assert!(layers.shadow.alpha > 0.0);
-                        assert_eq!(layers.shadow.offset_y, 8.0);
-                        assert_eq!(layers.shadow.blur_radius, 40.0);
-
-                        // При выключенном стекле (translucent = false) слои выключены
-                        let off = body_layers(m, s, bg, false, blur, 0.0, 1.0, 1.0);
-                        assert_eq!(off.sheen.alpha, 0.0);
-                        assert_eq!(off.rim.hi_alpha, 0.0);
-                        assert_eq!(off.shadow.alpha, 0.0);
+                    // Проверка минимальной альфы:
+                    // Regular + dark + blur == 0.41 (MIN_BODY_ALPHA)
+                    if m == Material::Regular && dark && blur {
+                        assert!((layers.min_alpha - MIN_BODY_ALPHA).abs() < 1e-6, "Regular dark blur must be 0.41");
                     }
+                    if m == Material::Regular && dark && !blur {
+                        assert!((layers.min_alpha - MIN_BODY_ALPHA_NO_BLUR).abs() < 1e-6, "Regular dark no-blur must be 0.60");
+                    }
+
+                    if blur {
+                        assert!((layers.min_alpha - mat_alpha).abs() < 1e-6);
+                    } else {
+                        assert!((layers.min_alpha - mat_alpha.max(MIN_BODY_ALPHA_NO_BLUR)).abs() < 1e-6);
+                    }
+
+                    // При opacity = 0, p = 1, k = 1: tint_alpha == min_alpha
+                    assert!((layers.tint_alpha - layers.min_alpha).abs() < 1e-6);
+
+                    // Проверка цвета тинта: всегда равен bg острова
+                    assert_eq!(layers.tint_color, bg);
+
+                    // При translucent слои активны независимо от blur (без blur стекло плотнее, но со слоями)
+                    assert!(layers.sheen.alpha > 0.0);
+                    assert!(layers.rim.hi_alpha > 0.0);
+                    assert!(layers.shadow.alpha > 0.0);
+                    assert_eq!(layers.shadow.offset_y, 8.0);
+                    assert_eq!(layers.shadow.blur_radius, 40.0);
+
+                    // При выключенном стекле (translucent = false) слои выключены
+                    let off = body_layers(m, bg, false, blur, 0.0, 1.0, 1.0);
+                    assert_eq!(off.sheen.alpha, 0.0);
+                    assert_eq!(off.rim.hi_alpha, 0.0);
+                    assert_eq!(off.shadow.alpha, 0.0);
+                    assert_eq!(off.tint_color, bg);
                 }
             }
         }
@@ -502,14 +480,14 @@ mod tests {
                 for blur in [true, false] {
                     let mut prev = 0.0;
                     for op in 0..=100 {
-                        let layers = body_layers(m, PaletteStyle::Ios, bg, true, blur, op as f32, 1.0, 1.0);
+                        let layers = body_layers(m, bg, true, blur, op as f32, 1.0, 1.0);
                         assert!(layers.tint_alpha >= layers.min_alpha - 1e-6);
                         assert!(layers.tint_alpha <= 1.0 + 1e-6);
                         assert!(layers.tint_alpha >= prev, "opacity {}% not monotonic: {} < {}", op, layers.tint_alpha, prev);
                         prev = layers.tint_alpha;
                     }
                     // 100% всегда даёт 1.0
-                    let full = body_layers(m, PaletteStyle::Ios, bg, true, blur, 100.0, 1.0, 1.0);
+                    let full = body_layers(m, bg, true, blur, 100.0, 1.0, 1.0);
                     assert!((full.tint_alpha - 1.0).abs() < 1e-6);
                 }
             }
@@ -520,7 +498,7 @@ mod tests {
     fn test_strip_and_collapsed_states() {
         let bg = [0.1, 0.1, 0.1];
         // Полоска (k = 0): сплошное тело (alpha = 1.0), эффекты погашены, цвет затемнён в 0
-        let strip = body_layers(Material::Regular, PaletteStyle::Windows, bg, true, true, 50.0, 1.0, 0.0);
+        let strip = body_layers(Material::Regular, bg, true, true, 50.0, 1.0, 0.0);
         assert_eq!(strip.tint_alpha, 1.0);
         assert_eq!(strip.sheen.alpha, 0.0);
         assert_eq!(strip.rim.hi_alpha, 0.0);
@@ -528,7 +506,7 @@ mod tests {
         assert_eq!(strip.tint_color, [0.0, 0.0, 0.0]);
 
         // Свёрнутое состояние (p = 0): сплошное тело (alpha = 1.0), эффекты погашены
-        let collapsed = body_layers(Material::Regular, PaletteStyle::Windows, bg, true, true, 50.0, 0.0, 1.0);
+        let collapsed = body_layers(Material::Regular, bg, true, true, 50.0, 0.0, 1.0);
         assert_eq!(collapsed.tint_alpha, 1.0);
         assert_eq!(collapsed.sheen.alpha, 0.0);
         assert_eq!(collapsed.rim.hi_alpha, 0.0);
@@ -536,11 +514,12 @@ mod tests {
         assert_eq!(collapsed.tint_color, bg);
 
         // Выключенное стекло (translucent = false): плоское тело (alpha = 1.0), эффекты погашены
-        let disabled = body_layers(Material::Regular, PaletteStyle::Ios, bg, false, true, 50.0, 1.0, 1.0);
+        let disabled = body_layers(Material::Regular, bg, false, true, 50.0, 1.0, 1.0);
         assert_eq!(disabled.tint_alpha, 1.0);
         assert_eq!(disabled.sheen.alpha, 0.0);
         assert_eq!(disabled.rim.hi_alpha, 0.0);
         assert_eq!(disabled.shadow.alpha, 0.0);
+        assert_eq!(disabled.tint_color, bg);
     }
 
     #[test]

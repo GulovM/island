@@ -62,12 +62,11 @@ impl App {
             0.0
         };
 
-        // Вычисление всех слоёв тела острова: тинт материала/фона, осветление сверху, кромка и тень.
+        // Вычисление всех слоёв тела острова: тинт фона, осветление сверху, кромка и тень.
         let real = self.real_glass();
         let bg_rgb = [pal.bg.r, pal.bg.g, pal.bg.b];
         let layers = crate::glass::body_layers(
             self.cfg.material,
-            self.cfg.palette_style,
             bg_rgb,
             self.cfg.glass,
             real,
@@ -289,10 +288,17 @@ impl App {
                 let (py, ph) = (TAB_TOP * s, TAB_H * s);
                 let rr = D2D1_ROUNDED_RECT { rect: D2D_RECT_F { left: px, top: py, right: px + pw, bottom: py + ph }, radiusX: ph / 2.0, radiusY: ph / 2.0 };
 
-                // Мягкая компактная тень Liquid Glass Small: 0 2 8 rgba(0,0,0,0.18) (подобрано).
+                let is_ios = pal.style == theme::PaletteStyle::Ios;
+
+                // Мягкая компактная тень Liquid Glass Small:
+                // В стиле iOS: 0 1 4 rgba(0,0,0,0.10) (подобрано).
+                // В стиле Windows: 0 2 8 rgba(0,0,0,0.18) (подобрано).
                 // Рисуется ТОЛЬКО снаружи капли (вычитание геометрии через PushLayer), чтобы тень не темнила полупрозрачную каплю.
-                let shadow_dy = 2.0 * s;
-                let shadow_blur = 8.0 * s;
+                let (shadow_dy, shadow_blur, shadow_base_alpha) = if is_ios {
+                    (1.0 * s, 4.0 * s, 0.10)
+                } else {
+                    (2.0 * s, 8.0 * s, 0.18)
+                };
                 let outer_rr = D2D1_ROUNDED_RECT {
                     rect: D2D_RECT_F {
                         left: px - shadow_blur,
@@ -333,7 +339,7 @@ impl App {
                                     for step in 1..=PILL_SHADOW_STEPS {
                                         let t = step as f32 / PILL_SHADOW_STEPS as f32;
                                         let weight = (1.0 - t * 0.6) / PILL_SHADOW_STEPS as f32;
-                                        let step_alpha = 0.18 * pill_a * weight * 1.5;
+                                        let step_alpha = shadow_base_alpha * pill_a * weight * 1.5;
                                         let grow = shadow_blur * t;
                                         let dy = shadow_dy * t;
                                         let step_rr = D2D1_ROUNDED_RECT {
@@ -366,17 +372,35 @@ impl App {
                 c.a *= pill_a;
                 g.brush.SetColor(&c);
                 g.dc.FillRoundedRectangle(&rr, &g.brush);
-                let fade = |c: D2D1_COLOR_F, factor: f32| D2D1_COLOR_F { a: c.a * pill_a * factor, ..c };
-                // Усилен блик слева-сверху (0.85 вместо 0.60)
-                let stops = [(0.0, fade(pal.rim_hi, 0.85)), (0.5, fade(pal.rim_mid, 0.60)), (1.0, fade(pal.rim_lo, 0.60))];
-                if let Some(br) = gradient_brush(g, (px, py), (px + pw, py + ph), &stops) {
-                    let h = 0.5 * s;
-                    let line = D2D1_ROUNDED_RECT {
-                        rect: D2D_RECT_F { left: px + h, top: py + h, right: px + pw - h, bottom: py + ph - h },
-                        radiusX: ph / 2.0 - h,
-                        radiusY: ph / 2.0 - h,
+
+                let h = 0.5 * s;
+                let line = D2D1_ROUNDED_RECT {
+                    rect: D2D_RECT_F { left: px + h, top: py + h, right: px + pw - h, bottom: py + ph - h },
+                    radiusX: ph / 2.0 - h,
+                    radiusY: ph / 2.0 - h,
+                };
+                if is_ios {
+                    // В стиле iOS: симметричная тонкая обводка 1 px (0.5·scale·2) без диагонального градиента.
+                    // Вертикальный градиент: верх alpha ≈ 0.28 белого / 0.18 чёрного для светлой темы, низ ≈ 0.10.
+                    let light = theme::is_light([pal.bg.r, pal.bg.g, pal.bg.b]);
+                    let (top_a, bot_a) = if light {
+                        (0.18, 0.10)
+                    } else {
+                        (0.28, 0.10)
                     };
-                    g.dc.DrawRoundedRectangle(&line, &br, 2.0 * h, None);
+                    let top_col = D2D1_COLOR_F { a: top_a * pill_a, ..pal.fg };
+                    let bot_col = D2D1_COLOR_F { a: bot_a * pill_a, ..pal.fg };
+                    let stops = [(0.0, top_col), (1.0, bot_col)];
+                    if let Some(br) = gradient_brush(g, (px, py), (px, py + ph), &stops) {
+                        g.dc.DrawRoundedRectangle(&line, &br, 2.0 * h, None);
+                    }
+                } else {
+                    let fade = |c: D2D1_COLOR_F, factor: f32| D2D1_COLOR_F { a: c.a * pill_a * factor, ..c };
+                    // Усилен блик слева-сверху (0.85 вместо 0.60)
+                    let stops = [(0.0, fade(pal.rim_hi, 0.85)), (0.5, fade(pal.rim_mid, 0.60)), (1.0, fade(pal.rim_lo, 0.60))];
+                    if let Some(br) = gradient_brush(g, (px, py), (px + pw, py + ph), &stops) {
+                        g.dc.DrawRoundedRectangle(&line, &br, 2.0 * h, None);
+                    }
                 }
             }
             for (i, (tx, tw)) in rects.iter().enumerate() {

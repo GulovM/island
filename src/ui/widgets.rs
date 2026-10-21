@@ -2,7 +2,7 @@
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
-use super::{card, chip_bg, dim, fg, icon, ink, mix, rgb, selection, track, txt, Canvas, Rect, Ui};
+use super::{card, chip_bg, dim, fg, icon, ink, mix, selection, track, txt, Canvas, Rect, Ui};
 
 /// Плитка не шире этого рисуется без текста (только значок); к `NARROW_TILE + TILE_FADE` текст
 /// проявляется целиком.
@@ -158,7 +158,7 @@ impl Ui {
         let mut bg = fg();
         bg.a = 0.10 * hv;
         cv.rr(r, r.h / 2.0, bg);
-        let col = if active { cv.accent } else { mix(rgb(0.45, 0.45, 0.48), txt(), hv) };
+        let col = if active { cv.accent } else { mix(dim(), txt(), hv) };
         cv.glyph(glyph, r.inset(1.0 * pr), false, col);
         clicked
     }
@@ -289,7 +289,7 @@ impl Ui {
         }
         let fg = match tint {
             Some(t) => mix(mix(dim(), txt(), hv), t, ov),
-            None => mix(mix(rgb(0.78, 0.78, 0.78), txt(), hv), ink(), ov),
+            None => mix(mix(dim(), txt(), hv), ink(), ov),
         };
         cv.text(label, r, &cv.g.fonts.small_c, fg);
         clicked

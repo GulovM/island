@@ -495,7 +495,7 @@ impl Clip {
             let (_, clicked) = ui.click_area(kid, Rect::new(x - 2.0, cy - 8.0, wdt + 4.0, 16.0));
             let hv = ui.hover_of(kid);
             if hv > 0.01 {
-                let mut c = crate::ui::WHITE;
+                let mut c = crate::ui::fg();
                 c.a = 0.05 * hv;
                 cv.rr(Rect::new(x - 3.0, cy - 9.0, wdt + 6.0, 18.0), 5.0, c);
             }

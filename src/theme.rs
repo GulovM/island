@@ -177,19 +177,8 @@ pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
     };
 
     if style == PaletteStyle::Ios {
-        // Системный акцент Blue iOS 26 для текущей темы (тёмная/светлая).
-        let ios_accent = ios::sys(ios::SysColor::Blue, dark);
-        p.accent = col(ios_accent);
-        p.ink = col(ink_for(ios_accent));
-
         // Текст: основной — Label Primary (непрозрачный).
         p.text = ios::label_primary(dark);
-
-        // Вторичный текст (dim): токен Label Secondary (с альфой 0.6) смешивается с фоном,
-        // чтобы поле оставалось непрозрачным (альфа 1.0) как и у стиля Windows.
-        let sec = ios::label_secondary(dark);
-        let dim_rgb = mix3(bg, [sec.r, sec.g, sec.b], sec.a);
-        p.dim = col(dim_rgb);
 
         // Поверхности по смыслу и визуальной иерархии iOS:
         // card — Quaternary Fill (самая нежная заливка подложки крупных карточек);
@@ -203,6 +192,9 @@ pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
 
         // Волосяная граница: полупрозрачный системный разделитель iOS (Non-Opaque).
         p.hairline = ios::separator_non_opaque(dark);
+
+        // Капля выбранной вкладки: полупрозрачная системная заливка Fill Primary iOS.
+        p.pill = ios::fill_primary(dark);
     }
 
     p
@@ -329,20 +321,29 @@ mod tests {
 
     #[test]
     fn ios_palette_dark_and_light() {
-        // Тёмный фон: акцент Blue Dark (#0091FF), Label Primary Dark (#FFFFFF)
+        // Тёмный фон: пользовательский акцент, Label Primary Dark (#FFFFFF)
         let dark_p = derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Ios);
-        let blue_dark = ios::sys(ios::SysColor::Blue, true);
-        assert_eq!([dark_p.accent.r, dark_p.accent.g, dark_p.accent.b], blue_dark);
+        assert_eq!([dark_p.accent.r, dark_p.accent.g, dark_p.accent.b], DEFAULT_ACCENT);
         assert_eq!(dark_p.text, ios::label_primary(true));
         assert!(dark_p.text.r > 0.9, "текст на тёмном фоне должен быть светлым");
 
-        // Светлый фон: акцент Blue Light (#0088FF), Label Primary Light (#000000)
+        // Светлый фон: пользовательский акцент, Label Primary Light (#000000)
         let light_bg = [0.95, 0.95, 0.96];
-        let light_p = derive(light_bg, DEFAULT_ACCENT, PaletteStyle::Ios);
-        let blue_light = ios::sys(ios::SysColor::Blue, false);
-        assert_eq!([light_p.accent.r, light_p.accent.g, light_p.accent.b], blue_light);
+        let custom_accent = [0.1, 0.4, 0.8];
+        let light_p = derive(light_bg, custom_accent, PaletteStyle::Ios);
+        assert_eq!([light_p.accent.r, light_p.accent.g, light_p.accent.b], custom_accent);
         assert_eq!(light_p.text, ios::label_primary(false));
         assert!(light_p.text.r < 0.1, "текст на светлом фоне должен быть тёмным");
+
+        // dim в стиле iOS совпадает с Windows-стилем
+        let dark_win = derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows);
+        let light_win = derive(light_bg, custom_accent, PaletteStyle::Windows);
+        assert_eq!(dark_p.dim, dark_win.dim);
+        assert_eq!(light_p.dim, light_win.dim);
+
+        // pill в стиле iOS равен полупрозрачному fill_primary
+        assert_eq!(dark_p.pill, ios::fill_primary(true));
+        assert_eq!(light_p.pill, ios::fill_primary(false));
 
         // Все поля должны иметь валидные альфы в диапазоне 0..=1
         for p in [dark_p, light_p] {
@@ -382,6 +383,37 @@ mod tests {
         assert_eq!(light_p.chip, ios::fill_secondary(false));
         assert_eq!(light_p.inset, ios::fill_tertiary(false));
         assert_eq!(light_p.hairline, ios::separator_non_opaque(false));
+    }
+
+    #[test]
+    fn test_derive_both_styles_both_themes() {
+        let dark_bg = [0.05, 0.05, 0.05];
+        let light_bg = [0.95, 0.95, 0.96];
+        let custom_accent = [0.2, 0.6, 0.9];
+
+        for (dark, bg) in [(true, dark_bg), (false, light_bg)] {
+            let win = derive(bg, custom_accent, PaletteStyle::Windows);
+            let ios = derive(bg, custom_accent, PaletteStyle::Ios);
+
+            // Акцент и чернила зависят от переданного акцента в обоих стилях
+            assert_eq!([win.accent.r, win.accent.g, win.accent.b], custom_accent);
+            assert_eq!([ios.accent.r, ios.accent.g, ios.accent.b], custom_accent);
+            assert_eq!(win.ink, ios.ink);
+
+            // dim настроен под стекло одинаково в обоих стилях
+            assert_eq!(win.dim, ios.dim);
+
+            // Текст: в Windows mix(bg, fg), в iOS label_primary
+            if dark {
+                assert!(win.text.r > 0.9 && ios.text.r > 0.9);
+            } else {
+                assert!(win.text.r < 0.1 && ios.text.r < 0.1);
+            }
+
+            // pill: в Windows непрозрачный on(..), в iOS полупрозрачный fill_primary
+            assert_eq!(ios.pill, ios::fill_primary(dark));
+            assert_ne!(win.pill, ios.pill);
+        }
     }
 
     #[test]
