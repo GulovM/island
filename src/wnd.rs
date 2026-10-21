@@ -1,5 +1,10 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use windows::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMNCRP_DISABLED, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
+    DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+};
+
 use super::*;
 
 // ---------- События от оконной процедуры к главному циклу ----------
@@ -434,4 +439,50 @@ pub(crate) unsafe fn enable_blur_behind(hwnd: HWND) -> bool {
     let mut acc = Accent { state: 3, flags: 0, color: 0, anim: 0 };
     let mut d = Wca { attr: 19, data: &mut acc, size: size_of::<Accent>() };
     f(hwnd, &mut d) != 0
+}
+
+/// Включает родное скругление DWM для окна подложки (Windows 11).
+/// DWMWA_WINDOW_CORNER_PREFERENCE (33) = DWMWCP_ROUND (2) скругляет и окно, и DWM-размытие.
+/// Убирает рамку DWM (DWMWA_BORDER_COLOR 34 = DWMWA_COLOR_NONE)
+/// и пробует отключить тень окна (DWMWA_NCRENDERING_POLICY 2 = DWMNCRP_DISABLED).
+/// Возвращает `true`, только если вызов 33 вернул S_OK (Windows 11 22000+).
+pub(crate) unsafe fn enable_round_blur(hwnd: HWND) -> bool {
+    let round = DWMWCP_ROUND;
+    let r_round = DwmSetWindowAttribute(
+        hwnd,
+        DWMWA_WINDOW_CORNER_PREFERENCE,
+        &round as *const _ as *const std::ffi::c_void,
+        size_of_val(&round) as u32,
+    );
+    if let Err(e) = r_round {
+        log::info(&format!("стекло: DWM-скругление недоступно (код 0x{:08X})", e.code().0));
+        return false;
+    }
+
+    let border = DWMWA_COLOR_NONE;
+    let r_border = DwmSetWindowAttribute(
+        hwnd,
+        DWMWA_BORDER_COLOR,
+        &border as *const _ as *const std::ffi::c_void,
+        size_of_val(&border) as u32,
+    );
+
+    let shadow = DWMNCRP_DISABLED;
+    let r_shadow = DwmSetWindowAttribute(
+        hwnd,
+        DWMWA_NCRENDERING_POLICY,
+        &shadow as *const _ as *const std::ffi::c_void,
+        size_of_val(&shadow) as u32,
+    );
+
+    let border_msg = match r_border {
+        Ok(()) => "рамка S_OK".to_string(),
+        Err(ref e) => format!("рамка 0x{:08X}", e.code().0),
+    };
+    let shadow_msg = match r_shadow {
+        Ok(()) => "тень S_OK".to_string(),
+        Err(ref e) => format!("тень 0x{:08X}", e.code().0),
+    };
+    log::info(&format!("стекло: DWM-скругление S_OK ({border_msg}, {shadow_msg})"));
+    true
 }

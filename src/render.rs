@@ -514,29 +514,56 @@ impl App {
         Ok(())
     }
 
-    /// Подложка стекла: окно с размытием фона под телом острова. Регион окна строится по самому контуру
-    /// тела (`glass::body_outline`: плоский верх, «ушки», скруглённые нижние углы), сдвинутому внутрь на
-    /// 1 физический px, чтобы сглаженный край тела целиком закрывал несглаженный край региона.
+    /// Подложка стекла: окно с размытием фона под телом острова.
+    /// В Windows 11 с поддержкой DWM-скругления (`self.blur_round`) окно подложки позиционируется
+    /// как скруглённый DWM-прямоугольник (`glass::blur_plate`), вписанный в тело острова без SetWindowRgn.
+    /// На Windows 10 форма окна по-прежнему вырезается регионом `SetWindowRgn` по `glass::body_outline`.
     unsafe fn apply_blur(&self, x0: f32, aw: f32, ah: f32, ear: f32, r: f32, on: bool) {
-        let shape = crate::glass::BlurShape::from_outline(&crate::glass::body_outline(x0, aw, ah, ear, r, 1.0));
-        let (gx, gy) = (self.win_x + shape.left, self.win_y + shape.top);
-        let key = if on { (gx, gy, shape.width, shape.height, shape.signature()) } else { (0, 0, 0, 0, -1) };
-        if self.blur_key.get() == key {
-            return;
-        }
-        self.blur_key.set(key);
-        if !on || shape.points.len() < 3 {
-            let _ = ShowWindow(self.glass_wnd, SW_HIDE);
-            return;
-        }
+        if self.blur_round {
+            let dpi = GetDpiForWindow(self.hwnd);
+            let dpi = if dpi == 0 { 96 } else { dpi };
+            let r_dwm = 8.0 * (dpi as f32 / 96.0);
+            let (left_off, width, height, _inset) = crate::glass::blur_plate(x0, aw, ah, r, r_dwm);
+            let (gx, gy) = (self.win_x + left_off, self.win_y);
+            let key = if on { (gx, gy, width, height, 0) } else { (0, 0, 0, 0, -1) };
+            if self.blur_key.get() == key {
+                return;
+            }
+            self.blur_key.set(key);
+            if !on || width <= 0 || height <= 0 {
+                let _ = ShowWindow(self.glass_wnd, SW_HIDE);
+                return;
+            }
+            let _ = SetWindowPos(
+                self.glass_wnd,
+                Some(self.hwnd),
+                gx,
+                gy,
+                width,
+                height,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
+        } else {
+            let shape = crate::glass::BlurShape::from_outline(&crate::glass::body_outline(x0, aw, ah, ear, r, 1.0));
+            let (gx, gy) = (self.win_x + shape.left, self.win_y + shape.top);
+            let key = if on { (gx, gy, shape.width, shape.height, shape.signature()) } else { (0, 0, 0, 0, -1) };
+            if self.blur_key.get() == key {
+                return;
+            }
+            self.blur_key.set(key);
+            if !on || shape.points.len() < 3 {
+                let _ = ShowWindow(self.glass_wnd, SW_HIDE);
+                return;
+            }
 
-        // Позиционируем окно подложки СТРОГО ДО SetWindowRgn, чтобы SetWindowPos не сбрасывал форму окна в DWM.
-        let _ = SetWindowPos(self.glass_wnd, Some(self.hwnd), gx, gy, shape.width, shape.height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            // Позиционируем окно подложки СТРОГО ДО SetWindowRgn, чтобы SetWindowPos не сбрасывал форму окна в DWM.
+            let _ = SetWindowPos(self.glass_wnd, Some(self.hwnd), gx, gy, shape.width, shape.height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 
-        let pts: Vec<POINT> = shape.points.iter().map(|&(x, y)| POINT { x, y }).collect();
-        let rgn = windows::Win32::Graphics::Gdi::CreatePolygonRgn(&pts, windows::Win32::Graphics::Gdi::ALTERNATE);
-        // bRedraw = true сообщает DWM о перерасчёте формы окна; система забирает владение регионом себе.
-        SetWindowRgn(self.glass_wnd, Some(rgn), true);
+            let pts: Vec<POINT> = shape.points.iter().map(|&(x, y)| POINT { x, y }).collect();
+            let rgn = windows::Win32::Graphics::Gdi::CreatePolygonRgn(&pts, windows::Win32::Graphics::Gdi::ALTERNATE);
+            // bRedraw = true сообщает DWM о перерасчёте формы окна; система забирает владение регионом себе.
+            SetWindowRgn(self.glass_wnd, Some(rgn), true);
+        }
     }
 
     /// Прячет подложку стекла (остров скрыт); следующий кадр покажет её снова.

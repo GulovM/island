@@ -30,6 +30,8 @@ pub struct App {
     pub(crate) glass_wnd: HWND,
     /// Размытие доступно: окно подложки приняло blur-behind.
     pub(crate) blur_ok: bool,
+    /// Родное скругление DWM поддерживается (Windows 11): подложка — скруглённый DWM-прямоугольник без SetWindowRgn.
+    pub(crate) blur_round: bool,
     /// Системные «Эффекты прозрачности» включены; иначе DWM рисует плоский фон вместо размытия.
     pub(crate) transparency: bool,
 
@@ -165,6 +167,7 @@ impl App {
             if !blur_ok {
                 log::info("стекло: blur-behind недоступен, тело острова остаётся без размытия");
             }
+            let blur_round = blur_ok && crate::wnd::enable_round_blur(glass_wnd);
             MAIN_WND.with(|w| w.set(hwnd));
             TASKBAR_MSG.with(|c| c.set(RegisterWindowMessageW(w!("TaskbarCreated"))));
 
@@ -201,6 +204,7 @@ impl App {
                 blur_key: std::cell::Cell::new((i32::MIN, 0, 0, 0, 0)),
                 glass_wnd,
                 blur_ok,
+                blur_round,
                 transparency: sys::transparency_enabled(),
                 dwrite,
                 gfx: Some(gfx),

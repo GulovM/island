@@ -235,6 +235,24 @@ pub fn body_outline(x0: f32, aw: f32, ah: f32, ear: f32, r: f32, inset: f32) -> 
     pts
 }
 
+/// Прямоугольник подложки размытия для Windows 11 (DWM-скругление без `SetWindowRgn`).
+/// Подложка целиком вписана в тело острова: без «ушек», со сдвигом внутрь на `inset` физических px,
+/// чтобы скруглённый угол радиуса `r_dwm` не выпирал за нижние углы тела радиуса `r_body`.
+/// Верх упирается в верхний край окна (`y = 0`), без отступа.
+/// Возвращает `(left_off, width, height, inset)` в целых пикселях окна:
+/// `left_off` — смещение левого края от начала окна острова,
+/// `width` — ширина подложки,
+/// `height` — высота подложки от верхнего края окна (y = 0),
+/// `inset` — отступ с краёв.
+pub fn blur_plate(x0: f32, aw: f32, ah: f32, r_body: f32, r_dwm: f32) -> (i32, i32, i32, i32) {
+    let diff = (r_body - r_dwm).max(0.0);
+    let inset = (0.2929 * diff).ceil() as i32 + 1;
+    let left_off = (x0 + inset as f32).round() as i32;
+    let width = ((aw - 2.0 * inset as f32).round() as i32).max(1);
+    let height = ((ah - inset as f32).round() as i32).max(1);
+    (left_off, width, height, inset)
+}
+
 /// Контур подложки в целых физических пикселях: рамка окна и точки региона относительно её левого верха.
 #[derive(Clone, PartialEq, Debug)]
 pub struct BlurShape {
@@ -542,5 +560,92 @@ mod tests {
         assert_eq!(mid_l, 0.08);
         assert_eq!(lo_col_l, [0.0, 0.0, 0.0]);
         assert_eq!(lo_a_l, 0.10);
+    }
+
+    #[test]
+    fn blur_plate_inset_rules() {
+        for r_dwm in [8.0f32, 10.0, 12.0, 16.0] {
+            // При r_body <= r_dwm inset всегда равен 1.
+            for r_body in [0.0f32, 1.0, 4.0, r_dwm - 0.01, r_dwm] {
+                let (_, _, _, inset) = blur_plate(10.0, 200.0, 100.0, r_body, r_dwm);
+                assert_eq!(inset, 1, "r_body={r_body}, r_dwm={r_dwm}: inset должен быть 1, получен {inset}");
+            }
+
+            // inset монотонен по r_body.
+            let mut prev_inset = 1;
+            let mut r = 0.0f32;
+            while r <= 100.0 {
+                let (_, _, _, inset) = blur_plate(10.0, 200.0, 100.0, r, r_dwm);
+                assert!(
+                    inset >= prev_inset,
+                    "r_body={r}, r_dwm={r_dwm}: нарушение монотонности: {prev_inset} -> {inset}"
+                );
+                let expected = (0.2929 * (r - r_dwm).max(0.0)).ceil() as i32 + 1;
+                assert_eq!(inset, expected);
+                prev_inset = inset;
+                r += 0.25;
+            }
+        }
+    }
+
+    #[test]
+    fn blur_plate_points_lie_inside_body() {
+        let mut test_cases = cases();
+        // Добавляем специфичные случаи с нулевым радиусом и r_body < r_dwm
+        for x0 in [0.0f32, 25.0] {
+            for (aw, ah) in [(200.0f32, 40.0f32), (400.0, 120.0), (333.3, 150.0)] {
+                for ear in [0.0f32, 8.0] {
+                    for r in [0.0f32, 2.0, 4.0, 6.0, 8.0, 15.0, 28.0] {
+                        test_cases.push((x0 + ear, aw, ah, ear, r));
+                    }
+                }
+            }
+        }
+
+        for &(x0, aw, ah, ear, r_body) in &test_cases {
+            for r_dwm in [8.0f32, 10.0, 12.0, 16.0] {
+                let (left_off, width, height, _inset) = blur_plate(x0, aw, ah, r_body, r_dwm);
+                let pl = left_off as f32;
+                let pr = (left_off + width) as f32;
+                let pt = 0.0f32;
+                let pb = height as f32;
+
+                let mut sample_pts = vec![
+                    // 1. Верхний край и верхние углы
+                    (pl, pt),
+                    (pr, pt),
+                    ((pl + pr) * 0.5, pt),
+                    // 2. Боковые кромки
+                    (pl, (pt + pb) * 0.5),
+                    (pr, (pt + pb) * 0.5),
+                    // 3. Нижний край между скруглениями
+                    ((pl + pr) * 0.5, pb),
+                ];
+
+                // 4. Точки скруглённого левого нижнего угла плиты с радиусом r_dwm
+                let clx = pl + r_dwm;
+                let cly = pb - r_dwm;
+                for step in 0..=16 {
+                    let a = PI * 0.5 + (PI * 0.5) * (step as f32 / 16.0);
+                    sample_pts.push((clx + r_dwm * a.cos(), cly + r_dwm * a.sin()));
+                }
+
+                // 5. Точки скруглённого правого нижнего угла плиты с радиусом r_dwm
+                let crx = pr - r_dwm;
+                let cry = pb - r_dwm;
+                for step in 0..=16 {
+                    let a = (PI * 0.5) * (step as f32 / 16.0);
+                    sample_pts.push((crx + r_dwm * a.cos(), cry + r_dwm * a.sin()));
+                }
+
+                // Проверка, что каждая точка скруглённой плиты лежит строго внутри тела
+                for (px, py) in sample_pts {
+                    assert!(
+                        inside_body(px, py, x0, aw, ah, ear, r_body),
+                        "Плита выпирает из тела! x0={x0} aw={aw} ah={ah} ear={ear} r_body={r_body} r_dwm={r_dwm}: точка ({px}, {py}), плита: pl={pl} pr={pr} pb={pb}"
+                    );
+                }
+            }
+        }
     }
 }
