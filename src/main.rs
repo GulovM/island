@@ -31,6 +31,8 @@ mod we;
 mod update;
 mod state;
 mod app;
+#[cfg(feature = "gallery")]
+mod gallery;
 
 pub use app::{App, HotZone};
 
@@ -159,6 +161,11 @@ pub(crate) unsafe fn start_env_timer(hwnd: HWND, ms: u32) {
 
 
 fn main() {
+    #[cfg(feature = "gallery")]
+    if let Some(dir) = std::env::args().skip_while(|a| a != "--gallery").nth(1) {
+        gallery::run(std::path::Path::new(&dir));
+        return;
+    }
     log::init();
     if !sys::acquire_single_instance() {
         log::info("Island уже запущен, второй экземпляр завершается");

@@ -28,7 +28,7 @@ use calendar::MonthCache;
 use todo::RowAnim;
 
 /// Число циферблатов часов.
-const CLOCK_STYLES: usize = 5;
+pub const CLOCK_STYLES: usize = 5;
 /// Через сколько без действий выключается режим выбора циферблата.
 const CLOCK_PICK_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -46,7 +46,8 @@ const TODO: usize = 4;
 const MONTH_W: f32 = 230.0;
 const MONTH_H: f32 = 252.0;
 
-static CLOCK_SIZES: [Size; 2] = [sz(8, 6), sz(8, 10)];
+/// Часы: карточка, высокая и широкая — у каждого циферблата своя композиция под каждый размер.
+static CLOCK_SIZES: [Size; 3] = [sz(8, 6), sz(8, 10), sz(16, 6)];
 static WEATHER_SIZES: [Size; 3] = [sz(8, 4), sz(8, 6), sz(16, 4)];
 static WEEK_SIZES: [Size; 4] = [sz(16, 6), sz(16, 8), sz(24, 8), sz(16, 16)];
 static TIMER_SIZES: [Size; 3] = [sz(16, 4), sz(16, 8), sz(24, 8)];
@@ -321,9 +322,8 @@ impl Today {
 
     /// Часы: 5 циферблатов. Двойной клик включает режим выбора (подсветка и стрелки по бокам),
     /// стрелки и колесо мыши листают по кругу; клик мимо или бездействие выключают режим.
-    /// `size` 0 — компактная карточка (время в одну строку).
+    /// `size` — индекс в `CLOCK_SIZES`: у каждого циферблата своя композиция под каждый размер.
     unsafe fn clock_card(&mut self, ui: &mut Ui, cv: &Canvas, c: Rect, size: usize, t: &SYSTEMTIME, dow: usize) {
-        let f = &cv.g.fonts;
         cv.card(c);
         if self.clock_pick.is_some_and(|at| at.elapsed() >= CLOCK_PICK_TIMEOUT) || (ui.pressed && !ui.hovering(c)) {
             self.clock_pick = None;
@@ -360,9 +360,72 @@ impl Today {
                 self.clock_pick = Some(Instant::now());
             }
         }
-        self.clock_face(cv, c, t, size == 0);
-        let foot = format!("{} • {} {}", crate::i18n::weekdays()[dow], t.wDay, crate::i18n::months_short()[(t.wMonth as usize).clamp(1, 12) - 1]);
-        cv.text(&foot, Rect::new(c.x, c.bottom() - 20.0, c.w, 13.0), &f.small_c, dim());
+        if self.clock_style == 2 {
+            clock::aim_seconds(&mut self.sec_ring, t.wSecond);
+        }
+        self.clock_face(cv, c, t, size, dow);
+        if picking {
+            // Какой циферблат из скольких: точки на капсуле у нижнего края.
+            let (n, pitch) = (CLOCK_STYLES as f32, 7.0);
+            let pill = Rect::new(c.cx() - n * pitch / 2.0 - 4.0, c.bottom() - 11.0, n * pitch + 8.0, 9.0);
+            cv.rr(pill, pill.h / 2.0, crate::ui::chip_bg());
+            for k in 0..CLOCK_STYLES {
+                let x = pill.x + 4.0 + pitch * (k as f32 + 0.5);
+                let col = if k == self.clock_style { cv.accent } else { D2D1_COLOR_F { a: 0.35, ..dim() } };
+                cv.circle(x, pill.cy(), 2.0, col);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "gallery")]
+impl Today {
+    /// Демо-данные галереи: погода, календарь на сегодня, идущий таймер, задачи.
+    pub fn demo(&mut self, today: i64) {
+        use std::sync::Arc;
+        let at = |h: i64, m: i64| today * 1440 + h * 60 + m;
+        let ev = |h: i64, m: i64, mins: i64, title: &str| online::RawEvent {
+            start: at(h, m),
+            end: at(h, m) + mins,
+            all_day: false,
+            title: title.into(),
+            rrule: None,
+            exdates: Vec::new(),
+            uid: title.into(),
+        };
+        self.online.weather = Some(online::Weather { temp: 18.4, code: 1, city: "Душанбе".into() });
+        self.online.calendar_set = true;
+        self.online.cal = Arc::new(vec![
+            ev(9, 30, 30, "Планёрка команды"),
+            ev(12, 0, 60, "Обед с Алексеем"),
+            ev(15, 0, 45, "Созвон с дизайнерами"),
+            ev(18, 30, 90, "Тренировка"),
+        ]);
+        self.next = Some(online::Event { start: at(15, 0), all_day: false, title: "Созвон с дизайнерами".into() });
+        self.next_min = at(10, 9);
+        self.total = Duration::from_secs(5 * 60);
+        self.left = Duration::from_secs(3 * 60 + 25);
+        self.deadline = Some(Instant::now() + self.left);
+        self.preset = Some(1);
+        self.todo = vec![
+            (false, "Купить продукты на неделю".into()),
+            (true, "Отправить отчёт".into()),
+            (false, "Позвонить в банк насчёт новой карты и уточнить лимиты".into()),
+            (false, "Забрать посылку".into()),
+            (true, "Записаться к стоматологу".into()),
+        ];
+        self.anim = self.todo.iter().map(|(d, _)| RowAnim::new(*d, false)).collect();
+    }
+
+    pub fn set_clock_style(&mut self, s: usize) {
+        self.clock_style = s % CLOCK_STYLES;
+    }
+
+    /// Один виджет вне сетки: номер в `SPEC`, индекс размера и прямоугольник.
+    pub unsafe fn gallery(&mut self, ui: &mut Ui, cv: &Canvas, idx: usize, size: usize, rect: Rect, t: &SYSTEMTIME) {
+        let dow = (t.wDayOfWeek as usize + 6) % 7;
+        let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
+        self.widget(ui, cv, &Item { idx, size, rect }, None, t, today, dow);
     }
 }
 

@@ -122,9 +122,10 @@ impl Ui {
             tcv.text(sub, Rect::new(tx, rect.cy() + 1.0, tw, 11.0), &fonts.small, sub_c);
         }
         if chevron != Chevron::None {
-            if chevron == Chevron::Divided {
+            // В узкой плитке черта зажата между значком и стрелкой: она проявляется вместе с текстом.
+            if chevron == Chevron::Divided && full > 0.02 {
                 let mut c = fg;
-                c.a = 0.22;
+                c.a = 0.22 * full;
                 cv.rr(Rect::new(chev.x, rect.y + 8.0, 1.0, rect.h - 16.0), 0.5, c);
             }
             let mut c = fg;

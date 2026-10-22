@@ -32,6 +32,16 @@ pub(super) fn fmt_uptime(secs: u64) -> String {
     }
 }
 
+/// Когда включили компьютер: «с 19 окт, 06:52» по местному времени (`now_min` — минуты от 1970-01-01).
+pub(super) fn fmt_since(now_min: i64, uptime_s: u64) -> String {
+    let boot = now_min - (uptime_s / 60) as i64;
+    let (_, m, d) = crate::online::civil_from_days(boot.div_euclid(1440));
+    let t = boot.rem_euclid(1440);
+    let month = crate::i18n::months_short()[(m as usize).clamp(1, 12) - 1];
+    let when = if crate::i18n::en() { format!("{month} {d}") } else { format!("{d} {month}") };
+    format!("{} {when}, {:02}:{:02}", crate::i18n::pick("с", "since"), t / 60, t % 60)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -46,5 +56,8 @@ mod tests {
         assert_eq!(fmt_uptime(120), "2 мин");
         assert_eq!(fmt_bytes(1.5 * 1024.0 * 1024.0 * 1024.0), "1.5 ГБ");
         assert_eq!(fmt_bytes(820.0 * 1024.0 * 1024.0), "820 МБ");
+        // 2026-10-22 10:09 минус 3 д 4 ч 17 мин — 19 октября, 05:52.
+        let now = crate::online::days_from_civil(2026, 10, 22) * 1440 + 10 * 60 + 9;
+        assert_eq!(fmt_since(now, 3 * 86_400 + 4 * 3600 + 17 * 60), "с 19 окт, 05:52");
     }
 }

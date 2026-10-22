@@ -21,7 +21,7 @@ pub(super) struct RowAnim {
 }
 
 impl RowAnim {
-    fn new(done: bool, entering: bool) -> Self {
+    pub(super) fn new(done: bool, entering: bool) -> Self {
         let mut fade = Spring::unit(if entering { 0.0 } else { 1.0 }, 220.0, 24.0);
         fade.target = 1.0;
         let mut d = Spring::unit(done as u8 as f32, 260.0, 26.0);
@@ -60,9 +60,13 @@ impl Today {
         cv.card(card);
         let f = &cv.g.fonts;
         let done = self.todo.iter().filter(|(d, _)| *d).count();
-        cv.text("Задачи", Rect::new(card.x + 11.0, card.y + 12.0, 90.0, 14.0), &f.body, txt());
+        // Низкая карточка: шапка и поле ввода плотнее, чтобы поместились две задачи.
+        let compact = card.h < 160.0;
+        let (head, field_h, row_h, pad) = if compact { (28.0, 24.0, 25.0, 8.0) } else { (38.0, 28.0, 27.0, 10.0) };
+        let head_cy = card.y + head / 2.0 + 2.0;
+        cv.line("Задачи", &f.body, card.x + 12.0, 90.0, head_cy, crate::ui::Align::Leading, txt());
         // Счётчик «выполнено/всего» в кружке с дугой прогресса.
-        let (bx, by) = (card.right() - 21.0, card.y + 18.0);
+        let (bx, by) = (card.right() - 21.0, head_cy);
         cv.circle(bx, by, 9.0, chip_bg());
         if !self.todo.is_empty() {
             cv.ring(bx, by, 8.0, 1.4, done as f32 / self.todo.len() as f32, status_green());
@@ -71,7 +75,7 @@ impl Today {
 
         // Поле «добавить» внизу и золотая кнопка со стрелкой.
         let fid = id(TODAY, 30);
-        let field = Rect::new(card.x + 10.0, card.bottom() - 38.0, card.w - 20.0, 28.0);
+        let field = Rect::new(card.x + 10.0, card.bottom() - pad - field_h, card.w - 20.0, field_h);
         let editing = self.edit.is_some_and(|i| i < self.todo.len());
         if !editing {
             self.edit = None;
@@ -79,7 +83,7 @@ impl Today {
         let (hint, glyph) = if editing { ("Изменить задачу…", icon::EDIT) } else { ("Добавить задачу…", icon::ADD) };
         // Нажатие достаётся первой зарегистрированной области под курсором, поэтому кнопки поверх
         // поля регистрируются раньше него, а рисуются после.
-        let add = Rect::new(field.right() - 22.0, field.y + 5.0, 16.0, 16.0);
+        let add = Rect::new(field.right() - 22.0, field.cy() - 8.0, 16.0, 16.0);
         let cancel = Rect::new(add.x - 19.0, add.y, 16.0, 16.0);
         let (_, add_clicked) = ui.click_area(id(TODAY, 31), add);
         let cancel_clicked = editing && ui.click_area(id(TODAY, 32), cancel).1;
@@ -123,11 +127,14 @@ impl Today {
             }
         }
 
-        const ROW: f32 = 27.0;
+        let row = row_h;
         const GAP: f32 = 3.0;
         /// Длинная задача переносится максимум на столько строк, дальше — «…» (целиком — в правке).
         const MAX_LINES: usize = 3;
-        let view = Rect::new(card.x + 9.0, card.y + 38.0, card.w - 18.0, (card.h - 38.0 - 48.0).max(ROW));
+        // Видимая область — целое число строк: край следующей задачи не торчит из-под списка.
+        let avail = (field.y - pad / 2.0 - (card.y + head)).max(row);
+        let whole = ((avail + GAP) / (row + GAP)).floor().max(1.0);
+        let view = Rect::new(card.x + 9.0, card.y + head, card.w - 18.0, whole * (row + GAP) - GAP);
         let text_w = (view.w - 4.0 - 25.0 - 8.0).max(20.0);
         // Раскладка строк: (смещение, высота, число строк, высота строки текста).
         let mut rows: Vec<(f32, f32, usize, f32)> = Vec::with_capacity(self.todo.len());
@@ -135,7 +142,7 @@ impl Today {
         for (_, text) in &self.todo {
             let (lines, lh) = cv.wrapped(text, &f.wrap_l, text_w);
             let lines = lines.clamp(1, MAX_LINES);
-            let h = (lines as f32 * lh + 11.0).max(ROW);
+            let h = (lines as f32 * lh + 11.0).max(row);
             rows.push((total, h, lines, lh));
             total += h + GAP;
         }
@@ -166,7 +173,7 @@ impl Today {
             // Кнопки справа («изменить», «удалить») видны при наведении; их области регистрируются
             // раньше строки, иначе строка заберёт нажатие себе.
             let (eid, did) = (id(TODAY, 600 + i as u32), id(TODAY, 400 + i as u32));
-            let del = Rect::new(r.right() - 21.0, r.y + ROW / 2.0 - 9.0, 18.0, 18.0);
+            let del = Rect::new(r.right() - 21.0, r.y + row / 2.0 - 9.0, 18.0, 18.0);
             let edit = Rect::new(del.x - 20.0, del.y, 18.0, 18.0);
             let show = ui.hover_of(rid) > 0.3 || ui.hover_of(did) > 0.3 || ui.hover_of(eid) > 0.3;
             let (mut edit_clicked, mut del_clicked) = (false, false);
@@ -180,7 +187,7 @@ impl Today {
             if self.edit == Some(i) {
                 cv.rr_line(r, 8.0, crate::ui::hue(crate::ios::SysColor::Blue, cv.accent), 1.0);
             }
-            let (cx, cy) = (r.x + 13.0, r.y + ROW / 2.0);
+            let (cx, cy) = (r.x + 13.0, r.y + row / 2.0);
             // Отметка выполнения проявляется плавно: кольцо гаснет, зелёный круг с галочкой нарастает.
             if dn < 0.99 {
                 let ring = D2D1_COLOR_F { a: dim().a * (1.0 - dn), ..dim() };

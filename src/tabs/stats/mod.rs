@@ -24,10 +24,11 @@ use windows::Win32::System::Threading::GetSystemTimes;
 
 use crate::anim::Spring;
 use crate::online::{self, Online};
-use crate::ui::{chip_bg, dim, icon, ink, status_bar_green, status_green, status_violet, track, txt, Canvas, Rect, Ui};
+use crate::ios::SysColor;
+use crate::ui::{chip_bg, dim, hue, icon, ink, mix, status_bar_green, status_green, status_violet, track, txt, Align, Canvas, Rect, Ui};
 use crate::{icons, sys};
 
-use super::grid::Grid;
+use super::grid::{Grid, Item};
 use super::layout::{sz, Size, Spec, TabSpec};
 use super::{ago, id, STATS};
 
@@ -298,13 +299,17 @@ impl Stats {
     /// Рисует вкладку по сетке. `h` — высота панели без полосы правки.
     pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, _h: f32) {
         let area = grid.area(w);
-        grid.draw(ui, cv, area, 0, |ui, cv, it| match it.idx {
+        grid.draw(ui, cv, area, 0, |ui, cv, it| self.paint(ui, cv, it));
+    }
+
+    unsafe fn paint(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item) {
+        match it.idx {
             CPU | GPU | RAM => self.ring_card(cv, it.rect, it.size, it.idx),
             DISK | NET | UPTIME => self.info_card(cv, it.rect, it.size, it.idx),
-            TOP_APPS => self.top_apps(ui, cv, it.rect),
+            TOP_APPS => self.top_apps(ui, cv, it.rect, it.size),
             SPEEDTEST => self.speed_card(ui, cv, it.rect, it.size),
             _ => {}
-        });
+        }
     }
 
     /// Кольцо загрузки в трёх видах (`size` — индекс в `RING`): мини (кольцо и название), обычная
@@ -343,11 +348,15 @@ impl Stats {
         let pct = format!("{}%", (v * 100.0).round() as i32);
         match size {
             0 => {
-                let (rad, cx, cy) = (21.0, r.x + 12.0 + 21.0, r.cy());
+                let (rad, cx, cy) = (19.0, r.x + 12.0 + 19.0, r.cy());
                 cv.ring(cx, cy, rad, 4.0, v, col);
                 cv.text(&pct, Rect::new(cx - 19.0, cy - 7.0, 38.0, 14.0), &f.small_c, txt());
-                let tx = cx + rad + 8.0;
-                cv.text(name, Rect::new(tx, cy - 8.0, (r.right() - tx - 4.0).max(0.0), 16.0), &f.body, txt());
+                let tx = cx + rad + 9.0;
+                let tw = (r.right() - tx - 8.0).max(0.0);
+                // Название и короткая подробность: частота, видеопамять, занятая память.
+                let brief = if i == RAM { sub.clone() } else { chips.first().cloned().unwrap_or_default() };
+                cv.line(name, &f.body, tx, tw, cy - 6.0, Align::Leading, txt());
+                cv.line(&brief, &f.small, tx, tw, cy + 7.0, Align::Leading, dim());
             }
             1 => {
                 let (rx, ry) = (r.cx(), r.y + 46.0);
@@ -371,42 +380,85 @@ impl Stats {
         }
     }
 
-    /// Диск, сеть и аптайм: подпись и значение; в широкой карточке значение крупнее.
-    unsafe fn info_card(&self, cv: &Canvas, r: Rect, _size: usize, i: usize) {
+    /// Диск, сеть и аптайм. Узкая (120×72) — главное значение и одна подробность; широкая
+    /// (248×72) добавляет вторую колонку: свободное место, загрузку и отдачу рядом, число процессов.
+    unsafe fn info_card(&self, cv: &Canvas, r: Rect, size: usize, i: usize) {
         let f = &cv.g.fonts;
         let c = &self.cur;
-        let (label, value) = match i {
-            DISK => ("Диск C:", format!("{:.0} / {:.0} {}", c.disk_used / GB, c.disk_total / GB, crate::i18n::pick("ГБ", "GB"))),
-            NET => ("Сеть", format!("↓{}  ↑{}", fmt_rate(c.rx_bps), fmt_rate(c.tx_bps))),
-            _ => ("В работе", fmt_uptime(c.uptime_s)),
-        };
+        let wide = size > 0;
+        let iw = r.w - 2.0 * P;
+        let vy = r.y + 41.0;
         cv.card(r);
-        cv.text(label, Rect::new(r.x + 12.0, r.y + 15.0, r.w - 20.0, 11.0), &f.caps, dim());
-        // Значение — главное в карточке: крупным заголовком при любом размере (как виджеты iOS).
-        cv.text(&value, Rect::new(r.x + 12.0, r.y + 34.0, r.w - 18.0, 20.0), &f.title, txt());
+        match i {
+            DISK => {
+                let tint = hue(SysColor::Teal, cv.accent);
+                header(cv, r, icon::FOLDER, "Диск C:", tint);
+                let frac = if c.disk_total > 0.0 { c.disk_used / c.disk_total } else { 0.0 };
+                let used = format!("{:.0}", c.disk_used / GB);
+                let uw = cv.digits_w(&used, 22.0, 600);
+                cv.digits(&used, r.x + P - 1.0, uw + 4.0, vy, 22.0, 600, Align::Leading, txt());
+                let total = format!("{} {:.0} {}", crate::i18n::pick("из", "of"), c.disk_total / GB, crate::i18n::pick("ГБ", "GB"));
+                cv.line(&total, &f.small, r.x + P + uw + 4.0, iw - uw - 4.0, vy + 3.0, Align::Leading, dim());
+                if wide {
+                    let free = format!("{:.0} {}", (c.disk_total - c.disk_used).max(0.0) / GB, crate::i18n::pick("ГБ свободно", "GB free"));
+                    cv.line(&free, &f.small, r.x + P, iw, vy + 3.0, Align::Trailing, dim());
+                }
+                cv.progress(Rect::new(r.x + P, r.bottom() - P - 4.0, iw, 4.0), frac, tint);
+            }
+            NET => {
+                header(cv, r, icon::WIFI, "Сеть", hue(SysColor::Blue, cv.accent));
+                let down = hue(SysColor::Blue, cv.accent);
+                let up = hue(SysColor::Green, cv.accent);
+                let (rx, tx) = (fmt_rate(c.rx_bps), fmt_rate(c.tx_bps));
+                if wide {
+                    // Две колонки: подпись со стрелкой цвета направления, под ней значение.
+                    for (k, (arrow, label, value, col)) in [("↓ ", "Загрузка", &rx, down), ("↑ ", "Отдача", &tx, up)].into_iter().enumerate() {
+                        let x = r.x + P + k as f32 * iw / 2.0;
+                        let aw = cv.line(arrow, &f.small_b, x, 12.0, r.y + 35.0, Align::Leading, col);
+                        cv.line(label, &f.small, x + aw, iw / 2.0 - aw, r.y + 35.0, Align::Leading, dim());
+                        cv.line(value, &f.title, x, iw / 2.0 - 6.0, r.y + 53.0, Align::Leading, txt());
+                    }
+                } else {
+                    for (k, (arrow, value, col)) in [("↓", &rx, down), ("↑", &tx, up)].into_iter().enumerate() {
+                        let y = r.y + 39.0 + k as f32 * 17.0;
+                        let aw = cv.line(arrow, &f.body, r.x + P, 12.0, y, Align::Leading, col);
+                        cv.line(value, &f.body, r.x + P + aw + 2.0, iw - aw - 2.0, y, Align::Leading, txt());
+                    }
+                }
+            }
+            _ => {
+                header(cv, r, icon::POWER, "В работе", hue(SysColor::Indigo, cv.accent));
+                cv.line(&fmt_uptime(c.uptime_s), &f.num, r.x + P, iw, vy, Align::Leading, txt());
+                let since = fmt_since(online::now_local_minutes(), c.uptime_s);
+                cv.line(&since, &f.small, r.x + P, iw, r.bottom() - P - 4.0, Align::Leading, dim());
+                if wide {
+                    cv.digits(&c.procs.to_string(), r.x + P, iw, vy, 22.0, 600, Align::Trailing, txt());
+                    cv.line(crate::i18n::pick("процессов", "processes"), &f.small, r.x + P, iw, r.bottom() - P - 4.0, Align::Trailing, dim());
+                }
+            }
+        }
     }
 
-    unsafe fn top_apps(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect) {
+    unsafe fn top_apps(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect, _size: usize) {
         let f = &cv.g.fonts;
         cv.card(r);
-        let mode = if self.top_by_cpu { "CPU" } else { "RAM" };
-        cv.text(&format!("{} • {mode}", crate::i18n::pick("Топ приложений", "Top apps")), Rect::new(r.x + 12.0, r.y + 9.0, 140.0, 12.0), &f.small, dim());
-        let sw = Rect::new(r.right() - 46.0, r.y + 8.0, 36.0, 13.0);
-        let (_, clicked) = ui.click_area(id(STATS, 10), sw);
-        let other = if self.top_by_cpu { "RAM ⇄" } else { "CPU ⇄" };
-        cv.text(other, sw, &f.body_r, cv.accent);
-        if clicked {
-            self.top_by_cpu = !self.top_by_cpu;
-            crate::state::set_stats_top_by_cpu(self.top_by_cpu);
+        header(cv, r, icon::APPS, "Топ приложений", hue(SysColor::Purple, cv.accent));
+        // Переключатель метрики — сегмент из двух капсул справа в шапке.
+        for (k, (name, cpu)) in [("RAM", false), ("CPU", true)].into_iter().enumerate() {
+            let seg = Rect::new(r.right() - P - 64.0 + k as f32 * 33.0, r.y + 10.0, 31.0, 14.0);
+            if ui.chip(cv, id(STATS, 10 + 2 * k as u32), seg, name, self.top_by_cpu == cpu) && self.top_by_cpu != cpu {
+                self.top_by_cpu = cpu;
+                crate::state::set_stats_top_by_cpu(cpu);
+            }
         }
         let list = if self.top_by_cpu { &self.heavy.top_cpu } else { &self.heavy.top_ram };
         let max = list.first().map(|x| x.1).unwrap_or(0.0).max(1e-9);
-        let rows = (((r.h - 32.0) / 22.0).floor() as usize).clamp(1, 5);
+        let rows = (((r.h - 34.0) / 22.0).floor() as usize).clamp(1, 5);
         // Полосы — цветом выбранной метрики, как её кольцо: CPU синий, RAM зелёный.
         let bar_col = if self.top_by_cpu { crate::ui::hue(crate::ios::SysColor::Blue, cv.accent) } else { status_bar_green() };
         for (k, (name, v)) in list.iter().take(rows).enumerate() {
-            let y = r.y + 28.0 + k as f32 * 22.0;
-            let tile = Rect::new(r.x + 12.0, y, 19.0, 19.0);
+            let y = r.y + 32.0 + k as f32 * 22.0;
+            let tile = Rect::new(r.x + P, y, 19.0, 19.0);
             let bmp = self.heavy.app_icons.get(name).and_then(|px| {
                 let key = {
                     use std::hash::{Hash, Hasher};
@@ -435,56 +487,117 @@ impl Stats {
         }
     }
 
-    /// `size` — индекс в `SPEED_SIZES`: в компактном виде кнопка запуска уменьшается до «▶» справа
-    /// от чисел, в остальных — во всю ширину под ними.
+    /// Замер скорости. `size` — индекс в `SPEED_SIZES`: в узкой карточке (120×72) загрузка крупно,
+    /// отдача строкой под ней и круглая кнопка в шапке; в широких — обе скорости рядом и
+    /// кнопка-капсула справа.
     unsafe fn speed_card(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect, size: usize) {
         let f = &cv.g.fonts;
-        let compact = size == 0;
         cv.card(r);
         let sp = &self.online.speed;
-        let tight_y = r.h < 70.0;
-        let title_y = if tight_y { r.y + 5.0 } else { r.y + 8.0 };
-        cv.text("Скорость сети", Rect::new(r.x + 12.0, title_y, 90.0, 12.0), &f.small, dim());
-        let info = if sp.at > 0 {
-            let when = ago(sys::now_secs(), sp.at);
-            if sp.place.is_empty() { when } else { format!("{when} • {}", sp.place) }
-        } else {
-            "ещё не замеряли".into()
-        };
-        cv.text(&info, Rect::new(r.right() - 112.0, title_y, 100.0, 12.0), &f.small_r, dim());
+        header(cv, r, icon::BOLT, if size == 0 { "Скорость" } else { "Скорость сети" }, hue(SysColor::Cyan, cv.accent));
+        let iw = r.w - 2.0 * P;
         let num = |v: f32| if sp.at > 0 { format!("{:.0}", v) } else { "—".into() };
         let (d, u) = (num(sp.down), num(sp.up));
-        let digits = |t: &str| if sp.at > 0 { t.chars().count() as f32 * 8.6 + 3.0 } else { 22.0 };
-        let dw = digits(&d);
-        let num_y = if tight_y { r.y + 16.0 } else { r.y + 21.0 };
-        let sub_y = if tight_y { r.y + 22.0 } else { r.y + 28.0 };
-        cv.text(&d, Rect::new(r.x + 12.0, num_y, dw + 4.0, 22.0), &f.num, txt());
-        cv.text("Мбит/с ↓", Rect::new(r.x + 12.0 + dw, sub_y, 50.0, 12.0), &f.small, dim());
-        let nums_w = if compact { r.w - 46.0 } else { r.w };
-        let ux = r.x + 12.0 + nums_w / 2.0 - 8.0;
-        let uw = digits(&u);
-        cv.text(&u, Rect::new(ux, num_y, uw + 4.0, 22.0), &f.num, txt());
-        cv.text("Мбит/с ↑", Rect::new(ux + uw, sub_y, 50.0, 12.0), &f.small, dim());
-        let (label, btn) = if compact {
-            (if sp.running { "…" } else { "▶" }, Rect::new(r.right() - 44.0, num_y, 32.0, 20.0))
+        let unit = crate::i18n::pick("Мбит/с", "Mbps");
+        let vy = r.y + 44.0;
+        let (bg, fg) = if sp.running { (chip_bg(), dim()) } else { (cv.accent, ink()) };
+        let go;
+        if size == 0 {
+            let dw = cv.digits_w(&d, 22.0, 600);
+            cv.digits(&d, r.x + P - 1.0, dw + 4.0, vy - 3.0, 22.0, 600, Align::Leading, txt());
+            cv.line(&format!("{unit} ↓"), &f.small, r.x + P + dw + 4.0, iw - dw - 4.0, vy, Align::Leading, dim());
+            cv.line(&format!("{u} {unit} ↑"), &f.small, r.x + P, iw, r.bottom() - P - 4.0, Align::Leading, dim());
+            let btn = Rect::new(r.right() - P - 18.0, r.y + 8.0, 18.0, 18.0);
+            let (_, clicked) = ui.click_area(id(STATS, 11), btn);
+            let hv = ui.hover_of(id(STATS, 11));
+            cv.circle(btn.cx(), btn.cy(), 9.0, mix(bg, crate::ui::fg(), 0.08 * hv));
+            cv.glyph(if sp.running { icon::REFRESH } else { icon::PLAY_SOLID }, btn, false, fg);
+            go = clicked;
         } else {
-            let label = if sp.running {
-                "Идёт замер…"
-            } else if sp.failed {
-                "▶ Повторить замер"
+            let info = if sp.running {
+                crate::i18n::pick("идёт замер…", "testing…").to_string()
+            } else if sp.at > 0 {
+                let when = ago(sys::now_secs(), sp.at);
+                if sp.place.is_empty() { when } else { format!("{when} • {}", sp.place) }
             } else {
-                "▶ Замерить скорость"
+                crate::i18n::pick("ещё не замеряли", "not measured yet").to_string()
             };
-            let (by, bh) = if tight_y { (r.y + 35.0, 18.0) } else { (r.y + 49.0, 21.0) };
-            (label, Rect::new(r.x + 12.0, by, r.w - 24.0, bh))
-        };
-        let bg = if sp.running { chip_bg() } else { cv.accent };
-        let fg = if sp.running { dim() } else { ink() };
-        if ui.solid_button(cv, id(STATS, 11), btn, label, bg, fg, 8.0) && !sp.running {
+            cv.line(&info, &f.small, r.x + P + iw / 2.0, iw / 2.0, r.y + 17.0, Align::Trailing, dim());
+            let label = match (sp.running, sp.failed, size) {
+                (true, _, _) => crate::i18n::pick("Замер…", "Testing…"),
+                (_, true, _) => crate::i18n::pick("Повторить", "Retry"),
+                (_, _, 1) => crate::i18n::pick("Замерить", "Test"),
+                _ => crate::i18n::pick("Замерить скорость", "Run speed test"),
+            };
+            let bw = cv.text_w(label, &f.small_c) + 26.0;
+            let btn = Rect::new(r.right() - P - bw, vy - 11.0, bw, 22.0);
+            go = ui.solid_button(cv, id(STATS, 11), btn, label, bg, fg, 11.0);
+            // Загрузка и отдача: число крупно, единица со стрелкой мелко.
+            let col_w = ((btn.x - r.x - P - 8.0) / 2.0).min(120.0);
+            for (k, (v, arrow)) in [(&d, "↓"), (&u, "↑")].into_iter().enumerate() {
+                let x = r.x + P + k as f32 * col_w;
+                let vw = cv.digits_w(v, 22.0, 600);
+                cv.digits(v, x - 1.0, vw + 4.0, vy, 22.0, 600, Align::Leading, txt());
+                cv.line(&format!("{unit} {arrow}"), &f.small, x + vw + 4.0, col_w - vw - 8.0, vy + 3.0, Align::Leading, dim());
+            }
+        }
+        if go && !sp.running {
             online::run_speedtest();
         }
-        let _ = icon::PLAY;
     }
+}
+
+#[cfg(feature = "gallery")]
+impl Stats {
+    /// Демо-данные галереи: типичная нагрузка ноутбука, топ программ, последний замер скорости.
+    pub fn demo(&mut self) {
+        let c = &mut self.cur;
+        c.cpu = 0.34;
+        c.mhz = 3400;
+        c.ram_used = 11.2 * GB;
+        c.ram_total = 16.0 * GB;
+        c.disk_used = 312.0 * GB;
+        c.disk_total = 476.0 * GB;
+        c.procs = 241;
+        c.uptime_s = 3 * 86400 + 4 * 3600 + 17 * 60;
+        c.rx_bps = 2.4e6;
+        c.tx_bps = 180e3;
+        self.cpu_name = "AMD Ryzen 7 5800H".into();
+        let gb = f64::from(GB);
+        let h = &mut self.heavy;
+        h.gpu = Some(0.18);
+        h.gpu_name = "NVIDIA GeForce RTX 3060 Laptop GPU".into();
+        h.vram_used = 2.1 * gb;
+        h.vram_total = 6.0 * gb;
+        h.top_ram = vec![
+            ("Google Chrome".into(), 2.8 * gb),
+            ("Visual Studio Code".into(), 1.4 * gb),
+            ("Telegram Desktop".into(), 0.62 * gb),
+            ("Проводник".into(), 0.31 * gb),
+            ("Spotify".into(), 0.24 * gb),
+        ];
+        for (ring, v) in self.rings.iter_mut().zip([0.34, 0.18, 0.70]) {
+            ring.target = v;
+            ring.value = v;
+        }
+        self.online.speed = online::Speed { down: 94.6, up: 41.2, place: "FRA".into(), at: sys::now_secs() - 300, running: false, failed: false };
+    }
+
+    /// Один виджет вне сетки: номер в `SPEC`, индекс размера и прямоугольник.
+    pub unsafe fn gallery(&mut self, ui: &mut Ui, cv: &Canvas, idx: usize, size: usize, rect: Rect) {
+        self.paint(ui, cv, &Item { idx, size, rect });
+    }
+}
+
+/// Внутренний отступ карточек вкладки.
+const P: f32 = 12.0;
+
+/// Шапка карточки: значок цвета метрики и название прописными (как подписи виджетов iOS).
+unsafe fn header(cv: &Canvas, r: Rect, glyph: &str, title: &str, tint: D2D1_COLOR_F) {
+    let cy = r.y + 17.0;
+    cv.symbol(glyph, Rect::new(r.x + P, cy - 6.0, 12.0, 12.0), 11.0, tint);
+    let title = crate::i18n::tr(title).to_uppercase();
+    cv.line(&title, &cv.g.fonts.caps, r.x + P + 16.0, r.w - 2.0 * P - 16.0, cy, Align::Leading, dim());
 }
 
 /// Ширина ряда плашек.

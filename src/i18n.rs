@@ -119,6 +119,26 @@ pub fn months_full() -> [&'static str; 12] {
     }
 }
 
+/// Полные названия дней недели с понедельника.
+pub fn weekdays_full() -> [&'static str; 7] {
+    if en() {
+        ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    } else {
+        ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+    }
+}
+
+/// Месяц в дате: «22 октября» (родительный падеж) / «October 22».
+pub fn day_month(day: u32, month: u32) -> String {
+    let m = (month as usize).clamp(1, 12) - 1;
+    if en() {
+        format!("{} {day}", months_full()[m])
+    } else {
+        const GEN: [&str; 12] = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+        format!("{day} {}", GEN[m])
+    }
+}
+
 /// «5 мин назад» / «5 min ago».
 pub fn ago_long(d: u64) -> String {
     if en() {

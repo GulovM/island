@@ -4,9 +4,31 @@ use std::time::{Duration, Instant};
 
 use super::Today;
 use crate::tabs::{id, TODAY};
-use crate::ui::{chip_bg, dim, icon, ink, status_orange, txt, Canvas, Rect, Submit, Ui};
+use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
+
+use crate::ui::{chip_bg, dim, icon, ink, mix, status_orange, txt, Align, Canvas, Rect, Submit, Ui};
 
 const PRESETS: [u32; 5] = [1, 5, 10, 15, 20];
+
+/// Время таймера: «03:25» или «1:02:05».
+fn clock_label(secs: u64) -> String {
+    if secs >= 3600 {
+        format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
+    } else {
+        format!("{:02}:{:02}", secs / 60, secs % 60)
+    }
+}
+
+/// Круглая кнопка со значком (пуск, сброс). `true` — нажата.
+#[allow(clippy::too_many_arguments)]
+unsafe fn round_button(ui: &mut Ui, cv: &Canvas, id: u32, cx: f32, cy: f32, rad: f32, glyph: &str, fill: D2D1_COLOR_F, fg: D2D1_COLOR_F) -> bool {
+    let r = Rect::new(cx - rad, cy - rad, 2.0 * rad, 2.0 * rad);
+    let (_, clicked) = ui.click_area(id, r);
+    let hv = ui.hover_of(id);
+    cv.circle(cx, cy, rad, mix(fill, crate::ui::fg(), 0.08 * hv));
+    cv.glyph(glyph, r, false, fg);
+    clicked
+}
 
 /// Число из текста поля: берутся только цифры, пусто — 0.
 fn parse_num(s: &str) -> u32 {
@@ -115,7 +137,7 @@ impl Today {
         let rem = self.remaining();
         let frac = if self.total.is_zero() { 0.0 } else { rem.as_secs_f32() / self.total.as_secs_f32() };
         self.ring.target = frac.clamp(0.0, 1.0);
-        let (cx, cy) = if compact { (tm.x + ox + 42.0, tm.cy()) } else { (tm.x + ox + 40.0, tm.y + 62.0) };
+        let (cx, cy) = (tm.x + ox + 40.0, tm.y + 54.0);
         // Поля времени (ч, мин, с): ввод цифр, Enter или уход из поля применяет.
         let tf = [id(TODAY, 110), id(TODAY, 111), id(TODAY, 112)];
         let focused = (0..3).find(|&k| ui.has_focus(tf[k]));
@@ -143,34 +165,46 @@ impl Today {
             // Полей времени в этом виде нет: ввод завершается (значение применится в следующем кадре).
             ui.blur();
         }
-        let radius = if compact { 22.0 } else { 24.0 };
-        cv.ring(cx, cy, radius, 3.0, self.ring.value, status_orange());
         let secs = rem.as_secs_f32().ceil() as u64;
-        let label = if secs >= 3600 {
-            format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
-        } else {
-            format!("{:02}:{:02}", secs / 60, secs % 60)
-        };
-        // Оставшееся время — крупными табличными цифрами: главное в карточке.
-        cv.text(&label, Rect::new(cx - 24.0, cy - 10.0, 48.0, 20.0), &f.title_c, txt());
-        if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(tm.x + ox + 5.0, tm.y + 5.0, 16.0, 16.0), icon::RINGER, self.sound, status_orange()) {
-            self.sound = !self.sound;
-            self.save_timer();
-        }
+        let label = clock_label(secs);
+        let orange = status_orange();
 
         if compact {
-            let by = tm.cy() - 13.0;
-            let bx = tm.x + ox + 78.0;
-            let start = if self.deadline.is_some() { "Пауза" } else { "Старт" };
-            if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, by, 68.0, 26.0), start, status_orange(), ink(), 6.0) {
+            // Полоса 248×56: кольцо, остаток крупно и «из 05:00», справа круглые кнопки.
+            const P: f32 = 12.0;
+            let r = tm.h / 2.0 - 10.0;
+            let (rx, cy) = (tm.x + P + r, tm.cy());
+            cv.ring(rx, cy, r, 3.0, self.ring.value, orange);
+            cv.glyph(icon::CLOCK, Rect::new(rx - 8.0, cy - 8.0, 16.0, 16.0), false, orange);
+            let tx = rx + r + 10.0;
+            cv.digits(&label, tx - 1.0, 90.0, cy - 6.0, 22.0, 600, Align::Leading, txt());
+            let of = format!("{} {}", crate::i18n::pick("из", "of"), clock_label(self.total.as_secs()));
+            cv.line(&of, &f.small, tx, 90.0, cy + 13.0, Align::Leading, dim());
+            let reset_x = tm.right() - P - 14.0;
+            let run_x = reset_x - 34.0;
+            let run_icon = if self.deadline.is_some() { icon::PAUSE } else { icon::PLAY_SOLID };
+            if round_button(ui, cv, id(TODAY, 40), run_x, cy, 14.0, run_icon, orange, crate::ui::on_color(orange)) {
                 self.toggle_run();
             }
-            if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + 74.0, by, 68.0, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
+            if round_button(ui, cv, id(TODAY, 41), reset_x, cy, 14.0, icon::RESTART, chip_bg(), txt()) {
                 self.left = self.total;
                 self.deadline = None;
                 self.save_timer();
             }
+            if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(run_x - 14.0 - 26.0, cy - 10.0, 20.0, 20.0), icon::RINGER, self.sound, orange) {
+                self.sound = !self.sound;
+                self.save_timer();
+            }
             return;
+        }
+
+        cv.ring(cx, cy, 25.0, 3.5, self.ring.value, orange);
+        // Оставшееся время — крупными табличными цифрами: главное в карточке.
+        cv.text(&label, Rect::new(cx - 25.0, cy - 10.0, 50.0, 20.0), &f.title_c, txt());
+        // Звук сигнала — под кольцом, по его оси.
+        if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(cx - 9.0, tm.y + 94.0, 18.0, 18.0), icon::RINGER, self.sound, orange) {
+            self.sound = !self.sound;
+            self.save_timer();
         }
 
         // Часы, минуты, секунды: поле ввода; колесо мыши меняет значение.

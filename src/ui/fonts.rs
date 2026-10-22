@@ -83,6 +83,14 @@ pub const FORMAT_ROLE_MAP: &[(&str, Option<TextRole>, f32, u32)] = &[
     ("icon_big", None, 12.0, 400),
 ];
 
+/// Выравнивание строки в формате `Fonts::display`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Align {
+    Leading,
+    Center,
+    Trailing,
+}
+
 /// Накладывает добавочный трекинг (letter-spacing) на текстовую раскладку DirectWrite.
 /// Для сужения текста передаётся отрицательный `trailingSpacing`.
 pub unsafe fn apply_tracking(layout: &IDWriteTextLayout, tracking: f32, len: u32) {
@@ -133,7 +141,10 @@ pub struct Fonts {
     /// Добавочный трекинг (letter-spacing) в пикселях по указателю формата (`as_raw() as usize`).
     tracking: RefCell<HashMap<usize, f32>>,
     /// Форматы с табличными цифрами (`tnum`) по указателю.
-    tabular: std::collections::HashSet<usize>,
+    tabular: RefCell<std::collections::HashSet<usize>>,
+    /// Семейство крупных цифр (Display) и сделанные по месту форматы `display` по (кегль×4, вес, выравнивание).
+    display_family: windows::core::PCWSTR,
+    sized: RefCell<HashMap<(u32, u32, u8), IDWriteTextFormat>>,
     /// Готовые раскладки текста: `DrawText` строит её заново при каждом вызове, а в кадре
     /// десятки строк, которые не меняются от кадра к кадру.
     layouts: RefCell<HashMap<u64, (String, IDWriteTextLayout)>>,
@@ -326,7 +337,7 @@ impl Fonts {
         reg_track(&wrap_l, ios::tracking_px(TextRole::Subheadline, 8.0));
 
         // Табличные цифры там, где числа меняются на глазах: проценты, время, скорость, часы.
-        let tabular = [&small_r, &body_r, &caps_c, &title_c, &num, &num_c, &big_c].iter().map(|t| t.as_raw() as usize).collect();
+        let tabular = RefCell::new([&small_r, &body_r, &caps_c, &title_c, &num, &num_c, &big_c].iter().map(|t| t.as_raw() as usize).collect());
 
         Ok(Fonts {
             factory: f.clone(),
@@ -351,8 +362,32 @@ impl Fonts {
             icon_big,
             tracking: RefCell::new(tracking),
             tabular,
+            display_family: display,
+            sized: RefCell::new(HashMap::new()),
             layouts: RefCell::new(HashMap::new()),
         })
+    }
+
+    /// Крупные цифры виджетов (часы, температура, перекидные плитки): Display нужного кегля и веса
+    /// с табличными цифрами и сужающим трекингом. Формат создаётся один раз и берётся из кэша;
+    /// если DirectWrite отказал — запасной `big_c`.
+    pub unsafe fn display(&self, size: f32, weight: u32, align: Align) -> IDWriteTextFormat {
+        let key = ((size * 4.0).round() as u32, weight, align as u8);
+        if let Some(t) = self.sized.borrow().get(&key) {
+            return t.clone();
+        }
+        let made = fmt_var(&self.factory, self.display_family, weight, size, align == Align::Center).and_then(|t| {
+            if align == Align::Trailing {
+                t.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+            }
+            Ok(t)
+        });
+        let Ok(t) = made else { return self.big_c.clone() };
+        // Чем крупнее цифры, тем плотнее их ставят (SF Pro Display): −1,5 % кегля.
+        self.register_tracking(&t, -0.015 * size);
+        self.tabular.borrow_mut().insert(t.as_raw() as usize);
+        self.sized.borrow_mut().insert(key, t.clone());
+        t
     }
 
     /// Регистрирует добавочный трекинг в пикселях для внешнего формата (например, подписей вкладок).
@@ -395,7 +430,7 @@ impl Fonts {
             map.clear();
         }
         let tracking = self.tracking_for(f);
-        let tabular = self.tabular.contains(&(f.as_raw() as usize));
+        let tabular = self.tabular.borrow().contains(&(f.as_raw() as usize));
         let layout = crate::sys::with_utf16(s, |wide| -> Result<IDWriteTextLayout> {
             let layout = self.factory.CreateTextLayout(wide, f, w, h)?;
             let range = DWRITE_TEXT_RANGE { startPosition: 0, length: wide.len() as u32 };

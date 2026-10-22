@@ -7,7 +7,7 @@ use windows_numerics::Matrix3x2;
 
 use crate::gfx::Gfx;
 use super::color::{bare, card, chip_bg, hairline, track, txt};
-use super::fonts::{cover_transform, ellipsize_units};
+use super::fonts::{cover_transform, ellipsize_units, Align};
 use super::geom::{pt, Rect};
 
 /// Рисование одного слоя содержимого: общая прозрачность и акцентный цвет.
@@ -136,6 +136,35 @@ impl Canvas<'_> {
             let _ = layout.SetStrikethrough(strike, range);
             self.g.dc.DrawTextLayout(pt(r.x, r.y), &layout, &self.g.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
+    }
+
+    /// Крупные цифры формата `Fonts::display`: `cy` — середина самих цифр (а не строки), поэтому
+    /// числа разных кеглей ровно встают по одной оси. `x`/`w` — полоса для выравнивания.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn digits(&self, s: &str, x: f32, w: f32, cy: f32, size: f32, weight: u32, align: Align, c: D2D1_COLOR_F) {
+        let f = self.g.fonts.display(size, weight, align);
+        // Строка Segoe UI Variable ≈ 1,33 кегля, середина цифр — на 0,73 кегля от её верха.
+        self.text(s, Rect::new(x, cy - 0.73 * size, w, 1.33 * size), &f, c);
+    }
+
+    /// Ширина строки цифр формата `Fonts::display(size, weight)`.
+    pub unsafe fn digits_w(&self, s: &str, size: f32, weight: u32) -> f32 {
+        self.text_w(s, &self.g.fonts.display(size, weight, Align::Leading))
+    }
+
+    /// Строка формата `f` (выровненного по левому краю) с серединой на `cy`, выровненная в полосе
+    /// `x..x + w`; не влезающее обрезается многоточием. Возвращает ширину текста.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn line(&self, s: &str, f: &IDWriteTextFormat, x: f32, w: f32, cy: f32, align: Align, c: D2D1_COLOR_F) -> f32 {
+        let tw = (self.text_w(s, f) + 2.0).min(w.max(0.0));
+        let left = match align {
+            Align::Leading => x,
+            Align::Center => x + (w - tw) / 2.0,
+            Align::Trailing => x + w - tw,
+        };
+        let h = f.GetFontSize() * 1.6;
+        self.text(s, Rect::new(left, cy - h / 2.0, tw, h), f, c);
+        tw
     }
 
     pub unsafe fn text_w(&self, s: &str, f: &IDWriteTextFormat) -> f32 {

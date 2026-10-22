@@ -785,6 +785,40 @@ impl Controls {
     }
 }
 
+#[cfg(feature = "gallery")]
+impl Controls {
+    /// Демо-данные галереи: Wi-Fi и ночной свет включены, Bluetooth выключен, играет трек.
+    pub fn demo(&mut self) {
+        self.wifi = true;
+        self.ssid = Some("Home-5G".into());
+        self.bluetooth = false;
+        self.dark = false;
+        self.night = Some(true);
+        self.volume = 0.62;
+        self.brightness = 0.8;
+        self.audio = Some("Наушники AirPods".into());
+        self.media = Some(Media {
+            title: "Blinding Lights".into(),
+            artist: "The Weeknd".into(),
+            playing: true,
+            pos: 74.0,
+            dur: 200.0,
+            at: Instant::now(),
+            rate: 0.0,
+            art: None,
+            key: 1,
+            can_seek: true,
+            min_seek: 0.0,
+            max_seek: 200.0,
+        });
+    }
+
+    /// Один виджет вне сетки: номер в `SPEC`, индекс размера и прямоугольник.
+    pub unsafe fn gallery(&mut self, ui: &mut Ui, cv: &Canvas, idx: usize, size: usize, rect: Rect) {
+        self.paint(ui, cv, &Item { idx, size, rect });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

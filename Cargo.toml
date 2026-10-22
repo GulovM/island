@@ -1,6 +1,6 @@
 [package]
 name = "island"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 description = "Dynamic island for Windows 10/11: a GPU-drawn notch at the top of the screen"
 license = "MIT"
@@ -84,6 +84,11 @@ features = [
     "Win32_System_WinRT_Composition",
     "Win32_System_WinRT_Graphics_Direct2D",
 ]
+
+[features]
+# Галерея виджетов для проверки дизайна: `cargo run --features gallery -- --gallery <папка>`
+# рисует все виджеты во всех размерах в PNG. В обычную сборку не входит.
+gallery = []
 
 [profile.release]
 opt-level = 3

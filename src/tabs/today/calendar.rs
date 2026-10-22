@@ -251,9 +251,12 @@ impl Today {
         let (y, m, d) = civil_from_days(today);
         let dates = week_dates(y, m, d);
         let monday = today - dow as i64;
-        cv.text("Эта неделя", Rect::new(wk.x + 9.0, wk.y + 10.0, 110.0, 14.0), &f.body, txt());
+        // В низкой карточке (только дни) ряды разнесены по всей высоте, иначе под ними — событие.
+        let low = size == 0 || wk.h < 90.0;
+        let head_cy = wk.y + if low { 17.0 } else { 16.0 };
+        let tw = cv.line("Эта неделя", &f.body, wk.x + 12.0, 120.0, head_cy, crate::ui::Align::Leading, txt());
         // Раскрыть месяц.
-        if ui.icon_button(cv, id(TODAY, 90), Rect::new(wk.x + 80.0, wk.y + 8.0, 18.0, 18.0), icon::DOWN, false) {
+        if ui.icon_button(cv, id(TODAY, 90), Rect::new(wk.x + 12.0 + tw + 1.0, head_cy - 9.0, 18.0, 18.0), icon::DOWN, false) {
             self.open_month(today);
         }
         let range = format!(
@@ -263,11 +266,14 @@ impl Today {
             dates[6].0,
             crate::i18n::months_short()[(dates[6].1 as usize).clamp(1, 12) - 1]
         );
-        cv.text(&range, Rect::new(wk.right() - 111.0, wk.y + 10.0, 100.0, 14.0), &f.small_r, dim());
+        cv.text(&range, Rect::new(wk.right() - 112.0, head_cy - 7.0, 100.0, 14.0), &f.small_r, dim());
+        let (label_cy, day_cy) = if low { (wk.y + 41.0, wk.y + 64.0) } else { (wk.y + 34.0, wk.y + 54.0) };
         for (i, (day, _)) in dates.iter().enumerate() {
-            let cx = wk.x + 23.0 + i as f32 * (wk.w - 46.0) / 6.0;
-            cv.text(crate::i18n::weekdays()[i], Rect::new(cx - 14.0, wk.y + 28.0, 28.0, 12.0), &f.small_c, dim());
-            let b = Rect::new(cx - 12.5, wk.y + 43.0, 25.0, 23.0);
+            let cx = wk.x + 24.0 + i as f32 * (wk.w - 48.0) / 6.0;
+            // Выходные приглушены сильнее будней, как в Календаре iOS.
+            let wd = if i >= 5 { mix(dim(), crate::ui::card(), 0.3) } else { dim() };
+            cv.text(crate::i18n::weekdays()[i], Rect::new(cx - 14.0, label_cy - 6.0, 28.0, 12.0), &f.small_c, wd);
+            let b = Rect::new(cx - 11.5, day_cy - 11.5, 23.0, 23.0);
             let is_today = i == dow;
             // Клик по дню открывает месяц с выбранным днём.
             let cid = id(TODAY, 80 + i as u32);
@@ -276,9 +282,9 @@ impl Today {
             // Сегодня — красным, как в Календаре iOS (в стиле Windows — акцент).
             let cal = crate::ui::hue(crate::ios::SysColor::Red, cv.accent);
             if is_today {
-                cv.rr(b, 5.0, cal);
+                cv.circle(b.cx(), b.cy(), b.h / 2.0, cal);
             } else if hv > 0.01 {
-                cv.rr(b, 5.0, D2D1_COLOR_F { a: 0.07 * hv, ..fg() });
+                cv.circle(b.cx(), b.cy(), b.h / 2.0, D2D1_COLOR_F { a: 0.07 * hv, ..fg() });
             }
             cv.text(&day.to_string(), b, &f.body_c, if is_today { crate::ui::on_color(cal) } else { txt() });
             if clicked {
@@ -287,7 +293,7 @@ impl Today {
         }
 
         // Ближайшее событие или расширенный список (в низкой карточке компактного размера их нет).
-        if size == 0 || wk.h < 90.0 {
+        if low {
             return;
         }
 
