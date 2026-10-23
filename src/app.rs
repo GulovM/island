@@ -407,6 +407,7 @@ impl App {
         self.cfg.tabs = new.tabs;
         self.cfg.hidden_tabs = new.hidden_tabs;
         self.cfg.strip_over_maximized = new.strip_over_maximized;
+        self.cfg.always_strip = new.always_strip;
         self.cfg.idle_face = new.idle_face;
         self.cfg.todo_clean_done = new.todo_clean_done;
         self.cfg.auto_update = new.auto_update;

@@ -44,6 +44,7 @@ const N_OPACITY: u32 = 19;
 const N_PRESET: u32 = 20;
 const N_ACCENT_PILL: u32 = 26;
 const N_TODO_CLEAN: u32 = 110;
+const N_COLLAPSED: u32 = 115;
 /// Занимает два номера подряд (27–28) — по числу `PALETTE_STYLES`.
 const N_PALETTE_STYLE: u32 = 27;
 /// Занимает три номера подряд (30–32) — по числу `SECTIONS`.
@@ -757,6 +758,21 @@ impl Settings {
             self.changed = true;
         }
         y += 24.0;
+        // Режим свёрнутого острова: «Авто» — чёлка (полоска только над окнами на весь экран), «Полоска» — всегда.
+        cv.text("Свёрнутый остров", Rect::new(x, y, 130.0, 18.0), &f.body, txt());
+        let modes = [("Авто", false), ("Всегда полоска", true)];
+        let widths: Vec<f32> = modes.iter().map(|&(label, _)| cv.chip_w(label)).collect();
+        let mut cx = lc.right() - 10.0 - crate::ui::chips_total_width(&widths, 4.0);
+        for (k, &(label, strip)) in modes.iter().enumerate() {
+            if ui.chip(cv, id(SETTINGS, N_COLLAPSED + k as u32), Rect::new(cx, y, widths[k], 18.0), label, self.cfg.always_strip == strip) {
+                self.cfg.always_strip = strip;
+                self.changed = true;
+            }
+            cx += widths[k] + 4.0;
+        }
+        y += 18.0;
+        cv.text("Авто: чёлка с плеером и временем, полоска — над окнами на весь экран", Rect::new(x, y, iw, 13.0), &f.small, dim());
+        y += 22.0;
         cv.text("Над окнами на весь экран — полоска", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
         let mut strip = self.cfg.strip_over_maximized;
         if ui.switch(cv, id(SETTINGS, N_STRIP), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut strip, true) {
@@ -953,6 +969,7 @@ mod tests {
             (N_PRESET, PRESETS.len() as u32),
             (N_ACCENT_PILL, 1),
             (N_TODO_CLEAN, 1),
+            (N_COLLAPSED, 2),
             (N_PALETTE_STYLE, PALETTE_STYLES.len() as u32),
             (N_SECTION, SECTIONS.len() as u32),
             (N_MATERIAL, MATERIALS.len() as u32),

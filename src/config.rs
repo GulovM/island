@@ -72,6 +72,11 @@ language = "auto"
 # (раскрывается при наведении на верхний край), чтобы не закрывать вкладки браузера
 strip_over_maximized = 1
 
+# Режим свёрнутого острова: "auto" — обычная чёлка, полоска только над окнами на весь экран
+# (если включено выше); "strip" — всегда тонкая полоска, без мини-плеера и времени.
+# Меняется и в Настройках.
+collapsed_mode = "auto"
+
 # Скрытые вкладки (список имён из tabs ниже)
 hidden_tabs = []
 
@@ -163,6 +168,8 @@ pub struct Config {
     pub ui_scale: f32,
     /// Над развёрнутыми окнами остров сжимается в тонкую полоску.
     pub strip_over_maximized: bool,
+    /// Свёрнутый остров всегда тонкая полоска (`collapsed_mode = "strip"`).
+    pub always_strip: bool,
     /// `auto`, `ru` или `en`.
     pub language: String,
     /// Имена скрытых вкладок.
@@ -212,6 +219,7 @@ impl Default for Config {
             accent_pill: false,
             ui_scale: DEFAULT_SCALE,
             strip_over_maximized: true,
+            always_strip: false,
             language: "auto".to_string(),
             hidden_tabs: Vec::new(),
             idle_face: true,
@@ -298,6 +306,7 @@ fn save_updates(cfg: &Config, names: &[&str]) -> Vec<(&'static str, String)> {
         ("accent_pill", (cfg.accent_pill as u8).to_string()),
         ("ui_scale_percent", format!("{}", cfg.ui_scale.round() as i32)),
         ("strip_over_maximized", (cfg.strip_over_maximized as u8).to_string()),
+        ("collapsed_mode", fmt_str(if cfg.always_strip { "strip" } else { "auto" })),
         ("language", fmt_str(&cfg.language)),
         ("tabs", fmt_list(&order)),
         ("hidden_tabs", fmt_list(&cfg.hidden_tabs)),
@@ -543,6 +552,7 @@ fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
         "accent_pill",
         "ui_scale_percent",
         "strip_over_maximized",
+        "collapsed_mode",
         "language",
         "tabs",
         "hidden_tabs",
@@ -623,6 +633,7 @@ pub fn parse(text: &str) -> Config {
             ("", "ui_scale", _) => {}
             ("", "ui_scale_percent", Value::Num(v)) => cfg.ui_scale = (v as f32).clamp(MIN_SCALE, MAX_SCALE),
             ("", "strip_over_maximized", Value::Num(v)) => cfg.strip_over_maximized = v != 0.0,
+            ("", "collapsed_mode", Value::Str(s)) => cfg.always_strip = s.trim().eq_ignore_ascii_case("strip"),
             ("", "language", Value::Str(s)) => {
                 cfg.language = match s.trim().to_lowercase().as_str() {
                     l @ ("ru" | "en") => l.to_string(),
@@ -1118,6 +1129,20 @@ gmail = \"https://mail.google.com\"
         assert!(!parse("todo_clean_done = 0
 ").todo_clean_done);
         assert!(!parse(DEFAULT_TEMPLATE).todo_clean_done);
+    }
+
+    #[test]
+    fn collapsed_mode_key_parses() {
+        assert!(!Config::default().always_strip);
+        assert!(parse("collapsed_mode = \"strip\"
+").always_strip);
+        assert!(parse("collapsed_mode = \"STRIP\"
+").always_strip);
+        assert!(!parse("collapsed_mode = \"auto\"
+").always_strip);
+        assert!(!parse("collapsed_mode = \"мусор\"
+").always_strip);
+        assert!(!parse(DEFAULT_TEMPLATE).always_strip);
     }
 
     #[test]
