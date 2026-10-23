@@ -174,7 +174,13 @@ impl Canvas<'_> {
                 return m.widthIncludingTrailingWhitespace.ceil();
             }
         }
-        s.chars().count() as f32 * 4.6
+        let tr_s = crate::i18n::tr(s);
+        tr_s.chars().count() as f32 * 4.6
+    }
+
+    /// Ширина пилюльки (чипа) по тексту: измеренная ширина шрифтом `small_c` + постоянный отступ `CHIP_PAD`.
+    pub unsafe fn chip_w(&self, label: &str) -> f32 {
+        super::chip_width(self.text_w(label, &self.g.fonts.small_c))
     }
 
     /// Плашка клавиши («Ctrl P») и подпись после неё. Возвращает общую ширину.

@@ -25,6 +25,22 @@ pub struct TileHit {
     pub chevron: bool,
 }
 
+/// Стандартный боковой отступ текста внутри пилюльки (чипа): 8 px слева и 8 px справа.
+pub const CHIP_PAD: f32 = 16.0;
+
+/// Ширина пилюльки (чипа) по измеренной ширине текста: ширина текста + постоянный отступ `CHIP_PAD`.
+pub fn chip_width(text_w: f32) -> f32 {
+    text_w + CHIP_PAD
+}
+
+/// Суммарная ширина ряда пилюлек с заданным шагом (`gap`) между ними.
+pub fn chips_total_width(widths: &[f32], gap: f32) -> f32 {
+    if widths.is_empty() {
+        return 0.0;
+    }
+    widths.iter().sum::<f32>() + gap * (widths.len() - 1) as f32
+}
+
 impl Ui {
     // --- примитивы ---
 
@@ -589,5 +605,17 @@ mod tests {
         assert!((p1.cy() - r.cy()).abs() < 1e-5);
         assert!((p1.w - 97.0).abs() < 1e-5);
         assert!((p1.h - 38.8).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_chip_width_and_total_width() {
+        assert_eq!(CHIP_PAD, 16.0);
+        assert_eq!(chip_width(40.0), 56.0);
+        assert_eq!(chip_width(0.0), 16.0);
+
+        assert_eq!(chips_total_width(&[], 4.0), 0.0);
+        assert_eq!(chips_total_width(&[44.0], 4.0), 44.0);
+        assert_eq!(chips_total_width(&[56.0, 44.0], 4.0), 104.0);
+        assert_eq!(chips_total_width(&[10.0, 20.0, 30.0], 5.0), 70.0);
     }
 }

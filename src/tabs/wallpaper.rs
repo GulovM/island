@@ -338,7 +338,7 @@ impl Wall {
             sections.push(("WE", WE));
         }
         for (i, (name, filt)) in sections.into_iter().enumerate() {
-            let bw = name.chars().count() as f32 * 5.0 + 16.0;
+            let bw = cv.chip_w(name);
             if ui.chip(cv, id(WALLPAPER, 1 + i as u32), Rect::new(x, y, bw, 17.0), name, self.filter == filt) && self.filter != filt {
                 self.filter = filt;
                 crate::state::set_wallpaper_filter(self.filter);
@@ -354,7 +354,7 @@ impl Wall {
         let max_off = n.saturating_sub(1) as f32;
         cv.text(&format!("{n} {}", crate::i18n::pick("изобр.", "images")), Rect::new(x + 4.0, y, 100.0, 17.0), &f.small, bare());
         let fb = Rect::new(w - PAD - 19.0, y - 1.0, 19.0, 19.0);
-        let pick_w = crate::i18n::pick("Выбрать папку…", "Choose folder…").chars().count() as f32 * 5.0 + 16.0;
+        let pick_w = cv.chip_w("Выбрать папку…");
         if ui.chip(cv, id(WALLPAPER, 8), Rect::new(fb.x - 6.0 - pick_w, y, pick_w, 17.0), "Выбрать папку…", false) {
             self.choose_folder();
         }

@@ -112,7 +112,6 @@ pub const MATERIALS: [(Material, &str); 5] = [
     (Material::Chrome, "Chrome"),
 ];
 
-const MATERIAL_CHIP_WIDTHS: [f32; 5] = [62.0, 40.0, 56.0, 46.0, 52.0];
 
 /// Время жизни кэша проверки системных эффектов прозрачности (1 секунда).
 pub const TRANSPARENCY_TTL: Duration = Duration::from_secs(1);
@@ -424,18 +423,29 @@ impl Settings {
         let sys = self.cfg.system_colors;
 
         // Что красим и готовые темы.
-        if ui.chip(cv, id(SETTINGS, N_CHIP_ACCENT), Rect::new(x, y, 56.0, 18.0), "Акцент", self.target == Target::Accent) {
+        let w_accent = cv.chip_w("Акцент");
+        let w_bg = cv.chip_w("Фон");
+        if ui.chip(cv, id(SETTINGS, N_CHIP_ACCENT), Rect::new(x, y, w_accent, 18.0), "Акцент", self.target == Target::Accent) {
             self.target = Target::Accent;
         }
-        if ui.chip(cv, id(SETTINGS, N_CHIP_BG), Rect::new(x + 60.0, y, 44.0, 18.0), "Фон", self.target == Target::Bg) {
+        if ui.chip(cv, id(SETTINGS, N_CHIP_BG), Rect::new(x + w_accent + 4.0, y, w_bg, 18.0), "Фон", self.target == Target::Bg) {
             self.target = Target::Bg;
         }
+        let chips_end = x + w_accent + 4.0 + w_bg;
+        let presets_w = (PRESETS.len() - 1) as f32 * 21.0 + 16.0;
+        let presets_x = if chips_end + 12.0 + presets_w <= lc.right() - 10.0 {
+            (chips_end + 12.0).max(x + 124.0)
+        } else {
+            y += 24.0;
+            x
+        };
+        let swatch_y = y + 9.0;
         for (i, (a, b)) in PRESETS.iter().enumerate() {
             let a = theme::parse_hex(a).unwrap_or(theme::DEFAULT_ACCENT);
             let b = theme::parse_hex(b).unwrap_or(theme::DEFAULT_BG);
             let selected = !self.cfg.system_colors && close(self.cfg.accent, a) && close(self.cfg.bg, b);
-            let cx = x + 124.0 + i as f32 * 21.0 + 8.0;
-            if ui.swatch(cv, id(SETTINGS, N_PRESET + i as u32), cx, y + 9.0, 7.5, col(b), col(a), selected) {
+            let cx = presets_x + i as f32 * 21.0 + 8.0;
+            if ui.swatch(cv, id(SETTINGS, N_PRESET + i as u32), cx, swatch_y, 7.5, col(b), col(a), selected) {
                 self.cfg.accent = a;
                 self.cfg.bg = b;
                 self.cfg.system_colors = false;
@@ -571,12 +581,17 @@ impl Settings {
 
         // Стиль цветов: системный Windows или macOS (системные цвета iOS 26 Liquid Glass)
         cv.text("Стиль цветов", Rect::new(x, y, 110.0, 18.0), &f.body, txt());
-        let win_w = 68.0;
-        let ios_w = 50.0;
-        let mut cx = rc.right() - 10.0 - (win_w + ios_w + 4.0);
+        let widths: Vec<f32> = PALETTE_STYLES.iter().map(|&(_, label)| cv.chip_w(label)).collect();
+        let total_w = crate::ui::chips_total_width(&widths, 4.0);
+        let mut cx = if x + 110.0 + total_w <= rc.right() - 10.0 {
+            rc.right() - 10.0 - total_w
+        } else {
+            y += 22.0;
+            x
+        };
         let cur_style_idx = palette_style_idx(self.cfg.palette_style);
         for (k, &(_, label)) in PALETTE_STYLES.iter().enumerate() {
-            let w = if k == 0 { win_w } else { ios_w };
+            let w = widths[k];
             if ui.chip(cv, id(SETTINGS, N_PALETTE_STYLE + k as u32), Rect::new(cx, y, w, 18.0), label, cur_style_idx == k) {
                 self.cfg.palette_style = palette_style_from_idx(k);
                 self.changed = true;
@@ -610,11 +625,12 @@ impl Settings {
             y += 18.0;
             let cur_mat_idx = material_idx(self.cfg.material);
             let mut mcx = x;
+            let widths: Vec<f32> = MATERIALS.iter().map(|&(_, label)| cv.chip_w(label)).collect();
             // Чипы ужимаются, чтобы весь ряд помещался в карточку.
-            let chips_w: f32 = MATERIAL_CHIP_WIDTHS.iter().sum::<f32>() + 4.0 * (MATERIAL_CHIP_WIDTHS.len() - 1) as f32;
+            let chips_w: f32 = crate::ui::chips_total_width(&widths, 4.0);
             let mat_k = (iw / chips_w).min(1.0);
             for (k, &(_, label)) in MATERIALS.iter().enumerate() {
-                let mw = MATERIAL_CHIP_WIDTHS[k] * mat_k;
+                let mw = widths[k] * mat_k;
                 let mr = Rect::new(mcx, y, mw, 18.0);
                 let sel = cur_mat_idx == k;
                 if glass_on {
@@ -750,10 +766,18 @@ impl Settings {
 
         // Язык интерфейса: применяется сразу.
         cv.text("Язык", Rect::new(x, y, 80.0, 18.0), &f.body, txt());
-        let langs = [("auto", "Авто", 46.0), ("ru", "RU", 34.0), ("en", "EN", 34.0)];
-        let mut cx = lc.right() - 10.0 - (46.0 + 34.0 + 34.0 + 8.0);
-        for (k, (code, label, w)) in langs.iter().enumerate() {
-            if ui.chip(cv, id(SETTINGS, N_LANG + k as u32), Rect::new(cx, y, *w, 18.0), label, self.cfg.language == *code) {
+        let langs = [("auto", "Авто"), ("ru", "RU"), ("en", "EN")];
+        let widths: Vec<f32> = langs.iter().map(|&(_, label)| cv.chip_w(label)).collect();
+        let total_w = crate::ui::chips_total_width(&widths, 4.0);
+        let mut cx = if x + 80.0 + total_w <= lc.right() - 10.0 {
+            lc.right() - 10.0 - total_w
+        } else {
+            y += 22.0;
+            x
+        };
+        for (k, (code, label)) in langs.iter().enumerate() {
+            let w = widths[k];
+            if ui.chip(cv, id(SETTINGS, N_LANG + k as u32), Rect::new(cx, y, w, 18.0), label, self.cfg.language == *code) {
                 self.cfg.language = code.to_string();
                 self.changed = true;
             }
@@ -893,10 +917,6 @@ mod tests {
             assert_eq!(material_idx(m), i);
         }
         assert_eq!(material_from_idx(99), Material::Regular);
-
-        // Проверка ширины чипов: сумма ширин + отступов ровно 272 px (ширина карточки iw)
-        let total_w: f32 = MATERIAL_CHIP_WIDTHS.iter().sum::<f32>() + 4.0 * 4.0;
-        assert_eq!(total_w, 272.0);
     }
 
     #[test]

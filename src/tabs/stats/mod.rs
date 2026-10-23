@@ -444,12 +444,17 @@ impl Stats {
         cv.card(r);
         header(cv, r, icon::APPS, "Топ приложений", hue(SysColor::Purple, cv.accent));
         // Переключатель метрики — сегмент из двух капсул справа в шапке.
-        for (k, (name, cpu)) in [("RAM", false), ("CPU", true)].into_iter().enumerate() {
-            let seg = Rect::new(r.right() - P - 64.0 + k as f32 * 33.0, r.y + 10.0, 31.0, 14.0);
+        let metrics = [("RAM", false), ("CPU", true)];
+        let widths: Vec<f32> = metrics.iter().map(|&(name, _)| cv.chip_w(name)).collect();
+        let total_w = crate::ui::chips_total_width(&widths, 2.0);
+        let mut cx = r.right() - P - total_w;
+        for (k, &(name, cpu)) in metrics.iter().enumerate() {
+            let seg = Rect::new(cx, r.y + 10.0, widths[k], 14.0);
             if ui.chip(cv, id(STATS, 10 + 2 * k as u32), seg, name, self.top_by_cpu == cpu) && self.top_by_cpu != cpu {
                 self.top_by_cpu = cpu;
                 crate::state::set_stats_top_by_cpu(cpu);
             }
+            cx += widths[k] + 2.0;
         }
         let list = if self.top_by_cpu { &self.heavy.top_cpu } else { &self.heavy.top_ram };
         let max = list.first().map(|x| x.1).unwrap_or(0.0).max(1e-9);

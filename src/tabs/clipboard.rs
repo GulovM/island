@@ -272,9 +272,9 @@ impl Clip {
         let bar = Rect::new(PAD, TOP, w - 2.0 * PAD, 26.0);
         cv.rr(bar, 10.0, card());
         let names = ["Все", "Текст", "Ссылки", "Фото"];
-        let widths: Vec<f32> = names.iter().map(|n| crate::i18n::tr(n).chars().count() as f32 * 5.0 + 14.0).collect();
+        let widths: Vec<f32> = names.iter().map(|n| cv.chip_w(n)).collect();
         let gear = Rect::new(bar.right() - 23.0, bar.y + 4.0, 18.0, 18.0);
-        let pills_w: f32 = widths.iter().sum::<f32>() + 4.0 * (names.len() - 1) as f32;
+        let pills_w = crate::ui::chips_total_width(&widths, 4.0);
         let mut px = gear.x - 8.0 - pills_w;
         let fid = id(CLIPBOARD, 0);
         let query = ui.field_text(fid);

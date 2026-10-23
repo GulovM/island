@@ -164,7 +164,7 @@ impl Today {
         cv.text(&format!("{done}/{}", self.todo.len()), Rect::new(bx - 9.0, by - 6.0, 18.0, 12.0), &f.caps_c, txt());
         // Сортировка: чип левее счётчика, по нажатию Вручную → По дате → По статусу. Выбранная подсвечена.
         let sort_label = self.todo_sort.label();
-        let sort_w = cv.text_w(&crate::i18n::tr(sort_label), &f.small_c) + 16.0;
+        let sort_w = cv.chip_w(sort_label);
         let sort_r = Rect::new(bx - 9.0 - 6.0 - sort_w, by - 8.5, sort_w, 17.0);
         if ui.chip(cv, id(TODAY, 33), sort_r, sort_label, self.todo_sort != Sort::Manual) {
             self.todo_sort = self.todo_sort.next();
