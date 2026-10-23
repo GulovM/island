@@ -28,6 +28,16 @@ pub fn body_alpha(translucent: bool, min_alpha: f32, opacity: f32, p: f32, k: f3
     1.0 - (1.0 - base) * p.clamp(0.0, 1.0) * k.clamp(0.0, 1.0)
 }
 
+/// Какие настройки плотности стекла действуют в стиле палитры: в Windows — ползунок «Прозрачность» поверх
+/// материала Regular, в macOS — только выбранный материал (ползунок скрыт и не влияет). Возвращает
+/// материал и значение ползунка для `body_layers`.
+pub fn effective_density(style: theme::PaletteStyle, material: Material, opacity: f32) -> (Material, f32) {
+    match style {
+        theme::PaletteStyle::Windows => (Material::Regular, opacity),
+        theme::PaletteStyle::Ios => (material, 0.0),
+    }
+}
+
 /// Параметры осветления сверху (sheen).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SheenLayer {
@@ -471,6 +481,16 @@ mod tests {
         assert_eq!(disabled.sheen.alpha, 0.0);
         assert_eq!(disabled.rim.hi_alpha, 0.0);
         assert_eq!(disabled.tint_color, bg);
+    }
+
+    #[test]
+    fn test_effective_density_by_style() {
+        use theme::PaletteStyle::{Ios, Windows};
+        // Windows: материал фиксирован (Regular), работает ползунок.
+        assert_eq!(effective_density(Windows, Material::Chrome, 40.0), (Material::Regular, 40.0));
+        // macOS: работает материал, ползунок не влияет.
+        assert_eq!(effective_density(Ios, Material::Chrome, 40.0), (Material::Chrome, 0.0));
+        assert_eq!(effective_density(Ios, Material::Thin, 100.0), (Material::Thin, 0.0));
     }
 
     #[test]

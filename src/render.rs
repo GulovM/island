@@ -67,12 +67,13 @@ impl App {
         // Вычисление всех слоёв тела острова: тинт фона, осветление сверху, кромка и тень.
         let real = self.real_glass();
         let bg_rgb = [pal.bg.r, pal.bg.g, pal.bg.b];
+        let (material, opacity) = crate::glass::effective_density(pal.style, self.cfg.material, self.cfg.glass_opacity);
         let layers = crate::glass::body_layers(
-            self.cfg.material,
+            material,
             bg_rgb,
             self.cfg.glass,
             real,
-            self.cfg.glass_opacity,
+            opacity,
             p,
             k,
         );

@@ -569,23 +569,6 @@ impl Settings {
             y += 16.0;
         }
 
-        // Прозрачность тела: 0% — самое прозрачное из допустимого (`glass::MIN_BODY_ALPHA`), 100% — сплошное.
-        cv.text("Прозрачность", Rect::new(x, y, 170.0, 13.0), &f.body, if glass_on { txt() } else { dim() });
-        cv.text(&format!("{}%", self.cfg.glass_opacity.round() as i32), Rect::new(rc.right() - 70.0, y, 60.0, 13.0), &f.body_r, dim());
-        y += 21.0;
-        let slider = Rect::new(x + 6.0, y, iw - 12.0, 14.0);
-        if glass_on {
-            let mut frac = self.cfg.glass_opacity / 100.0;
-            if ui.slider_thin(cv, id(SETTINGS, N_OPACITY), slider, &mut frac) {
-                self.cfg.glass_opacity = (frac * 100.0).clamp(0.0, 100.0);
-                self.changed = true;
-            }
-        } else {
-            let frac = self.cfg.glass_opacity / 100.0;
-            ui.slider_thin_disabled(cv, slider, frac);
-        }
-        y += 26.0;
-
         // Стиль цветов: системный Windows или macOS (системные цвета iOS 26 Liquid Glass)
         cv.text("Стиль цветов", Rect::new(x, y, 110.0, 18.0), &f.body, txt());
         let win_w = 68.0;
@@ -602,41 +585,62 @@ impl Settings {
         }
         y += 26.0;
 
-        // Материал стекла (iOS 26 Liquid Glass): 5 вариантов плотности. Активен только со стеклом.
-        cv.text("Материал", Rect::new(x, y, iw, 13.0), &f.body, if glass_on { txt() } else { dim() });
-        y += 18.0;
-        let cur_mat_idx = material_idx(self.cfg.material);
-        let mut mcx = x;
-        // Чипы ужимаются, чтобы весь ряд помещался в карточку.
-        let chips_w: f32 = MATERIAL_CHIP_WIDTHS.iter().sum::<f32>() + 4.0 * (MATERIAL_CHIP_WIDTHS.len() - 1) as f32;
-        let mat_k = (iw / chips_w).min(1.0);
-        for (k, &(_, label)) in MATERIALS.iter().enumerate() {
-            let mw = MATERIAL_CHIP_WIDTHS[k] * mat_k;
-            let mr = Rect::new(mcx, y, mw, 18.0);
-            let sel = cur_mat_idx == k;
+        // Плотность стекла зависит от стиля: в Windows ползунок «Прозрачность», в macOS выбор «Материал».
+        // Скрытая настройка в конфиге сохраняется, но на вид не влияет (`glass::effective_density`).
+        if self.cfg.palette_style == PaletteStyle::Windows {
+            // Прозрачность тела: 0% — самое прозрачное из допустимого (`glass::MIN_BODY_ALPHA`), 100% — сплошное.
+            cv.text("Прозрачность", Rect::new(x, y, 170.0, 13.0), &f.body, if glass_on { txt() } else { dim() });
+            cv.text(&format!("{}%", self.cfg.glass_opacity.round() as i32), Rect::new(rc.right() - 70.0, y, 60.0, 13.0), &f.body_r, dim());
+            y += 21.0;
+            let slider = Rect::new(x + 6.0, y, iw - 12.0, 14.0);
             if glass_on {
-                if ui.chip(cv, id(SETTINGS, N_MATERIAL + k as u32), mr, label, sel) {
-                    self.cfg.material = material_from_idx(k);
+                let mut frac = self.cfg.glass_opacity / 100.0;
+                if ui.slider_thin(cv, id(SETTINGS, N_OPACITY), slider, &mut frac) {
+                    self.cfg.glass_opacity = (frac * 100.0).clamp(0.0, 100.0);
                     self.changed = true;
                 }
             } else {
-                let bg = if sel {
-                    D2D1_COLOR_F { a: 0.30, ..dim() }
-                } else {
-                    D2D1_COLOR_F { a: 0.12, ..dim() }
-                };
-                cv.rr(mr, mr.h / 2.0, bg);
-                cv.hairline(mr, mr.h / 2.0);
-                let fg = if sel {
-                    D2D1_COLOR_F { a: 0.60, ..dim() }
-                } else {
-                    D2D1_COLOR_F { a: 0.35, ..dim() }
-                };
-                cv.text(label, mr, &cv.g.fonts.small_c, fg);
+                let frac = self.cfg.glass_opacity / 100.0;
+                ui.slider_thin_disabled(cv, slider, frac);
             }
-            mcx += mw + 4.0;
+            y += 26.0;
+        } else {
+            // Материал стекла (iOS 26 Liquid Glass): 5 вариантов плотности. Активен только со стеклом.
+            cv.text("Материал", Rect::new(x, y, iw, 13.0), &f.body, if glass_on { txt() } else { dim() });
+            y += 18.0;
+            let cur_mat_idx = material_idx(self.cfg.material);
+            let mut mcx = x;
+            // Чипы ужимаются, чтобы весь ряд помещался в карточку.
+            let chips_w: f32 = MATERIAL_CHIP_WIDTHS.iter().sum::<f32>() + 4.0 * (MATERIAL_CHIP_WIDTHS.len() - 1) as f32;
+            let mat_k = (iw / chips_w).min(1.0);
+            for (k, &(_, label)) in MATERIALS.iter().enumerate() {
+                let mw = MATERIAL_CHIP_WIDTHS[k] * mat_k;
+                let mr = Rect::new(mcx, y, mw, 18.0);
+                let sel = cur_mat_idx == k;
+                if glass_on {
+                    if ui.chip(cv, id(SETTINGS, N_MATERIAL + k as u32), mr, label, sel) {
+                        self.cfg.material = material_from_idx(k);
+                        self.changed = true;
+                    }
+                } else {
+                    let bg = if sel {
+                        D2D1_COLOR_F { a: 0.30, ..dim() }
+                    } else {
+                        D2D1_COLOR_F { a: 0.12, ..dim() }
+                    };
+                    cv.rr(mr, mr.h / 2.0, bg);
+                    cv.hairline(mr, mr.h / 2.0);
+                    let fg = if sel {
+                        D2D1_COLOR_F { a: 0.60, ..dim() }
+                    } else {
+                        D2D1_COLOR_F { a: 0.35, ..dim() }
+                    };
+                    cv.text(label, mr, &cv.g.fonts.small_c, fg);
+                }
+                mcx += mw + 4.0;
+            }
+            y += 26.0;
         }
-        y += 26.0;
 
         // Масштаб интерфейса (шаг 0.05): применяется, когда мышь отпущена.
         let shown = self.scale_drag.unwrap_or(self.cfg.ui_scale);
