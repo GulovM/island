@@ -77,12 +77,24 @@ impl App {
         }
     }
 
+    /// Размер тела острова сейчас: между свёрнутой и раскрытой формами по общему прогрессу `open`.
+    pub(crate) fn body_size(&self) -> (f32, f32) {
+        self.body.size(self.open.value)
+    }
+
+    /// Размер, к которому остров идёт: раскрытая форма или свёрнутая.
     pub(crate) fn target_size(&self) -> (f32, f32) {
+        if self.expanded { self.expanded_target() } else { self.collapsed_target() }
+    }
+
+    pub(crate) fn expanded_target(&self) -> (f32, f32) {
+        let id = self.cur_id();
+        (self.tab_w(id) * self.scale, self.tab_h(id) * self.scale)
+    }
+
+    pub(crate) fn collapsed_target(&self) -> (f32, f32) {
         let collapsed = self.collapsed();
-        let (w, h) = if self.expanded {
-            let id = self.cur_id();
-            (self.tab_w(id), self.tab_h(id))
-        } else if self.stripped() {
+        let (w, h) = if self.stripped() {
             // Ширина прежняя: зона наведения не растёт, меняется только высота.
             (collapsed.0, STRIP_H)
         } else {
@@ -204,8 +216,7 @@ impl App {
         self.place_window(false);
         if resized || snap {
             self.retarget();
-            self.w.snap();
-            self.h.snap();
+            self.body.snap();
         }
         self.apply_region();
     }
@@ -296,9 +307,10 @@ impl App {
     pub(crate) fn hit_rect(&self) -> (i32, i32, i32) {
         let win_w = self.win_w as f32;
         let (tw, th) = self.target_size();
-        let l = ((win_w - self.w.value) / 2.0).min((win_w - tw) / 2.0);
-        let r = ((win_w + self.w.value) / 2.0).max((win_w + tw) / 2.0);
-        let b = self.h.value.max(th);
+        let (cw, ch) = self.body_size();
+        let l = ((win_w - cw) / 2.0).min((win_w - tw) / 2.0);
+        let r = ((win_w + cw) / 2.0).max((win_w + tw) / 2.0);
+        let b = ch.max(th);
         // «Ушки» выходят за тело острова с обеих сторон.
         let ears = EAR * self.scale;
         // Допуск нужен только раскрытому острову, чтобы край не «дрожал»; свёрнутый — без запаса.
@@ -314,7 +326,21 @@ impl App {
     /// и другие приложения получают клики/наведение как обычно. (`HTTRANSPARENT` пропускает
     /// мышь только окнам того же потока, поэтому для чужих процессов не работает.)
     pub(crate) unsafe fn apply_region(&mut self) {
-        let rect = self.hit_rect();
+        let mut rect = self.hit_rect();
+        // Регион меняется сразу, а кадр в swap chain и подложка блюра доходят до экрана на пару кадров
+        // позже. Пока остров сжимается, берём объединение с последними кадрами: иначе регион обрезает
+        // ещё большое тело прямоугольником, а подложка блюра торчит вокруг как отдельная плита.
+        if self.animating() {
+            for &(l, r, b) in &self.rgn_hist {
+                rect = (rect.0.min(l), rect.1.max(r), rect.2.max(b));
+            }
+            self.rgn_hist.push(self.hit_rect());
+            if self.rgn_hist.len() > RGN_TRAIL_FRAMES {
+                self.rgn_hist.remove(0);
+            }
+        } else {
+            self.rgn_hist.clear();
+        }
         if rect == self.rgn {
             return;
         }
@@ -451,8 +477,7 @@ impl App {
         }
         self.disarm_leave();
         self.set_expanded(false);
-        self.w.snap();
-        self.h.snap();
+        self.body.snap();
         self.shot_until = Some(Instant::now() + std::time::Duration::from_millis(SHOT_HIDE_MS));
         self.hide_glass();
         let _ = ShowWindow(self.hwnd, SW_HIDE);
