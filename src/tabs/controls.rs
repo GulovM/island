@@ -635,34 +635,22 @@ impl Controls {
             cv.glyph(icon::MUSIC, art, false, D2D1_COLOR_F { a: 0.7, ..WHITE });
         }
         let (tx, ty, tw) = if compact {
-            let right_limit = if tl.can_seek { r.right() - 142.0 } else { r.right() - 95.0 };
+            let right_limit = r.right() - 95.0;
             (r.x + 56.0, r.cy() - 17.0, (right_limit - (r.x + 56.0)).max(40.0))
         } else if narrow {
             (r.x + 56.0, r.y + 10.0, r.w - 66.0)
         } else {
-            let right_limit = if tl.can_seek { r.right() - 142.0 } else { r.right() - 95.0 };
+            let right_limit = r.right() - 95.0;
             (r.x + 56.0, r.y + 25.0, (right_limit - (r.x + 56.0)).max(40.0))
         };
         cv.text(title, Rect::new(tx, ty, tw, 20.0), &f.title, txt());
         cv.text(artist, Rect::new(tx, ty + 18.0, tw, 14.0), &f.small, dim());
 
-        // Кнопки плеера:
-        // Без перемотки: prev, play/pause, next
-        // С перемоткой: prev, -10 с, play/pause, +10 с, next
+        // Кнопки плеера: prev, play/pause, next; перемотка только по полосе прогресса и колесу мыши.
         let (cy, xs) = if narrow {
-            let row_y = r.y + 57.0;
-            if tl.can_seek {
-                (row_y, [r.cx() - 52.0, r.cx() - 27.0, r.cx(), r.cx() + 27.0, r.cx() + 52.0])
-            } else {
-                (row_y, [r.cx() - 30.0, 0.0, r.cx(), 0.0, r.cx() + 30.0])
-            }
+            (r.y + 57.0, [r.cx() - 30.0, r.cx(), r.cx() + 30.0])
         } else {
-            let row_y = if compact { r.cy() } else { r.y + 40.0 };
-            if tl.can_seek {
-                (row_y, [r.right() - 122.0, r.right() - 97.0, r.right() - 69.0, r.right() - 41.0, r.right() - 16.0])
-            } else {
-                (row_y, [r.right() - 75.0, 0.0, r.right() - 45.0, 0.0, r.right() - 16.0])
-            }
+            (if compact { r.cy() } else { r.y + 40.0 }, [r.right() - 75.0, r.right() - 45.0, r.right() - 16.0])
         };
 
         let btn_rad = if narrow { 9.0 } else { 9.5 };
@@ -671,21 +659,11 @@ impl Controls {
         if Self::round_button(ui, cv, id(CONTROLS, 20), xs[0], cy, btn_rad, icon::PREV, chip_bg(), txt()) {
             bg::send(Cmd::Prev);
         }
-        if tl.can_seek
-            && Self::round_button(ui, cv, id(CONTROLS, 24), xs[1], cy, btn_rad, icon::REWIND, chip_bg(), txt())
-        {
-            self.apply_seek(tl.relative(-10.0), true);
-        }
         let toggle = if playing { icon::PAUSE } else { icon::PLAY_SOLID };
-        if Self::round_button(ui, cv, id(CONTROLS, 21), xs[2], cy, play_rad, toggle, slider_fill(cv.accent), on_color(slider_fill(cv.accent))) {
+        if Self::round_button(ui, cv, id(CONTROLS, 21), xs[1], cy, play_rad, toggle, slider_fill(cv.accent), on_color(slider_fill(cv.accent))) {
             bg::send(Cmd::PlayPause);
         }
-        if tl.can_seek
-            && Self::round_button(ui, cv, id(CONTROLS, 25), xs[3], cy, btn_rad, icon::FAST_FORWARD, chip_bg(), txt())
-        {
-            self.apply_seek(tl.relative(10.0), true);
-        }
-        if Self::round_button(ui, cv, id(CONTROLS, 22), xs[4], cy, btn_rad, icon::NEXT, chip_bg(), txt()) {
+        if Self::round_button(ui, cv, id(CONTROLS, 22), xs[2], cy, btn_rad, icon::NEXT, chip_bg(), txt()) {
             bg::send(Cmd::Next);
         }
 
