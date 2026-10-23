@@ -495,10 +495,12 @@ impl Clip {
                 format!("{chars} симв. • {words} сл. • {lines} стр.")
             };
         }
+        // Служебная информация — отдельным блоком под линией, тише содержимого записи.
+        cv.separator(r.x + 11.0, r.bottom() - 54.0, r.w - 22.0);
         for (k, (label, value)) in meta.iter().enumerate() {
             let cy = r.bottom() - 41.0 + k as f32 * 12.5;
             cv.text(label, Rect::new(r.x + 11.0, cy - 6.0, 52.0, 12.0), &f.small, dim());
-            cv.text(value, Rect::new(r.x + 63.0, cy - 6.0, r.w - 72.0, 12.0), &f.small_b, txt());
+            cv.text(value, Rect::new(r.x + 63.0, cy - 6.0, r.w - 72.0, 12.0), &f.small, txt());
         }
     }
 
