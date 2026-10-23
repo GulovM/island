@@ -6,7 +6,7 @@ use super::Today;
 use crate::tabs::{id, TODAY};
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
-use crate::ui::{chip_bg, dim, icon, ink, mix, status_orange, txt, Align, Canvas, Rect, Submit, Ui};
+use crate::ui::{chip_bg, dim, icon, mix, txt, Align, Canvas, Rect, Submit, Ui};
 
 const PRESETS: [u32; 5] = [1, 5, 10, 15, 20];
 
@@ -167,15 +167,16 @@ impl Today {
         }
         let secs = rem.as_secs_f32().ceil() as u64;
         let label = clock_label(secs);
-        let orange = status_orange();
+        // Цвет таймера — акцент: оранжевый вместе с остальными цветами «Сегодня» был слишком пёстрым (#10).
+        let tint = cv.accent;
 
         if compact {
             // Полоса 248×56: кольцо, остаток крупно и «из 05:00», справа круглые кнопки.
             const P: f32 = 12.0;
             let r = tm.h / 2.0 - 10.0;
             let (rx, cy) = (tm.x + P + r, tm.cy());
-            cv.ring(rx, cy, r, 3.0, self.ring.value, orange);
-            cv.glyph(icon::CLOCK, Rect::new(rx - 8.0, cy - 8.0, 16.0, 16.0), false, orange);
+            cv.ring(rx, cy, r, 3.0, self.ring.value, tint);
+            cv.glyph(icon::CLOCK, Rect::new(rx - 8.0, cy - 8.0, 16.0, 16.0), false, tint);
             let tx = rx + r + 10.0;
             cv.digits(&label, tx - 1.0, 90.0, cy - 6.0, 22.0, 600, Align::Leading, txt());
             let of = format!("{} {}", crate::i18n::pick("из", "of"), clock_label(self.total.as_secs()));
@@ -183,7 +184,7 @@ impl Today {
             let reset_x = tm.right() - P - 14.0;
             let run_x = reset_x - 34.0;
             let run_icon = if self.deadline.is_some() { icon::PAUSE } else { icon::PLAY_SOLID };
-            if round_button(ui, cv, id(TODAY, 40), run_x, cy, 14.0, run_icon, orange, crate::ui::on_color(orange)) {
+            if round_button(ui, cv, id(TODAY, 40), run_x, cy, 14.0, run_icon, tint, crate::ui::on_color(tint)) {
                 self.toggle_run();
             }
             if round_button(ui, cv, id(TODAY, 41), reset_x, cy, 14.0, icon::RESTART, chip_bg(), txt()) {
@@ -191,18 +192,18 @@ impl Today {
                 self.deadline = None;
                 self.save_timer();
             }
-            if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(run_x - 14.0 - 26.0, cy - 10.0, 20.0, 20.0), icon::RINGER, self.sound, orange) {
+            if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(run_x - 14.0 - 26.0, cy - 10.0, 20.0, 20.0), icon::RINGER, self.sound, tint) {
                 self.sound = !self.sound;
                 self.save_timer();
             }
             return;
         }
 
-        cv.ring(cx, cy, 25.0, 3.5, self.ring.value, orange);
+        cv.ring(cx, cy, 25.0, 3.5, self.ring.value, tint);
         // Оставшееся время — крупными табличными цифрами: главное в карточке.
         cv.text(&label, Rect::new(cx - 25.0, cy - 10.0, 50.0, 20.0), &f.title_c, txt());
         // Звук сигнала — под кольцом, по его оси.
-        if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(cx - 9.0, tm.y + 94.0, 18.0, 18.0), icon::RINGER, self.sound, orange) {
+        if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(cx - 9.0, tm.y + 94.0, 18.0, 18.0), icon::RINGER, self.sound, tint) {
             self.sound = !self.sound;
             self.save_timer();
         }
@@ -231,14 +232,14 @@ impl Today {
         // Пресеты.
         for (i, m) in PRESETS.iter().enumerate() {
             let r = Rect::new(bx + i as f32 * 29.0, tm.y + 48.0, 25.0, 18.0);
-            if ui.chip_ex(cv, id(TODAY, i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, Some(status_orange())) {
+            if ui.chip_ex(cv, id(TODAY, i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, None) {
                 self.set_preset(i);
             }
         }
 
         // Старт / пауза и сброс.
         let start = if self.deadline.is_some() { "Пауза" } else { "Старт" };
-        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 76.0, 68.0, 26.0), start, status_orange(), ink(), 6.0) {
+        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 76.0, 68.0, 26.0), start, tint, crate::ui::on_color(tint), 6.0) {
             self.toggle_run();
         }
         if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + 74.0, tm.y + 76.0, 68.0, 26.0), "Сброс", chip_bg(), txt(), 6.0) {

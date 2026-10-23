@@ -192,6 +192,17 @@ pub struct DayEvent {
     pub title: String,
 }
 
+/// Ответ сервера — календарь iCal. Неверная ссылка часто отдаёт обычную страницу (вход,
+/// «не найдено») с кодом 200: без этой проверки она считалась пустым календарём, а не ошибкой.
+fn check_ics(body: String) -> Result<String, String> {
+    let head: String = body.trim_start_matches('\u{feff}').trim_start().chars().take(15).collect();
+    if head.eq_ignore_ascii_case("BEGIN:VCALENDAR") {
+        Ok(body)
+    } else {
+        Err("ответ не похож на календарь iCal".into())
+    }
+}
+
 /// Обновляет события из настроенных iCal-ссылок (раз в 5 минут).
 pub fn refresh_calendar(urls: &[String]) {
     refresh_calendar_age(urls, CALENDAR_TTL);
@@ -232,13 +243,13 @@ pub fn refresh_calendar_age(urls: &[String], max_age: Duration) {
         let mut fetched = Vec::with_capacity(clean_urls.len());
         if clean_urls.len() <= 1 {
             for url in &clean_urls {
-                fetched.push((url.clone(), get_text(url)));
+                fetched.push((url.clone(), get_text(url).and_then(check_ics)));
             }
         } else {
             std::thread::scope(|scope| {
                 let mut handles = Vec::with_capacity(clean_urls.len());
                 for url in &clean_urls {
-                    handles.push(scope.spawn(move || (url.clone(), get_text(url))));
+                    handles.push(scope.spawn(move || (url.clone(), get_text(url).and_then(check_ics))));
                 }
                 for h in handles {
                     if let Ok(res) = h.join() {
@@ -848,6 +859,15 @@ END:VEVENT
         assert_eq!(raws.len(), 1);
         assert_eq!(raws[0].uid, "unique-event-id-999");
         assert_eq!(raws[0].title, "Test UID");
+    }
+
+    #[test]
+    fn only_icalendar_body_counts_as_calendar() {
+        assert!(check_ics("BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n".into()).is_ok());
+        assert!(check_ics("\u{feff}\r\nbegin:vcalendar\nEND:VCALENDAR".into()).is_ok());
+        // Неверная ссылка часто отдаёт обычную страницу с кодом 200: это ошибка, а не пустой календарь.
+        assert!(check_ics("<!doctype html><html><body>Sign in</body></html>".into()).is_err());
+        assert!(check_ics(String::new()).is_err());
     }
 
     #[test]

@@ -188,8 +188,8 @@ impl Today {
         let hm = format!("{hh}:{mm}");
         let ss = format!("{:02}", t.wSecond.min(59));
         let d = Dates::new(t, dow);
-        // День недели — красным, как в Календаре iOS (в стиле Windows — акцентом).
-        let day_c = hue(SysColor::Red, cv.accent);
+        // День недели — акцентом: красный Календаря iOS на «Сегодня» лишний (#10).
+        let day_c = cv.accent;
         let (cx, cy) = (c.cx(), c.cy());
         let iw = c.w - 2.0 * P;
         match self.clock_style {

@@ -62,6 +62,18 @@ impl Item {
         self.text.starts_with(IMG_TAG)
     }
 
+    fn is_file(&self) -> bool {
+        !self.is_image() && !self.is_link() && is_file_path(&self.text)
+    }
+
+    fn file_name(&self) -> Option<&str> {
+        if self.is_file() {
+            Some(path_file_name(&self.text))
+        } else {
+            None
+        }
+    }
+
     /// (имя файла, ширина, высота) для записи-изображения.
     fn image(&self) -> Option<(&str, u32, u32)> {
         let rest = self.text.strip_prefix(IMG_TAG)?;
@@ -70,11 +82,14 @@ impl Item {
         Some((file, w.parse().ok()?, h.parse().ok()?))
     }
 
-    /// Подпись в списке.
+    /// Подпись в списке (имя или адрес отдельно от размера и времени).
     fn label(&self) -> String {
-        match self.image() {
-            Some((_, w, h)) => format!("{} {w}×{h}", crate::i18n::t("Изображение")),
-            None => first_line(&self.text).to_string(),
+        if self.is_image() {
+            crate::i18n::t("Изображение").to_string()
+        } else if let Some(name) = self.file_name() {
+            name.to_string()
+        } else {
+            first_line(&self.text).to_string()
         }
     }
 
@@ -395,7 +410,7 @@ impl Clip {
             let n = order[p];
             let it = &self.items[n];
             // Тип записи виден по цвету плашки: закреплённое — оранжевое, картинка — фиолетовая,
-            // ссылка — синяя, текст — серый.
+            // ссылка — синяя, файл — зелёный, текст — серый.
             use crate::ios::SysColor;
             let (g, tint) = if it.pinned {
                 (icon::PIN, crate::ui::hue(SysColor::Orange, cv.accent))
@@ -403,6 +418,8 @@ impl Clip {
                 (icon::PICTURE, crate::ui::hue(SysColor::Purple, cv.accent))
             } else if it.is_link() {
                 (icon::LINK, crate::ui::hue(SysColor::Blue, cv.accent))
+            } else if it.is_file() {
+                (icon::FOLDER, crate::ui::hue(SysColor::Green, cv.accent))
             } else {
                 let p = crate::theme::get();
                 let dark = !crate::theme::is_light([p.bg.r, p.bg.g, p.bg.b]);
@@ -411,7 +428,12 @@ impl Clip {
             let r = Rect::new(list.x, yy, list.w - 3.0, ROW);
             let sel = selected_pos == Some(p);
             let label = it.label();
-            if ui.row_compact_tinted(cv, id(CLIPBOARD, 200 + p as u32), r, g, true, &label, &short_ago(now, it.ts), 0.0, sel, !sel, Some(tint)) {
+            let right = if let Some((_, w, h)) = it.image() {
+                format!("{w}×{h} • {}", short_ago(now, it.ts))
+            } else {
+                short_ago(now, it.ts)
+            };
+            if ui.row_compact_tinted(cv, id(CLIPBOARD, 200 + p as u32), r, g, true, &label, &right, 0.0, sel, !sel, Some(tint)) {
                 clicked = Some(n);
             }
         }
@@ -456,10 +478,11 @@ impl Clip {
             cv.text("Выберите запись слева", r, &f.small_c, dim());
             return;
         };
-        let area = Rect::new(r.x + 14.0, r.y + 11.0, r.w - 28.0, r.h - 11.0 - 62.0);
-        let (ts, is_link, image, text) = {
+        // Область данных сверху; внизу оставлено место под разделитель (#30) и блок метаданных.
+        let area = Rect::new(r.x + 14.0, r.y + 11.0, r.w - 28.0, (r.h - 77.0).max(20.0));
+        let (ts, is_link, is_file, image, text) = {
             let it = &self.items[idx];
-            (it.ts, it.is_link(), it.image().map(|(f, w, h)| (f.to_string(), w, h)), it.text.clone())
+            (it.ts, it.is_link(), it.is_file(), it.image().map(|(f, w, h)| (f.to_string(), w, h)), it.text.clone())
         };
         let mut meta: Vec<(&str, String)> =
             vec![("Тип", String::new()), ("Размер", String::new()), ("Скопировано", copied_at(ts, day_start))];
@@ -480,25 +503,54 @@ impl Clip {
             } else {
                 cv.text("Загрузка…", area, &f.small_c, dim());
             }
-            meta[0].1 = "Изображение".into();
+            meta[0].1 = crate::i18n::t("Изображение").to_string();
             meta[1].1 = format!("{w} × {h} px");
         } else {
             let shown: String = text.chars().take(600).collect();
-            cv.text_wrap_c(&shown, area, txt());
+            let max_lines = (area.h / 13.5).floor().max(1.0) as usize;
+            let clipped = cv.wrap_clip(&shown, &f.wrap_b, area.w, max_lines);
+            cv.text_wrap_c(&clipped, area, txt());
             let chars = text.chars().count();
-            let words = text.split_whitespace().count();
-            let lines = text.lines().count().max(1);
-            meta[0].1 = crate::i18n::t(if is_link { "Ссылка" } else { "Текст" }).to_string();
-            meta[1].1 = if crate::i18n::en() {
-                format!("{chars} chars • {words} words • {lines} lines")
+            if is_file {
+                meta[0].1 = crate::i18n::t("Файл").to_string();
+                let clean = text.trim().trim_matches('"');
+                let clean = clean.strip_prefix("file://").unwrap_or(clean);
+                meta[1].1 = match std::fs::metadata(clean) {
+                    Ok(m) => format_file_size(m.len()),
+                    Err(_) => {
+                        if crate::i18n::en() {
+                            format!("{chars} chars")
+                        } else {
+                            format!("{chars} симв.")
+                        }
+                    }
+                };
+            } else if is_link {
+                meta[0].1 = crate::i18n::t("Ссылка").to_string();
+                meta[1].1 = if crate::i18n::en() {
+                    format!("{chars} chars")
+                } else {
+                    format!("{chars} симв.")
+                };
             } else {
-                format!("{chars} симв. • {words} сл. • {lines} стр.")
-            };
+                let words = text.split_whitespace().count();
+                let lines = text.lines().count().max(1);
+                meta[0].1 = crate::i18n::t("Текст").to_string();
+                meta[1].1 = if crate::i18n::en() {
+                    format!("{chars} chars • {words} words • {lines} lines")
+                } else {
+                    format!("{chars} симв. • {words} сл. • {lines} стр.")
+                };
+            }
         }
+        // Блок метаданных в подвале: приглушённый мелкий шрифт, отделённый от данных.
+        let footer_y = r.bottom() - 43.0;
+        // Горизонтальная линия между содержимым и метаданными (стиль разделителей острова — `track`).
+        cv.rr(Rect::new(r.x + 14.0, footer_y - 12.0, r.w - 28.0, 1.0), 0.5, crate::ui::track());
         for (k, (label, value)) in meta.iter().enumerate() {
-            let cy = r.bottom() - 41.0 + k as f32 * 12.5;
-            cv.text(label, Rect::new(r.x + 11.0, cy - 6.0, 52.0, 12.0), &f.small, dim());
-            cv.text(value, Rect::new(r.x + 63.0, cy - 6.0, r.w - 72.0, 12.0), &f.small_b, txt());
+            let cy = footer_y + k as f32 * 13.0;
+            cv.text(label, Rect::new(r.x + 14.0, cy - 6.0, 68.0, 12.0), &f.small, dim());
+            cv.text(value, Rect::new(r.x + 86.0, cy - 6.0, r.w - 100.0, 12.0), &f.small, dim());
         }
     }
 
@@ -578,6 +630,54 @@ fn short_ago(now: u64, then: u64) -> String {
 fn first_line(s: &str) -> &str {
     let t = s.trim_start();
     t.lines().next().unwrap_or("").trim_end()
+}
+
+/// Человекочитаемый размер файла (Б, КБ, МБ, ГБ).
+fn format_file_size(bytes: u64) -> String {
+    const K: f64 = 1024.0;
+    let b = bytes as f64;
+    if b < K {
+        format!("{} {}", bytes, crate::i18n::pick("Б", "B"))
+    } else if b < K * K {
+        format!("{:.1} {}", b / K, crate::i18n::pick("КБ", "KB"))
+    } else if b < K * K * K {
+        format!("{:.1} {}", b / (K * K), crate::i18n::pick("МБ", "MB"))
+    } else {
+        format!("{:.2} {}", b / (K * K * K), crate::i18n::pick("ГБ", "GB"))
+    }
+}
+
+/// Проверяет, является ли строка путём к файлу или папке Windows (буква диска, UNC или file://).
+fn is_file_path(s: &str) -> bool {
+    let t = s.trim().trim_matches('"');
+    if t.is_empty() || t.contains('\n') || t.contains('\r') {
+        return false;
+    }
+    if t.starts_with("file://") {
+        return true;
+    }
+    let b = t.as_bytes();
+    if b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/') {
+        return true;
+    }
+    if (t.starts_with(r"\\") || t.starts_with("//")) && t.len() > 3 {
+        return true;
+    }
+    false
+}
+
+/// Извлекает имя файла из пути.
+fn path_file_name(s: &str) -> &str {
+    let t = s.trim().trim_matches('"');
+    let t = t.strip_prefix("file://").unwrap_or(t);
+    let t = t.trim_end_matches(['\\', '/']);
+    if let Some(pos) = t.rfind(['\\', '/']) {
+        let name = &t[pos + 1..];
+        if !name.is_empty() {
+            return name;
+        }
+    }
+    t
 }
 
 #[cfg(test)]
@@ -669,5 +769,72 @@ mod tests {
     fn first_line_trims() {
         assert_eq!(first_line("  \nabc\ndef"), "abc");
         assert_eq!(first_line(""), "");
+    }
+
+    #[test]
+    fn file_path_detection_and_name() {
+        let file_item = Item { text: r"C:\Users\User\Documents\Report.docx".into(), ts: 0, pinned: false };
+        assert!(file_item.is_file());
+        assert!(!file_item.is_link());
+        assert!(!file_item.is_image());
+        assert_eq!(file_item.file_name(), Some("Report.docx"));
+        assert_eq!(file_item.label(), "Report.docx");
+
+        let slash_item = Item { text: "D:/Photos/vacation.jpg".into(), ts: 0, pinned: false };
+        assert!(slash_item.is_file());
+        assert_eq!(slash_item.file_name(), Some("vacation.jpg"));
+
+        let unc_item = Item { text: r"\\server\share\data.csv".into(), ts: 0, pinned: false };
+        assert!(unc_item.is_file());
+        assert_eq!(unc_item.file_name(), Some("data.csv"));
+
+        let quoted_item = Item { text: r#""C:\Program Files\app.exe""#.into(), ts: 0, pinned: false };
+        assert!(quoted_item.is_file());
+        assert_eq!(quoted_item.file_name(), Some("app.exe"));
+
+        let file_uri = Item { text: "file:///C:/path/file.txt".into(), ts: 0, pinned: false };
+        assert!(file_uri.is_file());
+        assert_eq!(file_uri.file_name(), Some("file.txt"));
+
+        // Обычный текст и ссылки не должны определяться как файлы
+        let text_item = Item { text: "Just some text".into(), ts: 0, pinned: false };
+        assert!(!text_item.is_file());
+        assert_eq!(text_item.file_name(), None);
+        assert_eq!(text_item.label(), "Just some text");
+
+        let link_item = Item { text: "https://example.com/file.txt".into(), ts: 0, pinned: false };
+        assert!(!link_item.is_file());
+        assert!(link_item.is_link());
+        assert_eq!(link_item.label(), "https://example.com/file.txt");
+
+        let multiline_item = Item { text: "C:\\first\nsecond".into(), ts: 0, pinned: false };
+        assert!(!multiline_item.is_file());
+    }
+
+    #[test]
+    fn item_label_separated_from_metadata() {
+        // У картинок подпись содержит только имя/тип («Изображение»), размеры вынесены в правую колонку
+        let img_item = Item { text: format!("{IMG_TAG}photo.png:1920x1080"), ts: 0, pinned: false };
+        assert_eq!(img_item.label(), "Изображение");
+
+        // У ссылок — адрес
+        let link_item = Item { text: "https://example.com".into(), ts: 0, pinned: false };
+        assert_eq!(link_item.label(), "https://example.com");
+
+        // У файлов — имя файла
+        let file_item = Item { text: r"C:\path\to\document.pdf".into(), ts: 0, pinned: false };
+        assert_eq!(file_item.label(), "document.pdf");
+
+        // У текста — первая строка
+        let text_item = Item { text: "Hello\nWorld".into(), ts: 0, pinned: false };
+        assert_eq!(text_item.label(), "Hello");
+    }
+
+    #[test]
+    fn format_file_sizes() {
+        assert_eq!(format_file_size(500), "500 Б");
+        assert_eq!(format_file_size(1024), "1.0 КБ");
+        assert_eq!(format_file_size(1024 * 1536), "1.5 МБ");
+        assert_eq!(format_file_size(1024 * 1024 * 1024 * 2), "2.00 ГБ");
     }
 }

@@ -332,7 +332,7 @@ impl App {
                 let hv = ui.hover_amount(0xF000 + i as u32, hot && self.expanded);
                 if !active && hv > 0.01 {
                     let mut c = ui::fg();
-                    c.a = 0.08 * hv * p;
+                    c.a = 0.08 * hv * content_p;
                     g.brush.SetColor(&c);
                     g.dc.FillRoundedRectangle(
                         &D2D1_ROUNDED_RECT {
@@ -346,7 +346,7 @@ impl App {
                 // Со стеклом выбранную вкладку подсвечивает одна подвижная капля (ниже), без — плашка на вкладке.
                 if active && !self.cfg.glass {
                     let mut c = accent;
-                    c.a = 0.26 * p;
+                    c.a = 0.26 * content_p;
                     g.brush.SetColor(&c);
                     g.dc.FillRoundedRectangle(
                         &D2D1_ROUNDED_RECT {
@@ -369,7 +369,7 @@ impl App {
                 } else {
                     ui::bare()
                 };
-                c.a *= p;
+                c.a *= content_p;
                 g.draw_text(crate::i18n::tab_name(self.order[i]), px, py, pw, ph, c);
             }
 

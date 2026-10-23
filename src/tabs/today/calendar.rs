@@ -307,8 +307,8 @@ impl Today {
             let cid = id(TODAY, 80 + i as u32);
             let (_, clicked) = ui.click_area(cid, b);
             let hv = ui.hover_of(cid);
-            // Сегодня — красным, как в Календаре iOS (в стиле Windows — акцент).
-            let cal = crate::ui::hue(crate::ios::SysColor::Red, cv.accent);
+            // Сегодня — акцентом: красный календаря iOS на «Сегодня» лишний (#10), он остаётся в месяце.
+            let cal = cv.accent;
             if is_today {
                 cv.circle(b.cx(), b.cy(), b.h / 2.0, cal);
             } else if hv > 0.01 {
@@ -352,7 +352,7 @@ impl Today {
         let ev_y = if wk.h > 140.0 { wk.y + 72.0 } else { wk.bottom() - 46.0 };
         let ev = Rect::new(wk.x + 8.0, ev_y, wk.w - 16.0, 38.0);
         cv.rr(ev, 8.0, inset());
-        cv.rr(Rect::new(ev.x + 8.0, ev.y + 8.0, 3.0, 20.0), 1.5, status_pink());
+        cv.rr(Rect::new(ev.x + 8.0, ev.y + 8.0, 3.0, 20.0), 1.5, cv.accent);
         let (l1, l2) = match (&self.next, self.online.calendar_set) {
             (Some(e), _) => (event_when(e, online::now_local_minutes()), e.title.clone()),
             (None, true) if self.online.calendar_failed => (
@@ -381,8 +381,8 @@ impl Today {
             cv.rr(ev, 8.0, D2D1_COLOR_F { a: 0.05 * hv, ..fg() });
             cv.glyph(icon::EDIT, Rect::new(ev.right() - 22.0, ev.y + 10.0, 16.0, 16.0), false, D2D1_COLOR_F { a: hv, ..dim() });
         } else if self.online.calendar_failed {
-            // Предупреждение об ошибке загрузки при наличии событий
-            cv.circle(ev.right() - 14.0, ev.y + 19.0, 2.5, status_pink());
+            // Предупреждение об ошибке загрузки при наличии событий: нейтральная точка, без красного.
+            cv.circle(ev.right() - 14.0, ev.y + 19.0, 2.5, dim());
         }
         if clicked {
             self.begin_calendar_edit(ui);
@@ -412,7 +412,7 @@ impl Today {
             self.begin_calendar_edit(ui);
         }
         if self.online.calendar_failed {
-            cv.circle(box_r.right() - 28.0, box_r.y + 12.0, 2.5, status_pink());
+            cv.circle(box_r.right() - 28.0, box_r.y + 12.0, 2.5, dim());
         }
 
         let content_top = box_r.y + 24.0;
@@ -435,7 +435,7 @@ impl Today {
                 if next_h >= 32.0 {
                     let next_r = Rect::new(box_r.x + 6.0, next_y, box_r.w - 12.0, next_h);
                     cv.rr(next_r, 6.0, D2D1_COLOR_F { a: 0.04, ..fg() });
-                    cv.rr(Rect::new(next_r.x + 6.0, next_r.y + 7.0, 2.5, next_r.h - 14.0), 1.25, status_pink());
+                    cv.rr(Rect::new(next_r.x + 6.0, next_r.y + 7.0, 2.5, next_r.h - 14.0), 1.25, cv.accent);
                     let l1 = event_when(e, now_min);
                     cv.text(&l1, Rect::new(next_r.x + 14.0, next_r.y + 4.0, next_r.w - 20.0, 13.0), &f.small_b, txt());
                     cv.text(&e.title, Rect::new(next_r.x + 14.0, next_r.y + 17.0, next_r.w - 20.0, 13.0), &f.small, dim());
@@ -472,13 +472,13 @@ impl Today {
             let row_r = Rect::new(box_r.x + 4.0, ry, box_r.w - 8.0, EVENT_ROW_H - 2.0);
 
             let (strip_color, time_color, title_color) = if item.highlighted {
-                let cal = crate::ui::hue(crate::ios::SysColor::Red, cv.accent);
+                let cal = cv.accent;
                 cv.rr(row_r, 4.0, D2D1_COLOR_F { a: 0.10, ..cal });
                 (cal, cal, txt())
             } else if item.status == EventStatus::Past {
-                (D2D1_COLOR_F { a: 0.35, ..status_pink() }, dim(), mix(dim(), crate::ui::card(), 0.3))
+                (D2D1_COLOR_F { a: 0.35, ..cv.accent }, dim(), mix(dim(), crate::ui::card(), 0.3))
             } else {
-                (status_pink(), dim(), txt())
+                (cv.accent, dim(), txt())
             };
 
             // Цветная полоска
@@ -691,7 +691,7 @@ impl Today {
         let hv = ui.hover_of(id(TODAY, 91));
         cv.text(&format!("{} {}", crate::i18n::months_full()[vm as usize - 1], vy), title, &f.body, mix(txt(), cv.accent, hv));
         if self.online.calendar_failed {
-            cv.circle(r.right() - 95.0, r.y + 16.0, 2.5, status_pink());
+            cv.circle(r.right() - 95.0, r.y + 16.0, 2.5, dim());
         }
         let mut shift = 0;
         if ui.icon_button(cv, id(TODAY, 92), Rect::new(r.right() - 72.0, r.y + 7.0, 18.0, 18.0), icon::LEFT, false) {
@@ -719,7 +719,7 @@ impl Today {
             let (_, clicked) = ui.click_area(cid, b);
             let hv = ui.hover_of(cid);
             let is_today = day == today;
-            let cal = crate::ui::hue(crate::ios::SysColor::Red, cv.accent);
+            let cal = cv.accent;
             if is_today {
                 cv.rr(b, 5.0, cal);
             } else {
@@ -735,7 +735,7 @@ impl Today {
             let n = evs[idx].len().min(3);
             for k in 0..n {
                 let dx = (k as f32 - (n as f32 - 1.0) / 2.0) * 4.5;
-                cv.circle(b.cx() + dx, b.y + 16.0, 1.5, if is_today { crate::ui::on_color(cal) } else { status_pink() });
+                cv.circle(b.cx() + dx, b.y + 16.0, 1.5, if is_today { crate::ui::on_color(cal) } else { cv.accent });
             }
             if clicked {
                 pick = Some(day);
@@ -785,7 +785,7 @@ impl Today {
             if y + PITCH < view.y || y > view.bottom() {
                 continue;
             }
-            cv.rr(Rect::new(view.x + 3.0, y + 2.5, 2.5, PITCH - 5.0), 1.25, status_pink());
+            cv.rr(Rect::new(view.x + 3.0, y + 2.5, 2.5, PITCH - 5.0), 1.25, cv.accent);
             let when = format_event_range(e.minute, e.end_minute);
             cv.text(&when, Rect::new(view.x + 10.0, y, TIME_COL_W, PITCH), &f.small_b, dim());
             cv.text(&e.title, Rect::new(view.x + 14.0 + TIME_COL_W, y, view.w - TIME_COL_W - 22.0, PITCH), &f.small, txt());
