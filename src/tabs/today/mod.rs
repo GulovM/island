@@ -414,7 +414,7 @@ impl Today {
             ev(15, 0, 45, "Созвон с дизайнерами"),
             ev(18, 30, 90, "Тренировка"),
         ]);
-        self.next = Some(online::Event { start: at(15, 0), all_day: false, title: "Созвон с дизайнерами".into() });
+        self.next = Some(online::Event { start: at(15, 0), end: at(15, 45), all_day: false, title: "Созвон с дизайнерами".into() });
         self.next_min = at(10, 9);
         self.total = Duration::from_secs(5 * 60);
         self.left = Duration::from_secs(3 * 60 + 25);
