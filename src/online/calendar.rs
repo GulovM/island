@@ -138,6 +138,8 @@ pub fn init_cached_calendar(urls: &[String]) {
 pub struct Event {
     /// Начало в местном времени: минуты от 1970-01-01.
     pub start: i64,
+    /// Конец того же вхождения; у событий на весь день — начало дня после последнего. 0 — не задан.
+    pub end: i64,
     pub all_day: bool,
     pub title: String,
 }
@@ -405,6 +407,8 @@ fn unescape_ics(s: &str) -> String {
 struct Cur {
     start: Option<(i64, bool)>,
     end: Option<i64>,
+    /// `DURATION` в минутах: заменяет `DTEND`, если конца нет.
+    duration: Option<i64>,
     title: String,
     rrule: Option<String>,
     exdates: Vec<i64>,
@@ -412,6 +416,29 @@ struct Cur {
     /// `RECURRENCE-ID`: это изменённое вхождение повтора, а не отдельное событие.
     rid: Option<i64>,
     cancelled: bool,
+}
+
+/// Разбирает `DURATION` (`PT1H30M`, `P1D`, `P1W`, `P1DT2H`) в минуты; секунды отбрасываются.
+fn parse_duration(v: &str) -> Option<i64> {
+    let v = v.trim().strip_prefix('P')?;
+    let (date, time) = v.split_once('T').unwrap_or((v, ""));
+    let mut total = 0i64;
+    for (part, units) in [(date, [('W', 10080), ('D', 1440)].as_slice()), (time, [('H', 60), ('M', 1)].as_slice())] {
+        let mut num = String::new();
+        for ch in part.chars() {
+            if ch.is_ascii_digit() {
+                num.push(ch);
+            } else if let Some(&(_, mul)) = units.iter().find(|(u, _)| *u == ch) {
+                total += num.parse::<i64>().ok()? * mul;
+                num.clear();
+            } else if ch != 'S' {
+                return None;
+            } else {
+                num.clear();
+            }
+        }
+    }
+    Some(total)
 }
 
 /// Все события календаря в формате iCalendar.
@@ -436,7 +463,11 @@ pub fn parse_ics(ics: &str, offset: i64) -> Vec<RawEvent> {
             if let Some(c) = cur.take() {
                 if let (Some((start, all_day)), false) = (c.start, c.cancelled) {
                     // Конец: у даты без времени `DTEND` — первый день после события.
-                    let end = c.end.filter(|&e| e > start).unwrap_or(0);
+                    let end = c
+                        .end
+                        .filter(|&e| e > start)
+                        .or_else(|| c.duration.filter(|&d| d > 0).map(|d| start + if all_day { d.max(1440) } else { d }))
+                        .unwrap_or(0);
                     let ev = RawEvent {
                         start,
                         end,
@@ -456,6 +487,7 @@ pub fn parse_ics(ics: &str, offset: i64) -> Vec<RawEvent> {
         match name.split(';').next().unwrap_or("") {
             "DTSTART" => c.start = parse_dt(value, offset),
             "DTEND" => c.end = parse_dt(value, offset).map(|(t, _)| t),
+            "DURATION" => c.duration = parse_duration(value),
             "SUMMARY" => c.title = value.to_string(),
             "RRULE" => c.rrule = Some(value.to_string()),
             "EXDATE" => c.exdates.extend(value.split(',').filter_map(|v| parse_dt(v, offset)).map(|(t, _)| t)),
@@ -494,7 +526,11 @@ pub fn next_of(raws: &[RawEvent], now: i64, offset: i64) -> Option<Event> {
     raws.iter()
         .filter_map(|r| occurrence_from(r, now, offset).map(|t| (t, r)))
         .min_by_key(|(t, _)| *t)
-        .map(|(t, r)| Event { start: t, all_day: r.all_day, title: r.title.clone() })
+        .map(|(t, r)| {
+            // Длительность та же у каждого повтора: конец вхождения = его начало + длительность.
+            let end = if r.end > r.start { t + (r.end - r.start) } else { 0 };
+            Event { start: t, end, all_day: r.all_day, title: r.title.clone() }
+        })
 }
 
 /// Ближайшее событие календаря в формате iCalendar.
@@ -592,6 +628,55 @@ mod tests {
         // 23-е исключено EXDATE, 30-е повторяется.
         assert!(on(23).is_empty());
         assert_eq!(on(30).len(), 1);
+    }
+
+    #[test]
+    fn duration_values() {
+        assert_eq!(parse_duration("PT1H30M"), Some(90));
+        assert_eq!(parse_duration("P1D"), Some(1440));
+        assert_eq!(parse_duration("P1W"), Some(10080));
+        assert_eq!(parse_duration("P1DT2H"), Some(1560));
+        assert_eq!(parse_duration("PT45M"), Some(45));
+        assert_eq!(parse_duration("PT30S"), Some(0));
+        assert_eq!(parse_duration("мусор"), None);
+        assert_eq!(parse_duration("P1X"), None);
+    }
+
+    #[test]
+    fn next_event_carries_end_from_dtend_or_duration() {
+        let now = at(2026, 10, 15, 9, 0);
+        let dtend = "BEGIN:VEVENT
+DTSTART:20261015T100000
+DTEND:20261015T113000
+SUMMARY:A
+END:VEVENT
+";
+        let ev = next_event(dtend, now, 0).unwrap();
+        assert_eq!((ev.start, ev.end), (at(2026, 10, 15, 10, 0), at(2026, 10, 15, 11, 30)));
+        let dur = "BEGIN:VEVENT
+DTSTART:20261015T100000
+DURATION:PT1H
+SUMMARY:B
+END:VEVENT
+";
+        assert_eq!(next_event(dur, now, 0).unwrap().end, at(2026, 10, 15, 11, 0));
+        // Повтор: конец сдвигается вместе с началом.
+        let daily = "BEGIN:VEVENT
+DTSTART:20261001T100000
+DTEND:20261001T104500
+RRULE:FREQ=DAILY
+SUMMARY:C
+END:VEVENT
+";
+        let ev = next_event(daily, now, 0).unwrap();
+        assert_eq!((ev.start, ev.end), (at(2026, 10, 15, 10, 0), at(2026, 10, 15, 10, 45)));
+        // Без конца — end = 0, показывается только начало.
+        let none = "BEGIN:VEVENT
+DTSTART:20261015T100000
+SUMMARY:D
+END:VEVENT
+";
+        assert_eq!(next_event(none, now, 0).unwrap().end, 0);
     }
 
     #[test]

@@ -23,8 +23,23 @@ fn week_dates(y: i32, m: u32, d: u32) -> [(u32, u32); 7] {
 fn event_when(ev: &Event, now: i64) -> String {
     let day = ev.start.div_euclid(1440);
     let today = now.div_euclid(1440);
-    let tod = ev.start.rem_euclid(1440);
-    let when = if ev.all_day { crate::i18n::t("весь день").to_string() } else { format!("{:02}:{:02}", tod / 60, tod % 60) };
+    let hm = |t: i64| format!("{:02}:{:02}", t.rem_euclid(1440) / 60, t.rem_euclid(1440) % 60);
+    // Конец у события на весь день — начало дня после последнего, поэтому «до» считаем от предыдущей минуты.
+    let last_day = if ev.end > ev.start { (ev.end - 1).div_euclid(1440) } else { day };
+    let until = || {
+        let (_, m, d) = civil_from_days(last_day);
+        format!("{d} {}", crate::i18n::months_short()[(m as usize).clamp(1, 12) - 1])
+    };
+    let when = if ev.all_day {
+        let all = crate::i18n::t("весь день");
+        if last_day > day { format!("{all} → {}", until()) } else { all.to_string() }
+    } else if ev.end <= ev.start {
+        hm(ev.start)
+    } else if last_day == day {
+        format!("{}–{}", hm(ev.start), hm(ev.end))
+    } else {
+        format!("{} → {} {}", hm(ev.start), until(), hm(ev.end))
+    };
     if day == today {
         format!("{} • {when}", crate::i18n::pick("Далее", "Next"))
     } else if day == today + 1 {
@@ -213,10 +228,23 @@ pub fn format_event_time(minute: Option<i64>) -> String {
     }
 }
 
+/// Время в списке дня: «10:00–11:30», если окончание в тот же день позже начала. Без окончания —
+/// только начало; если событие уходит за полночь (`end` = 1440), — «10:00–…».
+pub fn format_event_range(minute: Option<i64>, end: Option<i64>) -> String {
+    let start = format_event_time(minute);
+    match (minute, end) {
+        (Some(_), Some(e)) if e >= 1440 => format!("{start}–…"),
+        (Some(s), Some(e)) if e > s => format!("{start}–{}", format_event_time(Some(e))),
+        _ => start,
+    }
+}
+
 /// Минимальная высота и ширина контейнера списка событий для показа расширенной формы.
 const MIN_LIST_BOX_H: f32 = 70.0;
 const MIN_LIST_BOX_W: f32 = 140.0;
 const EVENT_ROW_H: f32 = 22.0;
+/// Ширина колонки времени в списках событий: хватает на «10:00–11:30».
+const TIME_COL_W: f32 = 74.0;
 const EVENT_MORE_H: f32 = 20.0;
 
 /// События показанного месяца: (месяц, версия календаря, дни сетки).
@@ -457,12 +485,12 @@ impl Today {
             cv.rr(Rect::new(row_r.x + 3.0, row_r.y + 2.5, 3.0, row_r.h - 5.0), 1.5, strip_color);
 
             // Время начала или «весь день»
-            let when = format_event_time(item.minute);
-            cv.text(&when, Rect::new(row_r.x + 10.0, row_r.y + 2.0, 52.0, 14.0), &f.small_b, time_color);
+            let when = format_event_range(item.minute, item.end_minute);
+            cv.text(&when, Rect::new(row_r.x + 10.0, row_r.y + 2.0, TIME_COL_W, 14.0), &f.small_b, time_color);
 
             // Название события
-            let title_w = (row_r.w - 68.0).max(10.0);
-            cv.text(&item.title, Rect::new(row_r.x + 64.0, row_r.y + 2.0, title_w, 14.0), &f.small, title_color);
+            let title_w = (row_r.w - TIME_COL_W - 16.0).max(10.0);
+            cv.text(&item.title, Rect::new(row_r.x + 14.0 + TIME_COL_W, row_r.y + 2.0, title_w, 14.0), &f.small, title_color);
         }
 
         if layout.more_count > 0 {
@@ -758,12 +786,9 @@ impl Today {
                 continue;
             }
             cv.rr(Rect::new(view.x + 3.0, y + 2.5, 2.5, PITCH - 5.0), 1.25, status_pink());
-            let when = match e.minute {
-                Some(m) => format!("{:02}:{:02}", m / 60, m % 60),
-                None => crate::i18n::t("весь день").to_string(),
-            };
-            cv.text(&when, Rect::new(view.x + 10.0, y, 50.0, PITCH), &f.small_b, dim());
-            cv.text(&e.title, Rect::new(view.x + 62.0, y, view.w - 70.0, PITCH), &f.small, txt());
+            let when = format_event_range(e.minute, e.end_minute);
+            cv.text(&when, Rect::new(view.x + 10.0, y, TIME_COL_W, PITCH), &f.small_b, dim());
+            cv.text(&e.title, Rect::new(view.x + 14.0 + TIME_COL_W, y, view.w - TIME_COL_W - 22.0, PITCH), &f.small, txt());
         }
         ui.scroll_end(cv, sid);
 
@@ -813,11 +838,38 @@ mod tests {
     #[test]
     fn event_labels() {
         let now = days_from_civil(2026, 10, 15) * 1440 + 9 * 60;
-        let ev = |day: i64, tod: i64, all_day| Event { start: day * 1440 + tod, all_day, title: String::new() };
+        let ev = |day: i64, tod: i64, all_day| Event { start: day * 1440 + tod, end: 0, all_day, title: String::new() };
         let today = now / 1440;
         assert_eq!(event_when(&ev(today, 11 * 60, false), now), "Далее • 11:00");
         assert_eq!(event_when(&ev(today + 1, 9 * 60 + 30, false), now), "Завтра • 09:30");
         assert_eq!(event_when(&ev(today + 2, 0, true), now), "Сб 17 окт • весь день");
+    }
+
+    #[test]
+    fn event_labels_with_end() {
+        let now = days_from_civil(2026, 10, 15) * 1440 + 9 * 60;
+        let today = now / 1440;
+        let ev = |start: i64, end: i64, all_day| Event { start, end, all_day, title: String::new() };
+        // Тот же день: диапазон.
+        assert_eq!(event_when(&ev(today * 1440 + 600, today * 1440 + 690, false), now), "Далее • 10:00–11:30");
+        // Окончание на другой день: дата и время конца.
+        assert_eq!(
+            event_when(&ev(today * 1440 + 22 * 60, (today + 1) * 1440 + 90, false), now),
+            "Далее • 22:00 → 16 окт 01:30"
+        );
+        // Весь день на несколько дней: до последнего дня (конец — начало следующего).
+        assert_eq!(event_when(&ev((today + 1) * 1440, (today + 4) * 1440, true), now), "Завтра • весь день → 18 окт");
+        // Весь день на один день: без «до».
+        assert_eq!(event_when(&ev((today + 1) * 1440, (today + 2) * 1440, true), now), "Завтра • весь день");
+    }
+
+    #[test]
+    fn event_range_in_lists() {
+        assert_eq!(format_event_range(Some(600), Some(690)), "10:00–11:30");
+        assert_eq!(format_event_range(Some(600), None), "10:00");
+        assert_eq!(format_event_range(Some(600), Some(600)), "10:00");
+        assert_eq!(format_event_range(Some(1320), Some(1440)), "22:00–…");
+        assert_eq!(format_event_range(None, None), "весь день");
     }
 
     #[test]
