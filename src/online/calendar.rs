@@ -521,10 +521,15 @@ fn occurrence_from(raw: &RawEvent, from: i64, offset: i64) -> Option<i64> {
     None
 }
 
-/// Ближайшее событие не раньше `now`.
+/// Как далеко вперёд ищется ближайшее событие, дней: более далёкие не показываются.
+pub const NEXT_EVENT_DAYS: i64 = 30;
+
+/// Ближайшее событие не раньше `now` и не позже чем через `NEXT_EVENT_DAYS` дней.
 pub fn next_of(raws: &[RawEvent], now: i64, offset: i64) -> Option<Event> {
+    let horizon = now + NEXT_EVENT_DAYS * 1440;
     raws.iter()
         .filter_map(|r| occurrence_from(r, now, offset).map(|t| (t, r)))
+        .filter(|(t, _)| *t <= horizon)
         .min_by_key(|(t, _)| *t)
         .map(|(t, r)| {
             // Длительность та же у каждого повтора: конец вхождения = его начало + длительность.
@@ -628,6 +633,20 @@ mod tests {
         // 23-е исключено EXDATE, 30-е повторяется.
         assert!(on(23).is_empty());
         assert_eq!(on(30).len(), 1);
+    }
+
+    #[test]
+    fn next_event_only_within_30_days() {
+        let now = at(2026, 10, 15, 9, 0);
+        let one = |start: &str| format!("BEGIN:VEVENT\nDTSTART:{start}\nSUMMARY:X\nEND:VEVENT\n");
+        // Ровно через 30 дней — ещё показывается, через 30 дней и минуту — уже нет.
+        assert!(next_event(&one("20261114T090000"), now, 0).is_some());
+        assert!(next_event(&one("20261114T090100"), now, 0).is_none());
+        // Далёкое событие не мешает ближнему, а повтор подхватывается в окне.
+        let two = format!("{}{}", one("20270101T100000"), one("20261020T100000"));
+        assert_eq!(next_event(&two, now, 0).unwrap().start, at(2026, 10, 20, 10, 0));
+        let yearly = "BEGIN:VEVENT\nDTSTART:20250101T100000\nRRULE:FREQ=YEARLY\nSUMMARY:Y\nEND:VEVENT\n";
+        assert!(next_event(yearly, now, 0).is_none());
     }
 
     #[test]
