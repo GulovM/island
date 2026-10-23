@@ -691,7 +691,7 @@ impl Today {
         let hv = ui.hover_of(id(TODAY, 91));
         cv.text(&format!("{} {}", crate::i18n::months_full()[vm as usize - 1], vy), title, &f.body, mix(txt(), cv.accent, hv));
         if self.online.calendar_failed {
-            cv.circle(r.right() - 95.0, r.y + 16.0, 2.5, status_pink());
+            cv.circle(r.right() - 95.0, r.y + 16.0, 2.5, dim());
         }
         let mut shift = 0;
         if ui.icon_button(cv, id(TODAY, 92), Rect::new(r.right() - 72.0, r.y + 7.0, 18.0, 18.0), icon::LEFT, false) {
@@ -719,7 +719,7 @@ impl Today {
             let (_, clicked) = ui.click_area(cid, b);
             let hv = ui.hover_of(cid);
             let is_today = day == today;
-            let cal = crate::ui::hue(crate::ios::SysColor::Red, cv.accent);
+            let cal = cv.accent;
             if is_today {
                 cv.rr(b, 5.0, cal);
             } else {
@@ -735,7 +735,7 @@ impl Today {
             let n = evs[idx].len().min(3);
             for k in 0..n {
                 let dx = (k as f32 - (n as f32 - 1.0) / 2.0) * 4.5;
-                cv.circle(b.cx() + dx, b.y + 16.0, 1.5, if is_today { crate::ui::on_color(cal) } else { status_pink() });
+                cv.circle(b.cx() + dx, b.y + 16.0, 1.5, if is_today { crate::ui::on_color(cal) } else { cv.accent });
             }
             if clicked {
                 pick = Some(day);
@@ -785,7 +785,7 @@ impl Today {
             if y + PITCH < view.y || y > view.bottom() {
                 continue;
             }
-            cv.rr(Rect::new(view.x + 3.0, y + 2.5, 2.5, PITCH - 5.0), 1.25, status_pink());
+            cv.rr(Rect::new(view.x + 3.0, y + 2.5, 2.5, PITCH - 5.0), 1.25, cv.accent);
             let when = format_event_range(e.minute, e.end_minute);
             cv.text(&when, Rect::new(view.x + 10.0, y, TIME_COL_W, PITCH), &f.small_b, dim());
             cv.text(&e.title, Rect::new(view.x + 14.0 + TIME_COL_W, y, view.w - TIME_COL_W - 22.0, PITCH), &f.small, txt());
