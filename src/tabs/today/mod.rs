@@ -99,6 +99,10 @@ pub struct Today {
     todo_ts: Vec<u64>,
     /// Сортировка списка задач (сохраняется в `todo.txt`).
     todo_sort: todo::Sort,
+    /// Убирать выполненные задачи при смене дня (настройка `todo_clean_done`).
+    clean_done: bool,
+    /// День (от 1970-01-01), в который список проверялся в последний раз; 0 — ещё не записан.
+    todo_day: i64,
     /// Состояние анимации каждой задачи (та же длина, что у `todo`).
     anim: Vec<RowAnim>,
     /// 0 — неделя и таймер, 1 — месячный календарь (плавная смена).
@@ -152,6 +156,8 @@ impl Default for Today {
             todo: Vec::new(),
             todo_ts: Vec::new(),
             todo_sort: todo::Sort::default(),
+            clean_done: false,
+            todo_day: 0,
             anim: Vec::new(),
             month_t: Spring::unit(0.0, 240.0, 26.0),
             city: String::new(),
@@ -185,6 +191,7 @@ impl Today {
         self.city = cfg.weather_city.clone();
         self.ics = cfg.calendar_ics.clone();
         self.clock_style = cfg.clock_style.min(CLOCK_STYLES - 1);
+        self.clean_done = cfg.todo_clean_done;
     }
 
     /// Вкладка открылась: обновить погоду и календарь, если устарели.

@@ -43,6 +43,7 @@ const N_OPACITY: u32 = 19;
 /// Занимает шесть номеров подряд (20–25) — по числу `PRESETS`.
 const N_PRESET: u32 = 20;
 const N_ACCENT_PILL: u32 = 26;
+const N_TODO_CLEAN: u32 = 110;
 /// Занимает два номера подряд (27–28) — по числу `PALETTE_STYLES`.
 const N_PALETTE_STYLE: u32 = 27;
 /// Занимает три номера подряд (30–32) — по числу `SECTIONS`.
@@ -765,6 +766,13 @@ impl Settings {
         y += 18.0;
         cv.text("Наведите на верхний край, чтобы раскрыть", Rect::new(x, y, iw, 13.0), &f.small, dim());
         y += 24.0;
+        cv.text("Убирать выполненные задачи в новый день", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut clean = self.cfg.todo_clean_done;
+        if ui.switch(cv, id(SETTINGS, N_TODO_CLEAN), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut clean, true) {
+            self.cfg.todo_clean_done = clean;
+            self.changed = true;
+        }
+        y += 24.0;
 
         // Язык интерфейса: применяется сразу.
         cv.text("Язык", Rect::new(x, y, 80.0, 18.0), &f.body, txt());
@@ -944,6 +952,7 @@ mod tests {
             (N_OPACITY, 1),
             (N_PRESET, PRESETS.len() as u32),
             (N_ACCENT_PILL, 1),
+            (N_TODO_CLEAN, 1),
             (N_PALETTE_STYLE, PALETTE_STYLES.len() as u32),
             (N_SECTION, SECTIONS.len() as u32),
             (N_MATERIAL, MATERIALS.len() as u32),

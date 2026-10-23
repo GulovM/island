@@ -78,6 +78,10 @@ hidden_tabs = []
 # 1 — в свёрнутом острове без музыки показывать время, раскладку клавиатуры и Wi-Fi
 idle_face = 1
 
+# 1 — выполненные задачи в списке дел убираются сами с наступлением нового дня; 0 — не убираются.
+# Меняется и в Настройках.
+todo_clean_done = 0
+
 # 1 — найденные обновления скачиваются и ставятся сами (проверка — раз в сутки);
 # 0 — остров только сообщает об обновлении. Меняется и в Настройках.
 auto_update = 0
@@ -165,6 +169,8 @@ pub struct Config {
     pub hidden_tabs: Vec<String>,
     /// Время, раскладка и Wi-Fi на свёрнутом острове, когда музыка не играет.
     pub idle_face: bool,
+    /// Убирать выполненные задачи при смене дня.
+    pub todo_clean_done: bool,
     /// Устанавливать найденные обновления без вопросов.
     pub auto_update: bool,
     pub leave_delay_ms: u32,
@@ -209,6 +215,7 @@ impl Default for Config {
             language: "auto".to_string(),
             hidden_tabs: Vec::new(),
             idle_face: true,
+            todo_clean_done: false,
             auto_update: false,
             leave_delay_ms: 220,
             env_poll_ms: 400,
@@ -295,6 +302,7 @@ fn save_updates(cfg: &Config, names: &[&str]) -> Vec<(&'static str, String)> {
         ("tabs", fmt_list(&order)),
         ("hidden_tabs", fmt_list(&cfg.hidden_tabs)),
         ("idle_face", (cfg.idle_face as u8).to_string()),
+        ("todo_clean_done", (cfg.todo_clean_done as u8).to_string()),
         ("auto_update", (cfg.auto_update as u8).to_string()),
     ];
     updates.to_vec()
@@ -539,6 +547,7 @@ fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
         "tabs",
         "hidden_tabs",
         "idle_face",
+        "todo_clean_done",
         "auto_update",
     ];
     if tmpl.filter(|k| appearance.contains(&k.as_str())).all(|k| present(&k)) {
@@ -597,6 +606,7 @@ pub fn parse(text: &str) -> Config {
             },
             ("", "system_colors", Value::Num(v)) => cfg.system_colors = v != 0.0,
             ("", "idle_face", Value::Num(v)) => cfg.idle_face = v != 0.0,
+            ("", "todo_clean_done", Value::Num(v)) => cfg.todo_clean_done = v != 0.0,
             ("", "auto_update", Value::Num(v)) => cfg.auto_update = v != 0.0,
             ("", "corner_radius", Value::Num(v)) => cfg.corner_radius = (v as f32).clamp(0.0, MAX_RADIUS),
             ("", "glass", Value::Num(v)) => cfg.glass = v != 0.0,
@@ -1098,6 +1108,16 @@ gmail = \"https://mail.google.com\"
         assert!(!parse("glass = false\n").glass);
         // Неизвестное/нечисловое значение не перезаписывает значение по умолчанию
         assert!(parse("glass = \"yes\"\n").glass);
+    }
+
+    #[test]
+    fn todo_clean_done_key_parses() {
+        assert!(!Config::default().todo_clean_done);
+        assert!(parse("todo_clean_done = 1
+").todo_clean_done);
+        assert!(!parse("todo_clean_done = 0
+").todo_clean_done);
+        assert!(!parse(DEFAULT_TEMPLATE).todo_clean_done);
     }
 
     #[test]

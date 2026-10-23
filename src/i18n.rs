@@ -350,6 +350,8 @@ const TABLE: &[(&str, &str)] = &[
     ("Добавить задачу…", "Add task…"),
     ("Список пуст", "No tasks"),
     ("Вручную", "Manual"),
+    ("Убирать выполненные задачи в новый день", "Remove completed tasks on a new day"),
+    ("Убрать выполненные", "Clear done"),
     ("По дате", "By date"),
     ("По статусу", "By status"),
     // Wallpaper

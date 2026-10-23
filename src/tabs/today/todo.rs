@@ -68,9 +68,11 @@ fn sorted_order(sort: Sort, items: &[(bool, u64)]) -> Vec<usize> {
     ord
 }
 
-/// Разбор `todo.txt`: необязательная строка `#sort=…`, затем `выполнено[@время]|текст`.
-fn parse_todo(lines: &[String]) -> (Sort, Vec<(bool, String, u64)>) {
+/// Разбор `todo.txt`: необязательные строки `#sort=…` и `#day=…` (день последней проверки),
+/// затем `выполнено[@время]|текст`.
+fn parse_todo(lines: &[String]) -> (Sort, i64, Vec<(bool, String, u64)>) {
     let sort = lines.iter().find_map(|l| l.strip_prefix("#sort=")).map_or(Sort::Manual, Sort::parse);
+    let day = lines.iter().find_map(|l| l.strip_prefix("#day=")).and_then(|d| d.trim().parse().ok()).unwrap_or(0);
     let items = lines
         .iter()
         .filter_map(|l| l.split_once('|'))
@@ -80,7 +82,7 @@ fn parse_todo(lines: &[String]) -> (Sort, Vec<(bool, String, u64)>) {
         })
         .take(MAX_TODO)
         .collect();
-    (sort, items)
+    (sort, day, items)
 }
 
 /// Плавность строки задачи: смещение при вставке/удалении соседей, появление и отметка «выполнено».
@@ -114,8 +116,9 @@ impl RowAnim {
 
 impl Today {
     pub fn load(&mut self) {
-        let (sort, items) = parse_todo(&read_lines(TODO_FILE));
+        let (sort, day, items) = parse_todo(&read_lines(TODO_FILE));
         self.todo_sort = sort;
+        self.todo_day = day;
         self.todo_ts = items.iter().map(|i| i.2).collect();
         self.todo = items.into_iter().map(|(d, t, _)| (d, t)).collect();
         self.anim = self.todo.iter().map(|(d, _)| RowAnim::new(*d, false)).collect();
@@ -123,9 +126,58 @@ impl Today {
     }
 
     fn save(&self) {
-        let mut lines = vec![format!("#sort={}", self.todo_sort.as_str())];
+        let mut lines = vec![format!("#sort={}", self.todo_sort.as_str()), format!("#day={}", self.todo_day)];
         lines.extend(self.todo.iter().zip(&self.todo_ts).map(|((d, t), ts)| format!("{}@{ts}|{t}", if *d { 1 } else { 0 })));
         write_lines(TODO_FILE, &lines);
+    }
+
+    /// Убирает выполненные задачи насовсем (без архива) и сохраняет список.
+    fn clear_done(&mut self) {
+        if self.remove_done() {
+            self.save();
+        }
+    }
+
+    /// Выбрасывает выполненные задачи из памяти; невыполненные не трогает. `true` — что-то убрано.
+    fn remove_done(&mut self) -> bool {
+        let keep: Vec<bool> = self.todo.iter().map(|(d, _)| !*d).collect();
+        if keep.iter().all(|&k| k) {
+            return false;
+        }
+        let new_edit = self.edit.and_then(|e| keep.get(e).copied().unwrap_or(false).then(|| keep[..e].iter().filter(|&&k| k).count()));
+        let mut i = 0;
+        self.todo.retain(|_| {
+            i += 1;
+            keep[i - 1]
+        });
+        let mut i = 0;
+        self.todo_ts.retain(|_| {
+            i += 1;
+            keep.get(i - 1).copied().unwrap_or(true)
+        });
+        let mut i = 0;
+        self.anim.retain(|_| {
+            i += 1;
+            keep.get(i - 1).copied().unwrap_or(true)
+        });
+        self.edit = new_edit;
+        true
+    }
+
+    /// Смена дня: при включённой настройке выполненные задачи убираются (и при запуске после полуночи).
+    /// Первая запись дня (0, файл старой версии) только запоминается.
+    fn roll_day(&mut self) {
+        let today = crate::online::now_local_minutes().div_euclid(1440);
+        if self.todo_day == today {
+            return;
+        }
+        let first = self.todo_day == 0;
+        self.todo_day = today;
+        if self.clean_done && !first {
+            self.clear_done();
+        } else {
+            self.save();
+        }
     }
 
     /// Переставляет задачи по выбранной сортировке; пружины строк едут на новые места сами.
@@ -147,6 +199,7 @@ impl Today {
     }
 
     pub(super) unsafe fn todo_card(&mut self, ui: &mut Ui, cv: &Canvas, card: Rect) {
+        self.roll_day();
         cv.card(card);
         let f = &cv.g.fonts;
         let done = self.todo.iter().filter(|(d, _)| *d).count();
@@ -170,6 +223,12 @@ impl Today {
             self.todo_sort = self.todo_sort.next();
             self.resort();
             self.save();
+        }
+        // Ручная очистка: чип левее сортировки, виден, пока есть выполненные и хватает места рядом с заголовком.
+        let clear_w = cv.chip_w("Убрать выполненные");
+        let clear_r = Rect::new(sort_r.x - 6.0 - clear_w, by - 8.5, clear_w, 17.0);
+        if done > 0 && clear_r.x >= card.x + 12.0 + 64.0 && ui.chip(cv, id(TODAY, 34), clear_r, "Убрать выполненные", false) {
+            self.clear_done();
         }
 
         // Поле «добавить» внизу и золотая кнопка со стрелкой.
@@ -377,14 +436,16 @@ mod tests {
             "invalid_line".to_string(),
             "".to_string(),
         ];
-        let (sort, items) = parse_todo(&lines);
+        let (sort, day, items) = parse_todo(&lines);
         assert_eq!(sort, Sort::Status);
+        assert_eq!(day, 0);
         assert_eq!(items, vec![
             (false, "Купить молоко".to_string(), 0),
             (true, "Сдать отчёт | срочно".to_string(), 1_700_000_000),
         ]);
         // Без заголовка (файл старой версии) — ручной порядок.
         assert_eq!(parse_todo(&["0|a".to_string()]).0, Sort::Manual);
+        assert_eq!(parse_todo(&["#day=20750".to_string()]).1, 20750);
         assert_eq!(Sort::parse("мусор"), Sort::Manual);
     }
 
@@ -400,6 +461,27 @@ mod tests {
         let items = [(true, 1), (false, 2), (true, 3), (false, 4)];
         assert_eq!(sorted_order(Sort::Status, &items), vec![1, 3, 0, 2]);
         assert_eq!(sorted_order(Sort::Manual, &items), vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn remove_done_keeps_open_tasks_and_edit_target() {
+        let mut t = Today::default();
+        t.todo = vec![(true, "a".into()), (false, "b".into()), (true, "c".into()), (false, "d".into())];
+        t.todo_ts = vec![1, 2, 3, 4];
+        t.anim = t.todo.iter().map(|(d, _)| RowAnim::new(*d, false)).collect();
+        t.edit = Some(3);
+        assert!(t.remove_done());
+        assert_eq!(t.todo, vec![(false, "b".to_string()), (false, "d".to_string())]);
+        assert_eq!(t.todo_ts, vec![2, 4]);
+        assert_eq!(t.anim.len(), 2);
+        assert_eq!(t.edit, Some(1), "правка едет за своей задачей");
+        // Нечего убирать — ничего не меняется.
+        assert!(!t.remove_done());
+        // Правимая выполненная задача исчезает вместе с правкой.
+        t.todo[0].0 = true;
+        t.edit = Some(0);
+        assert!(t.remove_done());
+        assert_eq!(t.edit, None);
     }
 
     #[test]
