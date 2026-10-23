@@ -349,6 +349,9 @@ const TABLE: &[(&str, &str)] = &[
     ("Изменить задачу…", "Edit task…"),
     ("Добавить задачу…", "Add task…"),
     ("Список пуст", "No tasks"),
+    ("Вручную", "Manual"),
+    ("По дате", "By date"),
+    ("По статусу", "By status"),
     // Wallpaper
     ("Недавние", "Recent"),
     ("Папка", "Folder"),

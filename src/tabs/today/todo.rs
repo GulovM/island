@@ -11,6 +11,78 @@ const MAX_TODO: usize = 100;
 
 const TODO_FILE: &str = "todo.txt";
 
+/// Сортировка списка задач. «Вручную» порядок не трогает (новые добавляются сверху).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum Sort {
+    #[default]
+    Manual,
+    /// Новые сверху; задачи без даты (созданные в старых версиях) в конце.
+    Date,
+    /// Невыполненные сверху, внутри групп порядок сохраняется.
+    Status,
+}
+
+impl Sort {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Date => "date",
+            Self::Status => "status",
+        }
+    }
+
+    fn parse(s: &str) -> Self {
+        match s.trim() {
+            "date" => Self::Date,
+            "status" => Self::Status,
+            _ => Self::Manual,
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::Manual => Self::Date,
+            Self::Date => Self::Status,
+            Self::Status => Self::Manual,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Manual => "Вручную",
+            Self::Date => "По дате",
+            Self::Status => "По статусу",
+        }
+    }
+}
+
+/// Новый порядок индексов для `items` (выполнено, время создания) по сортировке; сортировка устойчивая.
+fn sorted_order(sort: Sort, items: &[(bool, u64)]) -> Vec<usize> {
+    let mut ord: Vec<usize> = (0..items.len()).collect();
+    match sort {
+        Sort::Manual => {}
+        // Ключ — убывание времени создания; задачи без даты (0) оказываются в конце.
+        Sort::Date => ord.sort_by_key(|&i| std::cmp::Reverse(items[i].1)),
+        Sort::Status => ord.sort_by_key(|&i| items[i].0),
+    }
+    ord
+}
+
+/// Разбор `todo.txt`: необязательная строка `#sort=…`, затем `выполнено[@время]|текст`.
+fn parse_todo(lines: &[String]) -> (Sort, Vec<(bool, String, u64)>) {
+    let sort = lines.iter().find_map(|l| l.strip_prefix("#sort=")).map_or(Sort::Manual, Sort::parse);
+    let items = lines
+        .iter()
+        .filter_map(|l| l.split_once('|'))
+        .map(|(head, t)| {
+            let (d, ts) = head.split_once('@').unwrap_or((head, ""));
+            (d == "1", t.to_string(), ts.parse().unwrap_or(0))
+        })
+        .take(MAX_TODO)
+        .collect();
+    (sort, items)
+}
+
 /// Плавность строки задачи: смещение при вставке/удалении соседей, появление и отметка «выполнено».
 pub(super) struct RowAnim {
     pos: Spring,
@@ -42,18 +114,36 @@ impl RowAnim {
 
 impl Today {
     pub fn load(&mut self) {
-        self.todo = read_lines(TODO_FILE)
-            .iter()
-            .filter_map(|l| l.split_once('|'))
-            .map(|(d, t)| (d == "1", t.to_string()))
-            .take(MAX_TODO)
-            .collect();
+        let (sort, items) = parse_todo(&read_lines(TODO_FILE));
+        self.todo_sort = sort;
+        self.todo_ts = items.iter().map(|i| i.2).collect();
+        self.todo = items.into_iter().map(|(d, t, _)| (d, t)).collect();
         self.anim = self.todo.iter().map(|(d, _)| RowAnim::new(*d, false)).collect();
+        self.resort();
     }
 
     fn save(&self) {
-        let lines: Vec<String> = self.todo.iter().map(|(d, t)| format!("{}|{t}", if *d { 1 } else { 0 })).collect();
+        let mut lines = vec![format!("#sort={}", self.todo_sort.as_str())];
+        lines.extend(self.todo.iter().zip(&self.todo_ts).map(|((d, t), ts)| format!("{}@{ts}|{t}", if *d { 1 } else { 0 })));
         write_lines(TODO_FILE, &lines);
+    }
+
+    /// Переставляет задачи по выбранной сортировке; пружины строк едут на новые места сами.
+    fn resort(&mut self) {
+        let items: Vec<(bool, u64)> = self.todo.iter().map(|(d, _)| *d).zip(self.todo_ts.iter().copied()).collect();
+        let ord = sorted_order(self.todo_sort, &items);
+        if ord.iter().enumerate().all(|(n, &i)| n == i) || self.anim.len() != self.todo.len() {
+            return;
+        }
+        let mut todo: Vec<Option<(bool, String)>> = std::mem::take(&mut self.todo).into_iter().map(Some).collect();
+        let mut anim: Vec<Option<RowAnim>> = std::mem::take(&mut self.anim).into_iter().map(Some).collect();
+        let ts = std::mem::take(&mut self.todo_ts);
+        for &i in &ord {
+            self.todo.extend(todo[i].take());
+            self.anim.extend(anim[i].take());
+            self.todo_ts.push(ts[i]);
+        }
+        self.edit = self.edit.and_then(|e| ord.iter().position(|&i| i == e));
     }
 
     pub(super) unsafe fn todo_card(&mut self, ui: &mut Ui, cv: &Canvas, card: Rect) {
@@ -72,6 +162,15 @@ impl Today {
             cv.ring(bx, by, 8.0, 1.4, done as f32 / self.todo.len() as f32, status_green());
         }
         cv.text(&format!("{done}/{}", self.todo.len()), Rect::new(bx - 9.0, by - 6.0, 18.0, 12.0), &f.caps_c, txt());
+        // Сортировка: чип левее счётчика, по нажатию Вручную → По дате → По статусу. Выбранная подсвечена.
+        let sort_label = self.todo_sort.label();
+        let sort_w = cv.text_w(&crate::i18n::tr(sort_label), &f.small_c) + 16.0;
+        let sort_r = Rect::new(bx - 9.0 - 6.0 - sort_w, by - 8.5, sort_w, 17.0);
+        if ui.chip(cv, id(TODAY, 33), sort_r, sort_label, self.todo_sort != Sort::Manual) {
+            self.todo_sort = self.todo_sort.next();
+            self.resort();
+            self.save();
+        }
 
         // Поле «добавить» внизу и золотая кнопка со стрелкой.
         let fid = id(TODAY, 30);
@@ -120,7 +219,9 @@ impl Today {
                 Some(_) => {}
                 None if !text.is_empty() && self.todo.len() < MAX_TODO => {
                     self.todo.insert(0, (false, text.to_string()));
+                    self.todo_ts.insert(0, crate::sys::now_secs());
                     self.anim.insert(0, RowAnim::new(false, true));
+                    self.resort();
                     self.save();
                 }
                 None => {}
@@ -229,6 +330,9 @@ impl Today {
         ui.scroll_end(cv, sid);
         if let Some(i) = removed {
             self.todo.remove(i);
+            if i < self.todo_ts.len() {
+                self.todo_ts.remove(i);
+            }
             if i < self.anim.len() {
                 self.anim.remove(i);
             }
@@ -251,6 +355,7 @@ impl Today {
             if let Some(a) = self.anim.get_mut(i) {
                 a.done.target = self.todo[i].0 as u8 as f32;
             }
+            self.resort();
             self.save();
         }
         if self.todo.is_empty() {
@@ -266,20 +371,42 @@ mod tests {
     #[test]
     fn parse_todo_lines() {
         let lines = [
+            "#sort=status".to_string(),
             "0|Купить молоко".to_string(),
-            "1|Сдать отчёт".to_string(),
+            "1@1700000000|Сдать отчёт | срочно".to_string(),
             "invalid_line".to_string(),
             "".to_string(),
         ];
-        let items: Vec<(bool, String)> = lines
-            .iter()
-            .filter_map(|l| l.split_once('|'))
-            .map(|(d, t)| (d == "1", t.to_string()))
-            .take(MAX_TODO)
-            .collect();
+        let (sort, items) = parse_todo(&lines);
+        assert_eq!(sort, Sort::Status);
         assert_eq!(items, vec![
-            (false, "Купить молоко".to_string()),
-            (true, "Сдать отчёт".to_string()),
+            (false, "Купить молоко".to_string(), 0),
+            (true, "Сдать отчёт | срочно".to_string(), 1_700_000_000),
         ]);
+        // Без заголовка (файл старой версии) — ручной порядок.
+        assert_eq!(parse_todo(&["0|a".to_string()]).0, Sort::Manual);
+        assert_eq!(Sort::parse("мусор"), Sort::Manual);
+    }
+
+    #[test]
+    fn sort_by_date_puts_undated_last() {
+        // (выполнено, время): новые сверху, без даты в конце, равные не переставляются.
+        let items = [(false, 0), (false, 100), (true, 300), (false, 200), (false, 0)];
+        assert_eq!(sorted_order(Sort::Date, &items), vec![2, 3, 1, 0, 4]);
+    }
+
+    #[test]
+    fn sort_by_status_keeps_order_inside_groups() {
+        let items = [(true, 1), (false, 2), (true, 3), (false, 4)];
+        assert_eq!(sorted_order(Sort::Status, &items), vec![1, 3, 0, 2]);
+        assert_eq!(sorted_order(Sort::Manual, &items), vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn sort_cycles_through_all_modes() {
+        assert_eq!(Sort::Manual.next().next().next(), Sort::Manual);
+        for s in [Sort::Manual, Sort::Date, Sort::Status] {
+            assert_eq!(Sort::parse(s.as_str()), s);
+        }
     }
 }

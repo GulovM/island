@@ -95,6 +95,10 @@ pub struct Today {
     sound: bool,
     ring: Spring,
     todo: Vec<(bool, String)>,
+    /// Время создания каждой задачи, секунды с 1970 (та же длина, что у `todo`); 0 — даты нет.
+    todo_ts: Vec<u64>,
+    /// Сортировка списка задач (сохраняется в `todo.txt`).
+    todo_sort: todo::Sort,
     /// Состояние анимации каждой задачи (та же длина, что у `todo`).
     anim: Vec<RowAnim>,
     /// 0 — неделя и таймер, 1 — месячный календарь (плавная смена).
@@ -146,6 +150,8 @@ impl Default for Today {
             sound: true,
             ring: Spring::unit(1.0, 160.0, 22.0),
             todo: Vec::new(),
+            todo_ts: Vec::new(),
+            todo_sort: todo::Sort::default(),
             anim: Vec::new(),
             month_t: Spring::unit(0.0, 240.0, 26.0),
             city: String::new(),
@@ -414,6 +420,7 @@ impl Today {
             (false, "Забрать посылку".into()),
             (true, "Записаться к стоматологу".into()),
         ];
+        self.todo_ts = vec![0; self.todo.len()];
         self.anim = self.todo.iter().map(|(d, _)| RowAnim::new(*d, false)).collect();
     }
 
