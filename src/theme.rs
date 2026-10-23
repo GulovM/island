@@ -25,13 +25,13 @@ impl PaletteStyle {
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Windows => "windows",
-            Self::Ios => "ios",
+            Self::Ios => "macos",
         }
     }
 
     pub fn parse(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
-            "ios" => Self::Ios,
+            "macos" | "ios" => Self::Ios,
             _ => Self::Windows,
         }
     }

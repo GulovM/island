@@ -86,7 +86,7 @@ const PRESETS: [(&str, &str); 6] = [
 /// Стили палитры оформления: Windows (цвета системы) или iOS 26.
 pub const PALETTE_STYLES: [(PaletteStyle, &str); 2] = [
     (PaletteStyle::Windows, "Windows"),
-    (PaletteStyle::Ios, "iOS"),
+    (PaletteStyle::Ios, "macOS"),
 ];
 
 pub fn palette_style_from_idx(idx: usize) -> PaletteStyle {
@@ -586,10 +586,10 @@ impl Settings {
         }
         y += 26.0;
 
-        // Стиль цветов: системный Windows или iOS 26 Liquid Glass
+        // Стиль цветов: системный Windows или macOS (системные цвета iOS 26 Liquid Glass)
         cv.text("Стиль цветов", Rect::new(x, y, 110.0, 18.0), &f.body, txt());
         let win_w = 68.0;
-        let ios_w = 42.0;
+        let ios_w = 50.0;
         let mut cx = rc.right() - 10.0 - (win_w + ios_w + 4.0);
         let cur_style_idx = palette_style_idx(self.cfg.palette_style);
         for (k, &(_, label)) in PALETTE_STYLES.iter().enumerate() {
@@ -863,7 +863,7 @@ mod tests {
     fn palette_style_index_helpers_roundtrip() {
         assert_eq!(PALETTE_STYLES.len(), 2);
         assert_eq!(PALETTE_STYLES[0], (PaletteStyle::Windows, "Windows"));
-        assert_eq!(PALETTE_STYLES[1], (PaletteStyle::Ios, "iOS"));
+        assert_eq!(PALETTE_STYLES[1], (PaletteStyle::Ios, "macOS"));
 
         assert_eq!(palette_style_from_idx(0), PaletteStyle::Windows);
         assert_eq!(palette_style_from_idx(1), PaletteStyle::Ios);
