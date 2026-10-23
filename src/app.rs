@@ -62,6 +62,8 @@ pub struct App {
     pub(crate) trim_pending: bool,
     /// Последний применённый регион окна: (left, right, bottom) в пикселях окна.
     pub(crate) rgn: (i32, i32, i32),
+    /// Области последних кадров анимации: регион окна не сжимается быстрее, чем обновляется картинка.
+    pub(crate) rgn_hist: Vec<(i32, i32, i32)>,
     /// Позиция выбранной вкладки в `order`.
     pub(crate) tab: usize,
     /// Вместо вкладки показана страница настроек (шестерёнка).
@@ -73,8 +75,9 @@ pub struct App {
     pub(crate) face_tick_on: bool,
     /// Настройки изменены и ждут записи в config.toml (пишем, когда кнопка мыши отпущена).
     pub(crate) save_pending: bool,
-    pub(crate) w: Spring,
-    pub(crate) h: Spring,
+    /// Свёрнутая и раскрытая формы тела; фактический размер — `body_size()`.
+    pub(crate) body: anim::Body,
+    /// Единый прогресс раскрытия 0..1: от него зависят размер тела, скругление и гашение свёрнутой формы.
     pub(crate) open: Spring,
 
     /// Тулкит и состояние вкладок.
@@ -253,15 +256,17 @@ impl App {
                 leave_hold: None,
                 trim_pending: true,
                 rgn: (-1, -1, -1),
+                rgn_hist: Vec::new(),
                 tab: initial_tab,
                 settings_open: false,
                 glow: Spring::unit(0.0, 220.0, 26.0),
                 face: face::Face::new(cfg.idle_face),
                 face_tick_on: false,
                 save_pending: false,
-                w: Spring::new(cfg.collapsed.0 * scale, 420.0, 30.0),
-                h: Spring::new(cfg.collapsed.1 * scale, 420.0, 30.0),
-                open: Spring::new(0.0, 300.0, 34.0),
+                body: anim::Body::new((cfg.collapsed.0 * scale, cfg.collapsed.1 * scale)),
+                // Затухание чуть выше критического порога 0,7: почти без отскока, чтобы при сворачивании
+                // тело не уходило меньше свёрнутого размера.
+                open: Spring::unit(0.0, 420.0, 34.0),
                 ui: Ui::default(),
                 tabs: tabs::Tabs::default(),
                 shown_tab: None,
@@ -288,8 +293,7 @@ impl App {
             app.apply_monitor(mon, true);
             // Стартовое состояние сразу, без анимации.
             app.refresh_environment();
-            app.w.snap();
-            app.h.snap();
+            app.body.snap();
             app.apply_region();
             app.rebuild_hot();
             if !app.hidden {
@@ -361,7 +365,7 @@ impl App {
 
     /// Центр шестерёнки в логических пикселях окна: у правого края острова в ряду вкладок.
     pub(crate) fn gear_center(&self) -> (f32, f32) {
-        let half = self.w.value / self.scale / 2.0;
+        let half = self.body_size().0 / self.scale / 2.0;
         (self.win_w as f32 / self.scale / 2.0 + half - 16.0, TAB_TOP + TAB_H / 2.0)
     }
 
@@ -460,8 +464,7 @@ impl App {
         self.register_hotkey();
         start_env_timer(self.hwnd, self.cfg.env_poll_ms);
         self.retarget();
-        self.w.snap();
-        self.h.snap();
+        self.body.snap();
         self.rgn = (-1, -1, -1);
         self.apply_region();
         self.rebuild_hot();
@@ -480,9 +483,13 @@ impl App {
     pub(crate) fn retarget(&mut self) {
         let min_cols = self.min_grid_cols();
         self.tabs.set_min_cols(min_cols);
-        let (w, h) = self.target_size();
-        self.w.target = w;
-        self.h.target = h;
+        self.body.set_targets(self.collapsed_target(), self.expanded_target());
+        // Форма, которой сейчас не видно, переходит к цели без анимации.
+        if !self.expanded && self.open.value < 0.001 {
+            self.body.snap_expanded();
+        } else if self.expanded && self.open.value > 0.999 {
+            self.body.snap_collapsed();
+        }
         self.retarget_pill();
         let form = self.live_form();
         self.live.set_form(form);
@@ -509,7 +516,7 @@ impl App {
     }
 
     pub(crate) fn animating(&self) -> bool {
-        !(self.w.settled() && self.h.settled() && self.open.settled())
+        !(self.body.settled() && self.open.settled())
             || !(self.pill_x.settled() && self.pill_w.settled() && self.pill_a.settled())
             || !self.tab_t.settled()
             || !self.glow.settled()
@@ -520,8 +527,7 @@ impl App {
     }
 
     pub(crate) fn step(&mut self, dt: f32) {
-        self.w.step(dt);
-        self.h.step(dt);
+        self.body.step(dt);
         self.open.step(dt);
         self.ui.step(dt);
         self.tabs.step(dt);
@@ -542,9 +548,8 @@ impl App {
             self.tab_t.snap();
             self.tab_prev = None;
         }
-        if self.w.settled() && self.h.settled() {
-            self.w.snap();
-            self.h.snap();
+        if self.body.settled() {
+            self.body.snap();
         }
         if self.open.settled() {
             self.open.snap();

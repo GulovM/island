@@ -46,9 +46,84 @@ impl Spring {
     }
 }
 
+/// Размер тела острова: одна интерполяция между свёрнутой и раскрытой формами.
+/// Ширина и высота не бегут каждая своей пружиной, а выводятся из одного прогресса раскрытия,
+/// поэтому остров растёт и сжимается как единое тело. Концы (`c`, `e`) — свои пружины: они
+/// сглаживают смену формы (мини-плеер, уведомление) и размера вкладки.
+pub struct Body {
+    c: [Spring; 2],
+    e: [Spring; 2],
+}
+
+impl Body {
+    pub fn new(collapsed: (f32, f32)) -> Self {
+        let s = |v| Spring::new(v, 420.0, 30.0);
+        Self { c: [s(collapsed.0), s(collapsed.1)], e: [s(collapsed.0), s(collapsed.1)] }
+    }
+
+    pub fn set_targets(&mut self, collapsed: (f32, f32), expanded: (f32, f32)) {
+        self.c[0].target = collapsed.0;
+        self.c[1].target = collapsed.1;
+        self.e[0].target = expanded.0;
+        self.e[1].target = expanded.1;
+    }
+
+    /// Раскрытая форма не видна, пока остров свёрнут, — к цели она переходит без анимации.
+    pub fn snap_expanded(&mut self) {
+        self.e.iter_mut().for_each(Spring::snap);
+    }
+
+    /// Свёрнутая форма не видна, пока остров раскрыт целиком.
+    pub fn snap_collapsed(&mut self) {
+        self.c.iter_mut().for_each(Spring::snap);
+    }
+
+    pub fn snap(&mut self) {
+        self.snap_expanded();
+        self.snap_collapsed();
+    }
+
+    pub fn step(&mut self, dt: f32) {
+        self.c.iter_mut().chain(self.e.iter_mut()).for_each(|s| s.step(dt));
+    }
+
+    pub fn settled(&self) -> bool {
+        self.c.iter().chain(self.e.iter()).all(Spring::settled)
+    }
+
+    /// Размер тела при прогрессе раскрытия `open` (0 — свёрнут, 1 — раскрыт).
+    pub fn size(&self, open: f32) -> (f32, f32) {
+        let t = open.max(0.0);
+        let at = |i: usize| self.c[i].value + (self.e[i].value - self.c[i].value) * t;
+        (at(0), at(1))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ширина и высота при любом прогрессе лежат на одной прямой между формами:
+    /// доля пройденного пути у них одинакова, отдельных растущих слоёв нет.
+    #[test]
+    fn body_axes_move_together() {
+        let mut b = Body::new((100.0, 20.0));
+        b.set_targets((100.0, 20.0), (500.0, 320.0));
+        b.snap();
+        for open in [0.0_f32, 0.25, 0.5, 0.8, 1.0] {
+            let (w, h) = b.size(open);
+            let (fw, fh) = ((w - 100.0) / 400.0, (h - 20.0) / 300.0);
+            assert!((fw - fh).abs() < 1e-5, "open={open}: {fw} против {fh}");
+        }
+    }
+
+    #[test]
+    fn body_does_not_shrink_below_collapsed_on_undershoot() {
+        let mut b = Body::new((100.0, 20.0));
+        b.set_targets((100.0, 20.0), (500.0, 320.0));
+        b.snap();
+        assert_eq!(b.size(-0.05), (100.0, 20.0));
+    }
 
     #[test]
     fn spring_converges() {

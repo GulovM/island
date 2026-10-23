@@ -84,6 +84,8 @@ pub(crate) const TAB_SIDE_RIGHT: f32 = 56.0;
 pub(crate) const WIN_LOGICAL: (f32, f32) = (800.0, 530.0);
 /// Допуск вокруг раскрытой формы, где мышь ещё считается «на острове» (только слева/справа/снизу).
 pub(crate) const HIT_SLOP: f32 = 4.0;
+/// Сколько последних кадров анимации держит регион окна: картинка и подложка блюра отстают на 2–3 кадра.
+pub(crate) const RGN_TRAIL_FRAMES: usize = 4;
 /// Радиус шестерёнки настроек в ряду вкладок.
 pub(crate) const GEAR_R: f32 = 9.0;
 /// Радиус «ушек» — загнутых плавных переходов чёлки в верхний край экрана.
@@ -210,8 +212,7 @@ fn run() -> Result<()> {
         let cfg = app.cfg.clone();
         app.tabs.load(&cfg, &state);
         app.retarget();
-        app.w.snap();
-        app.h.snap();
+        app.body.snap();
         if let Err(e) = AddClipboardFormatListener(app.hwnd) {
             log::error(&format!("не удалось подписаться на буфер обмена: {e}"));
         }

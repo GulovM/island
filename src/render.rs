@@ -19,8 +19,9 @@ impl App {
         let Some(g) = &self.gfx else { return Ok(()) };
         let t0 = Instant::now();
         let s = self.scale;
-        let aw = self.w.value.max(1.0);
-        let ah = self.h.value.max(1.0);
+        let (bw, bh) = self.body_size();
+        let aw = bw.max(1.0);
+        let ah = bh.max(1.0);
         let x0 = (self.win_w as f32 - aw) / 2.0;
         let open = self.open.value.clamp(0.0, 1.0);
         let accent = self.accent();
@@ -54,14 +55,21 @@ impl App {
         let span_w = (content_w - base_w).max(1.0);
         let w_prog = ((aw - base_w) / span_w).clamp(0.0, 1.0);
 
-        // Только по размеру тела: пружина `open` при сворачивании убывает быстрее размеров, и тело
-        // с кромкой гасли, пока остров ещё большой (оставался обрезанный по прямой контент и подложка).
+        // По фактическому размеру тела, а не по `open`: у мини-плеера и уведомления свёрнутая форма
+        // больше обычной, и по `open` стекло появлялось бы раньше, чем остров начал расти.
         let raw_prog = h_prog.min(w_prog);
         const EXPAND_THRESHOLD: f32 = 0.08;
+        const CONTENT_FADE_START: f32 = 0.4;
         let p = if raw_prog > EXPAND_THRESHOLD {
             ((raw_prog - EXPAND_THRESHOLD) / (1.0 - EXPAND_THRESHOLD)).clamp(0.0, 1.0)
         } else {
             0.0
+        };
+        // Содержимое проявляется во второй половине роста: сначала стекло, поверх него — контент.
+        // Стекло (слои тела, блюр) по-прежнему идёт по `p`.
+        let content_p = {
+            let t = ((p - CONTENT_FADE_START) / (1.0 - CONTENT_FADE_START)).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
         };
 
         // Вычисление всех слоёв тела острова: тинт фона, осветление сверху, кромка и тень.
@@ -201,9 +209,9 @@ impl App {
             g.dc.PopAxisAlignedClip();
         }
 
-        if p > 0.001 {
+        if content_p > 0.001 {
             let rects = self.tab_rects();
-            let pill_a = self.pill_a.value.clamp(0.0, 1.0) * p;
+            let pill_a = self.pill_a.value.clamp(0.0, 1.0) * content_p;
             if self.cfg.glass && pill_a > 0.01 {
                 let (px, pw) = (self.pill_x.value * s, self.pill_w.value.max(1.0) * s);
                 let (py, ph) = (TAB_TOP * s, TAB_H * s);
@@ -369,7 +377,7 @@ impl App {
             let (gx, gy) = self.gear_center();
             let gear_hot = self.expanded && (cursor.0 - gx).hypot(cursor.1 - gy) <= GEAR_R + 3.0;
             let gv = ui.hover_amount(0xF100, gear_hot);
-            let gcv = Canvas { g, alpha: p, accent };
+            let gcv = Canvas { g, alpha: content_p, accent };
             if self.settings_open {
                 g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
                 gcv.circle(gx, gy, GEAR_R, D2D1_COLOR_F { a: 0.26, ..accent });
@@ -386,7 +394,7 @@ impl App {
                 let ev = ui.presence(0xF103, tabs.editing(cur));
                 let hot = self.expanded && (cursor.0 - ex).hypot(cursor.1 - ey) <= GEAR_R + 3.0;
                 let hv = ui.hover_amount(0xF104, hot);
-                let pcv = Canvas { g, alpha: p * pv, accent };
+                let pcv = Canvas { g, alpha: content_p * pv, accent };
                 g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
                 if ev > 0.01 {
                     pcv.circle(ex, ey, GEAR_R, D2D1_COLOR_F { a: 0.26 * ev, ..accent });
@@ -442,9 +450,9 @@ impl App {
                 tabs.draw(id, ui, &cv, w, h);
             };
             if let Some(prev) = self.tab_prev {
-                layer(prev, p * (1.0 - fade), -self.tab_dir * SLIDE * fade, false, ui, tabs);
+                layer(prev, content_p * (1.0 - fade), -self.tab_dir * SLIDE * fade, false, ui, tabs);
             }
-            layer(self.cur_id(), p * fade, self.tab_dir * SLIDE * (1.0 - fade), true, ui, tabs);
+            layer(self.cur_id(), content_p * fade, self.tab_dir * SLIDE * (1.0 - fade), true, ui, tabs);
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
             g.dc.PopAxisAlignedClip();
             if let Some(params) = mask {

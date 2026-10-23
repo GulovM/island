@@ -126,6 +126,11 @@ impl Gfx {
         }
         let device = device.ok_or_else(|| windows::core::Error::from(E_FAIL))?;
         let dxgi: IDXGIDevice = device.cast()?;
+        // Очередь презентации в один кадр: иначе тело, нарисованное в D2D, отстаёт на ~3 кадра
+        // от подложки блюра (Composition, в эту очередь не входит) и стекло растёт двумя слоями.
+        if let Ok(d1) = dxgi.cast::<IDXGIDevice1>() {
+            let _ = d1.SetMaximumFrameLatency(1);
+        }
         let factory: IDXGIFactory2 = dxgi.GetAdapter()?.GetParent()?;
 
         let desc = DXGI_SWAP_CHAIN_DESC1 {
