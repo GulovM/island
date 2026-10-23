@@ -54,7 +54,7 @@ glass_opacity = 70
 # Меняется и в Настройках.
 material = "regular"
 
-# Стиль палитры: "windows" (цвета системы/пользовательские) или "ios" (системные цвета iOS 26).
+# Стиль палитры: "windows" (цвета системы/пользовательские) или "macos" (системные цвета iOS 26). Прежнее "ios" тоже принимается.
 # Меняется и в Настройках.
 palette_style = "windows"
 
@@ -1024,6 +1024,8 @@ gmail = \"https://mail.google.com\"
             ("palette_style = \"Windows\"\n", PaletteStyle::Windows),
             ("palette_style = \"ios\"\n", PaletteStyle::Ios),
             ("palette_style = \"IOS\"\n", PaletteStyle::Ios),
+            ("palette_style = \"macos\"\n", PaletteStyle::Ios),
+            ("palette_style = \"macOS\"\n", PaletteStyle::Ios),
         ] {
             assert_eq!(parse(input).palette_style, expected, "input: {input}");
         }
@@ -1032,7 +1034,7 @@ gmail = \"https://mail.google.com\"
     #[test]
     fn palette_style_and_material_garbage_values_fallback_to_defaults() {
         // Мусорные значения (неизвестные строки, числа, списки, пустые строки) сбрасываются в умолчания
-        let c = parse("material = \"superglass\"\npalette_style = \"macos\"\n");
+        let c = parse("material = \"superglass\"\npalette_style = \"linux\"\n");
         assert_eq!(c.material, Material::Regular);
         assert_eq!(c.palette_style, PaletteStyle::Windows);
 
