@@ -563,9 +563,11 @@ impl Settings {
             self.changed = true;
         }
 
-        let pill_x = x + 92.0;
-        let pill_sw_x = rc.right() - 40.0;
-        cv.text("Акцентная капля", Rect::new(pill_x, y, pill_sw_x - pill_x - 6.0, 20.0), &f.body, txt());
+        // Подпись и переключатель стоят рядом, группа прижата вправо; ширина подписи — по измеренному тексту (RU/EN).
+        let pill_w = cv.text_w("Акцентная капля", &f.body);
+        let pill_x = (rc.right() - 10.0 - 30.0 - 8.0 - pill_w).max(x + 92.0);
+        let pill_sw_x = pill_x + pill_w + 8.0;
+        cv.text("Акцентная капля", Rect::new(pill_x, y, pill_w + 2.0, 20.0), &f.body, txt());
         let mut accent_pill = self.cfg.accent_pill;
         if ui.switch(cv, id(SETTINGS, N_ACCENT_PILL), Rect::new(pill_sw_x, y + 2.0, 30.0, 16.0), &mut accent_pill, true) {
             self.cfg.accent_pill = accent_pill;
