@@ -211,13 +211,13 @@ impl App {
                 let is_ios = pal.style == theme::PaletteStyle::Ios;
 
                 // Мягкая компактная тень Liquid Glass Small:
-                // В стиле iOS: 0 1 4 rgba(0,0,0,0.10) (подобрано).
-                // В стиле Windows: 0 2 8 rgba(0,0,0,0.18) (подобрано).
+                // В стиле iOS: 0 1 3 rgba(0,0,0,0.06) (подобрано).
+                // В стиле Windows: 0 1 4 rgba(0,0,0,0.08) (подобрано).
                 // Рисуется ТОЛЬКО снаружи капли (вычитание геометрии через PushLayer), чтобы тень не темнила полупрозрачную каплю.
                 let (shadow_dy, shadow_blur, shadow_base_alpha) = if is_ios {
-                    (1.0 * s, 4.0 * s, 0.10)
+                    (1.0 * s, 3.0 * s, 0.06)
                 } else {
-                    (2.0 * s, 8.0 * s, 0.18)
+                    (1.0 * s, 4.0 * s, 0.08)
                 };
                 let outer_rr = D2D1_ROUNDED_RECT {
                     rect: D2D_RECT_F {
@@ -276,7 +276,8 @@ impl App {
                 }
 
                 let mut c = if self.cfg.accent_pill {
-                    D2D1_COLOR_F { a: 0.26, ..accent }
+                    // Залитая акцентом капля почти непрозрачна: подпись на ней белая или чёрная по контрасту (`on_color`).
+                    D2D1_COLOR_F { a: 0.92, ..accent }
                 } else {
                     pal.pill
                 };
@@ -347,8 +348,18 @@ impl App {
                         &g.brush,
                     );
                 }
-                // Подписи вкладок лежат прямо на теле острова: невыбранные белые (`bare`), а не серые.
-                let mut c = if active { accent } else { ui::bare() };
+                // Подписи вкладок лежат прямо на теле острова: невыбранные приглушены (`bare` при 68%), а не серые.
+                // Выбранная читается на своей подложке: на акцентной капле `on_color`, на нейтральной капле `bare`,
+                // на плашке без стекла акцент, подтянутый к `bare`, чтобы бледный акцент не терялся.
+                let mut c = if !active {
+                    D2D1_COLOR_F { a: 0.68, ..ui::bare() }
+                } else if !self.cfg.glass {
+                    ui::mix(accent, ui::bare(), 0.4)
+                } else if self.cfg.accent_pill {
+                    ui::on_color(accent)
+                } else {
+                    ui::bare()
+                };
                 c.a *= p;
                 g.draw_text(crate::i18n::tab_name(self.order[i]), px, py, pw, ph, c);
             }
