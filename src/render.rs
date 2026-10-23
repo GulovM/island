@@ -58,11 +58,15 @@ impl App {
         // с кромкой гасли, пока остров ещё большой (оставался обрезанный по прямой контент и подложка).
         let raw_prog = h_prog.min(w_prog);
         const EXPAND_THRESHOLD: f32 = 0.08;
-        let p = if raw_prog > EXPAND_THRESHOLD {
+        let body_p = if raw_prog > EXPAND_THRESHOLD {
             ((raw_prog - EXPAND_THRESHOLD) / (1.0 - EXPAND_THRESHOLD)).clamp(0.0, 1.0)
         } else {
             0.0
         };
+        // Вкладки и их содержимое — ещё и по пружине `open`: мини-плеер и уведомления увеличивают
+        // свёрнутый остров, и по одному размеру вкладки проступали на фоне (#29). При сворачивании
+        // `open` гаснет раньше размеров, так что контент уходит раньше тела.
+        let p = body_p.min(open);
 
         // Вычисление всех слоёв тела острова: тинт фона, осветление сверху, кромка и тень.
         let real = self.real_glass();
@@ -74,11 +78,11 @@ impl App {
             self.cfg.glass,
             real,
             opacity,
-            p,
+            body_p,
             k,
         );
 
-        self.apply_blur(g, x0, aw, ah, ear, r, real && p > 0.001 && k > 0.01, !theme::is_light([pal.bg.r, pal.bg.g, pal.bg.b]));
+        self.apply_blur(g, x0, aw, ah, ear, r, real && body_p > 0.001 && k > 0.01, !theme::is_light([pal.bg.r, pal.bg.g, pal.bg.b]));
 
         // Тело острова рисуется по BodyLayers (тинт материала или фона)
         let body = self.body_path(g, x0, aw, ah, ear, r, false)?;
