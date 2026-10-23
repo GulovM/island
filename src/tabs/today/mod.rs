@@ -47,35 +47,36 @@ const MONTH_W: f32 = 230.0;
 const MONTH_H: f32 = 252.0;
 
 /// Часы: карточка, высокая и широкая — у каждого циферблата своя композиция под каждый размер.
-static CLOCK_SIZES: [Size; 3] = [sz(8, 6), sz(8, 10), sz(16, 6)];
-static WEATHER_SIZES: [Size; 3] = [sz(8, 4), sz(8, 6), sz(16, 4)];
-static WEEK_SIZES: [Size; 4] = [sz(16, 6), sz(16, 8), sz(24, 8), sz(16, 16)];
-static TIMER_SIZES: [Size; 3] = [sz(16, 4), sz(16, 8), sz(24, 8)];
-static TODO_SIZES: [Size; 3] = [sz(16, 8), sz(16, 16), sz(24, 16)];
+static CLOCK_SIZES: [Size; 3] = [sz(2, 2), sz(2, 4), sz(4, 2)];
+static WEATHER_SIZES: [Size; 3] = [sz(2, 1), sz(2, 2), sz(4, 1)];
+/// Неделя: с ближайшим событием, шире, и расширенная со списком событий на сегодня.
+static WEEK_SIZES: [Size; 3] = [sz(4, 2), sz(6, 2), sz(4, 4)];
+static TIMER_SIZES: [Size; 3] = [sz(4, 1), sz(4, 2), sz(6, 2)];
+static TODO_SIZES: [Size; 3] = [sz(4, 2), sz(4, 4), sz(6, 4)];
 
-/// Сетка вкладки: 40 колонок по 16 px (шаг CELL=16, зазор GAP=8), 16 рядов. Часы и погода занимают
-/// 8 колонок, неделя, таймер и задачи — по 16: исходные пропорции макета.
+/// Сетка вкладки: 10 колонок и 4 ряда крупных ячеек (шаг CELL=56, зазор GAP=8; рядов до 5 — под месячный календарь). Часы и погода стоят
+/// столбцом шириной 2 ячейки, неделя и таймер — 4×2 рядом, задачи — 4×4: исходные пропорции макета.
 ///
-/// Статический `min_rows = 4` задаёт компактный размер при скрытых виджетах или пустой вкладке.
+/// Статический `min_rows = 1` задаёт компактный размер при скрытых виджетах или пустой вкладке.
 /// Месячный календарь (MONTH_H = 252 px) запрашивает место динамически через `overlay_rows`.
 pub static SPEC: TabSpec = TabSpec {
-    cols: 40,
-    rows: 16,
-    min_cols: 16,
-    min_rows: 4,
+    cols: 12,
+    rows: 5,
+    min_cols: 4,
+    min_rows: 1,
     specs: &[
-        Spec { key: "clock", title: "Часы", sizes: &CLOCK_SIZES, size: 1, col: 0, row: 0 },
-        Spec { key: "weather", title: "Погода", sizes: &WEATHER_SIZES, size: 1, col: 0, row: 10 },
-        Spec { key: "week", title: "Эта неделя", sizes: &WEEK_SIZES, size: 1, col: 8, row: 0 },
-        Spec { key: "timer", title: "Таймер", sizes: &TIMER_SIZES, size: 1, col: 8, row: 8 },
-        Spec { key: "todo", title: "Задачи", sizes: &TODO_SIZES, size: 1, col: 24, row: 0 },
+        Spec { key: "clock", title: "Часы", sizes: &CLOCK_SIZES, size: 0, col: 0, row: 0 },
+        Spec { key: "weather", title: "Погода", sizes: &WEATHER_SIZES, size: 1, col: 0, row: 2 },
+        Spec { key: "week", title: "Эта неделя", sizes: &WEEK_SIZES, size: 0, col: 2, row: 0 },
+        Spec { key: "timer", title: "Таймер", sizes: &TIMER_SIZES, size: 1, col: 2, row: 2 },
+        Spec { key: "todo", title: "Задачи", sizes: &TODO_SIZES, size: 1, col: 6, row: 0 },
     ],
 };
 
 /// Вычисляет число рядов сетки, необходимое для раскрытого месячного календаря.
 /// Динамический расчёт overlay_rows:
 /// Месячный календарь (MONTH_H = 252 px) раскрывается поверх сетки.
-/// Число рядов под высоту MONTH_H: ceil(MONTH_H / CELL) = ceil(252 / 16) = 16 рядов.
+/// Число рядов под высоту MONTH_H: ceil(MONTH_H / CELL) = ceil(252 / 56) = 5 рядов.
 #[inline]
 pub fn today_overlay_rows(month_h: f32) -> u8 {
     (month_h / super::layout::CELL).ceil().max(0.0) as u8
@@ -269,14 +270,14 @@ impl Today {
 
 
     /// Рисует вкладку по сетке; месячный календарь раскрывается поверх неё. `h` — высота панели
-    /// без полосы правки.
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, _h: f32) {
+    /// (с полосой правки).
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
         self.month_t.target = if self.month_open { 1.0 } else { 0.0 };
         let month_active = self.month_open || self.month_t.value > 0.0;
         let overlay_rows = if month_active { today_overlay_rows(MONTH_H) } else { 0 };
         grid.set_overlay_rows(overlay_rows);
 
-        let area = grid.area(w);
+        let area = grid.area(w, h);
         let t = GetLocalTime();
         let dow = (t.wDayOfWeek as usize + 6) % 7;
         let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
@@ -449,13 +450,14 @@ mod tests {
 
     #[test]
     fn test_today_overlay_rows() {
-        // Высота месячного календаря MONTH_H = 252 px -> 252 / 16 = 15.75 -> ceil = 16 рядов
-        assert_eq!(today_overlay_rows(MONTH_H), 16);
-        assert_eq!(today_overlay_rows(252.0), 16);
+        // Высота месячного календаря MONTH_H = 252 px -> 252 / 56 = 4.5 -> ceil = 5 рядов (вся сетка)
+        assert_eq!(today_overlay_rows(MONTH_H), 5);
+        assert_eq!(today_overlay_rows(252.0), 5);
+        assert_eq!(today_overlay_rows(SPEC.rows as f32 * crate::tabs::layout::CELL), SPEC.rows);
 
         // Меньшие высоты
-        assert_eq!(today_overlay_rows(64.0), 4);
-        assert_eq!(today_overlay_rows(16.0), 1);
+        assert_eq!(today_overlay_rows(56.0), 1);
+        assert_eq!(today_overlay_rows(57.0), 2);
         assert_eq!(today_overlay_rows(0.0), 0);
     }
 }

@@ -11,7 +11,7 @@ use std::f32::consts::TAU;
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows_numerics::Matrix3x2;
 
-use super::layout::{self, Layout, Placed, Side, TabSpec, Window, CELL};
+use super::layout::{self, Handle, Layout, Placed, Side, TabSpec, Window, CELL};
 use super::{id as tab_id};
 use crate::anim::Spring;
 use crate::i18n::tr;
@@ -32,6 +32,9 @@ const BADGE_R: f32 = 8.0;
 const CHIP_H: f32 = 22.0;
 const TRAY_PAD: f32 = 8.0;
 const TRAY_GAP: f32 = 6.0;
+/// До скольких колонок и рядов ручки растягивают окно (колонок — не меньше, чем нужно ряду вкладок).
+const STRETCH_COLS: u8 = 10;
+const STRETCH_ROWS: u8 = 6;
 
 const BLACK: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
 
@@ -125,6 +128,8 @@ struct Drag {
 /// Нажатие на угловой ручке: короткое — смена размера по кругу, с движением — подбор размера.
 struct Resize {
     idx: usize,
+    /// За какую ручку тянут: угловую или вертикальную (правый верхний угол).
+    handle: Handle,
     press: (f32, f32),
     /// Размер виджета в пикселях в момент нажатия.
     from: (f32, f32),
@@ -160,7 +165,10 @@ struct Tray {
 
 pub struct Grid {
     tab: usize,
+    /// Описание виджетов вкладки с подставленной шириной «на весь остров» (`layout::FULL`).
     spec: &'static TabSpec,
+    /// Описание из вкладки без подстановки.
+    base: &'static TabSpec,
     /// Рабочая раскладка; пока виджет в руке, это превью: соседи уже стоят там, куда их вытеснили.
     lay: Layout,
     /// Раскладка на начало перетаскивания: от неё считается превью, прерванный перенос возвращает её.
@@ -180,6 +188,8 @@ pub struct Grid {
     window: Window,
     min_cols: u8,
     overlay_rows: u8,
+    /// Автоуплотнение раскладки (как в Пункте управления iOS); `false` — свободная раскладка с пустотами.
+    compact: bool,
     last_skip: u32,
     /// Виджет, который рисуется поверх остальных, пока он «летит» на место.
     top: Option<usize>,
@@ -198,6 +208,7 @@ impl Default for Grid {
         Self {
             tab: 0,
             spec: &layout::EMPTY,
+            base: &layout::EMPTY,
             lay: Layout { entries: Vec::new() },
             before: None,
             slots: Vec::new(),
@@ -214,6 +225,7 @@ impl Default for Grid {
             window: Window { c0: 0, r0: 0, c1: 1, r1: 1 },
             min_cols: 1,
             overlay_rows: 0,
+            compact: true,
             last_skip: 0,
             top: None,
             tray_open: false,
@@ -232,6 +244,8 @@ impl Grid {
     /// Привязывает сетку к вкладке и описанию её виджетов, `text` — раскладка из конфига.
     pub fn configure(&mut self, tab: usize, spec: &'static TabSpec, text: &str) {
         self.tab = tab;
+        self.base = spec;
+        let spec = layout::resolve_full(spec, self.full_cols());
         self.spec = spec;
         self.lay = Layout::default_for(spec);
         self.slots = spec.specs.iter().map(|_| Slot::new()).collect();
@@ -241,9 +255,34 @@ impl Grid {
         if lay.fits(spec, 0, 0.0) {
             self.lay = lay;
         }
+        self.tidy_idle(0);
         self.window = layout::fit_window(&self.lay.entries, spec, 0, self.min_cols.max(spec.min_cols), self.eff_min_rows());
         self.pending = None;
         self.snap = true;
+        // Раскладка со старой сетки или после уплотнения отличается от записанной: запишем её заново.
+        let now = self.lay.to_text(spec);
+        if now != text.trim() {
+            self.saved = Some(now);
+        }
+    }
+
+    /// Ширина «на весь остров» в ячейках: колонки, которых хватает ряду вкладок.
+    fn full_cols(&self) -> u8 {
+        self.min_cols.max(self.base.min_cols).clamp(1, self.base.cols.max(1))
+    }
+
+    /// Пересчитывает описание виджетов под нынешнюю ширину острова; раскладка при этом заново
+    /// расставляется (виджеты «на весь остров» стали шире или уже).
+    fn respec(&mut self) {
+        let spec = layout::resolve_full(self.base, self.full_cols());
+        if std::ptr::eq(spec, self.spec) {
+            return;
+        }
+        let text = self.lay.to_text(self.spec);
+        self.spec = spec;
+        if !self.slots.is_empty() {
+            self.lay = Layout::parse(spec, &text);
+        }
     }
 
     /// Текущее окно сетки вкладки (в целых ячейках).
@@ -252,11 +291,82 @@ impl Grid {
         self.window
     }
 
-    /// Область под виджеты в слое шириной `w`: по центру, потому что остров бывает шире окна сетки
-    /// (ряд вкладок шире сетки, а у вкладки сетка ограничена максимумом колонок).
-    pub fn area(&self, w: f32) -> Rect {
-        let cw = self.window.content_w();
-        Rect::new(((w - cw) / 2.0).max(super::PAD), super::TOP, cw, self.window.content_h())
+    /// Область под виджеты в слое `w`×`h`: по центру, потому что остров одного размера на всех вкладках
+    /// и бывает больше окна сетки (ряд вкладок шире сетки, у вкладки сетка ограничена максимумом колонок,
+    /// а вкладке с малым содержимым достаётся высота самой большой). `h` включает полосу правки.
+    pub fn area(&self, w: f32, h: f32) -> Rect {
+        let (cw, ch) = (self.window.content_w(), self.window.content_h());
+        let free_h = (h - super::TOP - super::PAD - self.extra() - ch).max(0.0);
+        Rect::new(((w - cw) / 2.0).max(super::PAD), super::TOP + (free_h / 2.0).floor(), cw, ch)
+    }
+
+    /// Включает или выключает автоуплотнение. При включении раскладка сразу приводится в порядок
+    /// (см. `tidy`) и, если изменилась, сохраняется.
+    pub fn set_compact(&mut self, on: bool) {
+        if self.compact == on {
+            return;
+        }
+        self.compact = on;
+        if on && !self.slots.is_empty() && self.drag.is_none() && self.resizing.is_none() {
+            let before = self.lay.clone();
+            if self.editing {
+                self.tidy(self.window, self.last_skip);
+            } else {
+                self.tidy_idle(self.last_skip);
+                self.window = layout::fit_window(&self.lay.entries, self.spec, self.last_skip, self.min_cols, self.eff_min_rows());
+                self.resize = true;
+            }
+            if self.lay != before {
+                self.commit();
+            }
+        }
+    }
+
+    /// Автоуплотнение по завершении: виджеты в порядке чтения занимают первое свободное место окна
+    /// `win`, но только если это освобождает целый ряд или столбец (остров уменьшается). Если все
+    /// пустоты остаются внутри раскладки, ничего не двигается: одна пустая ячейка не повод
+    /// переставлять виджеты, пока пользователь их расставляет.
+    fn tidy(&mut self, win: Window, skip: u32) {
+        if !self.compact {
+            return;
+        }
+        let Some(packed) = layout::compact(win, self.spec, skip, &self.lay.entries) else { return };
+        let (now, then) = (
+            layout::fit_window(&self.lay.entries, self.spec, skip, 0, 0),
+            layout::fit_window(&packed, self.spec, skip, 0, 0),
+        );
+        if then.rows() < now.rows() || then.cols() < now.cols() {
+            self.lay.entries = packed;
+        }
+    }
+
+    /// То же вне режима правки: от начала сетки, на ширину обтянутого окна и на всю возможную высоту.
+    fn tidy_idle(&mut self, skip: u32) {
+        let fit = layout::fit_window(&self.lay.entries, self.spec, skip, self.min_cols, self.eff_min_rows());
+        self.tidy(Window { c0: 0, r0: 0, c1: fit.c1, r1: self.spec.rows }, skip);
+    }
+
+    /// Предел растягивания окна сеткой ручками: (колонки, ряды). Остров не шире ряда вкладок
+    /// и не выше исходной сетки; дальше растянуть нечего, и ручки не показываются.
+    fn stretch_cap(&self) -> (u8, u8) {
+        (self.spec.cols.min(self.min_cols.max(STRETCH_COLS)), self.spec.rows.min(STRETCH_ROWS))
+    }
+
+    /// Можно ли растянуть окно в сторону `side` (есть место и не упёрлись в предел).
+    fn can_stretch(&self, side: Side) -> bool {
+        let (cols, rows) = self.stretch_cap();
+        layout::can_expand_side(self.window, self.spec, side)
+            && match side {
+                Side::Right => self.window.c1 < cols,
+                Side::Bottom => self.window.r1 < rows,
+                Side::Left | Side::Top => true,
+            }
+    }
+
+    /// Окно после растягивания: не больше предела (но не меньше исходного).
+    fn capped(&self, win: Window, from: Window) -> Window {
+        let (cols, rows) = self.stretch_cap();
+        Window { c1: win.c1.min(cols.max(from.c1)), r1: win.r1.min(rows.max(from.r1)), ..win }
     }
 
     /// Число рядов окна, запрошенное открытым оверлеем (список устройств, месячный календарь).
@@ -299,6 +409,7 @@ impl Grid {
             return;
         }
         self.min_cols = eff;
+        self.respec();
         if !self.editing {
             self.window = layout::fit_window(&self.lay.entries, self.spec, self.last_skip, self.min_cols, self.eff_min_rows());
         }
@@ -349,6 +460,12 @@ impl Grid {
         self.editing = false;
         self.edit.target = 0.0;
         self.tray_open = false;
+        // Правка закончена: пустоты схлопываются, если это освободит целый ряд или столбец.
+        let before = self.lay.clone();
+        self.tidy(self.window, self.last_skip);
+        if self.lay != before {
+            self.commit();
+        }
         // По «Готово» окно сбрасывает ручные расширения и плотно обтягивает оставшиеся виджеты
         self.window = layout::fit_window(&self.lay.entries, self.spec, self.last_skip, self.min_cols, self.eff_min_rows());
         self.resize = true;
@@ -546,6 +663,7 @@ impl Grid {
 
         let mut to_hide = None;
         let mut to_cycle = None;
+        let mut to_flip = None;
         for &idx in &vis {
             let r = self.slots[idx].rect();
             let (_, hide) = ui.click_area(self.wid(idx, 0), badge_hit(r));
@@ -562,7 +680,20 @@ impl Grid {
                 }
                 if self.resizing.is_none() && self.drag.is_none() && ui.is_dragging(id) {
                     let (ptr_x, ptr_y) = ptr;
-                    self.resizing = Some(Resize { idx, press: (ptr_x, ptr_y), from: (r.w, r.h), live: false, before: self.lay.clone(), refused: false });
+                    self.resizing = Some(Resize { idx, handle: Handle::Corner, press: (ptr_x, ptr_y), from: (r.w, r.h), live: false, before: self.lay.clone(), refused: false });
+                }
+            }
+            // Вторая ручка (правый верхний угол) у ползунков: длина и положение «стоя».
+            if layout::is_dual(spec, idx) {
+                let id = self.wid(idx, 3);
+                let (_, flip) = ui.click_area(id, top_hit(r));
+                let dragged = self.resizing.as_ref().is_some_and(|rs| rs.idx == idx && rs.live);
+                if flip && !dragged {
+                    to_flip = Some(idx);
+                }
+                if self.resizing.is_none() && self.drag.is_none() && ui.is_dragging(id) {
+                    let (ptr_x, ptr_y) = ptr;
+                    self.resizing = Some(Resize { idx, handle: Handle::Top, press: (ptr_x, ptr_y), from: (r.w, r.h), live: false, before: self.lay.clone(), refused: false });
                 }
             }
         }
@@ -589,7 +720,7 @@ impl Grid {
         // Ручки растягивания окна сетки
         const SIDES: [Side; 4] = [Side::Left, Side::Top, Side::Right, Side::Bottom];
         for &side in &SIDES {
-            if !layout::can_expand_side(self.window, spec, side) {
+            if !self.can_stretch(side) {
                 continue;
             }
             let id = self.hid(side);
@@ -597,8 +728,8 @@ impl Grid {
             let (_, clicked) = ui.click_area(id, hit);
             let dragged = self.stretching.as_ref().is_some_and(|st| st.side == side && st.live);
             if clicked && !dragged {
-                // Клик без движения: +4 ячейки (но не больше максимума)
-                self.window = layout::expand_side(self.window, spec, side, 4);
+                // Клик без движения: +1 ячейка (но не больше максимума)
+                self.window = self.capped(layout::expand_side(self.window, spec, side, 1), self.window);
                 self.resize = true;
             }
             if self.stretching.is_none() && self.drag.is_none() && self.resizing.is_none() && ui.is_dragging(id) {
@@ -626,6 +757,13 @@ impl Grid {
             self.commit();
             if self.lay.visible_count(skip) == 0 {
                 self.tray_open = true;
+            }
+        }
+        if let Some(idx) = to_flip {
+            if self.lay.flip_orientation_in_window(self.window, spec, skip, idx) {
+                self.commit();
+            } else {
+                self.say("Не хватает места");
             }
         }
         if let Some(idx) = to_cycle {
@@ -703,6 +841,7 @@ impl Grid {
         if st.live {
             let layer_w = area.w + 2.0 * area.x;
             let new_win = layout::stretch_window(st.side, (px, py), st.press_pos, st.initial_window, spec, layer_w);
+            let new_win = self.capped(new_win, st.initial_window);
             if new_win != self.window {
                 self.window = new_win;
                 self.resize = true;
@@ -722,7 +861,7 @@ impl Grid {
 
         const SIDES: [Side; 4] = [Side::Left, Side::Top, Side::Right, Side::Bottom];
         for &side in &SIDES {
-            if !layout::can_expand_side(self.window, self.spec, side) {
+            if !self.can_stretch(side) {
                 continue;
             }
             let id = self.hid(side);
@@ -790,7 +929,7 @@ impl Grid {
     fn resize_step(&mut self, ui: &mut Ui, area: Rect, skip: u32) {
         let spec = self.spec;
         let Some(mut rs) = self.resizing.take() else { return };
-        if !ui.is_dragging(self.wid(rs.idx, 1)) {
+        if !ui.is_dragging(self.wid(rs.idx, if rs.handle == Handle::Top { 3 } else { 1 })) {
             if rs.live && rs.before != self.lay {
                 self.commit();
             }
@@ -805,12 +944,25 @@ impl Grid {
             }
         }
         if rs.live {
-            let (w, h) = (rs.from.0 + px - rs.press.0, rs.from.1 + py - rs.press.1);
+            // Угловая ручка тянет вправо и вниз, верхняя — вверх (длина «стоя» растёт вверх от нижнего края).
+            let (w, h) = match rs.handle {
+                Handle::Corner => (rs.from.0 + px - rs.press.0, rs.from.1 + py - rs.press.1),
+                Handle::Top => (rs.from.0, rs.from.1 + rs.press.1 - py),
+            };
             let prefer = self.lay.entry(rs.idx).map_or(0, |e| e.size);
-            if let Some(res) = layout::resolve_resize(self.window, spec, skip, &rs.before.entries, rs.idx, w, h, prefer) {
+            let start = rs.before.entry(rs.idx).map_or(0, |e| e.size);
+            if let Some(res) = layout::resolve_resize(self.window, spec, skip, &rs.before.entries, rs.idx, w, h, prefer, rs.handle) {
                 // Размер под курсором не встал даже с вытеснением: говорим об этом сразу, а не молчим.
                 let got = res.entries.iter().find(|e| e.idx == rs.idx).map(|e| e.size);
-                let refused = got != layout::size_order(spec, rs.idx, w, h, prefer).first().copied();
+                // Размеры больше окна не считаются отказом: ручка просто упёрлась в край сетки.
+                let win = self.window;
+                let wanted = layout::resize_order(spec, rs.idx, start, rs.handle, w, h, prefer)
+                    .into_iter()
+                    .find(|&z| {
+                        let zs = spec.specs[rs.idx].sizes[z];
+                        zs.w <= win.cols() && zs.h <= win.rows()
+                    });
+                let refused = got != wanted;
                 if refused && !rs.refused {
                     self.say("Не хватает места");
                 }
@@ -932,6 +1084,7 @@ impl Grid {
         // Раскладка из конфига или набор доступных виджетов изменились: окно обтягивает их заново,
         // а остров подстраивает размер (иначе он остаётся от прежнего окна).
         if !self.editing && refit {
+            self.tidy_idle(skip);
             let win = layout::fit_window(&self.lay.entries, spec, skip, self.min_cols, self.eff_min_rows());
             if win != self.window {
                 self.window = win;
@@ -1096,8 +1249,23 @@ impl Grid {
                 bcv.circle(bx, by, br, ui::status_red());
                 let half = 3.2 * e.max(0.0);
                 bcv.stroke_line((bx - half, by), (bx + half, by), 1.7, ui::WHITE);
+                if layout::is_dual(self.spec, idx) {
+                    let held = self.resizing.as_ref().is_some_and(|rs| rs.idx == idx && rs.live && rs.handle == Handle::Top);
+                    let th = ui.hover_of(self.wid(idx, 3)).max(if held { 2.0 } else { 0.0 });
+                    let (tx, ty) = (r.right() - 2.0, r.y + 2.0);
+                    let tr_ = BADGE_R * e.max(0.0) * (1.0 + 0.1 * th);
+                    bcv.circle(tx, ty, tr_, cv.accent);
+                    let q = 3.2 * e.max(0.0);
+                    let t = ui::ink();
+                    // Двойная вертикальная стрелка.
+                    bcv.stroke_line((tx, ty - q), (tx, ty + q), 1.5, t);
+                    bcv.stroke_line((tx - 2.4, ty - q + 2.4), (tx, ty - q), 1.5, t);
+                    bcv.stroke_line((tx + 2.4, ty - q + 2.4), (tx, ty - q), 1.5, t);
+                    bcv.stroke_line((tx - 2.4, ty + q - 2.4), (tx, ty + q), 1.5, t);
+                    bcv.stroke_line((tx + 2.4, ty + q - 2.4), (tx, ty + q), 1.5, t);
+                }
                 if self.spec.specs[idx].sizes.len() > 1 {
-                    let held = self.resizing.as_ref().is_some_and(|rs| rs.idx == idx && rs.live);
+                    let held = self.resizing.as_ref().is_some_and(|rs| rs.idx == idx && rs.live && rs.handle == Handle::Corner);
                     let sh = ui.hover_of(self.wid(idx, 1)).max(if held { 2.0 } else { 0.0 });
                     let (sx, sy) = (r.right() - 2.0, r.bottom() - 2.0);
                     let sr = BADGE_R * e.max(0.0) * (1.0 + 0.1 * sh);
@@ -1202,11 +1370,33 @@ impl Grid {
         let base_inner = fade(fg, 0.22 * e);
         let base_edge = fade(fg, 0.38 * e);
         let base_corner = fade(fg, 0.45 * e);
-        let max_dist = 2.5;
+        let max_dist = 1.2;
 
         let win = self.window;
         let cols = win.cols();
         let rows = win.rows();
+
+        // Свободные ячейки окна (в свободной раскладке это пустоты): едва заметные «лунки» под виджетами.
+        let busy: Vec<(u8, u8, u8, u8)> = self
+            .lay
+            .entries
+            .iter()
+            .filter(|e| !e.hidden && !layout::skipped(self.last_skip, e.idx))
+            .map(|e| {
+                let s = self.spec.specs[e.idx].sizes[e.size];
+                (e.col, e.row, s.w, s.h)
+            })
+            .collect();
+        for r in win.r0..win.r1 {
+            for c in win.c0..win.c1 {
+                if busy.iter().any(|&(bc, br, bw, bh)| c >= bc && c < bc + bw && r >= br && r < br + bh) {
+                    continue;
+                }
+                let (x, y) = win.cell_to_pixel(c, r);
+                let hole = Rect::new(area.x + x, area.y + y, CELL - layout::GAP, CELL - layout::GAP);
+                cv.rr(hole, 11.0, fade(fg, 0.06 * e));
+            }
+        }
 
         for r_rel in 0..=rows {
             for c_rel in 0..=cols {
@@ -1259,6 +1449,11 @@ fn badge_hit(r: Rect) -> Rect {
 /// Область нажатия на кнопку размера в правом нижнем углу виджета.
 fn size_hit(r: Rect) -> Rect {
     Rect::new(r.right() - 2.0 - 10.0, r.bottom() - 2.0 - 10.0, 20.0, 20.0)
+}
+
+/// Область нажатия на вертикальную ручку в правом верхнем углу виджета.
+fn top_hit(r: Rect) -> Rect {
+    Rect::new(r.right() - 2.0 - 10.0, r.y + 2.0 - 10.0, 20.0, 20.0)
 }
 
 /// Мягкая тень из нескольких полупрозрачных слоёв.
@@ -1378,16 +1573,16 @@ mod tests {
         assert_eq!(p00, (14.0 - 4.0, 38.0 - 4.0));
 
         let p10 = node_pos(area, 1, 0);
-        assert_eq!(p10, (14.0 + 16.0 - 4.0, 38.0 - 4.0));
+        assert_eq!(p10, (14.0 + 56.0 - 4.0, 38.0 - 4.0));
         assert_eq!(p10.0 - p00.0, CELL);
 
         let p01 = node_pos(area, 0, 1);
         assert_eq!(p01.1 - p00.1, CELL);
 
-        // Узел между виджетом w=8 (x: 14..134) и виджетом w=8 (x: 142..262):
-        // Зазор между 134 и 142 px, середина зазора — 138 px.
-        let p80 = node_pos(area, 8, 0);
-        assert_eq!(p80.0, 138.0);
+        // Узел между виджетом w=2 (x: 14..118) и виджетом w=2 (x: 126..230):
+        // Зазор между 118 и 126 px, середина зазора — 122 px.
+        let p20 = node_pos(area, 2, 0);
+        assert_eq!(p20.0, 122.0);
     }
 
     #[test]
@@ -1465,6 +1660,125 @@ mod tests {
         assert!(!badge_hit(r).contains((60.0, 60.0)));
         assert!(size_hit(r).contains((118.0, 88.0)));
         assert!(!size_hit(r).contains((60.0, 60.0)));
+    }
+
+    #[test]
+    fn configure_compacts_scattered_layout_and_rewrites_config() {
+        use crate::tabs::controls::SPEC;
+        let mut g = Grid::default();
+        // Wi-Fi и Bluetooth разнесены по углам: в уплотнённом режиме они встают рядом
+        g.configure(0, &SPEC, "v2 wifi@0,0 bluetooth@4,3");
+        let lay = g.layout();
+        let (w, b) = (lay.entry(0).unwrap(), lay.entry(1).unwrap());
+        assert_eq!((w.col, w.row), (0, 0));
+        assert_eq!(b.row, 0, "Bluetooth поднялся из угла в первый ряд");
+        // Записанная строка отличается от уплотнённой, поэтому раскладка пишется заново
+        assert!(g.take_saved().is_some());
+    }
+
+    #[test]
+    fn holes_stay_when_no_row_or_column_is_freed() {
+        use crate::tabs::controls::SPEC;
+        let mut g = Grid::default();
+        // Между Wi-Fi и Bluetooth пустой столбец, но ширина и высота при уплотнении не уменьшатся
+        g.configure(0, &SPEC, "v2 wifi@0,0 bluetooth@3,0 night@0,1 dark@3,1 -audio -volume -brightness -media");
+        let b = g.layout().entry(1).unwrap();
+        assert_eq!((b.col, b.row), (3, 0));
+    }
+
+    #[test]
+    fn finishing_edit_compacts_only_when_it_frees_a_row() {
+        use crate::tabs::controls::SPEC;
+        let mut g = Grid::default();
+        g.configure(0, &SPEC, "");
+        g.begin_edit();
+        // Пока правят, ничего само не двигается: Bluetooth можно оставить в углу
+        g.lay.entry_mut(1).unwrap().col = 5;
+        g.lay.entry_mut(1).unwrap().row = 3;
+        let _ = g.take_saved();
+        assert_eq!((g.layout().entry(1).unwrap().col, g.layout().entry(1).unwrap().row), (5, 3));
+        // По «Готово» освобождается ряд — виджеты уплотняются и раскладка сохраняется
+        g.end_edit();
+        assert!(g.layout().entry(1).unwrap().row < 3);
+        assert!(g.take_saved().is_some());
+    }
+
+    #[test]
+    fn full_width_widgets_follow_island_width() {
+        use crate::tabs::controls::SPEC;
+        // Плеер на всю ширину острова в 8 колонок: размер записан ячейками и переживает пересчёт
+        let mut g = Grid::default();
+        g.set_min_cols(8);
+        g.configure(0, &SPEC, "v2 media:8x2@0,0");
+        let m = g.layout().entry(7).unwrap();
+        assert_eq!(g.spec.specs[7].sizes[m.size], layout::sz(8, 2));
+        // Остров стал шире (другой язык, масштаб): виджет остаётся 8×2, но может вырасти до 10
+        g.set_min_cols(10);
+        let m = g.layout().entry(7).unwrap();
+        assert_eq!(g.spec.specs[7].sizes[m.size], layout::sz(8, 2));
+        assert_eq!(g.spec.specs[7].sizes.iter().map(|s| s.w).max(), Some(SPEC.cols));
+        // Остров сузился: размер задан ячейками и остаётся (окно подстроится под виджет)
+        g.set_min_cols(6);
+        let m = g.layout().entry(7).unwrap();
+        assert_eq!(g.spec.specs[7].sizes[m.size].w, 8);
+        // Остальные виджеты никуда не делись
+        assert!(g.layout().visible_count(0) == SPEC.specs.len());
+        assert!(g.layout().fits(g.spec, 0, 0.0));
+    }
+
+    #[test]
+    fn stretch_handles_only_when_island_can_grow() {
+        use crate::tabs::controls::SPEC;
+        let mut g = Grid::default();
+        g.set_min_cols(8);
+        g.configure(0, &SPEC, "");
+        // Окно Управления: 8 колонок (по ряду вкладок), предел сетки 10×6
+        assert!(g.can_stretch(Side::Bottom));
+        assert!(g.can_stretch(Side::Right));
+        g.window.c1 = 10;
+        g.window.r1 = 6;
+        assert!(!g.can_stretch(Side::Right));
+        assert!(!g.can_stretch(Side::Bottom));
+        // Растягивание ручкой не выходит за предел
+        let w = g.capped(Window { c0: 0, r0: 0, c1: 12, r1: 8 }, Window { c0: 0, r0: 0, c1: 8, r1: 4 });
+        assert_eq!((w.c1, w.r1), (10, 6));
+    }
+
+    #[test]
+    fn free_layout_keeps_gaps() {
+        use crate::tabs::controls::SPEC;
+        let mut g = Grid::default();
+        g.set_compact(false);
+        g.configure(0, &SPEC, "v2 wifi@0,0 bluetooth@4,3");
+        let b = g.layout().entry(1).unwrap();
+        assert_eq!((b.col, b.row), (4, 3));
+    }
+
+    #[test]
+    fn enabling_compaction_closes_gaps_and_saves() {
+        use crate::tabs::controls::SPEC;
+        let mut g = Grid::default();
+        g.set_compact(false);
+        g.configure(0, &SPEC, "v2 wifi@0,0 bluetooth@4,3");
+        let _ = g.take_saved();
+        g.set_compact(true);
+        let b = g.layout().entry(1).unwrap();
+        assert_eq!(b.row, 0, "Bluetooth поднялся из угла в первый ряд");
+        assert!(g.take_saved().is_some());
+    }
+
+    #[test]
+    fn area_is_centered_in_shared_island() {
+        use crate::tabs::controls::SPEC;
+        let mut g = Grid::default();
+        g.configure(0, &SPEC, "");
+        let win = g.window();
+        // Остров выше окна на 64 px: содержимое сдвигается на половину
+        let h = super::super::TOP + win.content_h() + super::super::PAD + 64.0;
+        let a = g.area(win.island_w(), h);
+        assert_eq!(a.y, super::super::TOP + 32.0);
+        let tight = g.area(win.island_w(), win.island_h(0.0));
+        assert_eq!(tight.y, super::super::TOP);
     }
 
     #[test]

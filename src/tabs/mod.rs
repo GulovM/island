@@ -18,6 +18,7 @@ pub mod clipboard;
 pub mod controls;
 pub mod grid;
 pub mod layout;
+mod legacy;
 pub mod power;
 pub mod settings;
 pub mod stats;
@@ -185,6 +186,7 @@ impl Tabs {
         self.apps.configure(cfg);
         self.wall.configure(cfg);
         for (tab, g) in self.grids.iter_mut().enumerate() {
+            g.set_compact(!cfg.free_layout);
             g.configure(tab, spec_of(tab), &cfg.layouts[tab]);
         }
     }
@@ -194,8 +196,16 @@ impl Tabs {
         self.apps.configure(cfg);
         self.wall.configure(cfg);
         self.settings.set_config(cfg);
+        self.set_compact(!cfg.free_layout);
         for (tab, g) in self.grids.iter_mut().enumerate() {
             g.set_text(&cfg.layouts[tab]);
+        }
+    }
+
+    /// Включает или выключает автоуплотнение раскладки на всех вкладках с сеткой.
+    pub fn set_compact(&mut self, on: bool) {
+        for g in &mut self.grids {
+            g.set_compact(on);
         }
     }
 
@@ -442,13 +452,11 @@ mod tests {
     fn test_island_sizes() {
         let tabs = Tabs::default();
 
-        // Вкладки с сеткой: вычисляются строго из формулы cols*16-8+2*PAD и TOP+rows*16-8+PAD
-        // Controls: cols=24, rows=16 -> (376+28, 38+248+14) = (404.0, 300.0)
-        assert_eq!(tabs.island_size(CONTROLS), (404.0, 300.0));
-        // Today: cols=40, rows=16 -> (632+28, 38+248+14) = (660.0, 300.0)
-        assert_eq!(tabs.island_size(TODAY), (660.0, 300.0));
-        // Stats: cols=40, rows=15 -> (632+28, 38+232+14) = (660.0, 284.0)
-        assert_eq!(tabs.island_size(STATS), (660.0, 284.0));
+        // Вкладки с сеткой: из формулы cols*56-8+2*PAD и TOP+rows*56-8+PAD по окну сетки.
+        // Окно по умолчанию — все виджеты в сетке 6×4 (Controls) и 10×4 (Today, Stats).
+        assert_eq!(tabs.island_size(CONTROLS), (356.0, 268.0));
+        assert_eq!(tabs.island_size(TODAY), (580.0, 268.0));
+        assert_eq!(tabs.island_size(STATS), (580.0, 268.0));
 
         // Вкладки без сетки:
         assert_eq!(tabs.island_size(CLIPBOARD), (590.0, 300.0));
@@ -459,9 +467,21 @@ mod tests {
     }
 
     #[test]
+    fn test_all_widget_sizes_are_standard() {
+        for tab in [CONTROLS, TODAY, STATS] {
+            for s in spec_of(tab).specs {
+                for z in s.sizes {
+                    assert!(z.is_standard(), "{}: нестандартный размер {}×{}", s.key, z.w, z.h);
+                }
+                assert!(s.size < s.sizes.len(), "{}: размер по умолчанию вне списка", s.key);
+            }
+        }
+    }
+
+    #[test]
     fn test_all_grid_tabs_no_overlap_and_fit() {
         for tab in [CONTROLS, TODAY, STATS] {
-            let spec = spec_of(tab);
+            let spec = layout::resolve_full(spec_of(tab), 8);
             let lay = Layout::default_for(spec);
             let placed = lay.pack(spec, 0);
 

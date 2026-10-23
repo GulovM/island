@@ -44,6 +44,8 @@ const N_OPACITY: u32 = 19;
 const N_PRESET: u32 = 20;
 const N_ACCENT_PILL: u32 = 26;
 const N_TODO_CLEAN: u32 = 110;
+const N_FREE_LAYOUT: u32 = 111;
+const N_HIDE_SHOT: u32 = 112;
 const N_COLLAPSED: u32 = 115;
 /// Занимает два номера подряд (27–28) — по числу `PALETTE_STYLES`.
 const N_PALETTE_STYLE: u32 = 27;
@@ -789,6 +791,24 @@ impl Settings {
             self.changed = true;
         }
         y += 24.0;
+        // Свободная раскладка: по умолчанию виджеты сами уплотняются, как в Пункте управления iOS.
+        cv.text("Свободная раскладка виджетов", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut free = self.cfg.free_layout;
+        if ui.switch(cv, id(SETTINGS, N_FREE_LAYOUT), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut free, true) {
+            self.cfg.free_layout = free;
+            self.changed = true;
+        }
+        y += 18.0;
+        cv.text("Выкл.: виджеты сами заполняют пустоты", Rect::new(x, y, iw, 13.0), &f.small, dim());
+        y += 24.0;
+        // По PrtSc и Win+Shift+S остров прячется, чтобы не попасть в кадр; выкл. — виден на скриншотах.
+        cv.text("Прятать остров при скриншоте", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut hide = self.cfg.hide_on_screenshot;
+        if ui.switch(cv, id(SETTINGS, N_HIDE_SHOT), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut hide, true) {
+            self.cfg.hide_on_screenshot = hide;
+            self.changed = true;
+        }
+        y += 24.0;
 
         // Язык интерфейса: применяется сразу.
         cv.text("Язык", Rect::new(x, y, 80.0, 18.0), &f.body, txt());
@@ -969,6 +989,8 @@ mod tests {
             (N_PRESET, PRESETS.len() as u32),
             (N_ACCENT_PILL, 1),
             (N_TODO_CLEAN, 1),
+            (N_FREE_LAYOUT, 1),
+            (N_HIDE_SHOT, 1),
             (N_COLLAPSED, 2),
             (N_PALETTE_STYLE, PALETTE_STYLES.len() as u32),
             (N_SECTION, SECTIONS.len() as u32),

@@ -91,6 +91,10 @@ todo_clean_done = 0
 # 0 — остров только сообщает об обновлении. Меняется и в Настройках.
 auto_update = 0
 
+# 1 — по PrtSc и Win+Shift+S остров прячется на время съёмки, чтобы не попасть в кадр;
+# 0 — остров остаётся на экране и виден на скриншотах. Меняется и в Настройках.
+hide_on_screenshot = 1
+
 # Через сколько мс после ухода курсора остров сворачивается
 leave_delay_ms = 220
 
@@ -125,11 +129,17 @@ calendar_ics = []
 
 # Раскладка виджетов вкладок. Меняется прямо в острове: кнопка с карандашом справа в ряду вкладок
 # (рядом с шестерёнкой, или долгое нажатие на пустом месте вкладки). Пусто — раскладка по умолчанию.
-# Формат: виджеты через пробел, «-» — скрыт, «:N» — размер, «@col,row» — ячейка сетки, например "wifi:0@0,0 -night". Старый формат (@col) сбрасывается к раскладке по умолчанию.
+# Формат: метка версии «v2», затем виджеты через пробел, «-» — скрыт, «:N» — номер стандартного размера,
+# «@col,row» — крупная ячейка сетки, например "v2 wifi:0@0,0 -night". Строки старого формата (без «v2»,
+# мелкая сетка) приводятся к ближайшим стандартным размерам, а совсем старые (@col) сбрасываются.
 # Остров автоматически подгоняется под видимые виджеты по «Готово»; в режиме правки ручки по краям позволяют растянуть сетку обратно.
 layout_controls = ""
 layout_today = ""
 layout_stats = ""
+
+# 0 — виджеты сами уплотняются, пустот в раскладке нет (как в Пункте управления iOS);
+# 1 — свободная раскладка: пустые места между виджетами допустимы. Меняется и в Настройках.
+free_layout = 0
 
 # Индикаторы в свёрнутой форме (1 — включено, 0 — выключено):
 # мини-плеер при воспроизведении музыки и короткие уведомления (таймер, громкость, зарядка)
@@ -180,6 +190,8 @@ pub struct Config {
     pub todo_clean_done: bool,
     /// Устанавливать найденные обновления без вопросов.
     pub auto_update: bool,
+    /// Прятать остров на время скриншота (PrtSc, Win+Shift+S).
+    pub hide_on_screenshot: bool,
     pub leave_delay_ms: u32,
     pub env_poll_ms: u32,
     pub collapsed: (f32, f32),
@@ -197,6 +209,8 @@ pub struct Config {
     pub calendar_ics: Vec<String>,
     /// Раскладка виджетов вкладок Controls, Today, Stats (пустая строка — по умолчанию).
     pub layouts: [String; 3],
+    /// Свободная раскладка виджетов: пустоты допустимы. По умолчанию (`false`) раскладка уплотняется.
+    pub free_layout: bool,
     /// Глобальная горячая клавиша («ctrl+alt+space»); пустая — отключена.
     pub hotkey: String,
     /// Мини-плеер в свёрнутой форме, пока играет музыка.
@@ -225,6 +239,7 @@ impl Default for Config {
             idle_face: true,
             todo_clean_done: false,
             auto_update: false,
+            hide_on_screenshot: true,
             leave_delay_ms: 220,
             env_poll_ms: 400,
             collapsed: (180.0, 24.0),
@@ -236,6 +251,7 @@ impl Default for Config {
             clock_style: 0,
             calendar_ics: Vec::new(),
             layouts: Default::default(),
+            free_layout: false,
             hotkey: "ctrl+alt+space".into(),
             live_media: true,
             live_toasts: true,
@@ -313,6 +329,8 @@ fn save_updates(cfg: &Config, names: &[&str]) -> Vec<(&'static str, String)> {
         ("idle_face", (cfg.idle_face as u8).to_string()),
         ("todo_clean_done", (cfg.todo_clean_done as u8).to_string()),
         ("auto_update", (cfg.auto_update as u8).to_string()),
+        ("free_layout", (cfg.free_layout as u8).to_string()),
+        ("hide_on_screenshot", (cfg.hide_on_screenshot as u8).to_string()),
     ];
     updates.to_vec()
 }
@@ -559,6 +577,8 @@ fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
         "idle_face",
         "todo_clean_done",
         "auto_update",
+        "free_layout",
+        "hide_on_screenshot",
     ];
     if tmpl.filter(|k| appearance.contains(&k.as_str())).all(|k| present(&k)) {
         return;
@@ -618,6 +638,8 @@ pub fn parse(text: &str) -> Config {
             ("", "idle_face", Value::Num(v)) => cfg.idle_face = v != 0.0,
             ("", "todo_clean_done", Value::Num(v)) => cfg.todo_clean_done = v != 0.0,
             ("", "auto_update", Value::Num(v)) => cfg.auto_update = v != 0.0,
+            ("", "free_layout", Value::Num(v)) => cfg.free_layout = v != 0.0,
+            ("", "hide_on_screenshot", Value::Num(v)) => cfg.hide_on_screenshot = v != 0.0,
             ("", "corner_radius", Value::Num(v)) => cfg.corner_radius = (v as f32).clamp(0.0, MAX_RADIUS),
             ("", "glass", Value::Num(v)) => cfg.glass = v != 0.0,
             ("", "glass_opacity", Value::Num(v)) => cfg.glass_opacity = (v as f32).clamp(0.0, 100.0),
@@ -1119,6 +1141,25 @@ gmail = \"https://mail.google.com\"
         assert!(!parse("glass = false\n").glass);
         // Неизвестное/нечисловое значение не перезаписывает значение по умолчанию
         assert!(parse("glass = \"yes\"\n").glass);
+    }
+
+    #[test]
+    fn hide_on_screenshot_key_parses_and_defaults_to_hiding() {
+        assert!(Config::default().hide_on_screenshot);
+        assert!(!parse("hide_on_screenshot = 0\n").hide_on_screenshot);
+        assert!(parse("hide_on_screenshot = 1\n").hide_on_screenshot);
+        assert!(parse(DEFAULT_TEMPLATE).hide_on_screenshot);
+    }
+
+    #[test]
+    fn free_layout_key_parses_and_defaults_to_compact() {
+        assert!(!Config::default().free_layout, "по умолчанию раскладка уплотняется");
+        assert!(parse("free_layout = 1\n").free_layout);
+        assert!(!parse("free_layout = 0\n").free_layout);
+        assert!(!parse(DEFAULT_TEMPLATE).free_layout);
+        let mut c = Config::default();
+        c.free_layout = true;
+        assert!(save_updates(&c, &[]).contains(&("free_layout", "1".to_string())));
     }
 
     #[test]

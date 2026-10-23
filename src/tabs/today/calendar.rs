@@ -267,8 +267,8 @@ impl Today {
         self.sel = if self.view == (ty, tm) { today } else { days_from_civil(self.view.0, self.view.1, 1) };
     }
 
-    /// Неделя. `size`: 0 — только дни недели, 1 и 2 — ещё и блок ближайшего события (2 шире:
-    /// дни расходятся по ширине карточки), 3 — расширенная форма со списком нескольких событий на сегодня.
+    /// Неделя. `size`: 0 и 1 — дни недели и блок ближайшего события (1 шире: дни расходятся
+    /// по ширине карточки), 2 — расширенная форма со списком нескольких событий на сегодня.
     pub(super) unsafe fn week_card(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect, size: usize, today: i64, dow: usize) {
         let f = &cv.g.fonts;
         cv.card(wk);
@@ -280,8 +280,10 @@ impl Today {
         let dates = week_dates(y, m, d);
         let monday = today - dow as i64;
         // В низкой карточке (только дни) ряды разнесены по всей высоте, иначе под ними — событие.
-        let low = size == 0 || wk.h < 90.0;
-        let head_cy = wk.y + if low { 17.0 } else { 16.0 };
+        let low = wk.h < 90.0;
+        // Карточка 4×2 (104 px) ниже макета в 120: шапка и ряды дней подтянуты вверх, чтобы событие поместилось.
+        let tight = !low && wk.h < 112.0;
+        let head_cy = wk.y + if low { 17.0 } else if tight { 14.0 } else { 16.0 };
         let tw = cv.line("Эта неделя", &f.body, wk.x + 12.0, 120.0, head_cy, crate::ui::Align::Leading, txt());
         // Раскрыть месяц.
         if ui.icon_button(cv, id(TODAY, 90), Rect::new(wk.x + 12.0 + tw + 1.0, head_cy - 9.0, 18.0, 18.0), icon::DOWN, false) {
@@ -295,7 +297,13 @@ impl Today {
             crate::i18n::months_short()[(dates[6].1 as usize).clamp(1, 12) - 1]
         );
         cv.text(&range, Rect::new(wk.right() - 112.0, head_cy - 7.0, 100.0, 14.0), &f.small_r, dim());
-        let (label_cy, day_cy) = if low { (wk.y + 41.0, wk.y + 64.0) } else { (wk.y + 34.0, wk.y + 54.0) };
+        let (label_cy, day_cy) = if low {
+            (wk.y + 41.0, wk.y + 64.0)
+        } else if tight {
+            (wk.y + 30.0, wk.y + 46.0)
+        } else {
+            (wk.y + 34.0, wk.y + 54.0)
+        };
         for (i, (day, _)) in dates.iter().enumerate() {
             let cx = wk.x + 24.0 + i as f32 * (wk.w - 48.0) / 6.0;
             // Выходные приглушены сильнее будней, как в Календаре iOS.
@@ -325,9 +333,9 @@ impl Today {
             return;
         }
 
-        // В расширенном размере (size >= 3), если хватает места по высоте и ширине,
+        // В расширенном размере (size >= 2), если хватает места по высоте и ширине,
         // показываем СПИСОК событий на сегодня.
-        if size >= 3 {
+        if size >= 2 {
             let events_top = wk.y + 72.0;
             let events_bottom = wk.bottom() - 8.0;
             let events_h = events_bottom - events_top;
@@ -349,7 +357,7 @@ impl Today {
     /// или при деградации, когда расширенный список не влезает).
     unsafe fn draw_single_event(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect) {
         let f = &cv.g.fonts;
-        let ev_y = if wk.h > 140.0 { wk.y + 72.0 } else { wk.bottom() - 46.0 };
+        let ev_y = if wk.h > 140.0 { wk.y + 72.0 } else if wk.h < 112.0 { wk.bottom() - 43.0 } else { wk.bottom() - 46.0 };
         let ev = Rect::new(wk.x + 8.0, ev_y, wk.w - 16.0, 38.0);
         cv.rr(ev, 8.0, inset());
         cv.rr(Rect::new(ev.x + 8.0, ev.y + 8.0, 3.0, 20.0), 1.5, cv.accent);
@@ -1034,38 +1042,37 @@ mod tests {
         use crate::tabs::today::SPEC;
         use crate::tabs::layout::{sz, Layout};
 
-        // Проверяем, что список размеров виджета "week" расширен до 4 размеров (в ячейках)
+        // Размеры виджета "week" — стандартные, в крупных ячейках
         let week_spec = &SPEC.specs[2];
         assert_eq!(week_spec.key, "week");
-        assert_eq!(week_spec.sizes.len(), 4);
-        assert_eq!(week_spec.sizes[0], sz(16, 6));
-        assert_eq!(week_spec.sizes[1], sz(16, 8));
-        assert_eq!(week_spec.sizes[2], sz(24, 8));
-        assert_eq!(week_spec.sizes[3], sz(16, 16));
+        assert_eq!(week_spec.sizes.len(), 3);
+        assert_eq!(week_spec.sizes[0], sz(4, 2));
+        assert_eq!(week_spec.sizes[1], sz(6, 2));
+        assert_eq!(week_spec.sizes[2], sz(4, 4));
 
-        // Размер по умолчанию остался прежним — индекс 1 (120 px)
-        assert_eq!(week_spec.size, 1);
+        // Размер по умолчанию — индекс 0 (248×120 px)
+        assert_eq!(week_spec.size, 0);
 
         // Раскладка по умолчанию не сломалась
         let def = Layout::default_for(&SPEC);
         let week_entry = def.entry(2).unwrap();
-        assert_eq!(week_entry.size, 1);
+        assert_eq!(week_entry.size, 0);
 
-        // Разбор из конфига: старые размеры 0, 1, 2 и новый 3 распознаются корректно
-        let l0 = Layout::parse(&SPEC, "week:0");
-        assert_eq!(l0.entry(2).unwrap().size, 0);
+        // Разбор из конфига: индексы 0, 1, 2 распознаются корректно
+        for n in 0..3 {
+            let l = Layout::parse(&SPEC, &format!("v2 week:{n}"));
+            assert_eq!(l.entry(2).unwrap().size, n);
+        }
 
-        let l1 = Layout::parse(&SPEC, "week:1");
-        assert_eq!(l1.entry(2).unwrap().size, 1);
+        // Невалидный индекс размера откатывается на размер по умолчанию (0)
+        let linv = Layout::parse(&SPEC, "v2 week:99");
+        assert_eq!(linv.entry(2).unwrap().size, 0);
 
-        let l2 = Layout::parse(&SPEC, "week:2");
-        assert_eq!(l2.entry(2).unwrap().size, 2);
-
-        let l3 = Layout::parse(&SPEC, "week:3");
-        assert_eq!(l3.entry(2).unwrap().size, 3);
-
-        // Невалидный индекс размера откатывается на размер по умолчанию (1)
-        let linv = Layout::parse(&SPEC, "week:99");
-        assert_eq!(linv.entry(2).unwrap().size, 1);
+        // Старая раскладка на мелкой сетке: 16×8 → 4×2, 24×8 → 6×2, 16×16 → 4×4
+        for (old, new) in [(1, 0), (2, 1), (3, 2)] {
+            let l = Layout::parse(&SPEC, &format!("week:{old}@8,0"));
+            assert_eq!(l.entry(2).unwrap().size, new, "старый размер {old}");
+            assert_eq!((l.entry(2).unwrap().col, l.entry(2).unwrap().row), (2, 0));
+        }
     }
 }

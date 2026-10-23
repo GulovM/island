@@ -132,12 +132,16 @@ impl Today {
         let f = &cv.g.fonts;
         cv.card(tm);
         let compact = size == 0;
-        // Содержимое рассчитано на 230 px по ширине; лишнее место делим пополам.
-        let ox = ((tm.w - 230.0) / 2.0).max(0.0);
+        // Содержимое рассчитано на 230 px по ширине (в узкой карточке 4×2 — на 208 px, элементы
+        // чуть теснее); лишнее место делим пополам.
+        let narrow = tm.w < 224.0;
+        let ox = ((tm.w - if narrow { 208.0 } else { 230.0 }) / 2.0).max(0.0);
+        // Сдвиги кольца и блока справа от него, шаги полей времени и пресетов, ширина кнопок.
+        let (cx_off, bx_off, f_step, p_step, btn_w) = if narrow { (35.0, 66.0, 46.0, 27.0, 66.0) } else { (40.0, 82.0, 49.0, 29.0, 68.0) };
         let rem = self.remaining();
         let frac = if self.total.is_zero() { 0.0 } else { rem.as_secs_f32() / self.total.as_secs_f32() };
         self.ring.target = frac.clamp(0.0, 1.0);
-        let (cx, cy) = (tm.x + ox + 40.0, tm.y + 54.0);
+        let (cx, cy) = (tm.x + ox + cx_off, tm.y + 46.0);
         // Поля времени (ч, мин, с): ввод цифр, Enter или уход из поля применяет.
         let tf = [id(TODAY, 110), id(TODAY, 111), id(TODAY, 112)];
         let focused = (0..3).find(|&k| ui.has_focus(tf[k]));
@@ -203,17 +207,17 @@ impl Today {
         // Оставшееся время — крупными табличными цифрами: главное в карточке.
         cv.text(&label, Rect::new(cx - 25.0, cy - 10.0, 50.0, 20.0), &f.title_c, txt());
         // Звук сигнала — под кольцом, по его оси.
-        if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(cx - 9.0, tm.y + 94.0, 18.0, 18.0), icon::RINGER, self.sound, tint) {
+        if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(cx - 9.0, tm.y + 77.0, 18.0, 18.0), icon::RINGER, self.sound, tint) {
             self.sound = !self.sound;
             self.save_timer();
         }
 
         // Часы, минуты, секунды: поле ввода; колесо мыши меняет значение.
-        let bx = tm.x + ox + 82.0;
+        let bx = tm.x + ox + bx_off;
         let vals = [self.hours, self.minutes, self.seconds];
         let units = [crate::i18n::pick("ч", "h"), crate::i18n::pick("м", "m"), crate::i18n::pick("с", "s")];
         for k in 0..3 {
-            let b = Rect::new(bx + k as f32 * 49.0, tm.y + 14.0, 46.0, 24.0);
+            let b = Rect::new(bx + k as f32 * f_step, tm.y + 10.0, f_step - 3.0, 24.0);
             if self.time_focus != Some(k) {
                 ui.set_field_text(tf[k], &if k == 0 { vals[k].to_string() } else { format!("{:02}", vals[k]) });
             }
@@ -231,7 +235,7 @@ impl Today {
 
         // Пресеты.
         for (i, m) in PRESETS.iter().enumerate() {
-            let r = Rect::new(bx + i as f32 * 29.0, tm.y + 48.0, 25.0, 18.0);
+            let r = Rect::new(bx + i as f32 * p_step, tm.y + 42.0, p_step - 4.0, 18.0);
             if ui.chip_ex(cv, id(TODAY, i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, None) {
                 self.set_preset(i);
             }
@@ -239,10 +243,10 @@ impl Today {
 
         // Старт / пауза и сброс.
         let start = if self.deadline.is_some() { "Пауза" } else { "Старт" };
-        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 76.0, 68.0, 26.0), start, tint, crate::ui::on_color(tint), 6.0) {
+        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 68.0, btn_w, 26.0), start, tint, crate::ui::on_color(tint), 6.0) {
             self.toggle_run();
         }
-        if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + 74.0, tm.y + 76.0, 68.0, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
+        if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + btn_w + 6.0, tm.y + 68.0, btn_w, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
             self.left = self.total;
             self.deadline = None;
             self.save_timer();

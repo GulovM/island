@@ -50,11 +50,13 @@ struct Row {
 }
 
 fn spec(tab: Tab) -> &'static TabSpec {
-    match tab {
+    let base = match tab {
         Tab::Controls => &controls::SPEC,
         Tab::Today => &today::SPEC,
         Tab::Stats => &stats::SPEC,
-    }
+    };
+    // Виджеты «на весь остров» показываются на ширине в 8 колонок.
+    crate::tabs::layout::resolve_full(base, 8)
 }
 
 fn sizes(r: &Row) -> &'static [Size] {
