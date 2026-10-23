@@ -277,12 +277,26 @@ impl Clip {
         let pills_w: f32 = widths.iter().sum::<f32>() + 4.0 * (names.len() - 1) as f32;
         let mut px = gear.x - 8.0 - pills_w;
         let fid = id(CLIPBOARD, 0);
+        let query = ui.field_text(fid);
+        let count = self.visible(&query).len();
         let ph = if crate::i18n::en() {
-            format!("Search {} items…", self.items.len())
+            format!("Search {count} items…")
         } else {
-            format!("Поиск среди {} записей…", self.items.len())
+            format!("Поиск среди {count} записей…")
         };
-        ui.text_field_ex(cv, fid, Rect::new(bar.x, bar.y, px - bar.x - 6.0, bar.h), &ph, icon::SEARCH, Submit::Keep);
+        // Если поиск не пуст, число совпадений показываем счётчиком между полем и фильтрами.
+        let (field_w, count_badge) = if query.is_empty() {
+            (px - bar.x - 6.0, None)
+        } else {
+            let s = count.to_string();
+            let cw = cv.text_w(&s, &f.small);
+            let cx = px - 6.0 - cw;
+            (cx - bar.x - 6.0, Some((s, cx, cw)))
+        };
+        ui.text_field_ex(cv, fid, Rect::new(bar.x, bar.y, field_w, bar.h), &ph, icon::SEARCH, Submit::Keep);
+        if let Some((s, cx, cw)) = count_badge {
+            cv.text(&s, Rect::new(cx, bar.y, cw + 2.0, bar.h), &f.small, dim());
+        }
         for (i, name) in names.iter().enumerate() {
             let r = Rect::new(px, bar.y + 4.5, widths[i], 17.0);
             if ui.chip_ex(cv, id(CLIPBOARD, 1 + i as u32), r, name, self.filter == i, true, None) {
@@ -296,7 +310,6 @@ impl Clip {
         }
 
         ui.sticky_focus = Some(fid);
-        let query = ui.field_text(fid);
         let order = self.visible(&query);
 
         // Клавиши, пока в поиске фокус: стрелки двигают выбор, Ctrl+P закрепляет, Enter вставляет.
@@ -597,6 +610,40 @@ mod tests {
         assert_eq!(c.visible(""), vec![1, 2]);
         c.filter = 0;
         assert_eq!(c.visible("WORLD"), vec![1]);
+    }
+
+    #[test]
+    fn count_by_filter_and_query() {
+        let mut c = Clip::default();
+        c.items.push(Item { text: "https://example.com/x".into(), ts: 0, pinned: false });
+        c.items.push(Item { text: "hello world".into(), ts: 0, pinned: false });
+        c.items.push(Item { text: "see https://a.b".into(), ts: 0, pinned: false });
+        c.items.push(Item { text: format!("{IMG_TAG}screen.png:100x100"), ts: 0, pinned: false });
+
+        // Пустой запрос: число записей в текущем фильтре.
+        c.filter = 0;
+        assert_eq!(c.visible("").len(), 4);
+        c.filter = 1;
+        assert_eq!(c.visible("").len(), 2);
+        c.filter = 2;
+        assert_eq!(c.visible("").len(), 1);
+        c.filter = 3;
+        assert_eq!(c.visible("").len(), 1);
+
+        // Поиск с фильтром: число совпадений внутри выбранной категории.
+        c.filter = 0;
+        assert_eq!(c.visible("world").len(), 1);
+        assert_eq!(c.visible("https").len(), 2);
+        assert_eq!(c.visible("фото").len(), 1);
+        c.filter = 1;
+        assert_eq!(c.visible("https").len(), 1);
+        assert_eq!(c.visible("world").len(), 1);
+        c.filter = 2;
+        assert_eq!(c.visible("https").len(), 1);
+        assert_eq!(c.visible("world").len(), 0);
+        c.filter = 3;
+        assert_eq!(c.visible("фото").len(), 1);
+        assert_eq!(c.visible("world").len(), 0);
     }
 
     #[test]
