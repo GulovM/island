@@ -414,6 +414,9 @@ impl App {
         self.cfg.always_strip = new.always_strip;
         self.cfg.idle_face = new.idle_face;
         self.cfg.todo_clean_done = new.todo_clean_done;
+        self.cfg.free_layout = new.free_layout;
+        self.cfg.hide_on_screenshot = new.hide_on_screenshot;
+        self.tabs.set_compact(!self.cfg.free_layout);
         self.cfg.auto_update = new.auto_update;
         if self.cfg.language != new.language {
             self.cfg.language = new.language;

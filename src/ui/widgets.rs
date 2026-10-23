@@ -180,8 +180,46 @@ impl Ui {
             }
         }
         cv.glyph(glyph, Rect::new(r.x + 6.0, r.y, 18.0, r.h), false, if v > 0.04 { on_fill } else { txt() });
-        let col = if v > 0.93 { on_fill } else { txt() };
+        // Проценты лежат на заливке, если она дотянулась до них (у короткого ползунка — раньше).
+        let col = if r.x + (r.w * v).max(r.h) > r.right() - 34.0 { on_fill } else { txt() };
         cv.text(&format!("{}%", (v * 100.0).round() as i32), Rect::new(r.right() - 52.0, r.y, 42.0, r.h), &cv.g.fonts.body_r, col);
+        changed
+    }
+
+    /// Вертикальный ползунок: заливка растёт снизу вверх, значок внизу, проценты сверху.
+    /// Ширина карточки — одна ячейка сетки, поэтому проценты мелким шрифтом.
+    pub unsafe fn slider_bar_v(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, value: &mut f32, fill: D2D1_COLOR_F) -> bool {
+        let hit = Rect::new(r.x - 4.0, r.y, r.w + 8.0, r.h);
+        let _ = self.interact(id, hit);
+        let mut changed = false;
+        if self.is_dragging(id) {
+            let v = (1.0 - (self.mouse.1 - r.y) / r.h.max(1.0)).clamp(0.0, 1.0);
+            if (v - *value).abs() > f32::EPSILON {
+                *value = v;
+                changed = true;
+            }
+        }
+        let w = self.widget(id);
+        let hv = w.hover.value;
+        let v = value.clamp(0.0, 1.0);
+        let rad = r.w / 2.0;
+        cv.rr(r, rad, mix(card(), fg(), 0.04 * hv));
+        cv.hairline(r, rad);
+        let on_fill = super::color::on_color(fill);
+        if v > 0.0 {
+            let fh = (r.h * v).max(r.w);
+            let fr = Rect::new(r.x, r.bottom() - fh, r.w, fh);
+            cv.rr(fr, rad, fill);
+            if crate::theme::glass() {
+                let top = D2D1_COLOR_F { a: 0.10, ..crate::theme::get().rim_hi };
+                cv.gradient_stops(fr, rad, &[(0.0, top), (0.6, D2D1_COLOR_F { a: 0.0, ..top })], false);
+            }
+        }
+        // Значок внизу лежит на заливке почти всегда; проценты сверху — на заливке только у полного ползунка.
+        let glyph_rect = Rect::new(r.x, r.bottom() - r.w + 4.0, r.w, r.w - 8.0);
+        cv.glyph(glyph, glyph_rect, false, if v > 0.04 { on_fill } else { txt() });
+        let col = if v > 0.93 { on_fill } else { txt() };
+        cv.text(&format!("{}%", (v * 100.0).round() as i32), Rect::new(r.x, r.y + 6.0, r.w, 14.0), &cv.g.fonts.small_c, col);
         changed
     }
 

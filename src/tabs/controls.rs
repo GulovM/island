@@ -13,7 +13,7 @@ use crate::ios::SysColor;
 use crate::ui::{hue, icon, mix, on_color, slider_fill, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink, txt, WHITE};
 
 use super::grid::{Grid, Item};
-use super::layout::{sz, Size, Spec, TabSpec, CELL, GAP};
+use super::layout::{sz, Size, Spec, TabSpec, CELL, GAP, TALL, WIDE};
 use super::{id, CONTROLS};
 
 /// Сколько после перетаскивания слайдера не принимать громкость из снимка (иначе ползунок дёргается).
@@ -32,29 +32,34 @@ const MEDIA: usize = 7;
 /// Высота выпадающего списка устройств.
 const LIST_H: f32 = 116.0;
 
-static TILE: [Size; 4] = [sz(4, 3), sz(8, 3), sz(12, 3), sz(24, 3)];
-static SLIDER: [Size; 2] = [sz(12, 2), sz(24, 2)];
-static PLAYER: [Size; 3] = [sz(24, 4), sz(12, 6), sz(24, 6)];
+/// Плитки: значок (1×1), компактная и широкие плитки с подписью.
+static TILE: [Size; 4] = [sz(1, 1), sz(2, 1), sz(3, 1), sz(4, 1)];
+/// Ползунки: длина произвольная — лёжа от 2 ячеек до ширины острова, стоя от 2 ячеек до высоты
+/// сетки (ширина — одна ячейка). По умолчанию лёжа 3×1 (второй размер списка).
+static SLIDER: [Size; 2] = [sz(WIDE + 2, 1), sz(1, TALL + 2)];
+/// Плеер: высота 2 ячейки (или полоса в один ряд), ширина произвольная — от 3 (4 у полосы) ячеек
+/// до ширины острова. По умолчанию 3×2 (первый размер списка).
+static PLAYER: [Size; 2] = [sz(WIDE + 3, 2), sz(WIDE + 4, 1)];
 
-/// Сетка вкладки: 24 колонки по 16 px (шаг CELL=16, зазор GAP=8), 16 рядов. Плитки по умолчанию занимают
-/// 8 ячеек (1/3 ширины) или 12 ячеек (1/2 ширины) при высоте 3 ячейки (40 px).
+/// Сетка вкладки: до 10 колонок и 6 рядов крупных ячеек (шаг CELL=56, зазор GAP=8; рядов до 5 — под список устройств). По умолчанию в первом
+/// ряду три плитки по 2 ячейки, во втором — две по 3, ниже плеер 3×2 и два ползунка 3×1 рядом с ним.
 ///
-/// Статический `min_rows = 4` задаёт компактный размер при скрытых виджетах или пустой вкладке.
+/// Статический `min_rows = 1` задаёт компактный размер при скрытых виджетах или пустой вкладке.
 /// Выпадающий список устройств LIST_H = 116 px запрашивает место динамически через `overlay_rows`.
 pub static SPEC: TabSpec = TabSpec {
-    cols: 24,
-    rows: 16,
-    min_cols: 8,
-    min_rows: 4,
+    cols: 10,
+    rows: 6,
+    min_cols: 2,
+    min_rows: 1,
     specs: &[
         Spec { key: "wifi", title: "Wi-Fi", sizes: &TILE, size: 1, col: 0, row: 0 },
-        Spec { key: "bluetooth", title: "Bluetooth", sizes: &TILE, size: 1, col: 8, row: 0 },
-        Spec { key: "audio", title: "Аудио", sizes: &TILE, size: 1, col: 16, row: 0 },
-        Spec { key: "night", title: "Ночной свет", sizes: &TILE, size: 2, col: 0, row: 3 },
-        Spec { key: "dark", title: "Тёмная тема", sizes: &TILE, size: 2, col: 12, row: 3 },
-        Spec { key: "volume", title: "Громкость", sizes: &SLIDER, size: 1, col: 0, row: 6 },
-        Spec { key: "brightness", title: "Яркость", sizes: &SLIDER, size: 1, col: 0, row: 14 },
-        Spec { key: "media", title: "Плеер", sizes: &PLAYER, size: 2, col: 0, row: 8 },
+        Spec { key: "bluetooth", title: "Bluetooth", sizes: &TILE, size: 1, col: 2, row: 0 },
+        Spec { key: "audio", title: "Аудио", sizes: &TILE, size: 1, col: 4, row: 0 },
+        Spec { key: "night", title: "Ночной свет", sizes: &TILE, size: 2, col: 0, row: 1 },
+        Spec { key: "dark", title: "Тёмная тема", sizes: &TILE, size: 2, col: 3, row: 1 },
+        Spec { key: "volume", title: "Громкость", sizes: &SLIDER, size: 1, col: 3, row: 2 },
+        Spec { key: "brightness", title: "Яркость", sizes: &SLIDER, size: 1, col: 3, row: 3 },
+        Spec { key: "media", title: "Плеер", sizes: &PLAYER, size: 0, col: 0, row: 2 },
     ],
 };
 
@@ -63,8 +68,8 @@ pub static SPEC: TabSpec = TabSpec {
 /// Список устройств LIST_H = 116 px открывается под плитками (низ на `low` px от верха окна).
 /// С учётом зазоров GAP между плитками и списком и запаса GAP до нижнего края окна:
 /// ceil((low + GAP + LIST_H + GAP) / CELL).
-/// Для плиток по умолчанию в 2 ряда (низ row 6 -> low = 88 px):
-/// (88 + 8 + 116 + 8) / 16 = 220 / 16 = 13.75 -> 14 рядов.
+/// Для плиток по умолчанию в 2 ряда (низ row 2 -> low = 104 px):
+/// (104 + 8 + 116 + 8) / 56 = 236 / 56 = 4.21 -> 5 рядов.
 #[inline]
 pub fn controls_overlay_rows(low: f32) -> u8 {
     let needed = low + GAP + LIST_H + GAP;
@@ -275,8 +280,8 @@ impl Controls {
     }
 
     /// Рисует вкладку: виджеты по сетке, а поверх них — выпадающий список устройств. `h` — высота
-    /// панели без полосы правки.
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, _h: f32) {
+    /// панели (с полосой правки).
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
         if let Some(kind) = self.open {
             self.shown = Some(kind);
         }
@@ -294,7 +299,7 @@ impl Controls {
         };
         grid.set_overlay_rows(overlay_rows);
 
-        let area = grid.area(w);
+        let area = grid.area(w, h);
         let skip = if crate::bright::available() { 0 } else { 1 << BRIGHTNESS };
         // Виджеты под списком гаснут и не принимают нажатий (иначе они перехватят их у строк списка).
         let cover = (self.list_t.0.value > 0.004).then(|| self.list_rect(area, low));
@@ -405,7 +410,12 @@ impl Controls {
                     v if v < 0.67 => icon::VOLUME2,
                     _ => icon::VOLUME3,
                 };
-                if ui.slider_bar(cv, id(CONTROLS, 10), r, g, &mut self.volume, slider_fill(cv.accent)) {
+                let moved = if r.h > r.w {
+                    ui.slider_bar_v(cv, id(CONTROLS, 10), r, g, &mut self.volume, slider_fill(cv.accent))
+                } else {
+                    ui.slider_bar(cv, id(CONTROLS, 10), r, g, &mut self.volume, slider_fill(cv.accent))
+                };
+                if moved {
                     self.hold_until = Some(Instant::now() + HOLD);
                     // Как в Windows: громкость выше нуля снимает «без звука».
                     if self.muted && self.volume > 0.0 {
@@ -416,7 +426,12 @@ impl Controls {
                 }
             }
             BRIGHTNESS => {
-                if ui.slider_bar(cv, id(CONTROLS, 11), r, icon::BRIGHTNESS, &mut self.brightness, slider_fill(cv.accent)) {
+                let moved = if r.h > r.w {
+                    ui.slider_bar_v(cv, id(CONTROLS, 11), r, icon::BRIGHTNESS, &mut self.brightness, slider_fill(cv.accent))
+                } else {
+                    ui.slider_bar(cv, id(CONTROLS, 11), r, icon::BRIGHTNESS, &mut self.brightness, slider_fill(cv.accent))
+                };
+                if moved {
                     self.bright_hold = Some(Instant::now() + HOLD);
                     bg::send(Cmd::Brightness(self.brightness));
                 }
@@ -592,20 +607,26 @@ impl Controls {
     /// Плеер в трёх вариантах (`size` — индекс в `PLAYER`): 0 — низкая полоса без времени и имени
     /// устройства, 1 — узкая карточка с кнопками во втором ряду, 2 — полная.
     unsafe fn media_card(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect, size: usize, device: &str) {
-        let (compact, narrow) = (size == 0, size == 1);
+        // Вид определяется формой карточки, а не номером размера: полоса в один ряд, узкая (до 4 ячеек)
+        // с кнопками во втором ряду и полная.
+        let _ = size;
+        let compact = r.h < 72.0;
+        let narrow = !compact && r.w < 230.0;
         cv.card(r);
         let f = &cv.g.fonts;
+        // Содержимое двухрядных карточек скомпоновано под 88 px высоты: лишнее место делится поровну.
+        let dy = if compact { 0.0 } else { ((r.h - 88.0) / 2.0).max(0.0) };
         if !compact && !narrow {
-            cv.glyph(icon::VOLUME, Rect::new(r.x + 8.0, r.y + 4.0, 12.0, 14.0), false, dim());
-            cv.text(device, Rect::new(r.x + 21.0, r.y + 4.0, 150.0, 14.0), &f.small, dim());
+            cv.glyph(icon::VOLUME, Rect::new(r.x + 8.0, r.y + dy + 4.0, 12.0, 14.0), false, dim());
+            cv.text(device, Rect::new(r.x + 21.0, r.y + dy + 4.0, 150.0, 14.0), &f.small, dim());
         }
 
         let art = if compact {
             Rect::new(r.x + 10.0, r.cy() - 18.0, 36.0, 36.0)
         } else if narrow {
-            Rect::new(r.x + 10.0, r.y + 9.0, 36.0, 36.0)
+            Rect::new(r.x + 10.0, r.y + dy + 9.0, 36.0, 36.0)
         } else {
-            Rect::new(r.x + 11.0, r.y + 24.0, 36.0, 36.0)
+            Rect::new(r.x + 11.0, r.y + dy + 24.0, 36.0, 36.0)
         };
         let cover = self.media.as_ref().and_then(|m| m.art.clone().map(|px| (m.key, px)));
         let mut has_cover = false;
@@ -638,19 +659,19 @@ impl Controls {
             let right_limit = r.right() - 95.0;
             (r.x + 56.0, r.cy() - 17.0, (right_limit - (r.x + 56.0)).max(40.0))
         } else if narrow {
-            (r.x + 56.0, r.y + 10.0, r.w - 66.0)
+            (r.x + 56.0, r.y + dy + 10.0, r.w - 66.0)
         } else {
             let right_limit = r.right() - 95.0;
-            (r.x + 56.0, r.y + 25.0, (right_limit - (r.x + 56.0)).max(40.0))
+            (r.x + 56.0, r.y + dy + 25.0, (right_limit - (r.x + 56.0)).max(40.0))
         };
         cv.text(title, Rect::new(tx, ty, tw, 20.0), &f.title, txt());
         cv.text(artist, Rect::new(tx, ty + 18.0, tw, 14.0), &f.small, dim());
 
         // Кнопки плеера: prev, play/pause, next; перемотка только по полосе прогресса и колесу мыши.
         let (cy, xs) = if narrow {
-            (r.y + 57.0, [r.cx() - 30.0, r.cx(), r.cx() + 30.0])
+            (r.y + dy + 57.0, [r.cx() - 30.0, r.cx(), r.cx() + 30.0])
         } else {
-            (if compact { r.cy() } else { r.y + 40.0 }, [r.right() - 75.0, r.right() - 45.0, r.right() - 16.0])
+            (if compact { r.cy() } else { r.y + dy + 40.0 }, [r.right() - 75.0, r.right() - 45.0, r.right() - 16.0])
         };
 
         let btn_rad = if narrow { 9.0 } else { 9.5 };
@@ -674,7 +695,7 @@ impl Controls {
             return;
         }
 
-        let py = r.y + 76.0;
+        let py = r.y + dy + 76.0;
         let time_w = if tl.dur >= 3600.0 { 44.0 } else { 32.0 };
         let left_rect = Rect::new(r.x + 9.0, py - 6.0, time_w, 12.0);
         let right_rect = Rect::new(r.right() - 9.0 - time_w, py - 6.0, time_w, 12.0);
@@ -881,8 +902,9 @@ mod tests {
     #[test]
     fn controls_default_layout_and_device_list_fit() {
         use crate::tabs::layout::{CELL, GAP, Layout};
-        let lay = Layout::default_for(&SPEC);
-        let p = lay.pack(&SPEC, 0);
+        let spec = crate::tabs::layout::resolve_full(&SPEC, 8);
+        let lay = Layout::default_for(spec);
+        let p = lay.pack(spec, 0);
         assert_eq!(p.len(), 8);
 
         // Проверяем отсутствие пересечений
@@ -894,49 +916,49 @@ mod tests {
             }
         }
 
-        // Проверяем размеры плитки: 8 ячеек = 120 px ширина, 3 ячейки = 40 px высота
+        // Проверяем размеры плитки: 2 ячейки = 104 px ширина, 1 ячейка = 48 px высота
         let wifi = lay.entry(WIFI).unwrap();
         let wifi_sz = SPEC.specs[WIFI].sizes[wifi.size];
-        assert_eq!(wifi_sz.pixel_w(), 120.0);
-        assert_eq!(wifi_sz.pixel_h(), 40.0);
+        assert_eq!(wifi_sz.pixel_w(), 104.0);
+        assert_eq!(wifi_sz.pixel_h(), 48.0);
 
         // Проверяем выпадающий список устройств: LIST_H=116 px
-        // Низ самой нижней плитки (Night/Dark): row 3 + h 3 = row 6 -> y = 6 * 16 - 8 = 88 px.
-        // y + GAP = 88.0 + 8.0 = 96.0 px (от верха содержимого).
-        // Низ списка: 96 + 116 = 212 px.
-        // При overlay_rows = 14 высота содержимого: 14 * 16 - 8 = 216 px (212 <= 216).
-        let low_tiles = 6.0 * CELL - GAP;
+        // Низ самой нижней плитки (Night/Dark): row 1 + h 1 = row 2 -> y = 2 * 56 - 8 = 104 px.
+        // y + GAP = 104.0 + 8.0 = 112.0 px (от верха содержимого).
+        // Низ списка: 112 + 116 = 228 px.
+        // При overlay_rows = 5 высота содержимого: 5 * 56 - 8 = 272 px (228 <= 272).
+        let low_tiles = 2.0 * CELL - GAP;
         let list_top = low_tiles + GAP;
         let list_bottom = list_top + LIST_H;
-        let area_h = 14.0 * CELL - GAP;
+        let area_h = 5.0 * CELL - GAP;
         assert!(
             list_bottom <= area_h,
             "список устройств не помещается: bottom {} > area_h {}",
             list_bottom,
             area_h
         );
-        assert_eq!(controls_overlay_rows(low_tiles), 14);
+        assert_eq!(controls_overlay_rows(low_tiles), 5);
     }
 
     #[test]
     fn test_controls_overlay_rows_and_tiles_low() {
-        // По умолчанию: Night/Dark заканчиваются на row 6 -> low = 6*16 - 8 = 88 px
-        assert_eq!(controls_overlay_rows(88.0), 14);
+        // По умолчанию: Night/Dark заканчиваются на row 2 -> low = 2*56 - 8 = 104 px
+        assert_eq!(controls_overlay_rows(104.0), 5);
 
-        // Только 1 ряд плиток: row 3 -> low = 3*16 - 8 = 40 px
-        assert_eq!(controls_overlay_rows(40.0), 11);
+        // Только 1 ряд плиток: row 1 -> low = 1*56 - 8 = 48 px
+        assert_eq!(controls_overlay_rows(48.0), 4);
 
         // Без плиток (все скрыты): low = 0 px
-        assert_eq!(controls_overlay_rows(0.0), 9);
+        assert_eq!(controls_overlay_rows(0.0), 3);
 
-        // Плитки смещены в edit mode: low = 120 px -> 16 рядов
-        assert_eq!(controls_overlay_rows(120.0), 16);
+        // Три ряда плиток: low = 3*56 - 8 = 160 px -> 6 рядов (больше, чем в сетке: список прижмётся к низу)
+        assert_eq!(controls_overlay_rows(160.0), 6);
 
         // Проверяем tiles_low на сетке по умолчанию
         let mut grid = Grid::default();
         grid.configure(CONTROLS, &SPEC, "");
         let low = Controls::tiles_low(&grid);
-        assert_eq!(low, 88.0);
-        assert_eq!(controls_overlay_rows(low), 14);
+        assert_eq!(low, 104.0);
+        assert_eq!(controls_overlay_rows(low), 5);
     }
 }

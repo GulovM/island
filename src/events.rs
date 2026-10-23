@@ -122,7 +122,9 @@ impl App {
             Ev::Hot(h) => self.on_hot(h),
             Ev::Hotkey => self.on_hotkey(),
             Ev::Shot => {
-                self.hide_for_shot();
+                if self.cfg.hide_on_screenshot {
+                    self.hide_for_shot();
+                }
                 false
             }
             Ev::Display => self.reconfigure(),

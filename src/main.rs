@@ -210,6 +210,8 @@ fn run() -> Result<()> {
         // Мини-плееру нужно знать о музыке и при свёрнутом острове: подписка на события сессии.
         bg::send(bg::Cmd::Media);
         let cfg = app.cfg.clone();
+        // Ширина острова нужна сеткам до загрузки раскладки: виджеты «на весь остров» занимают её целиком.
+        app.tabs.set_min_cols(app.min_grid_cols());
         app.tabs.load(&cfg, &state);
         app.retarget();
         app.body.snap();

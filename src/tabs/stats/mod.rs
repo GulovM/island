@@ -56,35 +56,35 @@ const TOP_APPS: usize = 6;
 const SPEEDTEST: usize = 7;
 
 /// Кольцо: мини (кольцо и название), карточка, широкая карточка с подробностями.
-static RING: [Size; 3] = [sz(8, 4), sz(8, 10), sz(16, 6)];
-static INFO: [Size; 2] = [sz(8, 5), sz(16, 5)];
-/// Топ приложений: три, четыре или пять строк.
-static APPS_SIZES: [Size; 3] = [sz(16, 6), sz(16, 10), sz(24, 10)];
+static RING: [Size; 3] = [sz(2, 1), sz(2, 2), sz(4, 2)];
+/// Диск, сеть, аптайм: узкая и широкая карточки.
+static INFO: [Size; 2] = [sz(2, 2), sz(4, 2)];
+/// Топ приложений: три строки, пять строк, пять строк на всю ширину.
+static APPS_SIZES: [Size; 3] = [sz(4, 2), sz(4, 4), sz(6, 4)];
 /// Замер скорости: компактный (кнопка «▶» в строке с числами) и обычный.
-static SPEED_SIZES: [Size; 3] = [sz(8, 5), sz(16, 5), sz(24, 5)];
+static SPEED_SIZES: [Size; 3] = [sz(2, 2), sz(4, 2), sz(6, 2)];
 
-/// Сетка вкладки: 40 колонок по 16 px (шаг CELL=16, зазор GAP=8), 15 рядов. Кольца и карточки занимают
-/// по 8 колонок, топ приложений и замер скорости — по 16.
+/// Сетка вкладки: 10 колонок и 4 ряда крупных ячеек (шаг CELL=56, зазор GAP=8). По умолчанию кольца
+/// и карточки занимают по 2×2, топ приложений и замер скорости — по 4×2.
 ///
-/// Арифметика min_rows = 5:
-/// Вкладка Stats не имеет выпадающих оверлеев. Минимальная содержательная строка — инфо-карточки
-/// (sz(8, 5)) или кольца (sz(8, 4) / sz(8, 6)). При min_rows = 5 высота содержимого:
-/// 5 * 16 - 8 = 72 px, что достаточно как для компактного ряда карточек, так и для
-/// размещения заглушки «Нет виджетов» с кнопкой «Настроить».
+/// Арифметика min_rows = 1:
+/// Вкладка Stats не имеет выпадающих оверлеев. Минимальная содержательная строка — мини-кольцо
+/// (sz(2, 1)). При min_rows = 1 высота содержимого 1 * 56 - 8 = 48 px, что достаточно как для
+/// компактного кольца, так и для заглушки «Нет виджетов» с кнопкой «Настроить».
 pub static SPEC: TabSpec = TabSpec {
-    cols: 40,
-    rows: 15,
-    min_cols: 8,
-    min_rows: 5,
+    cols: 12,
+    rows: 4,
+    min_cols: 2,
+    min_rows: 1,
     specs: &[
         Spec { key: "cpu", title: "CPU", sizes: &RING, size: 1, col: 0, row: 0 },
-        Spec { key: "gpu", title: "GPU", sizes: &RING, size: 1, col: 8, row: 0 },
-        Spec { key: "ram", title: "RAM", sizes: &RING, size: 1, col: 16, row: 0 },
-        Spec { key: "disk", title: "Диск", sizes: &INFO, size: 0, col: 0, row: 10 },
-        Spec { key: "net", title: "Сеть", sizes: &INFO, size: 0, col: 8, row: 10 },
-        Spec { key: "uptime", title: "Аптайм", sizes: &INFO, size: 0, col: 16, row: 10 },
-        Spec { key: "apps", title: "Топ приложений", sizes: &APPS_SIZES, size: 1, col: 24, row: 0 },
-        Spec { key: "speed", title: "Скорость сети", sizes: &SPEED_SIZES, size: 1, col: 24, row: 10 },
+        Spec { key: "gpu", title: "GPU", sizes: &RING, size: 1, col: 2, row: 0 },
+        Spec { key: "ram", title: "RAM", sizes: &RING, size: 1, col: 4, row: 0 },
+        Spec { key: "disk", title: "Диск", sizes: &INFO, size: 0, col: 0, row: 2 },
+        Spec { key: "net", title: "Сеть", sizes: &INFO, size: 0, col: 2, row: 2 },
+        Spec { key: "uptime", title: "Аптайм", sizes: &INFO, size: 0, col: 4, row: 2 },
+        Spec { key: "apps", title: "Топ приложений", sizes: &APPS_SIZES, size: 0, col: 6, row: 0 },
+        Spec { key: "speed", title: "Скорость сети", sizes: &SPEED_SIZES, size: 1, col: 6, row: 2 },
     ],
 };
 
@@ -296,9 +296,9 @@ impl Stats {
         self.prev_net = Some((now, rx, tx));
     }
 
-    /// Рисует вкладку по сетке. `h` — высота панели без полосы правки.
-    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, _h: f32) {
-        let area = grid.area(w);
+    /// Рисует вкладку по сетке. `h` — высота панели (с полосой правки).
+    pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
+        let area = grid.area(w, h);
         grid.draw(ui, cv, area, 0, |ui, cv, it| self.paint(ui, cv, it));
     }
 
@@ -359,12 +359,12 @@ impl Stats {
                 cv.line(&brief, &f.small, tx, tw, cy + 7.0, Align::Leading, dim());
             }
             1 => {
-                let (rx, ry) = (r.cx(), r.y + 46.0);
-                cv.ring(rx, ry, 31.0, 5.0, v, col);
-                cv.text(&pct, Rect::new(rx - 26.0, ry - 8.0, 52.0, 16.0), &f.body_c, txt());
-                cv.text(name, Rect::new(r.x, r.y + 88.0, r.w, 14.0), &f.body_c, txt());
-                cv.text(&sub, Rect::new(r.x + 6.0, r.y + 106.0, r.w - 12.0, 12.0), &f.small_c, dim());
-                chips_row(cv, r.cx(), r.y + 126.0, &chips);
+                let (rx, ry) = (r.cx(), r.y + 29.0);
+                cv.ring(rx, ry, 21.0, 4.5, v, col);
+                cv.text(&pct, Rect::new(rx - 20.0, ry - 8.0, 40.0, 16.0), &f.small_c, txt());
+                cv.text(name, Rect::new(r.x, r.y + 55.0, r.w, 14.0), &f.body_c, txt());
+                cv.text(&sub, Rect::new(r.x + 6.0, r.y + 70.0, r.w - 12.0, 12.0), &f.small_c, dim());
+                chips_row(cv, r.cx(), r.y + 84.0, &chips);
             }
             _ => {
                 let (rad, cx, cy) = (38.0, r.x + 16.0 + 38.0, r.cy());
@@ -380,8 +380,8 @@ impl Stats {
         }
     }
 
-    /// Диск, сеть и аптайм. Узкая (120×72) — главное значение и одна подробность; широкая
-    /// (248×72) добавляет вторую колонку: свободное место, загрузку и отдачу рядом, число процессов.
+    /// Диск, сеть и аптайм. Узкая (120×120) — главное значение и одна подробность; широкая
+    /// (248×120) добавляет вторую колонку: свободное место, загрузку и отдачу рядом, число процессов.
     unsafe fn info_card(&self, cv: &Canvas, r: Rect, size: usize, i: usize) {
         let f = &cv.g.fonts;
         let c = &self.cur;
@@ -492,7 +492,7 @@ impl Stats {
         }
     }
 
-    /// Замер скорости. `size` — индекс в `SPEED_SIZES`: в узкой карточке (120×72) загрузка крупно,
+    /// Замер скорости. `size` — индекс в `SPEED_SIZES`: в узкой карточке (120×120) загрузка крупно,
     /// отдача строкой под ней и круглая кнопка в шапке; в широких — обе скорости рядом и
     /// кнопка-капсула справа.
     unsafe fn speed_card(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect, size: usize) {
@@ -539,11 +539,14 @@ impl Stats {
             go = ui.solid_button(cv, id(STATS, 11), btn, label, bg, fg, 11.0);
             // Загрузка и отдача: число крупно, единица со стрелкой мелко.
             let col_w = ((btn.x - r.x - P - 8.0) / 2.0).min(120.0);
+            // В узкой карточке единицы сокращаются до стрелки: «95 ↓ 41 ↑» читается и без подписи.
+            let short = col_w < 78.0;
             for (k, (v, arrow)) in [(&d, "↓"), (&u, "↑")].into_iter().enumerate() {
                 let x = r.x + P + k as f32 * col_w;
                 let vw = cv.digits_w(v, 22.0, 600);
                 cv.digits(v, x - 1.0, vw + 4.0, vy, 22.0, 600, Align::Leading, txt());
-                cv.line(&format!("{unit} {arrow}"), &f.small, x + vw + 4.0, col_w - vw - 8.0, vy + 3.0, Align::Leading, dim());
+                let cap = if short { arrow.to_string() } else { format!("{unit} {arrow}") };
+                cv.line(&cap, &f.small, x + vw + 4.0, col_w - vw - 8.0, vy + 3.0, Align::Leading, dim());
             }
         }
         if go && !sp.running {
