@@ -545,6 +545,8 @@ impl Clip {
         }
         // Блок метаданных в подвале: приглушённый мелкий шрифт, отделённый от данных.
         let footer_y = r.bottom() - 43.0;
+        // Горизонтальная линия между содержимым и метаданными (стиль разделителей острова — `track`).
+        cv.rr(Rect::new(r.x + 14.0, footer_y - 12.0, r.w - 28.0, 1.0), 0.5, crate::ui::track());
         for (k, (label, value)) in meta.iter().enumerate() {
             let cy = footer_y + k as f32 * 13.0;
             cv.text(label, Rect::new(r.x + 14.0, cy - 6.0, 68.0, 12.0), &f.small, dim());
