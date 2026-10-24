@@ -154,8 +154,8 @@ impl Today {
         }
         let (_, m, d) = civil_from_days(form.day);
         let date = format!("{} {} {}", crate::i18n::weekdays()[weekday(form.day) as usize], d, crate::i18n::months_short()[(m as usize).clamp(1, 12) - 1]);
-        cv.line(&date, &f.small_b, x + 20.0, 88.0, dy + 9.0, Align::Center, txt());
-        if ui.icon_button(cv, id(TODAY, DAY_NEXT), Rect::new(x + 110.0, dy, 18.0, 18.0), icon::RIGHT, false) {
+        cv.line(&date, &f.small_b, x + 18.0, 62.0, dy + 9.0, Align::Center, txt());
+        if ui.icon_button(cv, id(TODAY, DAY_NEXT), Rect::new(x + 80.0, dy, 18.0, 18.0), icon::RIGHT, false) {
             form.day += 1;
         }
         cv.line(pick("Весь день", "All day"), &f.small, r.right() - 9.0 - 34.0 - 6.0 - 70.0, 70.0, dy + 9.0, Align::Trailing, dim());
