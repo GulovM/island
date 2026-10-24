@@ -234,6 +234,8 @@ const TABLE: &[(&str, &str)] = &[
     ("Ссылка", "Link"),
     ("Ярлыки меню «Пуск» не найдены", "No Start menu shortcuts found"),
     ("Ничего не найдено", "Nothing found"),
+    ("Все приложения", "All apps"),
+    ("Избранные", "Favorites"),
     // Clipboard
     ("Все", "All"),
     ("Текст", "Text"),

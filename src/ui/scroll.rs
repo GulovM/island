@@ -99,6 +99,19 @@ impl Ui {
         cv.rr(Rect::new(s.view.right() - 4.0, ty, 3.0, th), 1.5, c);
     }
 
+    /// Текущее смещение области прокрутки (0, если её ещё не рисовали).
+    pub fn scroll_offset(&self, id: u32) -> f32 {
+        self.scrolls.get(&id).map_or(0.0, |s| s.off)
+    }
+
+    /// Мгновенно переходит к смещению `off` (в пределах содержимого) и гасит инерцию.
+    pub fn scroll_jump(&mut self, id: u32, off: f32) {
+        if let Some(s) = self.scrolls.get_mut(&id) {
+            s.off = off.clamp(0.0, s.max);
+            s.vel = 0.0;
+        }
+    }
+
     /// Колесо мыши над прямоугольником `r` (в координатах слоя): забирает накопленное значение.
     pub fn wheel_in(&mut self, r: Rect) -> f32 {
         if self.interactive && r.contains(self.mouse) && self.wheel != 0.0 {

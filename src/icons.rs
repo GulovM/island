@@ -25,7 +25,7 @@ use windows::Win32::UI::Shell::{
 
 use crate::{bg, log, sys};
 
-pub const SIZE_PX: u32 = 32;
+pub const SIZE_PX: u32 = 48;
 
 pub struct Uwp {
     pub name: String,
@@ -179,15 +179,26 @@ fn normalize(src: &[u8], w: usize, h: usize) -> Vec<u8> {
     let opaque = src.chunks_exact(4).all(|p| p[3] == 0);
     let mut out = vec![0u8; n * n * 4];
     for y in 0..n {
+        let (y0, y1) = (y * h / n, ((y + 1) * h / n).max(y * h / n + 1).min(h));
         for x in 0..n {
-            let (sx, sy) = (x * w / n, y * h / n);
-            let s = (sy * w + sx) * 4;
-            let o = (y * n + x) * 4;
-            let a = if opaque { 255 } else { src[s + 3] as u32 };
-            for c in 0..3 {
-                out[o + c] = if opaque { src[s + c] } else { (src[s + c] as u32 * a / 255) as u8 };
+            let (x0, x1) = (x * w / n, ((x + 1) * w / n).max(x * w / n + 1).min(w));
+            // Среднее по блоку исходных пикселей: крупная иконка Shell уменьшается без «лесенки».
+            let (mut acc, mut cnt) = ([0u32; 4], 0u32);
+            for sy in y0..y1 {
+                for sx in x0..x1 {
+                    let s = (sy * w + sx) * 4;
+                    let a = if opaque { 255 } else { src[s + 3] as u32 };
+                    for c in 0..3 {
+                        acc[c] += if opaque { src[s + c] as u32 } else { src[s + c] as u32 * a / 255 };
+                    }
+                    acc[3] += a;
+                    cnt += 1;
+                }
             }
-            out[o + 3] = a as u8;
+            let o = (y * n + x) * 4;
+            for c in 0..4 {
+                out[o + c] = (acc[c] / cnt.max(1)) as u8;
+            }
         }
     }
     out
@@ -306,7 +317,7 @@ mod tests {
 
     #[test]
     fn normalize_premultiplies_and_resizes() {
-        // 1×1 полупрозрачный → 32×32 с цветом, умноженным на альфу.
+        // 1×1 полупрозрачный → SIZE_PX² с цветом, умноженным на альфу.
         let px = normalize(&[200, 100, 50, 128], 1, 1);
         assert_eq!(px.len(), (SIZE_PX * SIZE_PX * 4) as usize);
         assert_eq!(&px[..4], &[100, 50, 25, 128]);

@@ -64,6 +64,10 @@ pub struct State {
     pub stats_top_by_cpu: bool,
     /// Выбранный раздел обоев в Wallpaper (0 — Все, 1 — Недавние, 2 — WE).
     pub wallpaper_filter: usize,
+    /// Вкладка «Приложения»: сетка вместо списка.
+    pub apps_grid: bool,
+    /// Вкладка «Приложения»: показан полный список (false — только избранные).
+    pub apps_all: bool,
     pub timer: TimerState,
     pub weather: WeatherState,
 }
@@ -77,6 +81,8 @@ impl Default for State {
             clipboard_section: 0,
             stats_top_by_cpu: false,
             wallpaper_filter: 0,
+            apps_grid: false,
+            apps_all: false,
             timer: TimerState::default(),
             weather: WeatherState::default(),
         }
@@ -117,6 +123,8 @@ pub fn serialize(state: &State) -> String {
     out.push_str(&format!("clipboard_section = {}\n", state.clipboard_section));
     out.push_str(&format!("stats_top_by_cpu = {}\n", state.stats_top_by_cpu as u8));
     out.push_str(&format!("wallpaper_filter = {}\n", state.wallpaper_filter));
+    out.push_str(&format!("apps_grid = {}\n", state.apps_grid as u8));
+    out.push_str(&format!("apps_all = {}\n", state.apps_all as u8));
 
     out.push_str("\n[timer]\n");
     out.push_str(&format!("duration = {}\n", state.timer.duration));
@@ -183,6 +191,12 @@ pub fn parse(text: &str) -> State {
                 if let Ok(f) = val.parse::<usize>() {
                     state.wallpaper_filter = f;
                 }
+            }
+            ("", "apps_grid") => {
+                state.apps_grid = val == "1" || val.eq_ignore_ascii_case("true");
+            }
+            ("", "apps_all") => {
+                state.apps_all = val == "1" || val.eq_ignore_ascii_case("true");
             }
             ("timer", "duration") => {
                 if let Ok(d) = val.parse::<u64>() {
@@ -355,6 +369,15 @@ pub fn set_wallpaper_filter(filter: usize) {
     flush();
 }
 
+/// Запоминает вид и режим («Избранные» / «Показать все») вкладки «Приложения».
+pub fn set_apps_view(grid: bool, all: bool) {
+    update(|s| {
+        s.apps_grid = grid;
+        s.apps_all = all;
+    });
+    flush();
+}
+
 /// Запоминает состояние таймера.
 pub fn set_timer(timer: TimerState) {
     update(|s| s.timer = timer);
@@ -387,6 +410,8 @@ mod tests {
             clipboard_section: 1,
             stats_top_by_cpu: true,
             wallpaper_filter: 2,
+            apps_grid: true,
+            apps_all: true,
             timer: TimerState {
                 duration: 600,
                 left: 450,
