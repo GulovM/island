@@ -302,6 +302,11 @@ impl Stats {
         grid.draw(ui, cv, area, 0, |ui, cv, it| self.paint(ui, cv, it));
     }
 
+    /// Рисует виджет `it.idx` на собственной вкладке.
+    pub unsafe fn paint_foreign(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item) {
+        self.paint(ui, cv, it);
+    }
+
     unsafe fn paint(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item) {
         match it.idx {
             CPU | GPU | RAM => self.ring_card(cv, it.rect, it.size, it.idx),

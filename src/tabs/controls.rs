@@ -132,6 +132,8 @@ pub struct Controls {
     bluetooth: bool,
     /// Режим полёта: все радио выключены.
     airplane: bool,
+    /// Виджет рисуется на собственной вкладке: выпадающих списков там нет, стрелки ведут в Параметры.
+    foreign: bool,
     /// Режим энергосбережения; `None` — батареи нет, плитка скрыта.
     saver: Option<bool>,
     dark: bool,
@@ -219,6 +221,14 @@ impl Controls {
 
     /// Открывает/закрывает список устройств по стрелке плитки.
     fn toggle(&mut self, kind: ListKind) {
+        if self.foreign {
+            sys::open(match kind {
+                ListKind::Wifi => "ms-settings:network-wifi",
+                ListKind::Bluetooth => "ms-settings:bluetooth",
+                ListKind::Audio => "ms-settings:sound",
+            });
+            return;
+        }
         self.join = None;
         if self.open == Some(kind) {
             self.open = None;
@@ -314,7 +324,7 @@ impl Controls {
         grid.set_overlay_rows(overlay_rows);
 
         let area = grid.area(w, h);
-        let skip = (if crate::bright::available() { 0 } else { 1 << BRIGHTNESS }) | (if self.saver.is_some() { 0 } else { 1 << SAVER });
+        let skip = [BRIGHTNESS, SAVER].iter().filter(|&&i| self.unavailable(i)).fold(0u32, |m, &i| m | 1 << i);
         // Виджеты под списком гаснут и не принимают нажатий (иначе они перехватят их у строк списка).
         let cover = (self.list_t.0.value > 0.004).then(|| self.list_rect(area, low));
         grid.draw(ui, cv, area, skip, |ui, cv, it| self.widget(ui, cv, it, cover));
@@ -354,6 +364,22 @@ impl Controls {
         self.paint(ui, &sub, it);
         if let Some(p) = prev {
             ui.unmute(p);
+        }
+    }
+
+    /// Рисует виджет `it.idx` на собственной вкладке.
+    pub unsafe fn paint_foreign(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item) {
+        self.foreign = true;
+        self.paint(ui, cv, it);
+        self.foreign = false;
+    }
+
+    /// Виджета нет на этом ПК (нет датчика яркости или батареи): на сетке его не рисуем.
+    pub fn unavailable(&self, idx: usize) -> bool {
+        match idx {
+            BRIGHTNESS => !crate::bright::available(),
+            SAVER => self.saver.is_none(),
+            _ => false,
         }
     }
 

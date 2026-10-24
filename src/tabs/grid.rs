@@ -616,10 +616,19 @@ impl Grid {
         Bar { tray, reset, done, note: Rect::new(left, y, (right - left).max(0.0), BAR_H), show_tray, show_reset }
     }
 
+    /// Подпись чипа в лотке; в каталоге собственной вкладки к названию добавляется группа.
+    fn chip_title(&self, i: usize) -> String {
+        let s = &self.spec.specs[i];
+        match super::custom::group_title(s.key) {
+            Some(g) => format!("{} · {}", tr(g), tr(s.title)),
+            None => tr(s.title).into_owned(),
+        }
+    }
+
     unsafe fn tray_layout(&self, cv: &Canvas, area: Rect, bar: &Bar, hidden: &[usize]) -> Tray {
         let f = &cv.g.fonts.small_c;
         let widths: Vec<f32> =
-            hidden.iter().map(|&i| (cv.text_w(&tr(self.spec.specs[i].title), f) + 22.0).max(44.0)).collect();
+            hidden.iter().map(|&i| (cv.text_w(&self.chip_title(i), f) + 22.0).max(44.0)).collect();
         let max_w = area.w.min(420.0) - 2.0 * TRAY_PAD;
         let (pos, w, h) = flow(&widths, max_w, CHIP_H, TRAY_GAP);
         let dy = (1.0 - self.tray.value) * 8.0;
@@ -1355,7 +1364,7 @@ impl Grid {
                 let r = tray.chips[k];
                 let hv = ui.hover_of(tab_id(self.tab, 0x1300 + idx as u32)).clamp(0.0, 1.0);
                 tcv.rr(r, r.h / 2.0, ui::mix(ui::chip_bg(), ui::fg(), 0.08 * hv));
-                tcv.text(&tr(spec.specs[idx].title), r, &f.small_c, ui::mix(ui::dim(), ui::txt(), hv));
+                tcv.text(&self.chip_title(idx), r, &f.small_c, ui::mix(ui::dim(), ui::txt(), hv));
             }
         }
     }

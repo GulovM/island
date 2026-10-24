@@ -341,6 +341,19 @@ impl Today {
         Rect::new(wk.x.min(area.right() - w).max(area.x), wk.y.min(area.bottom() - h).max(area.y), w, h)
     }
 
+    /// Рисует виджет `it.idx` на собственной вкладке. Месячный календарь раскрывается только на
+    /// вкладке «Сегодня», поэтому нажатие на неделю там ничего не открывает.
+    pub unsafe fn paint_foreign(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item) {
+        let t = GetLocalTime();
+        let dow = (t.wDayOfWeek as usize + 6) % 7;
+        let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
+        let was_open = self.month_open;
+        let week = self.week_rect;
+        self.widget(ui, cv, it, None, &t, today, dow);
+        self.month_open = was_open;
+        self.week_rect = week;
+    }
+
     /// Один виджет сетки; если его закрывает месячный календарь, он гаснет и становится немым.
     #[allow(clippy::too_many_arguments)]
     unsafe fn widget(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item, cover: Option<Rect>, t: &SYSTEMTIME, today: i64, dow: usize) {

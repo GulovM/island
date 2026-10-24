@@ -431,6 +431,7 @@ impl App {
             unsafe { self.apply_monitor(self.mon, true) };
         }
         self.cfg.tabs = new.tabs;
+        let custom_changed = self.cfg.custom != new.custom;
         self.cfg.custom = new.custom;
         self.cfg.hidden_tabs = new.hidden_tabs;
         self.cfg.strip_over_maximized = new.strip_over_maximized;
@@ -443,6 +444,12 @@ impl App {
         self.cfg.auto_update = new.auto_update;
         if self.cfg.language != new.language {
             self.cfg.language = new.language;
+            // SAFETY: оконный поток, DirectWrite-фабрика жива.
+            unsafe { self.refresh_language() };
+        }
+        if custom_changed {
+            // Новые и переименованные вкладки: сетки и ширины подписей в ряду.
+            self.tabs.sync_custom(&self.cfg);
             // SAFETY: оконный поток, DirectWrite-фабрика жива.
             unsafe { self.refresh_language() };
         }

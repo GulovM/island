@@ -441,6 +441,12 @@ impl App {
                     self.disarm_leave();
                     self.set_expanded(false);
                 }
+                tabs::Action::Layout(tab, text) if tab >= tabs::CUSTOM_BASE => {
+                    if let Some(c) = self.cfg.custom.get_mut(tab - tabs::CUSTOM_BASE) {
+                        c.layout = text;
+                        config::save(&self.cfg);
+                    }
+                }
                 tabs::Action::Layout(tab, text) => {
                     if let (Some(slot), Some(key)) = (self.cfg.layouts.get_mut(tab), config::LAYOUT_KEYS.get(tab)) {
                         config::save_str(key, &text);

@@ -18,6 +18,7 @@ use crate::ui::{Canvas, Ui};
 pub mod apps;
 pub mod clipboard;
 pub mod controls;
+pub mod custom;
 pub mod grid;
 pub mod layout;
 mod legacy;
@@ -151,6 +152,11 @@ pub struct Tabs {
     pub actions: Vec<Action>,
     /// Сетки виджетов вкладок Controls, Today, Stats (индекс = номер вкладки).
     grids: [grid::Grid; 3],
+    /// Сетки собственных вкладок (номер вкладки = `CUSTOM_BASE` + позиция) и их номера в конфиге.
+    custom: Vec<grid::Grid>,
+    custom_ids: Vec<u32>,
+    min_cols: u8,
+    compact: bool,
 }
 
 impl Default for Tabs {
@@ -170,6 +176,10 @@ impl Default for Tabs {
             settings: Default::default(),
             actions: Default::default(),
             grids,
+            custom: Vec::new(),
+            custom_ids: Vec::new(),
+            min_cols: 1,
+            compact: true,
         }
     }
 }
@@ -202,6 +212,50 @@ impl Tabs {
             g.set_compact(!cfg.free_layout);
             g.configure(tab, spec_of(tab), &cfg.layouts[tab]);
         }
+        self.compact = !cfg.free_layout;
+        self.sync_custom(cfg);
+    }
+
+    /// Приводит сетки собственных вкладок к списку из конфига: новые создаются, удалённые пропадают,
+    /// у остальных раскладка перечитывается.
+    pub fn sync_custom(&mut self, cfg: &Config) {
+        let ids: Vec<u32> = cfg.custom.iter().map(|c| c.id).collect();
+        if ids == self.custom_ids {
+            for (g, c) in self.custom.iter_mut().zip(&cfg.custom) {
+                g.set_text(&c.layout);
+            }
+            return;
+        }
+        let spec = custom::catalog().spec;
+        self.custom = cfg
+            .custom
+            .iter()
+            .enumerate()
+            .map(|(k, c)| {
+                let mut g = grid::Grid::default();
+                g.set_compact(self.compact);
+                g.set_min_cols(self.min_cols);
+                g.configure(CUSTOM_BASE + k, spec, &c.layout);
+                g
+            })
+            .collect();
+        self.custom_ids = ids;
+    }
+
+    /// Сетка вкладки `tab`, если она есть (Controls, Today, Stats и собственные вкладки).
+    fn grid(&self, tab: usize) -> Option<&grid::Grid> {
+        self.grids.get(tab).or_else(|| tab.checked_sub(CUSTOM_BASE).and_then(|k| self.custom.get(k)))
+    }
+
+    fn grid_mut(&mut self, tab: usize) -> Option<&mut grid::Grid> {
+        match tab.checked_sub(CUSTOM_BASE) {
+            Some(k) => self.custom.get_mut(k),
+            None => self.grids.get_mut(tab),
+        }
+    }
+
+    fn all_grids_mut(&mut self) -> impl Iterator<Item = &mut grid::Grid> {
+        self.grids.iter_mut().chain(self.custom.iter_mut())
     }
 
     pub fn apply_config(&mut self, cfg: &Config) {
@@ -214,27 +268,29 @@ impl Tabs {
         for (tab, g) in self.grids.iter_mut().enumerate() {
             g.set_text(&cfg.layouts[tab]);
         }
+        self.sync_custom(cfg);
     }
 
     /// Включает или выключает автоуплотнение раскладки на всех вкладках с сеткой.
     pub fn set_compact(&mut self, on: bool) {
-        for g in &mut self.grids {
+        self.compact = on;
+        for g in self.all_grids_mut() {
             g.set_compact(on);
         }
     }
 
     /// Можно ли настраивать виджеты вкладки (показывается карандаш).
     pub fn editable(&self, tab: usize) -> bool {
-        self.grids.get(tab).is_some_and(grid::Grid::can_edit)
+        self.grid(tab).is_some_and(grid::Grid::can_edit)
     }
 
     pub fn editing(&self, tab: usize) -> bool {
-        self.grids.get(tab).is_some_and(grid::Grid::is_editing)
+        self.grid(tab).is_some_and(grid::Grid::is_editing)
     }
 
     /// Переключает режим правки. `true` — состояние изменилось.
     pub fn toggle_edit(&mut self, tab: usize) -> bool {
-        let Some(g) = self.grids.get_mut(tab) else { return false };
+        let Some(g) = self.grid_mut(tab) else { return false };
         if !g.can_edit() {
             return false;
         }
@@ -254,13 +310,14 @@ impl Tabs {
 
     /// На сколько остров выше, пока вкладку правят.
     pub fn edit_extra(&self, tab: usize) -> f32 {
-        self.grids.get(tab).map_or(0.0, grid::Grid::extra)
+        self.grid(tab).map_or(0.0, grid::Grid::extra)
     }
 
     /// Устанавливает минимальную ширину сетки (в ячейках) для всех вкладок с сеткой
     /// для согласования с длиной ряда вкладок острова.
     pub fn set_min_cols(&mut self, min_cols: u8) {
-        for g in &mut self.grids {
+        self.min_cols = min_cols;
+        for g in self.all_grids_mut() {
             g.set_min_cols(min_cols);
         }
     }
@@ -276,7 +333,10 @@ impl Tabs {
                 (win.island_w(), win.island_h(0.0))
             }
             CLIPBOARD..=SETTINGS => NON_GRID_SIZES[tab - CLIPBOARD],
-            _ => (400.0, 200.0),
+            _ => match self.grid(tab) {
+                Some(g) => (g.window().island_w(), g.window().island_h(0.0)),
+                None => (400.0, 200.0),
+            },
         };
         h += self.edit_extra(tab);
         (w, h)
@@ -294,14 +354,18 @@ impl Tabs {
             WALLPAPER => self.wall.draw(ui, cv, w, h),
             POWER => self.power.draw(ui, cv, w),
             SETTINGS => self.settings.draw(ui, cv, w, h),
-            _ => {}
+            _ => self.draw_custom(tab, ui, cv, w, h),
         }
         // Клавиши навигации, которых не ждала ни одна вкладка, не копятся.
         if tab != CLIPBOARD && tab != APPS {
             let _ = ui.take_nav();
         }
         // Правка сетки: новую раскладку надо записать, окончание правки — пересчитать высоту острова.
-        if let Some(g) = self.grids.get_mut(tab) {
+        let grid = match tab.checked_sub(CUSTOM_BASE) {
+            Some(k) => self.custom.get_mut(k),
+            None => self.grids.get_mut(tab),
+        };
+        if let Some(g) = grid {
             if let Some(text) = g.take_saved() {
                 self.actions.push(Action::Layout(tab, text));
             }
@@ -311,13 +375,45 @@ impl Tabs {
         }
     }
 
+    /// Собственная вкладка: сетка с виджетами, которые рисуют их хозяева.
+    unsafe fn draw_custom(&mut self, tab: usize, ui: &mut Ui, cv: &Canvas, w: f32, h: f32) {
+        let Some(grid) = tab.checked_sub(CUSTOM_BASE).and_then(|k| self.custom.get_mut(k)) else { return };
+        let cat = custom::catalog();
+        let area = grid.area(w, h);
+        let controls = &mut self.controls;
+        let skip = cat
+            .map
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.0 == custom::Owner::Controls && controls.unavailable(m.1))
+            .fold(0u32, |mask, (j, _)| mask | 1 << j);
+        let (today, stats) = (&mut self.today, &mut self.stats);
+        grid.draw(ui, cv, area, skip, |ui, cv, it| {
+            let Some(&(owner, idx)) = cat.map.get(it.idx) else { return };
+            let it = grid::Item { idx, size: it.size, rect: it.rect };
+            match owner {
+                custom::Owner::Controls => controls.paint_foreign(ui, cv, &it),
+                custom::Owner::Today => today.paint_foreign(ui, cv, &it),
+                custom::Owner::Stats => stats.paint_foreign(ui, cv, &it),
+            }
+        });
+    }
+
+    /// Хозяева виджетов, стоящих на собственной вкладке `tab`.
+    fn owners_of(&self, tab: usize) -> Vec<custom::Owner> {
+        match tab.checked_sub(CUSTOM_BASE).and_then(|k| self.custom.get(k)) {
+            Some(g) => custom::catalog().owners_on(g.layout()),
+            None => Vec::new(),
+        }
+    }
+
     pub fn step(&mut self, dt: f32) {
         self.controls.step(dt);
         self.today.step(dt);
         self.stats.step(dt);
         self.wall.step(dt);
         self.settings.step(dt);
-        for g in &mut self.grids {
+        for g in self.all_grids_mut() {
             g.step(dt);
         }
     }
@@ -328,12 +424,13 @@ impl Tabs {
             || self.stats.animating()
             || self.wall.animating()
             || self.settings.animating()
-            || self.grids.iter().any(grid::Grid::animating)
+            || self.grids.iter().chain(&self.custom).any(grid::Grid::animating)
     }
 
     /// Вкладка стала видимой. `true` — нужен кадр.
     pub fn show(&mut self, tab: usize) -> bool {
-        if let Some(g) = self.grids.get_mut(tab) {
+        let owners = self.owners_of(tab);
+        if let Some(g) = self.grid_mut(tab) {
             g.show();
         }
         match tab {
@@ -343,12 +440,26 @@ impl Tabs {
             WALLPAPER => self.wall.show(),
             TODAY => self.today.show(),
             CLIPBOARD => self.clip.show(),
-            _ => false,
+            _ => owners.iter().fold(false, |dirty, o| {
+                dirty
+                    | match o {
+                        custom::Owner::Controls => self.controls.show(),
+                        custom::Owner::Today => self.today.show(),
+                        custom::Owner::Stats => self.stats.show(),
+                    }
+            }),
         }
     }
 
     pub fn hide(&mut self, tab: usize) {
-        if let Some(g) = self.grids.get_mut(tab) {
+        for o in self.owners_of(tab) {
+            match o {
+                custom::Owner::Controls => self.controls.hide(),
+                custom::Owner::Today => self.today.hide_overlays(),
+                custom::Owner::Stats => self.stats.hide(),
+            }
+        }
+        if let Some(g) = self.grid_mut(tab) {
             g.hide();
         }
         if tab == POWER {
@@ -373,7 +484,7 @@ impl Tabs {
         match tab {
             CONTROLS | STATS | TODAY => true,
             POWER => self.power.armed(),
-            _ => false,
+            _ => !self.owners_of(tab).is_empty(),
         }
     }
 
@@ -384,7 +495,14 @@ impl Tabs {
             STATS => self.stats.poll(),
             TODAY => self.today.poll(),
             POWER => self.power.poll(),
-            _ => false,
+            _ => self.owners_of(tab).iter().fold(false, |dirty, o| {
+                dirty
+                    | match o {
+                        custom::Owner::Controls => self.controls.poll(),
+                        custom::Owner::Today => self.today.poll(),
+                        custom::Owner::Stats => self.stats.poll(),
+                    }
+            }),
         }
     }
 
