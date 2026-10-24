@@ -187,6 +187,8 @@ pub struct Grid {
     stretching: Option<StretchDrag>,
     window: Window,
     min_cols: u8,
+    /// Размер окна в режиме правки (колонки, ряды): правка начинается минимум с него. (0, 0) — как есть.
+    edit_min: (u8, u8),
     overlay_rows: u8,
     /// Автоуплотнение раскладки (как в Пункте управления iOS); `false` — свободная раскладка с пустотами.
     compact: bool,
@@ -224,6 +226,7 @@ impl Default for Grid {
             stretching: None,
             window: Window { c0: 0, r0: 0, c1: 1, r1: 1 },
             min_cols: 1,
+            edit_min: (0, 0),
             overlay_rows: 0,
             compact: true,
             last_skip: 0,
@@ -448,6 +451,23 @@ impl Grid {
         self.edit.target = 1.0;
         self.tray_open = false;
         self.stretching = None;
+        if self.edit_min != (0, 0) {
+            let w = self.window;
+            let (mut c0, mut c1, mut r0, mut r1) = (w.c0, w.c1, w.r0, w.r1);
+            layout::expand_range(&mut c0, &mut c1, self.edit_min.0, self.spec.cols);
+            layout::expand_range(&mut r0, &mut r1, self.edit_min.1, self.spec.rows);
+            let win = Window { c0, r0, c1, r1 };
+            if win != w {
+                self.window = win;
+                self.resize = true;
+            }
+        }
+    }
+
+    /// Задаёт минимальный размер окна в режиме правки: пустую или маленькую вкладку удобно наполнять,
+    /// когда видна вся сетка и хватает места лотку.
+    pub fn set_edit_min(&mut self, cols: u8, rows: u8) {
+        self.edit_min = (cols, rows);
     }
 
     pub fn end_edit(&mut self) {
@@ -616,10 +636,19 @@ impl Grid {
         Bar { tray, reset, done, note: Rect::new(left, y, (right - left).max(0.0), BAR_H), show_tray, show_reset }
     }
 
+    /// Подпись чипа в лотке; в каталоге собственной вкладки к названию добавляется группа.
+    fn chip_title(&self, i: usize) -> String {
+        let s = &self.spec.specs[i];
+        match super::custom::group_title(s.key) {
+            Some(g) => format!("{} · {}", tr(g), tr(s.title)),
+            None => tr(s.title).into_owned(),
+        }
+    }
+
     unsafe fn tray_layout(&self, cv: &Canvas, area: Rect, bar: &Bar, hidden: &[usize]) -> Tray {
         let f = &cv.g.fonts.small_c;
         let widths: Vec<f32> =
-            hidden.iter().map(|&i| (cv.text_w(&tr(self.spec.specs[i].title), f) + 22.0).max(44.0)).collect();
+            hidden.iter().map(|&i| (cv.text_w(&self.chip_title(i), f) + 22.0).max(44.0)).collect();
         let max_w = area.w.min(420.0) - 2.0 * TRAY_PAD;
         let (pos, w, h) = flow(&widths, max_w, CHIP_H, TRAY_GAP);
         let dy = (1.0 - self.tray.value) * 8.0;
@@ -1355,7 +1384,7 @@ impl Grid {
                 let r = tray.chips[k];
                 let hv = ui.hover_of(tab_id(self.tab, 0x1300 + idx as u32)).clamp(0.0, 1.0);
                 tcv.rr(r, r.h / 2.0, ui::mix(ui::chip_bg(), ui::fg(), 0.08 * hv));
-                tcv.text(&tr(spec.specs[idx].title), r, &f.small_c, ui::mix(ui::dim(), ui::txt(), hv));
+                tcv.text(&self.chip_title(idx), r, &f.small_c, ui::mix(ui::dim(), ui::txt(), hv));
             }
         }
     }
@@ -1722,7 +1751,7 @@ mod tests {
         let m = g.layout().entry(7).unwrap();
         assert_eq!(g.spec.specs[7].sizes[m.size].w, 8);
         // Остальные виджеты никуда не делись
-        assert!(g.layout().visible_count(0) == SPEC.specs.len());
+        assert!(g.layout().visible_count(0) == SPEC.specs.iter().filter(|s| s.row != layout::HIDDEN).count());
         assert!(g.layout().fits(g.spec, 0, 0.0));
     }
 

@@ -249,7 +249,7 @@ impl App {
                     self.lose_gfx();
                 }
             }
-            match measure_tabs(&self.dwrite, scale) {
+            match measure_tabs(&self.dwrite, scale, &self.cfg) {
                 Ok(w) => self.tab_widths = w,
                 Err(e) => log::error(&format!("не удалось измерить вкладки: {e}")),
             }
@@ -671,7 +671,7 @@ impl App {
         // Старый Gfx должен быть уничтожен до создания нового: у окна одна цель DComp.
         self.gfx = None;
         let result = Gfx::new(self.hwnd, self.win_w, self.win_h, self.scale, &self.dwrite)
-            .and_then(|g| measure_tabs(&self.dwrite, self.scale).map(|t| (g, t)));
+            .and_then(|g| measure_tabs(&self.dwrite, self.scale, &self.cfg).map(|t| (g, t)));
         match result {
             Ok((g, tabs)) => {
                 self.gfx = Some(g);

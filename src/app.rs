@@ -52,7 +52,7 @@ pub struct App {
     /// `None` — графика потеряна и ждёт пересоздания (рисовать нечем).
     pub(crate) gfx: Option<Gfx>,
     /// Ширина каждой вкладки по её индексу в `TABS`.
-    pub(crate) tab_widths: [f32; TAB_COUNT],
+    pub(crate) tab_widths: Vec<f32>,
     /// Видимые вкладки в порядке показа: `order[позиция] = индекс в TABS` (скрытые не входят).
     pub(crate) order: Vec<usize>,
     pub(crate) hot: Vec<HotZone>,
@@ -98,14 +98,14 @@ pub struct App {
     /// Тулкит и состояние вкладок.
     pub(crate) ui: Ui,
     pub(crate) tabs: tabs::Tabs,
-    /// Вкладка, которая сейчас на экране (индекс в `TABS`), и включённые для неё таймеры.
+    /// Вкладка, которая сейчас на экране (номер вкладки, `tabs`), и включённые для неё таймеры.
     pub(crate) shown_tab: Option<usize>,
     pub(crate) poll_on: bool,
     pub(crate) alarm_at: Option<Instant>,
     /// Сессия заблокирована или экран погашен: напоминания о событиях ждут.
     pub(crate) locked: bool,
     pub(crate) screen_off: bool,
-    /// Предыдущая вкладка (индекс в `TABS`) на время кроссфейда и прогресс перехода 0..1.
+    /// Предыдущая вкладка (номер вкладки, `tabs`) на время кроссфейда и прогресс перехода 0..1.
     pub(crate) tab_prev: Option<usize>,
     pub(crate) tab_t: Spring,
     /// Капля под выбранной вкладкой: левый край, ширина (логические пиксели) и прозрачность; `pill_sig` — отпечаток ряда вкладок, при смене которого капля прыгает без анимации.
@@ -233,10 +233,10 @@ impl App {
 
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let gfx = Gfx::new(hwnd, cw, ch, scale, &dwrite)?;
-            let tab_widths = measure_tabs(&dwrite, scale)?;
-            let order = cfg.resolve_visible(&TABS);
+            let tab_widths = measure_tabs(&dwrite, scale, &cfg)?;
+            let order = cfg.visible_tabs();
             let initial_tab = if !state.last_tab.is_empty() {
-                order.iter().position(|&idx| TABS[idx].eq_ignore_ascii_case(&state.last_tab)).unwrap_or(0)
+                order.iter().position(|&idx| cfg.tab_key(idx).eq_ignore_ascii_case(&state.last_tab)).unwrap_or(0)
             } else {
                 0
             };
@@ -371,7 +371,7 @@ impl App {
         theme_changed || flipped
     }
 
-    /// Номер вкладки (индекс в `TABS`), выбранной в ряду.
+    /// Номер вкладки (номер вкладки, `tabs`), выбранной в ряду.
     pub(crate) fn normal_id(&self) -> usize {
         self.order.get(self.tab).or_else(|| self.order.last()).copied().unwrap_or(0)
     }
@@ -431,6 +431,8 @@ impl App {
             unsafe { self.apply_monitor(self.mon, true) };
         }
         self.cfg.tabs = new.tabs;
+        let custom_changed = self.cfg.custom != new.custom;
+        self.cfg.custom = new.custom;
         self.cfg.hidden_tabs = new.hidden_tabs;
         self.cfg.strip_over_maximized = new.strip_over_maximized;
         self.cfg.always_strip = new.always_strip;
@@ -445,7 +447,13 @@ impl App {
             // SAFETY: оконный поток, DirectWrite-фабрика жива.
             unsafe { self.refresh_language() };
         }
-        self.order = self.cfg.resolve_visible(&TABS);
+        if custom_changed {
+            // Новые и переименованные вкладки: сетки и ширины подписей в ряду.
+            self.tabs.sync_custom(&self.cfg);
+            // SAFETY: оконный поток, DirectWrite-фабрика жива.
+            unsafe { self.refresh_language() };
+        }
+        self.order = self.cfg.visible_tabs();
         self.tab = self.order.iter().position(|&i| i == current).unwrap_or(0);
         self.face.set_enabled(self.cfg.idle_face);
         self.apply_theme();
@@ -458,6 +466,11 @@ impl App {
         self.tabs.island_size(id).1
     }
 
+    /// То же для `tabs`, которые отрисовка забрала у `self` на время кадра (`self.tabs` в это время пуст).
+    pub(crate) fn tab_w_in(&self, tabs: &tabs::Tabs, id: usize) -> f32 {
+        tabs.island_size(id).0.max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT)
+    }
+
     /// Ширина панели вкладки: не уже ряда вкладок, иначе они обрезаются.
     pub(crate) fn tab_w(&self, id: usize) -> f32 {
         self.tabs.island_size(id).0.max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT)
@@ -466,7 +479,7 @@ impl App {
     /// Применяет язык из конфига: подписи вкладок меняют ширину, поэтому ряд измеряется заново.
     pub(crate) unsafe fn refresh_language(&mut self) {
         i18n::set(i18n::from_config(&self.cfg.language));
-        match measure_tabs(&self.dwrite, self.scale) {
+        match measure_tabs(&self.dwrite, self.scale, &self.cfg) {
             Ok(w) => self.tab_widths = w,
             Err(e) => log::error(&format!("не удалось измерить вкладки: {e}")),
         }
@@ -475,7 +488,7 @@ impl App {
 
     pub(crate) unsafe fn apply_config(&mut self, cfg: Config) {
         let current = self.normal_id();
-        self.order = cfg.resolve_visible(&TABS);
+        self.order = cfg.visible_tabs();
         self.tab = self.order.iter().position(|&i| i == current).unwrap_or(0);
         self.cfg = cfg;
         theme::set_glass(self.cfg.glass);

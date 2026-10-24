@@ -241,6 +241,10 @@ pub fn expand_range(min_val: &mut u8, max_val: &mut u8, target_len: u8, limit: u
     *max_val += add_after;
 }
 
+/// Значение `Spec::row`: виджет по умолчанию лежит в лотке скрытых и не занимает места на вкладке
+/// (так добавляют новые виджеты, не меняя размер острова у тех, кто уже настроил вкладку).
+pub const HIDDEN: u8 = u8::MAX;
+
 /// Размер виджета в целых ячейках сетки.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Size {
@@ -1015,9 +1019,9 @@ impl Layout {
             .map(|(idx, s)| Entry {
                 idx,
                 size: s.size,
-                col: s.col,
-                row: s.row,
-                hidden: false,
+                col: if s.row == HIDDEN { 0 } else { s.col },
+                row: if s.row == HIDDEN { 0 } else { s.row },
+                hidden: s.row == HIDDEN,
             })
             .collect();
         Layout { entries }
@@ -1110,7 +1114,9 @@ impl Layout {
             if out.iter().any(|e| e.idx == idx) {
                 continue;
             }
-            if can_place(spec, 0, &out, idx, s.size, s.col, s.row) {
+            if s.row == HIDDEN {
+                out.push(Entry { idx, size: s.size, col: 0, row: 0, hidden: true });
+            } else if can_place(spec, 0, &out, idx, s.size, s.col, s.row) {
                 out.push(Entry { idx, size: s.size, col: s.col, row: s.row, hidden: false });
             } else if let Some((c, r)) = first_free(spec, 0, &out, idx, s.size) {
                 out.push(Entry { idx, size: s.size, col: c, row: r, hidden: false });
@@ -1131,6 +1137,10 @@ impl Layout {
         parts.push(VERSION.to_string());
         for e in &self.entries {
             let s = &spec.specs[e.idx];
+            // Лежит в лотке по умолчанию и не тронут: разбор вернёт его туда же, место в строке не нужно.
+            if e.hidden && s.row == HIDDEN && e.size == s.size {
+                continue;
+            }
             let mut t = String::new();
             if e.hidden {
                 t.push('-');

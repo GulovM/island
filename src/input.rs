@@ -13,7 +13,7 @@ impl App {
         self.hold_leave();
         self.ui.blur();
         if let Some(&id) = self.order.get(i) {
-            crate::state::set_last_tab(TABS[id]);
+            crate::state::set_last_tab(&self.cfg.tab_key(id));
         }
         // В буфере обмена клавиатура сразу управляет списком: фокус в поиске.
         if self.order.get(i) == Some(&tabs::CLIPBOARD) {

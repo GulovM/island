@@ -317,6 +317,13 @@ impl App {
             }
         }
 
+        // Размер вкладки мог измениться без просьбы (окно сетки подогнали под ряд вкладок после запуска,
+        // собственная вкладка выросла): остров идёт к актуальному размеру.
+        if self.expanded && self.body.expanded_goal() != self.expanded_target() {
+            self.retarget();
+            dirty = true;
+        }
+
         // Изменения со страницы настроек: применяем сразу, пока ползунок или палитру тянут.
         if let Some(c) = self.tabs.settings.take_change() {
             self.apply_settings(c);
@@ -324,7 +331,7 @@ impl App {
         }
         if self.save_pending && !self.ui.down {
             self.save_pending = false;
-            config::save(&self.cfg, &TABS);
+            config::save(&self.cfg);
         }
         // Остров светится, пока тянут ползунок радиуса углов.
         let glow = self.expanded && self.settings_open && self.tabs.settings.glowing();
@@ -440,6 +447,12 @@ impl App {
                 tabs::Action::Collapse => {
                     self.disarm_leave();
                     self.set_expanded(false);
+                }
+                tabs::Action::Layout(tab, text) if tab >= tabs::CUSTOM_BASE => {
+                    if let Some(c) = self.cfg.custom.get_mut(tab - tabs::CUSTOM_BASE) {
+                        c.layout = text;
+                        config::save(&self.cfg);
+                    }
                 }
                 tabs::Action::Layout(tab, text) => {
                     if let (Some(slot), Some(key)) = (self.cfg.layouts.get_mut(tab), config::LAYOUT_KEYS.get(tab)) {

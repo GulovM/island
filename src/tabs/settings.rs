@@ -54,9 +54,17 @@ const N_SECTION: u32 = 30;
 /// Занимает пять номеров подряд (33–37) — по числу `MATERIALS`.
 const N_MATERIAL: u32 = 33;
 /// Три группы по номеру вкладки (+0..6): переключатель, «вверх», «вниз».
-const N_SWITCH: u32 = 40;
-const N_UP: u32 = 60;
-const N_DOWN: u32 = 80;
+/// Строки списка вкладок нумеруются номером вкладки; на каждую группу отведено `TAB_SLOTS` номеров.
+const TAB_SLOTS: u32 = 2000;
+const N_SWITCH: u32 = 1000;
+const N_UP: u32 = N_SWITCH + TAB_SLOTS;
+const N_DOWN: u32 = N_UP + TAB_SLOTS;
+const N_EDIT: u32 = N_DOWN + TAB_SLOTS;
+const N_DEL: u32 = N_EDIT + TAB_SLOTS;
+const N_NAME: u32 = 120;
+const N_CREATE: u32 = 121;
+const N_CANCEL: u32 = 122;
+const N_SCROLL: u32 = 123;
 
 /// Раздел страницы настроек.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -169,8 +177,13 @@ pub struct Settings {
     scale_drag: Option<f32>,
     autostart: bool,
     /// Вертикальные позиции строк вкладок по их номеру (плавная перестановка).
-    rows: [Spring; 7],
+    /// Положение строки списка вкладок по номеру вкладки.
+    rows: Vec<Spring>,
     rows_ready: bool,
+    /// Собственная вкладка (позиция в `Config::custom`), чьё название сейчас правят в форме справа.
+    renaming: Option<usize>,
+    /// Собственная вкладка, у которой нажата корзина и ждёт подтверждения.
+    confirm_del: Option<usize>,
     /// Выбранный раздел: помнится, пока программа работает (в конфиг не пишется).
     section: Section,
     /// Кэш состояния «Эффектов прозрачности» Windows: (время проверки, значение).
@@ -187,8 +200,10 @@ impl Default for Settings {
             glow: false,
             scale_drag: None,
             autostart: false,
-            rows: std::array::from_fn(|_| Spring::new(0.0, 520.0, 38.0)),
+            rows: Vec::new(),
             rows_ready: false,
+            renaming: None,
+            confirm_del: None,
             section: Section::Look,
             transparency_cache: None,
         }
@@ -304,19 +319,20 @@ impl Settings {
     }
 
     /// Порядок вкладок: `order[позиция] = номер вкладки`.
-    fn order(&self) -> [usize; 7] {
-        self.cfg.resolve_order(&crate::TABS)
+    fn order(&self) -> Vec<usize> {
+        self.cfg.ordered_tabs()
     }
 
+    /// Вкладка выключена: скрыта в конфиге или не поместилась в лимит включённых.
     fn hidden(&self, tab: usize) -> bool {
-        self.cfg.hidden_tabs.iter().any(|h| h.eq_ignore_ascii_case(crate::TABS[tab]))
+        !self.cfg.visible_tabs().contains(&tab)
     }
 
     fn set_hidden(&mut self, tab: usize, hide: bool) {
-        let name = crate::TABS[tab];
-        self.cfg.hidden_tabs.retain(|h| !h.eq_ignore_ascii_case(name));
+        let key = self.cfg.tab_key(tab);
+        self.cfg.hidden_tabs.retain(|h| !h.eq_ignore_ascii_case(&key));
         if hide {
-            self.cfg.hidden_tabs.push(name.to_string());
+            self.cfg.hidden_tabs.push(key);
         }
         self.changed = true;
     }
@@ -324,7 +340,46 @@ impl Settings {
     fn move_tab(&mut self, pos: usize, to: usize) {
         let mut order = self.order();
         order.swap(pos, to);
-        self.cfg.tabs = order.iter().map(|&i| crate::TABS[i].to_string()).collect();
+        self.cfg.tabs = order.iter().map(|&i| self.cfg.tab_key(i)).collect();
+        self.changed = true;
+    }
+
+    /// Создаёт собственную вкладку; если включённых уже 8, она остаётся выключенной.
+    fn create_tab(&mut self, name: &str) {
+        let name = crate::config::clean_tab_name(name);
+        if name.is_empty() {
+            return;
+        }
+        let id = self.cfg.next_custom_id();
+        self.cfg.custom.push(crate::config::CustomTab { id, name, layout: String::new() });
+        let tab = crate::tabs::CUSTOM_BASE + self.cfg.custom.len() - 1;
+        if !self.cfg.visible_tabs().contains(&tab) {
+            self.set_hidden(tab, true);
+        }
+        self.rows_ready = false;
+        self.changed = true;
+    }
+
+    fn rename_tab(&mut self, k: usize, name: &str) {
+        let name = crate::config::clean_tab_name(name);
+        if let (Some(c), false) = (self.cfg.custom.get_mut(k), name.is_empty()) {
+            c.name = name;
+            self.changed = true;
+        }
+    }
+
+    /// Удаляет собственную вкладку вместе с её записями в порядке и в списке выключенных.
+    fn delete_tab(&mut self, k: usize) {
+        let key = self.cfg.tab_key(crate::tabs::CUSTOM_BASE + k);
+        if self.cfg.custom.get(k).is_none() {
+            return;
+        }
+        self.cfg.custom.remove(k);
+        self.cfg.tabs.retain(|t| !t.eq_ignore_ascii_case(&key));
+        self.cfg.hidden_tabs.retain(|t| !t.eq_ignore_ascii_case(&key));
+        self.renaming = None;
+        self.confirm_del = None;
+        self.rows_ready = false;
         self.changed = true;
     }
 
@@ -341,8 +396,9 @@ impl Settings {
         self.cfg.accent_pill = d.accent_pill;
         self.cfg.ui_scale = DEFAULT_SCALE;
         self.scale_drag = None;
-        self.cfg.hidden_tabs.clear();
-        self.cfg.tabs = crate::TABS.iter().map(|t| t.to_string()).collect();
+        // Встроенные вкладки включены, собственные выключены: так включённых не больше лимита.
+        self.cfg.hidden_tabs = self.cfg.custom.iter().enumerate().map(|(i, _)| self.cfg.tab_key(crate::tabs::CUSTOM_BASE + i)).collect();
+        self.cfg.tabs = self.cfg.tab_keys().into_iter().map(|(_, k)| k).collect();
         self.cfg.idle_face = true;
         self.cfg.strip_over_maximized = d.strip_over_maximized;
         self.hsv = theme::rgb_to_hsv(self.current());
@@ -367,6 +423,8 @@ impl Settings {
                 self.section = *sec;
                 // Строки вкладок встают на место без анимации из старых позиций.
                 self.rows_ready = false;
+                self.renaming = None;
+                self.confirm_del = None;
             }
             cx += cw + 6.0;
         }
@@ -384,8 +442,13 @@ impl Settings {
                 self.look(ui, cv, rc);
             }
             Section::Tabs => {
-                cv.card(body);
-                self.tab_list(ui, cv, body);
+                let lw = (body.w - 200.0).max(300.0);
+                let lc = Rect::new(body.x, body.y, lw, body.h);
+                let rc = Rect::new(lc.right() + 10.0, body.y, body.right() - lc.right() - 10.0, body.h);
+                cv.card(lc);
+                cv.card(rc);
+                self.tab_list(ui, cv, lc);
+                self.tab_form(ui, cv, rc);
             }
             Section::System => {
                 let (lc, rc) = split(body);
@@ -687,11 +750,17 @@ impl Settings {
         let f = &cv.g.fonts;
         let x = rc.x + 10.0;
         let iw = rc.w - 20.0;
-        let mut y = rc.y + 9.0;
-        cv.text("ВКЛАДКИ — ВКЛЮЧЕНИЕ И ПОРЯДОК", Rect::new(x, y, iw, 11.0), &f.caps, dim());
-        y += 15.0;
+        let y = rc.y + 9.0;
+        cv.text("ВКЛАДКИ — ВКЛЮЧЕНИЕ И ПОРЯДОК", Rect::new(x, y, iw - 54.0, 11.0), &f.caps, dim());
         let order = self.order();
-        let visible = self.cfg.resolve_visible(&crate::TABS).len();
+        let visible = self.cfg.visible_tabs().len();
+        let max = crate::config::MAX_ENABLED_TABS;
+        cv.text(&format!("{visible} / {max}"), Rect::new(rc.right() - 64.0, y - 1.0, 54.0, 13.0), &f.body_r, if visible >= max { cv.accent } else { dim() });
+        let slots = crate::tabs::CUSTOM_BASE + self.cfg.custom.len();
+        if self.rows.len() != slots {
+            self.rows.resize_with(slots, || Spring::new(0.0, 520.0, 38.0));
+            self.rows_ready = false;
+        }
         if !self.rows_ready {
             for (pos, &tab) in order.iter().enumerate() {
                 self.rows[tab].target = pos as f32 * ROW_PITCH;
@@ -699,19 +768,25 @@ impl Settings {
             }
             self.rows_ready = true;
         }
+        let view = Rect::new(rc.x + 4.0, y + 16.0, rc.w - 8.0, (rc.bottom() - y - 22.0).max(0.0));
+        let off = ui.scroll_begin(cv, id(SETTINGS, N_SCROLL), view, order.len() as f32 * ROW_PITCH);
         let mut action: Option<(usize, i32)> = None;
+        let mut edit: Option<usize> = None;
+        let mut del: Option<usize> = None;
         for (pos, &tab) in order.iter().enumerate() {
             self.rows[tab].target = pos as f32 * ROW_PITCH;
-            let r = Rect::new(x, y + self.rows[tab].value, iw, ROW_H);
+            let r = Rect::new(x, view.y + self.rows[tab].value - off, iw - 6.0, ROW_H);
             cv.rr(r, 6.0, inset());
             let hidden = self.hidden(tab);
             let mut on = !hidden;
-            // Последняя видимая вкладка не выключается.
-            let can_toggle = hidden || visible > 1;
+            // Последняя видимая вкладка не выключается, а сверх лимита включить нельзя.
+            let can_toggle = if hidden { visible < max } else { visible > 1 };
             if ui.switch(cv, id(SETTINGS, N_SWITCH + tab as u32), Rect::new(r.x + 6.0, r.y + 2.5, 30.0, 16.0), &mut on, can_toggle) {
                 self.set_hidden(tab, !on);
             }
-            cv.text(crate::i18n::tab_name(tab), Rect::new(r.x + 44.0, r.y, r.w - 92.0, r.h), &f.body, if hidden { dim() } else { txt() });
+            let custom = tab.checked_sub(crate::tabs::CUSTOM_BASE);
+            let label_w = r.w - 92.0 - if custom.is_some() { 42.0 } else { 0.0 };
+            cv.text(&self.cfg.tab_label(tab), Rect::new(r.x + 44.0, r.y, label_w, r.h), &f.body, if hidden { dim() } else { txt() });
             let up = Rect::new(r.right() - 44.0, r.y + 1.5, 18.0, 18.0);
             let down = Rect::new(r.right() - 23.0, r.y + 1.5, 18.0, 18.0);
             if pos > 0 {
@@ -728,10 +803,79 @@ impl Settings {
             } else {
                 cv.glyph(icon::DOWN, down, false, D2D1_COLOR_F { a: 0.25, ..dim() });
             }
+            if let Some(k) = custom {
+                let pencil = Rect::new(r.right() - 86.0, r.y + 1.5, 18.0, 18.0);
+                let bin = Rect::new(r.right() - 65.0, r.y + 1.5, 18.0, 18.0);
+                if ui.icon_button(cv, id(SETTINGS, N_EDIT + tab as u32), pencil, icon::EDIT, self.renaming == Some(k)) {
+                    edit = Some(k);
+                }
+                // Первое нажатие корзины просит подтверждения, второе удаляет.
+                let confirm = self.confirm_del == Some(k);
+                if ui.icon_button(cv, id(SETTINGS, N_DEL + tab as u32), bin, if confirm { icon::CHECK } else { icon::DELETE }, confirm) {
+                    if confirm {
+                        del = Some(k);
+                    } else {
+                        self.confirm_del = Some(k);
+                    }
+                }
+            }
         }
+        ui.scroll_end(cv, id(SETTINGS, N_SCROLL));
         if let Some((pos, d)) = action {
             self.move_tab(pos, (pos as i32 + d) as usize);
         }
+        if let Some(k) = edit {
+            self.renaming = Some(k);
+            self.confirm_del = None;
+            if let Some(c) = self.cfg.custom.get(k) {
+                let fid = id(SETTINGS, N_NAME);
+                ui.set_field_text(fid, &c.name);
+                ui.select_all(fid);
+            }
+        }
+        if let Some(k) = del {
+            self.delete_tab(k);
+        }
+    }
+
+    /// Правая карточка раздела «Вкладки»: создать собственную вкладку или переименовать выбранную.
+    unsafe fn tab_form(&mut self, ui: &mut Ui, cv: &Canvas, rc: Rect) {
+        let f = &cv.g.fonts;
+        let x = rc.x + 10.0;
+        let iw = rc.w - 20.0;
+        let mut y = rc.y + 9.0;
+        let renaming = self.renaming.filter(|&k| k < self.cfg.custom.len());
+        let title = if renaming.is_some() { "ПЕРЕИМЕНОВАТЬ ВКЛАДКУ" } else { "НОВАЯ ВКЛАДКА" };
+        cv.text(title, Rect::new(x, y, iw, 11.0), &f.caps, dim());
+        y += 18.0;
+        let fid = id(SETTINGS, N_NAME);
+        ui.text_field_ex(cv, fid, Rect::new(x, y, iw, 24.0), "Название", icon::EDIT, Submit::None);
+        y += 32.0;
+        let can = !crate::config::clean_tab_name(&ui.field_text(fid)).is_empty();
+        let (bg, fg) = if can { (cv.accent, ink()) } else { (chip_bg(), dim()) };
+        let label = if renaming.is_some() { "Сохранить" } else { "Создать" };
+        let bw = if renaming.is_some() { (iw - 6.0) / 2.0 } else { iw };
+        let mut text = ui.take_submitted(fid);
+        if ui.solid_button(cv, id(SETTINGS, N_CREATE), Rect::new(x, y, bw, 22.0), label, bg, fg, 7.0) && can {
+            text = Some(ui.field_text(fid));
+        }
+        if renaming.is_some() && ui.solid_button(cv, id(SETTINGS, N_CANCEL), Rect::new(x + bw + 6.0, y, bw, 22.0), "Отмена", chip_bg(), txt(), 7.0) {
+            self.renaming = None;
+            let _ = ui.submit_field(fid);
+        }
+        if let Some(t) = text {
+            if !crate::config::clean_tab_name(&t).is_empty() {
+                match renaming {
+                    Some(k) => self.rename_tab(k, &t),
+                    None => self.create_tab(&t),
+                }
+                self.renaming = None;
+                let _ = ui.submit_field(fid);
+            }
+        }
+        y += 34.0;
+        let hint = "Включить можно не больше 8 вкладок. Виджеты добавляются в режиме правки: карандаш в верхнем углу острова.";
+        cv.text(hint, Rect::new(x, y, iw, (rc.bottom() - y - 8.0).max(0.0)), &f.wrap_l, dim());
     }
 
     // ---------- «Система», левая карточка: поведение острова ----------
@@ -874,7 +1018,7 @@ mod tests {
         let mut c = s.take_change().unwrap();
         assert!(s.take_change().is_none(), "изменение отдаётся один раз");
         c.hidden_tabs.clear();
-        assert_eq!(c.resolve_order(&crate::TABS)[0], crate::tabs::TODAY);
+        assert_eq!(c.ordered_tabs()[0], crate::tabs::TODAY);
     }
 
     #[test]
@@ -930,7 +1074,7 @@ mod tests {
         assert_eq!(s.cfg.palette_style, Config::default().palette_style);
         assert_eq!(s.cfg.accent_pill, Config::default().accent_pill);
         assert!(s.cfg.hidden_tabs.is_empty() && s.cfg.idle_face);
-        assert_eq!(s.cfg.resolve_visible(&crate::TABS).len(), 7);
+        assert_eq!(s.cfg.visible_tabs().len(), 7);
     }
 
     #[test]
@@ -967,7 +1111,7 @@ mod tests {
 
     #[test]
     fn widget_ids_do_not_overlap() {
-        let tabs = crate::TABS.len() as u32;
+        let tabs = TAB_SLOTS;
         let groups = [
             (N_SYSTEM, 1),
             (N_CHIP_ACCENT, 1),
@@ -998,6 +1142,12 @@ mod tests {
             (N_SWITCH, tabs),
             (N_UP, tabs),
             (N_DOWN, tabs),
+            (N_EDIT, tabs),
+            (N_DEL, tabs),
+            (N_NAME, 1),
+            (N_CREATE, 1),
+            (N_CANCEL, 1),
+            (N_SCROLL, 1),
         ];
         let mut seen = std::collections::HashSet::new();
         for (start, len) in groups {

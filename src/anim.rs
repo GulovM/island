@@ -61,6 +61,11 @@ impl Body {
         Self { c: [s(collapsed.0), s(collapsed.1)], e: [s(collapsed.0), s(collapsed.1)] }
     }
 
+    /// Размер, к которому идёт раскрытая форма.
+    pub fn expanded_goal(&self) -> (f32, f32) {
+        (self.e[0].target, self.e[1].target)
+    }
+
     pub fn set_targets(&mut self, collapsed: (f32, f32), expanded: (f32, f32)) {
         self.c[0].target = collapsed.0;
         self.c[1].target = collapsed.1;

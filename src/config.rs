@@ -108,6 +108,10 @@ collapsed_height = 24
 # Порядок вкладок. Пропущенные добавляются в конец.
 tabs = ["Controls", "Today", "Stats", "Clipboard", "Apps", "Wallpaper", "Power"]
 
+# Собственные вкладки: "номер|название|раскладка". Их удобнее создавать и править в настройках.
+# В порядке и в hidden_tabs такая вкладка называется custom:<номер>.
+custom_tabs = []
+
 # Глобальная горячая клавиша: раскрывает остров на вкладке Apps с фокусом в поиске.
 # Модификаторы ctrl/alt/shift/win и клавиша (буква, цифра, space, enter, f1…f12); "" — отключить
 hotkey = "ctrl+alt+space"
@@ -159,6 +163,46 @@ weather = ""
 # gmail = "https://mail.google.com"
 "##;
 
+/// Собственная вкладка пользователя: стабильный номер, название и раскладка (формат `tabs::layout`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CustomTab {
+    pub id: u32,
+    pub name: String,
+    pub layout: String,
+}
+
+/// Самая длинная подпись собственной вкладки, символов.
+pub const MAX_TAB_NAME: usize = 16;
+
+impl CustomTab {
+    /// Строка для `custom_tabs`: `номер|название|раскладка`.
+    fn encode(&self) -> String {
+        format!("{}|{}|{}", self.id, self.name, self.layout)
+    }
+
+    fn decode(s: &str) -> Option<CustomTab> {
+        let mut it = s.splitn(3, '|');
+        let id = it.next()?.trim().parse().ok()?;
+        let name = clean_tab_name(it.next()?);
+        if name.is_empty() {
+            return None;
+        }
+        Some(CustomTab { id, name, layout: it.next().unwrap_or("").trim().to_string() })
+    }
+}
+
+/// Название вкладки без служебных символов (`|`, кавычки, управляющие) и не длиннее `MAX_TAB_NAME`.
+pub fn clean_tab_name(s: &str) -> String {
+    let cleaned: String = s.chars().map(|c| if c.is_control() || matches!(c, '|' | '"' | '\\') { ' ' } else { c }).collect();
+    cleaned.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_TAB_NAME).collect::<String>().trim().to_string()
+}
+
+/// Сколько вкладок может быть включено одновременно (встроенные и собственные вместе), чтобы ряд поместился.
+pub const MAX_ENABLED_TABS: usize = 8;
+
+/// Номер вкладки и её ключ в `tabs` / `hidden_tabs`: имя встроенной вкладки или `custom:<id>`.
+pub type TabKey = (usize, String);
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     pub accent: [f32; 3],
@@ -200,6 +244,8 @@ pub struct Config {
     pub env_poll_ms: u32,
     pub collapsed: (f32, f32),
     pub tabs: Vec<String>,
+    /// Собственные вкладки; номер вкладки на острове — `tabs::CUSTOM_BASE` плюс позиция в списке.
+    pub custom: Vec<CustomTab>,
     pub keys: Vec<(String, String)>,
     /// Папка с обоями; `None` — «Изображения» пользователя.
     pub wallpaper_dir: Option<String>,
@@ -250,6 +296,7 @@ impl Default for Config {
             env_poll_ms: 400,
             collapsed: (180.0, 24.0),
             tabs: Vec::new(),
+            custom: Vec::new(),
             keys: Vec::new(),
             wallpaper_dir: None,
             snippets: Vec::new(),
@@ -273,35 +320,65 @@ impl Config {
         self.keys.iter().find(|(k, v)| k == name && !v.is_empty()).map(|(_, v)| v.as_str())
     }
 
-    /// Порядок вкладок: `out[позиция] = индекс в names`. Неизвестные имена игнорируются,
+    /// Номер для новой собственной вкладки: больше всех существующих.
+    pub fn next_custom_id(&self) -> u32 {
+        self.custom.iter().map(|c| c.id).max().map_or(1, |m| m + 1)
+    }
+
+    /// Ключи всех вкладок: сначала встроенные, затем собственные в порядке списка.
+    pub fn tab_keys(&self) -> Vec<TabKey> {
+        let builtin = crate::TABS.iter().enumerate().map(|(i, n)| (i, n.to_string()));
+        let custom = self.custom.iter().enumerate().map(|(i, c)| (crate::tabs::CUSTOM_BASE + i, format!("custom:{}", c.id)));
+        builtin.chain(custom).collect()
+    }
+
+    /// Ключ вкладки в конфиге: имя встроенной или `custom:<id>`; пусто у страницы настроек и чужих номеров.
+    pub fn tab_key(&self, tab: usize) -> String {
+        self.tab_keys().into_iter().find(|(t, _)| *t == tab).map(|(_, k)| k).unwrap_or_default()
+    }
+
+    /// Название вкладки для показа в ряду и в настройках.
+    pub fn tab_label(&self, tab: usize) -> String {
+        match tab.checked_sub(crate::tabs::CUSTOM_BASE) {
+            Some(i) => self.custom.get(i).map(|c| c.name.clone()).unwrap_or_default(),
+            None => crate::i18n::tab_name(tab).to_string(),
+        }
+    }
+
+    /// Все вкладки в порядке показа, включая выключенные.
+    pub fn ordered_tabs(&self) -> Vec<usize> {
+        self.resolve_order(&self.tab_keys())
+    }
+
+    /// Включённые вкладки в порядке показа.
+    pub fn visible_tabs(&self) -> Vec<usize> {
+        self.resolve_visible(&self.tab_keys())
+    }
+
+    /// Порядок вкладок: номера вкладок по позициям. Неизвестные ключи игнорируются,
     /// повторы и пропущенные вкладки дописываются в исходном порядке.
-    pub fn resolve_order<const N: usize>(&self, names: &[&str; N]) -> [usize; N] {
-        let mut out = [0usize; N];
-        let mut used = [false; N];
-        let mut n = 0;
+    pub fn resolve_order(&self, keys: &[TabKey]) -> Vec<usize> {
+        let mut out: Vec<usize> = Vec::with_capacity(keys.len());
         for want in &self.tabs {
-            if let Some(i) = names.iter().position(|x| x.eq_ignore_ascii_case(want)) {
-                if !used[i] {
-                    used[i] = true;
-                    out[n] = i;
-                    n += 1;
+            if let Some((tab, _)) = keys.iter().find(|(_, k)| k.eq_ignore_ascii_case(want)) {
+                if !out.contains(tab) {
+                    out.push(*tab);
                 }
             }
         }
-        for (i, _) in used.iter().enumerate().filter(|(_, u)| !**u) {
-            out[n] = i;
-            n += 1;
-        }
+        let rest: Vec<usize> = keys.iter().map(|(t, _)| *t).filter(|t| !out.contains(t)).collect();
+        out.extend(rest);
         out
     }
 
-    /// Вкладки, которые видны на острове, в порядке показа: полный порядок без скрытых.
+    /// Вкладки, которые видны на острове, в порядке показа: полный порядок без скрытых, но не больше
+    /// `MAX_ENABLED_TABS` (лишние в конце порядка считаются выключенными).
     /// Хотя бы одна вкладка остаётся всегда (если скрыты все — первая по порядку).
-    pub fn resolve_visible<const N: usize>(&self, names: &[&str; N]) -> Vec<usize> {
-        let order = self.resolve_order(names);
+    pub fn resolve_visible(&self, keys: &[TabKey]) -> Vec<usize> {
+        let order = self.resolve_order(keys);
         let hidden: Vec<usize> =
-            self.hidden_tabs.iter().filter_map(|h| names.iter().position(|x| x.eq_ignore_ascii_case(h))).collect();
-        let mut out: Vec<usize> = order.iter().copied().filter(|i| !hidden.contains(i)).collect();
+            self.hidden_tabs.iter().filter_map(|h| keys.iter().find(|(_, k)| k.eq_ignore_ascii_case(h)).map(|(t, _)| *t)).collect();
+        let mut out: Vec<usize> = order.iter().copied().filter(|t| !hidden.contains(t)).take(MAX_ENABLED_TABS).collect();
         if out.is_empty() {
             out.push(order[0]);
         }
@@ -310,13 +387,13 @@ impl Config {
 }
 
 /// Записывает настройки внешнего вида обратно в `config.toml`, не трогая остальные строки и комментарии.
-pub fn save(cfg: &Config, names: &[&str]) {
-    write_updates(&save_updates(cfg, names));
+pub fn save(cfg: &Config) {
+    write_updates(&save_updates(cfg));
 }
 
-fn save_updates(cfg: &Config, names: &[&str]) -> Vec<(&'static str, String)> {
+fn save_updates(cfg: &Config) -> Vec<(&'static str, String)> {
     let order: Vec<String> = cfg.tabs.iter().map(|t| t.to_string()).collect();
-    let order = if order.is_empty() { names.iter().map(|n| n.to_string()).collect() } else { order };
+    let order = if order.is_empty() { cfg.tab_keys().into_iter().map(|(_, k)| k).collect() } else { order };
     let updates = [
         ("accent", fmt_str(&theme::to_hex(cfg.accent))),
         ("bg", fmt_str(&theme::to_hex(cfg.bg))),
@@ -333,6 +410,7 @@ fn save_updates(cfg: &Config, names: &[&str]) -> Vec<(&'static str, String)> {
         ("language", fmt_str(&cfg.language)),
         ("tabs", fmt_list(&order)),
         ("hidden_tabs", fmt_list(&cfg.hidden_tabs)),
+        ("custom_tabs", fmt_list(&cfg.custom.iter().map(CustomTab::encode).collect::<Vec<_>>())),
         ("idle_face", (cfg.idle_face as u8).to_string()),
         ("todo_clean_done", (cfg.todo_clean_done as u8).to_string()),
         ("auto_update", (cfg.auto_update as u8).to_string()),
@@ -581,6 +659,7 @@ fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
         "language",
         "tabs",
         "hidden_tabs",
+        "custom_tabs",
         "idle_face",
         "todo_clean_done",
         "auto_update",
@@ -591,7 +670,7 @@ fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
         return;
     }
     // Недостающие ключи берём из разобранных настроек (они уже учитывают значения по умолчанию).
-    let missing_only = save_updates(cfg, &[]).into_iter().filter(|(k, _)| !present(k)).collect::<Vec<_>>();
+    let missing_only = save_updates(cfg).into_iter().filter(|(k, _)| !present(k)).collect::<Vec<_>>();
     if !missing_only.is_empty() {
         write_text(path, &set_keys(text, &missing_only), text);
     }
@@ -677,6 +756,13 @@ pub fn parse(text: &str) -> Config {
             ("", "live_media", Value::Num(v)) => cfg.live_media = v != 0.0,
             ("", "live_toasts", Value::Num(v)) => cfg.live_toasts = v != 0.0,
             ("", "tabs", Value::List(l)) => cfg.tabs = l,
+            ("", "custom_tabs", Value::List(l)) => {
+                for c in l.iter().filter_map(|s| CustomTab::decode(s)) {
+                    if !cfg.custom.iter().any(|o| o.id == c.id) {
+                        cfg.custom.push(c);
+                    }
+                }
+            }
             ("", "weather_city", Value::Str(s)) => cfg.weather_city = s,
             ("", "clock_style", Value::Num(v)) => cfg.clock_style = (v.max(0.0) as usize).min(4),
             ("", "calendar_ics", Value::Str(s)) => {
@@ -812,6 +898,10 @@ mod tests {
 
     const NAMES: [&str; 4] = ["A", "B", "C", "D"];
 
+    fn keys() -> Vec<TabKey> {
+        NAMES.iter().enumerate().map(|(i, n)| (i, n.to_string())).collect()
+    }
+
     #[test]
     fn template_matches_defaults() {
         let c = parse(DEFAULT_TEMPLATE);
@@ -836,7 +926,7 @@ mod tests {
         // Старый ключ из тестовых сборок не ломает разбор и не попадает обратно в файл.
         assert_eq!(parse("glass_hint_dismissed = 1\n"), Config::default());
         assert!(!DEFAULT_TEMPLATE.contains("glass_hint_dismissed"));
-        assert!(save_updates(&Config::default(), &[]).iter().all(|(k, _)| *k != "glass_hint_dismissed"));
+        assert!(save_updates(&Config::default()).iter().all(|(k, _)| *k != "glass_hint_dismissed"));
     }
 
     #[test]
@@ -991,9 +1081,9 @@ gmail = \"https://mail.google.com\"
         let mut c = Config::default();
         c.tabs = vec!["C".into(), "A".into()];
         c.hidden_tabs = vec!["a".into()];
-        assert_eq!(c.resolve_visible(&NAMES), vec![2, 1, 3]);
+        assert_eq!(c.resolve_visible(&keys()), vec![2, 1, 3]);
         c.hidden_tabs = NAMES.iter().map(|s| s.to_string()).collect();
-        assert_eq!(c.resolve_visible(&NAMES), vec![2], "скрыть все вкладки нельзя");
+        assert_eq!(c.resolve_visible(&keys()), vec![2], "скрыть все вкладки нельзя");
     }
 
     #[test]
@@ -1127,12 +1217,70 @@ gmail = \"https://mail.google.com\"
     }
 
     #[test]
+    fn custom_tabs_join_the_dynamic_tab_list() {
+        let mut c = Config::default();
+        c.custom = vec![
+            CustomTab { id: 7, name: "Работа".into(), layout: String::new() },
+            CustomTab { id: 9, name: "Дом".into(), layout: String::new() },
+        ];
+        let keys = c.tab_keys();
+        assert_eq!(keys.len(), crate::TABS.len() + 2);
+        assert_eq!(c.tab_key(crate::tabs::CUSTOM_BASE + 1), "custom:9");
+        assert_eq!(c.tab_label(crate::tabs::CUSTOM_BASE), "Работа");
+        assert_eq!(c.tab_key(crate::tabs::SETTINGS), "", "у страницы настроек ключа нет");
+        // Собственные вкладки встают в порядок по ключу, а неизвестные ключи пропускаются.
+        c.tabs = vec!["custom:9".into(), "custom:404".into(), "Today".into()];
+        let order = c.ordered_tabs();
+        assert_eq!(&order[..3], &[crate::tabs::CUSTOM_BASE + 1, 1, 0]);
+        assert_eq!(order.len(), keys.len());
+        c.hidden_tabs = vec!["CUSTOM:9".into()];
+        assert!(!c.visible_tabs().contains(&(crate::tabs::CUSTOM_BASE + 1)));
+    }
+
+    #[test]
+    fn custom_tabs_survive_save_and_load() {
+        let mut c = Config::default();
+        c.custom = vec![
+            CustomTab { id: 3, name: "Работа".into(), layout: "v2 controls.wifi@0,0 today.clock:1@2,0".into() },
+            CustomTab { id: 8, name: "Дом".into(), layout: String::new() },
+        ];
+        let back = parse(&set_keys(DEFAULT_TEMPLATE, &save_updates(&c)));
+        assert_eq!(back.custom, c.custom);
+        assert_eq!(back.next_custom_id(), 9);
+        assert_eq!(parse(DEFAULT_TEMPLATE).custom, Vec::new(), "старый конфиг открывается без собственных вкладок");
+    }
+
+    #[test]
+    fn broken_custom_tab_entries_are_dropped() {
+        let c = parse("custom_tabs = [\"x|Нет номера|\", \"4||пустое имя\", \"5|Живая|v2\", \"5|Повтор|\", \"мусор\"]
+");
+        assert_eq!(c.custom.len(), 1);
+        assert_eq!((c.custom[0].id, c.custom[0].name.as_str()), (5, "Живая"));
+        assert_eq!(clean_tab_name("  a|b \"c\"
+ d  "), "a b c d");
+        assert_eq!(clean_tab_name(&"я".repeat(40)).chars().count(), MAX_TAB_NAME);
+    }
+
+    #[test]
+    fn no_more_than_the_limit_of_tabs_is_enabled() {
+        let mut c = Config::default();
+        c.custom = (1..=4).map(|id| CustomTab { id, name: format!("T{id}"), layout: String::new() }).collect();
+        let visible = c.visible_tabs();
+        assert_eq!(visible.len(), MAX_ENABLED_TABS);
+        // Лишние отбрасываются с конца порядка: остаются встроенные и первая собственная.
+        assert_eq!(visible, [0, 1, 2, 3, 4, 5, 6, crate::tabs::CUSTOM_BASE]);
+        // Выключив встроенную, освобождаем место следующей собственной.
+        c.hidden_tabs = vec!["Power".into()];
+        assert_eq!(c.visible_tabs().last(), Some(&(crate::tabs::CUSTOM_BASE + 1)));
+    }
+
+    #[test]
     fn tab_order() {
         let mut c = Config::default();
         c.tabs = vec!["c".into(), "zzz".into(), "A".into(), "c".into()];
-        assert_eq!(c.resolve_order(&NAMES), [2, 0, 1, 3]);
+        assert_eq!(c.resolve_order(&keys()), [2, 0, 1, 3]);
         c.tabs.clear();
-        assert_eq!(c.resolve_order(&NAMES), [0, 1, 2, 3]);
+        assert_eq!(c.resolve_order(&keys()), [0, 1, 2, 3]);
     }
 
     #[test]
@@ -1172,7 +1320,7 @@ gmail = \"https://mail.google.com\"
         assert!(!parse(DEFAULT_TEMPLATE).free_layout);
         let mut c = Config::default();
         c.free_layout = true;
-        assert!(save_updates(&c, &[]).contains(&("free_layout", "1".to_string())));
+        assert!(save_updates(&c).contains(&("free_layout", "1".to_string())));
     }
 
     #[test]

@@ -398,7 +398,7 @@ impl App {
                     ui::bare()
                 };
                 c.a *= content_p;
-                g.draw_text(crate::i18n::tab_name(self.order[i]), px, py, pw, ph, c);
+                g.draw_text(&self.cfg.tab_label(self.order[i]), px, py, pw, ph, c);
             }
 
             // Шестерёнка настроек: при наведении поворачивается, при открытых настройках залита акцентом.
@@ -470,7 +470,7 @@ impl App {
                 if alpha < 0.01 {
                     return;
                 }
-                let (w, h) = (self.tab_w(id), self.tab_h(id));
+                let (w, h) = (self.tab_w_in(tabs, id), tabs.island_size(id).1);
                 let ox = centre - w / 2.0 + dx;
                 g.dc.SetTransform(&ui::matrix(s, ox * s, 0.0));
                 ui.begin_content(ox, interactive);

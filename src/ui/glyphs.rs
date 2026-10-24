@@ -54,5 +54,7 @@ pub mod icon {
     pub const FORWARD: &str = "\u{E72A}";
     pub const TEXT_DOC: &str = "\u{E8A5}";
     pub const BOLT: &str = "\u{E945}";
+    pub const AIRPLANE: &str = "\u{E709}";
+    pub const BATTERY: &str = "\u{E83F}";
     pub const LIST: &str = "\u{E8FD}";
 }
