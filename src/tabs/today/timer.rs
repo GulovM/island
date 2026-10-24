@@ -210,7 +210,7 @@ impl Today {
             let reset_x = tm.right() - P - 14.0;
             let run_x = reset_x - 34.0;
             let run_icon = if self.deadline.is_some() { icon::PAUSE } else { icon::PLAY_SOLID };
-            if round_button(ui, cv, id(TODAY, 40), run_x, cy, 14.0, run_icon, tint, crate::ui::on_color(tint)) {
+            if round_button(ui, cv, id(TODAY, 40), run_x, cy, 14.0, run_icon, tint, crate::ui::WHITE) {
                 self.toggle_run();
             }
             if round_button(ui, cv, id(TODAY, 41), reset_x, cy, 14.0, icon::RESTART, chip_bg(), txt()) {
@@ -265,7 +265,7 @@ impl Today {
 
         // Старт / пауза и сброс.
         let start = if self.deadline.is_some() { "Пауза" } else { "Старт" };
-        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 68.0, btn_w, 26.0), start, tint, crate::ui::on_color(tint), 6.0) {
+        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 68.0, btn_w, 26.0), start, tint, crate::ui::WHITE, 6.0) {
             self.toggle_run();
         }
         if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + btn_w + 6.0, tm.y + 68.0, btn_w, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
