@@ -167,6 +167,9 @@ pub struct CustomTab {
     pub layout: String,
 }
 
+/// Сколько вкладок может быть включено одновременно (встроенные и собственные вместе), чтобы ряд поместился.
+pub const MAX_ENABLED_TABS: usize = 8;
+
 /// Номер вкладки и её ключ в `tabs` / `hidden_tabs`: имя встроенной вкладки или `custom:<id>`.
 pub type TabKey = (usize, String);
 
@@ -333,13 +336,14 @@ impl Config {
         out
     }
 
-    /// Вкладки, которые видны на острове, в порядке показа: полный порядок без скрытых.
+    /// Вкладки, которые видны на острове, в порядке показа: полный порядок без скрытых, но не больше
+    /// `MAX_ENABLED_TABS` (лишние в конце порядка считаются выключенными).
     /// Хотя бы одна вкладка остаётся всегда (если скрыты все — первая по порядку).
     pub fn resolve_visible(&self, keys: &[TabKey]) -> Vec<usize> {
         let order = self.resolve_order(keys);
         let hidden: Vec<usize> =
             self.hidden_tabs.iter().filter_map(|h| keys.iter().find(|(_, k)| k.eq_ignore_ascii_case(h)).map(|(t, _)| *t)).collect();
-        let mut out: Vec<usize> = order.iter().copied().filter(|t| !hidden.contains(t)).collect();
+        let mut out: Vec<usize> = order.iter().copied().filter(|t| !hidden.contains(t)).take(MAX_ENABLED_TABS).collect();
         if out.is_empty() {
             out.push(order[0]);
         }
@@ -1187,6 +1191,19 @@ gmail = \"https://mail.google.com\"
         assert_eq!(order.len(), keys.len());
         c.hidden_tabs = vec!["CUSTOM:9".into()];
         assert!(!c.visible_tabs().contains(&(crate::tabs::CUSTOM_BASE + 1)));
+    }
+
+    #[test]
+    fn no_more_than_the_limit_of_tabs_is_enabled() {
+        let mut c = Config::default();
+        c.custom = (1..=4).map(|id| CustomTab { id, name: format!("T{id}"), layout: String::new() }).collect();
+        let visible = c.visible_tabs();
+        assert_eq!(visible.len(), MAX_ENABLED_TABS);
+        // Лишние отбрасываются с конца порядка: остаются встроенные и первая собственная.
+        assert_eq!(visible, [0, 1, 2, 3, 4, 5, 6, crate::tabs::CUSTOM_BASE]);
+        // Выключив встроенную, освобождаем место следующей собственной.
+        c.hidden_tabs = vec!["Power".into()];
+        assert_eq!(c.visible_tabs().last(), Some(&(crate::tabs::CUSTOM_BASE + 1)));
     }
 
     #[test]

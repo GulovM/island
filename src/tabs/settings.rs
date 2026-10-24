@@ -311,9 +311,9 @@ impl Settings {
         self.cfg.ordered_tabs()
     }
 
+    /// Вкладка выключена: скрыта в конфиге или не поместилась в лимит включённых.
     fn hidden(&self, tab: usize) -> bool {
-        let key = self.cfg.tab_key(tab);
-        self.cfg.hidden_tabs.iter().any(|h| h.eq_ignore_ascii_case(&key))
+        !self.cfg.visible_tabs().contains(&tab)
     }
 
     fn set_hidden(&mut self, tab: usize, hide: bool) {
@@ -345,7 +345,8 @@ impl Settings {
         self.cfg.accent_pill = d.accent_pill;
         self.cfg.ui_scale = DEFAULT_SCALE;
         self.scale_drag = None;
-        self.cfg.hidden_tabs.clear();
+        // Встроенные вкладки включены, собственные выключены: так включённых не больше лимита.
+        self.cfg.hidden_tabs = self.cfg.custom.iter().enumerate().map(|(i, _)| self.cfg.tab_key(crate::tabs::CUSTOM_BASE + i)).collect();
         self.cfg.tabs = self.cfg.tab_keys().into_iter().map(|(_, k)| k).collect();
         self.cfg.idle_face = true;
         self.cfg.strip_over_maximized = d.strip_over_maximized;
@@ -715,8 +716,8 @@ impl Settings {
             cv.rr(r, 6.0, inset());
             let hidden = self.hidden(tab);
             let mut on = !hidden;
-            // Последняя видимая вкладка не выключается.
-            let can_toggle = hidden || visible > 1;
+            // Последняя видимая вкладка не выключается, а сверх лимита включить нельзя.
+            let can_toggle = if hidden { visible < crate::config::MAX_ENABLED_TABS } else { visible > 1 };
             if ui.switch(cv, id(SETTINGS, N_SWITCH + tab as u32), Rect::new(r.x + 6.0, r.y + 2.5, 30.0, 16.0), &mut on, can_toggle) {
                 self.set_hidden(tab, !on);
             }
