@@ -40,10 +40,10 @@
 | `dnd.rs`, `dragdrop.rs` | перетаскивание: OLE-приём файлов, ссылок и текста на остров и отдача записей «Быстрого доступа» наружу (`dnd`), надпись «Быстрый доступ», итог броска, горячая клавиша раздела (`dragdrop`) |
 | `gfx.rs`, `anim.rs`, `theme.rs`, `face.rs`, `live.rs` | D3D11/Direct2D/DirectComposition, пружины, палитра, свёрнутый вид и индикатор |
 | `ui/` | UI-тулкит: `color`, `glyphs`, `geom`, `fonts`, `canvas`, `bitmap_cache`, `scroll`, `field` (текстовое поле), `widgets` |
-| `tabs/` | вкладки: `controls`, `power`, `clipboard/` (`quick` — «Быстрый доступ»), `apps`, `wallpaper`, `settings`; `grid` и `layout` (сетка и раскладка виджетов, режим правки); `today/` (`alarm`, `clock`, `timer`, `calendar`, `todo`, `weather`), `stats/` (`procs`, `gpu`, `hw`, `format`) |
+| `tabs/` | вкладки: `controls`, `power`, `clipboard/` (`quick` — «Быстрый доступ»), `apps`, `wallpaper`, `settings`; `grid` и `layout` (сетка и раскладка виджетов, режим правки); `today/` (`alarm`, `clock`, `timer`, `calendar`, `events`, `event_form`, `todo`, `weather`), `stats/` (`procs`, `gpu`, `hw`, `format`) |
 | `bg/` | фоновый поток для WinRT/COM: `net`, `devices`, `audio_policy`, `volume`, `wifi`, `bluetooth`, `media`, `winrt` |
 | `sys/` | системная интеграция: `shell`, `clipboard`, `registry`, `appearance`, `night_light`, `seal` (DPAPI), `paths` |
-| `online/` | сеть без сторонних библиотек: `http` (WinHTTP), `weather`, `calendar` (iCal), `datetime`, `speedtest` |
+| `online/` | сеть без сторонних библиотек: `http` (WinHTTP), `weather`, `calendar` (iCal), `local` (события острова: повторы, напоминания), `datetime`, `speedtest` |
 | `config.rs`, `i18n.rs`, `log.rs`, `perf.rs`, `update.rs` | настройки (свой TOML), два языка, лог, замер кадров, обновление через GitHub Releases |
 | `icons.rs`, `img.rs`, `thumbs.rs`, `we.rs`, `bright.rs` | иконки приложений, изображения через WIC, миниатюры обоев, Wallpaper Engine, яркость |
 
@@ -386,3 +386,10 @@
 6. ~~Этап 5: качество и производительность~~ — завершён
 7. ~~Этап 6: настройки в острове, цвета, индикатор свёрнутого вида, иконка, README, portable-архив~~ — завершён
 8. Этап 7: подключение Wi-Fi/Bluetooth/звука из острова, анимация эквалайзера — сделано, ждёт проверки на живом экране
+
+## События календаря, созданные в острове (#17)
+
+- Хранятся локально в `%APPDATA%\island\events.txt`: `id|начало|конец|весь_день|повтор|дни|напоминание|название`, время — минуты от 1970-01-01 по местному времени. Показываются вместе с событиями из `calendar_ics`.
+- Создание и правка: кнопка «+» на карточке недели и в месячном календаре; клик по событию острова в списке дня открывает правку и удаление. Повтор: нет / день / неделя (с выбором дней) / месяц / год. Напоминание: за 5, 10, 30 или 60 минут.
+- Уведомление приходит за N минут и в момент начала, только когда экран включён и сессия разблокирована; пропущенное за последние сутки показывается при разблокировке. Ведёт себя как уведомление таймера (выход из полоски, ×, Esc, автозакрытие), звук — один короткий сигнал. Проверка раз в 15 секунд (`EVENT_TIMER`), последняя проверенная минута — в `events_seen.txt`.
+- Запись во внешние календари: iCloud — #35, Google — #36.

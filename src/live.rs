@@ -59,6 +59,8 @@ pub enum Form {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Toast {
     Timer,
+    /// Наступило событие календаря; название и подпись лежат в `Live::event`.
+    Event,
     Volume { level: f32, muted: bool },
     Brightness { level: f32 },
     Charging { on: bool, percent: u8 },
@@ -66,11 +68,18 @@ pub enum Toast {
 }
 
 impl Toast {
+    /// Заметное уведомление: остров ради него выходит из полоски, не раскрывается от наведения
+    /// и закрывается по ×, Esc или таймауту.
+    pub fn is_alert(&self) -> bool {
+        matches!(self, Toast::Timer | Toast::Event)
+    }
+
     /// Сколько уведомление остаётся на экране.
     pub fn lifetime(&self) -> Duration {
         Duration::from_millis(match self {
             // Минимум; пока звучит сигнал, остров ждёт его конца (см. `ToastTimer`).
             Toast::Timer => 4000,
+            Toast::Event => 6000,
             Toast::Volume { .. } | Toast::Brightness { .. } => 1700,
             Toast::Charging { .. } => 3000,
             Toast::LowBattery(_) => 5000,
@@ -97,6 +106,8 @@ pub struct Live {
     toast: Option<Toast>,
     /// Последнее показанное уведомление: рисуется, пока гаснет.
     shown: Option<Toast>,
+    /// Текст уведомления о событии календаря.
+    event: Option<(String, String)>,
     mini_a: Spring,
     toast_a: Spring,
     rev: u64,
@@ -118,6 +129,7 @@ impl Live {
             media_enabled,
             toast: None,
             shown: None,
+            event: None,
             mini_a: Spring::unit(0.0, 260.0, 30.0),
             toast_a: Spring::unit(0.0, 260.0, 30.0),
             rev: 0,
@@ -217,10 +229,16 @@ impl Live {
         self.shown = Some(t);
     }
 
-    /// Показано уведомление об окончании таймера: остров ради него выходит из полоски, не раскрывается
-    /// от наведения и закрывается по ×, Esc или таймауту.
+    /// Уведомление о событии календаря: название и короткая подпись («Сейчас», «10 мин»).
+    pub fn show_event(&mut self, title: String, tag: String) {
+        self.event = Some((title, tag));
+        self.show(Toast::Event);
+    }
+
+    /// Показано заметное уведомление (окончание таймера, событие календаря): остров ради него выходит
+    /// из полоски, не раскрывается от наведения и закрывается по ×, Esc или таймауту.
     pub fn alert(&self) -> bool {
-        self.toast == Some(Toast::Timer)
+        self.toast.is_some_and(|t| t.is_alert())
     }
 
     pub fn clear_toast(&mut self) -> bool {
@@ -371,6 +389,19 @@ impl Live {
                 cv.glyph(icon::CLOCK, ic, false, cv.accent);
                 cv.text(&crate::i18n::tr("Таймер завершён"), Rect::new(tx, cy - 8.0, Self::close_rect(r).x - tx, 16.0), &f.body, txt());
                 let x = Self::close_rect(r);
+                let hot = cursor.0 >= x.x - 4.0 && cursor.0 < x.right() + 4.0 && cursor.1 >= x.y - 4.0 && cursor.1 < x.bottom() + 4.0;
+                cv.circle(x.cx(), x.cy(), 9.0, crate::ui::mix(crate::ui::chip_bg(), txt(), if hot { 0.18 } else { 0.0 }));
+                cv.glyph(icon::CLOSE, x.inset(4.0), false, if hot { txt() } else { dim() });
+            }
+            Toast::Event => {
+                let (title, tag) = self.event.as_ref().map_or(("", ""), |(a, b)| (a.as_str(), b.as_str()));
+                cv.glyph(icon::CALENDAR, ic, false, cv.accent);
+                let x = Self::close_rect(r);
+                let tag_w = if tag.is_empty() { 0.0 } else { 44.0 };
+                cv.text(title, Rect::new(tx, cy - 8.0, x.x - tx - tag_w - 4.0, 16.0), &f.body, txt());
+                if tag_w > 0.0 {
+                    cv.text(tag, Rect::new(x.x - tag_w, cy - 8.0, tag_w, 16.0), &f.small, dim());
+                }
                 let hot = cursor.0 >= x.x - 4.0 && cursor.0 < x.right() + 4.0 && cursor.1 >= x.y - 4.0 && cursor.1 < x.bottom() + 4.0;
                 cv.circle(x.cx(), x.cy(), 9.0, crate::ui::mix(crate::ui::chip_bg(), txt(), if hot { 0.18 } else { 0.0 }));
                 cv.glyph(icon::CLOSE, x.inset(4.0), false, if hot { txt() } else { dim() });

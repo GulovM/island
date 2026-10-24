@@ -186,6 +186,7 @@ impl Tabs {
     /// Загружает сохранённые данные (один раз при старте).
     pub fn load(&mut self, cfg: &Config, state: &crate::state::State) {
         self.today.load();
+        self.today.load_events();
         self.today.load_timer(state);
         self.today.configure(cfg);
         self.clip.load(state.clipboard_paused, state.clipboard_section);
@@ -408,6 +409,11 @@ impl Tabs {
     /// Таймер дошёл до нуля (для уведомления в свёрнутой форме).
     pub fn take_timer_fired(&mut self) -> bool {
         self.today.take_fired()
+    }
+
+    /// Напоминание о событии календаря, время которого наступило (`ready` — экран включён, ПК разблокирован).
+    pub fn take_event_notice(&mut self, ready: bool) -> Option<today::Notice> {
+        self.today.take_due(ready)
     }
 
     pub fn alarm(&mut self) -> bool {

@@ -5,6 +5,8 @@
 mod alarm;
 mod calendar;
 mod clock;
+mod event_form;
+mod events;
 mod timer;
 mod todo;
 mod weather;
@@ -25,6 +27,7 @@ use super::layout::{sz, Size, Spec, TabSpec};
 use super::{id, TODAY};
 use alarm::play_alarm;
 use calendar::MonthCache;
+pub use events::Notice;
 use todo::RowAnim;
 
 /// Число циферблатов часов.
@@ -43,8 +46,9 @@ const TIMER: usize = 3;
 const TODO: usize = 4;
 
 /// Месячный календарь раскрывается поверх сетки: минимальная ширина и высота.
-const MONTH_W: f32 = 230.0;
-const MONTH_H: f32 = 252.0;
+/// Размер сетки 4×4: 4 * CELL - GAP по ширине и по высоте.
+const MONTH_W: f32 = 216.0;
+const MONTH_H: f32 = 216.0;
 
 /// Часы: карточка, высокая и широкая — у каждого циферблата своя композиция под каждый размер.
 static CLOCK_SIZES: [Size; 3] = [sz(2, 2), sz(2, 4), sz(4, 2)];
@@ -58,7 +62,7 @@ static TODO_SIZES: [Size; 3] = [sz(4, 2), sz(4, 4), sz(6, 4)];
 /// столбцом шириной 2 ячейки, неделя и таймер — 4×2 рядом, задачи — 4×4: исходные пропорции макета.
 ///
 /// Статический `min_rows = 1` задаёт компактный размер при скрытых виджетах или пустой вкладке.
-/// Месячный календарь (MONTH_H = 252 px) запрашивает место динамически через `overlay_rows`.
+/// Месячный календарь (MONTH_H = 216 px) запрашивает место динамически через `overlay_rows`.
 pub static SPEC: TabSpec = TabSpec {
     cols: 12,
     rows: 5,
@@ -75,12 +79,15 @@ pub static SPEC: TabSpec = TabSpec {
 
 /// Вычисляет число рядов сетки, необходимое для раскрытого месячного календаря.
 /// Динамический расчёт overlay_rows:
-/// Месячный календарь (MONTH_H = 252 px) раскрывается поверх сетки.
-/// Число рядов под высоту MONTH_H: ceil(MONTH_H / CELL) = ceil(252 / 56) = 5 рядов.
+/// Месячный календарь (MONTH_H = 216 px, как карточка 4×4) раскрывается поверх сетки.
+/// Число рядов под высоту MONTH_H: ceil(MONTH_H / CELL) = ceil(216 / 56) = 4 ряда.
 #[inline]
 pub fn today_overlay_rows(month_h: f32) -> u8 {
     (month_h / super::layout::CELL).ceil().max(0.0) as u8
 }
+
+/// Объединённые события и версии источников, из которых они собраны.
+type MergedEvents = ((u64, u64), std::sync::Arc<Vec<online::RawEvent>>);
 
 pub struct Today {
     /// Выбранный пресет (индекс в `PRESETS`); `None` — время задано вручную.
@@ -116,6 +123,15 @@ pub struct Today {
     cal_editing: bool,
     cal_bad: bool,
     online: Online,
+    /// События, созданные в острове (`events.txt`); `local_ver` растёт при каждом изменении.
+    local: Vec<crate::online::LocalEvent>,
+    local_ver: u64,
+    /// Календарь по ссылкам вместе со своими событиями: (версии источников, список).
+    merged: Option<MergedEvents>,
+    /// Открытая форма события острова (поверх месячного календаря).
+    ev_form: Option<event_form::EventForm>,
+    /// Минута, до которой напоминания о событиях уже проверены.
+    seen_min: i64,
     /// Ближайшее событие календаря (пересчитывается раз в минуту).
     next: Option<Event>,
     next_min: i64,
@@ -167,6 +183,11 @@ impl Default for Today {
             cal_editing: false,
             cal_bad: false,
             online: Online::default(),
+            local: Vec::new(),
+            local_ver: 0,
+            merged: None,
+            ev_form: None,
+            seen_min: 0,
             next: None,
             next_min: i64::MIN,
             month_open: false,
@@ -214,12 +235,14 @@ impl Today {
         self.month_t.snap();
         self.editing = false;
         self.cal_editing = false;
+        self.ev_form = None;
         self.edit = None;
         self.clock_pick = None;
     }
 
     pub fn sync(&mut self) -> bool {
         self.online = online::snapshot();
+        self.merge_events();
         self.next_min = online::now_local_minutes();
         self.next = online::next_of(&self.online.cal, self.next_min, online::utc_offset_minutes());
         true
@@ -306,13 +329,14 @@ impl Today {
                 ui.unmute(p);
             }
         }
+        ui.paint_tip(cv, Rect::new(0.0, 0.0, w, h));
     }
 
-    /// Где раскрывается месячный календарь: на месте карточки недели (она не меньше нужной
-    /// ширины), но не выходя за область вкладки.
+    /// Где раскрывается месячный календарь: с левого края карточки недели, размером ровно 4×4 ячейки,
+    /// но не выходя за область вкладки.
     fn month_rect(&self, area: Rect) -> Rect {
         let wk = self.week_rect;
-        let w = wk.w.max(MONTH_W).min(area.w);
+        let w = MONTH_W.min(area.w);
         let h = MONTH_H.min(area.h);
         Rect::new(wk.x.min(area.right() - w).max(area.x), wk.y.min(area.bottom() - h).max(area.y), w, h)
     }
@@ -425,7 +449,7 @@ impl Today {
             ev(15, 0, 45, "Созвон с дизайнерами"),
             ev(18, 30, 90, "Тренировка"),
         ]);
-        self.next = Some(online::Event { start: at(15, 0), end: at(15, 45), all_day: false, title: "Созвон с дизайнерами".into() });
+        self.next = Some(online::Event { start: at(15, 0), end: at(15, 45), all_day: false, title: "Созвон с дизайнерами".into(), local_id: None });
         self.next_min = at(10, 9);
         self.total = Duration::from_secs(5 * 60);
         self.left = Duration::from_secs(3 * 60 + 25);
@@ -460,8 +484,8 @@ mod tests {
 
     #[test]
     fn test_today_overlay_rows() {
-        // Высота месячного календаря MONTH_H = 252 px -> 252 / 56 = 4.5 -> ceil = 5 рядов (вся сетка)
-        assert_eq!(today_overlay_rows(MONTH_H), 5);
+        // Высота месячного календаря MONTH_H = 216 px (4×4) -> 216 / 56 = 3.86 -> ceil = 4 ряда
+        assert_eq!(today_overlay_rows(MONTH_H), 4);
         assert_eq!(today_overlay_rows(252.0), 5);
         assert_eq!(today_overlay_rows(SPEC.rows as f32 * crate::tabs::layout::CELL), SPEC.rows);
 

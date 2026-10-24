@@ -354,6 +354,30 @@ impl Ui {
         self.widget(id).hover.value
     }
 
+    /// Подсказка к кнопке `id` в прямоугольнике `r`: появляется, пока на ней курсор. Рисуется
+    /// позже и поверх всего через [`Ui::paint_tip`].
+    pub fn tip(&mut self, id: u32, r: Rect, text: &str) {
+        let hv = self.hover_of(id);
+        if hv > 0.6 && self.tip.is_none() {
+            self.tip = Some((r, text.to_string(), hv));
+        }
+    }
+
+    /// Рисует подсказку, заявленную в этом кадре, под кнопкой (или над ней, если снизу нет места);
+    /// не выходит за `bounds`.
+    pub unsafe fn paint_tip(&mut self, cv: &Canvas, bounds: Rect) {
+        let Some((r, text, hv)) = self.tip.take() else { return };
+        let font = &cv.g.fonts.small;
+        let (w, h) = (cv.text_w(&text, font) + 16.0, 22.0);
+        let x = (r.cx() - w / 2.0).min(bounds.right() - w - 4.0).max(bounds.x + 4.0);
+        let y = if r.bottom() + 4.0 + h <= bounds.bottom() { r.bottom() + 4.0 } else { r.y - h - 4.0 };
+        let tip = Rect::new(x, y, w, h);
+        let fade = Canvas { g: cv.g, alpha: cv.alpha * ((hv - 0.6) / 0.4).clamp(0.0, 1.0), accent: cv.accent };
+        fade.rr(tip, 6.0, mix(chip_bg(), fg(), 0.1));
+        fade.hairline(tip, 6.0);
+        fade.text(&text, Rect::new(x + 8.0, y, w - 16.0, h), font, txt());
+    }
+
     /// Чип-фильтр. Выбранный залит акцентом. `flat` — невыбранный без фона (фильтры в строке
     /// поиска). `true` — нажат.
     pub unsafe fn chip(&mut self, cv: &Canvas, id: u32, r: Rect, label: &str, selected: bool) -> bool {

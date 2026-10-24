@@ -102,6 +102,9 @@ pub struct App {
     pub(crate) shown_tab: Option<usize>,
     pub(crate) poll_on: bool,
     pub(crate) alarm_at: Option<Instant>,
+    /// Сессия заблокирована или экран погашен: напоминания о событиях ждут.
+    pub(crate) locked: bool,
+    pub(crate) screen_off: bool,
     /// Предыдущая вкладка (индекс в `TABS`) на время кроссфейда и прогресс перехода 0..1.
     pub(crate) tab_prev: Option<usize>,
     pub(crate) tab_t: Spring,
@@ -289,6 +292,8 @@ impl App {
                 shown_tab: None,
                 poll_on: false,
                 alarm_at: None,
+                locked: false,
+                screen_off: false,
                 tab_prev: None,
                 tab_t: Spring::unit(1.0, 260.0, 30.0),
                 pill_x: Spring::new(0.0, 420.0, 30.0),

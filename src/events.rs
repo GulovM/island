@@ -141,7 +141,21 @@ impl App {
             }
             Ev::Display => self.reconfigure(),
             Ev::Resume => self.on_resume(),
-            Ev::Lock => self.on_lock(),
+            Ev::Lock => {
+                self.locked = true;
+                self.on_lock()
+            }
+            Ev::Unlock => {
+                self.locked = false;
+                // Пропущенные за время блокировки напоминания показываем сразу, не дожидаясь тика.
+                let shown = self.show_event_notice();
+                self.on_resume() | shown
+            }
+            Ev::ScreenPower(on) => {
+                self.screen_off = !on;
+                on && self.show_event_notice()
+            }
+            Ev::EventTick => self.show_event_notice(),
             Ev::RecoverTimer => self.try_recover(),
             Ev::TaskbarCreated => {
                 self.add_tray();

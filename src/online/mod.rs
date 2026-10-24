@@ -11,10 +11,12 @@ use crate::log;
 mod calendar;
 mod datetime;
 mod http;
+mod local;
 mod speedtest;
 mod weather;
 
 pub use calendar::{events_by_day, init_cached_calendar, next_of, refresh_calendar, refresh_calendar_age, DayEvent, Event, RawEvent};
+pub use local::{due_reminders, merge_local, Due, DueKind, LocalEvent, Repeat, MAX_LOCAL, MISSED_WINDOW, REMIND_CHOICES};
 pub use datetime::{civil_from_days, days_from_civil, now_local_minutes, utc_offset_minutes, weekday};
 pub(crate) use http::{get_bytes, get_text, json_str};
 pub use speedtest::{run_speedtest, Speed};

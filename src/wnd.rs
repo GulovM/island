@@ -36,6 +36,12 @@ pub(crate) enum Ev {
     /// Компьютер проснулся или разблокирован.
     Resume,
     Lock,
+    /// Сессия разблокирована.
+    Unlock,
+    /// Экран включился или погас (состояние дисплея).
+    ScreenPower(bool),
+    /// Пора проверить напоминания о событиях календаря.
+    EventTick,
     RecoverTimer,
     /// Explorer перезапустился — значок трея нужно добавить заново.
     TaskbarCreated,
@@ -193,13 +199,19 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 push(Ev::Resume);
             } else if wp.0 as u32 == PBT_APMPOWERSTATUSCHANGE {
                 push(Ev::PowerChange);
+            } else if wp.0 as u32 == PBT_POWERSETTINGCHANGE && lp.0 != 0 {
+                let s = &*(lp.0 as *const POWERBROADCAST_SETTING);
+                if s.PowerSetting == GUID_CONSOLE_DISPLAY_STATE && s.DataLength >= 4 {
+                    // 0 — экран выключен, 1 — включён, 2 — приглушён.
+                    push(Ev::ScreenPower(s.Data[0] != 0));
+                }
             }
             LRESULT(1)
         }
         WM_WTSSESSION_CHANGE => {
             match wp.0 {
                 WTS_SESSION_LOCK => push(Ev::Lock),
-                WTS_SESSION_UNLOCK => push(Ev::Resume),
+                WTS_SESSION_UNLOCK => push(Ev::Unlock),
                 _ => {}
             }
             LRESULT(0)
@@ -249,6 +261,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_TIMER if wp.0 == POLL_TIMER => {
             push(Ev::Poll);
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == EVENT_TIMER => {
+            push(Ev::EventTick);
             LRESULT(0)
         }
         WM_TIMER if wp.0 == ALARM_TIMER => {

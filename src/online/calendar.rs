@@ -142,6 +142,8 @@ pub struct Event {
     pub end: i64,
     pub all_day: bool,
     pub title: String,
+    /// Номер события, созданного в самом острове (его можно править).
+    pub local_id: Option<u64>,
 }
 
 /// Событие календаря как в файле: одно вхождение или правило повтора.
@@ -190,6 +192,8 @@ pub struct DayEvent {
     /// Минуты окончания от полуночи; `None` — весь день или не задано.
     pub end_minute: Option<i64>,
     pub title: String,
+    /// Номер события, созданного в самом острове (его можно править и удалять).
+    pub local_id: Option<u64>,
 }
 
 /// Ответ сервера — календарь iCal. Неверная ссылка часто отдаёт обычную страницу (вход,
@@ -519,7 +523,7 @@ pub fn parse_ics(ics: &str, offset: i64) -> Vec<RawEvent> {
 }
 
 /// Начало следующего вхождения `raw` не раньше `from` с учётом исключений.
-fn occurrence_from(raw: &RawEvent, from: i64, offset: i64) -> Option<i64> {
+pub(super) fn occurrence_from(raw: &RawEvent, from: i64, offset: i64) -> Option<i64> {
     let mut from = from;
     for _ in 0..64 {
         let t = next_occurrence(raw.start, raw.all_day, raw.rrule.as_deref(), from, offset)?;
@@ -545,7 +549,8 @@ pub fn next_of(raws: &[RawEvent], now: i64, offset: i64) -> Option<Event> {
         .map(|(t, r)| {
             // Длительность та же у каждого повтора: конец вхождения = его начало + длительность.
             let end = if r.end > r.start { t + (r.end - r.start) } else { 0 };
-            Event { start: t, end, all_day: r.all_day, title: r.title.clone() }
+            let local_id = r.uid.strip_prefix("island-local-").and_then(|n| n.parse().ok());
+            Event { start: t, end, all_day: r.all_day, title: r.title.clone(), local_id }
         })
 }
 
@@ -562,6 +567,7 @@ pub fn events_by_day(raws: &[RawEvent], first_day: i64, days: usize, offset: i64
     let mut out: Vec<Vec<DayEvent>> = vec![Vec::new(); days];
     for raw in raws {
         let dur = if raw.end > raw.start { raw.end - raw.start } else { 0 };
+        let local_id = raw.uid.strip_prefix("island-local-").and_then(|n| n.parse().ok());
         let mut add = |t: i64| {
             let first = t.div_euclid(1440);
             let last = if dur > 0 { (t + dur - 1).div_euclid(1440).max(first) } else { first };
@@ -582,7 +588,7 @@ pub fn events_by_day(raws: &[RawEvent], first_day: i64, days: usize, offset: i64
                 } else {
                     minute
                 };
-                out[(d - lo) as usize].push(DayEvent { minute, end_minute, title: raw.title.clone() });
+                out[(d - lo) as usize].push(DayEvent { minute, end_minute, title: raw.title.clone(), local_id });
             }
         };
         if raw.rrule.is_none() {

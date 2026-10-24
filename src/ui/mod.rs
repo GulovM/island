@@ -97,6 +97,8 @@ pub struct Ui {
     pub nav: Vec<Nav>,
     /// Поле, в котором нажали Enter (только для полей с `Submit != None`).
     submitted: Option<(u32, String)>,
+    /// Подсказка под курсором: прямоугольник кнопки, текст и степень наведения; рисуется в конце кадра.
+    tip: Option<(Rect, String, f32)>,
     pub cache: BitmapCache,
 }
 
