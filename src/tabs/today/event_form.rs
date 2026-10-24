@@ -3,7 +3,7 @@
 use super::Today;
 use crate::online::{self, civil_from_days, weekday, LocalEvent, Repeat, REMIND_CHOICES};
 use crate::tabs::{id, TODAY};
-use crate::ui::{dim, icon, inset, status_pink, txt, Align, Canvas, Rect, Submit, Ui};
+use crate::ui::{dim, icon, status_pink, txt, Align, Canvas, Rect, Submit, Ui};
 
 const TITLE: u32 = 120;
 const START: u32 = 121;
@@ -144,11 +144,11 @@ impl Today {
 
         // Название.
         let title_id = id(TODAY, TITLE);
-        ui.text_field_at(cv, title_id, Rect::new(x, r.y + 30.0, w, 26.0), pick("Название", "Title"), "", Submit::Keep, 10.0, 8.0);
+        ui.text_field_at(cv, title_id, Rect::new(x, r.y + 28.0, w, 24.0), pick("Название", "Title"), "", Submit::Keep, 10.0, 8.0);
         let mut save = ui.take_submitted(title_id).is_some();
 
         // Дата и «весь день».
-        let dy = r.y + 64.0;
+        let dy = r.y + 58.0;
         if ui.icon_button(cv, id(TODAY, DAY_PREV), Rect::new(x, dy, 18.0, 18.0), icon::LEFT, false) {
             form.day -= 1;
         }
@@ -164,7 +164,7 @@ impl Today {
         form.all_day = all;
 
         // Время начала и конца.
-        let ty = r.y + 92.0;
+        let ty = r.y + 82.0;
         if !form.all_day {
             ui.text_field_at(cv, id(TODAY, START), Rect::new(x, ty, 64.0, 24.0), "09:00", "", Submit::Keep, 10.0, 6.0);
             cv.line("–", &f.body, x + 64.0, 16.0, ty + 12.0, Align::Center, dim());
@@ -174,9 +174,9 @@ impl Today {
         }
 
         // Повтор и напоминание.
-        let cy = r.y + 124.0;
+        let cy = r.y + 112.0;
         let (rl_ru, rl_en) = form.repeat.label();
-        if ui.chip(cv, id(TODAY, REPEAT), Rect::new(x, cy, 116.0, 22.0), pick(rl_ru, rl_en), form.repeat != Repeat::None) {
+        if ui.chip(cv, id(TODAY, REPEAT), Rect::new(x, cy, 100.0, 22.0), pick(rl_ru, rl_en), form.repeat != Repeat::None) {
             let i = Repeat::ALL.iter().position(|&p| p == form.repeat).unwrap_or(0);
             form.repeat = Repeat::ALL[(i + 1) % Repeat::ALL.len()];
         }
@@ -187,7 +187,7 @@ impl Today {
             m if crate::i18n::en() => format!("{m} min before"),
             m => format!("За {m} мин"),
         };
-        if ui.chip(cv, id(TODAY, REMIND), Rect::new(x + 122.0, cy, w - 122.0, 22.0), &rl, remind != 0) {
+        if ui.chip(cv, id(TODAY, REMIND), Rect::new(x + 106.0, cy, w - 106.0, 22.0), &rl, remind != 0) {
             form.remind = (form.remind + 1) % REMIND_CHOICES.len();
         }
 
@@ -195,7 +195,7 @@ impl Today {
         if form.repeat == Repeat::Weekly {
             let cw = w / 7.0;
             for (i, name) in crate::i18n::weekdays().iter().enumerate() {
-                let rect = Rect::new(x + i as f32 * cw + 1.0, r.y + 152.0, cw - 2.0, 20.0);
+                let rect = Rect::new(x + i as f32 * cw + 1.0, r.y + 140.0, cw - 2.0, 20.0);
                 // Если дни не выбраны, повтор идёт по дню недели начала: подсвечиваем его.
                 let on = if form.days == 0 { weekday(form.day) as usize == i } else { form.days >> i & 1 == 1 };
                 if ui.chip(cv, id(TODAY, WEEKDAY + i as u32), rect, name, on) {
@@ -213,11 +213,9 @@ impl Today {
                 Problem::End => pick("Конец позже начала, вида 10:30", "End after start, like 10:30"),
                 Problem::Limit => pick("Слишком много событий", "Too many events"),
             };
-            cv.text(msg, Rect::new(x, r.y + 180.0, w, 14.0), &f.small, status_pink());
-        } else {
-            cv.rr(Rect::new(x, r.y + 178.0, w, 1.0), 0.5, inset());
+            cv.text(msg, Rect::new(x, r.y + 164.0, w, 14.0), &f.small, status_pink());
         }
-        let by = r.bottom() - 34.0;
+        let by = r.bottom() - 32.0;
         if form.id != 0 && ui.chip(cv, id(TODAY, DELETE), Rect::new(x, by, 84.0, 24.0), pick("Удалить", "Delete"), false) {
             self.remove_event(form.id);
             keep = false;

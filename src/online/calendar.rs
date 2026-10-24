@@ -142,6 +142,8 @@ pub struct Event {
     pub end: i64,
     pub all_day: bool,
     pub title: String,
+    /// Номер события, созданного в самом острове (его можно править).
+    pub local_id: Option<u64>,
 }
 
 /// Событие календаря как в файле: одно вхождение или правило повтора.
@@ -547,7 +549,8 @@ pub fn next_of(raws: &[RawEvent], now: i64, offset: i64) -> Option<Event> {
         .map(|(t, r)| {
             // Длительность та же у каждого повтора: конец вхождения = его начало + длительность.
             let end = if r.end > r.start { t + (r.end - r.start) } else { 0 };
-            Event { start: t, end, all_day: r.all_day, title: r.title.clone() }
+            let local_id = r.uid.strip_prefix("island-local-").and_then(|n| n.parse().ok());
+            Event { start: t, end, all_day: r.all_day, title: r.title.clone(), local_id }
         })
 }
 

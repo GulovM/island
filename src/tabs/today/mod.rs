@@ -46,8 +46,9 @@ const TIMER: usize = 3;
 const TODO: usize = 4;
 
 /// Месячный календарь раскрывается поверх сетки: минимальная ширина и высота.
-const MONTH_W: f32 = 230.0;
-const MONTH_H: f32 = 252.0;
+/// Размер сетки 4×4: 4 * CELL - GAP по ширине и по высоте.
+const MONTH_W: f32 = 224.0;
+const MONTH_H: f32 = 216.0;
 
 /// Часы: карточка, высокая и широкая — у каждого циферблата своя композиция под каждый размер.
 static CLOCK_SIZES: [Size; 3] = [sz(2, 2), sz(2, 4), sz(4, 2)];
@@ -61,7 +62,7 @@ static TODO_SIZES: [Size; 3] = [sz(4, 2), sz(4, 4), sz(6, 4)];
 /// столбцом шириной 2 ячейки, неделя и таймер — 4×2 рядом, задачи — 4×4: исходные пропорции макета.
 ///
 /// Статический `min_rows = 1` задаёт компактный размер при скрытых виджетах или пустой вкладке.
-/// Месячный календарь (MONTH_H = 252 px) запрашивает место динамически через `overlay_rows`.
+/// Месячный календарь (MONTH_H = 216 px) запрашивает место динамически через `overlay_rows`.
 pub static SPEC: TabSpec = TabSpec {
     cols: 12,
     rows: 5,
@@ -78,8 +79,8 @@ pub static SPEC: TabSpec = TabSpec {
 
 /// Вычисляет число рядов сетки, необходимое для раскрытого месячного календаря.
 /// Динамический расчёт overlay_rows:
-/// Месячный календарь (MONTH_H = 252 px) раскрывается поверх сетки.
-/// Число рядов под высоту MONTH_H: ceil(MONTH_H / CELL) = ceil(252 / 56) = 5 рядов.
+/// Месячный календарь (MONTH_H = 216 px, как карточка 4×4) раскрывается поверх сетки.
+/// Число рядов под высоту MONTH_H: ceil(MONTH_H / CELL) = ceil(216 / 56) = 4 ряда.
 #[inline]
 pub fn today_overlay_rows(month_h: f32) -> u8 {
     (month_h / super::layout::CELL).ceil().max(0.0) as u8
@@ -328,6 +329,7 @@ impl Today {
                 ui.unmute(p);
             }
         }
+        ui.paint_tip(cv, Rect::new(0.0, 0.0, w, h));
     }
 
     /// Где раскрывается месячный календарь: на месте карточки недели (она не меньше нужной
@@ -447,7 +449,7 @@ impl Today {
             ev(15, 0, 45, "Созвон с дизайнерами"),
             ev(18, 30, 90, "Тренировка"),
         ]);
-        self.next = Some(online::Event { start: at(15, 0), end: at(15, 45), all_day: false, title: "Созвон с дизайнерами".into() });
+        self.next = Some(online::Event { start: at(15, 0), end: at(15, 45), all_day: false, title: "Созвон с дизайнерами".into(), local_id: None });
         self.next_min = at(10, 9);
         self.total = Duration::from_secs(5 * 60);
         self.left = Duration::from_secs(3 * 60 + 25);
@@ -482,8 +484,8 @@ mod tests {
 
     #[test]
     fn test_today_overlay_rows() {
-        // Высота месячного календаря MONTH_H = 252 px -> 252 / 56 = 4.5 -> ceil = 5 рядов (вся сетка)
-        assert_eq!(today_overlay_rows(MONTH_H), 5);
+        // Высота месячного календаря MONTH_H = 216 px (4×4) -> 216 / 56 = 3.86 -> ceil = 4 ряда
+        assert_eq!(today_overlay_rows(MONTH_H), 4);
         assert_eq!(today_overlay_rows(252.0), 5);
         assert_eq!(today_overlay_rows(SPEC.rows as f32 * crate::tabs::layout::CELL), SPEC.rows);
 
