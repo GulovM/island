@@ -5,6 +5,7 @@
 mod alarm;
 mod calendar;
 mod clock;
+mod event_form;
 mod events;
 mod timer;
 mod todo;
@@ -84,6 +85,9 @@ pub fn today_overlay_rows(month_h: f32) -> u8 {
     (month_h / super::layout::CELL).ceil().max(0.0) as u8
 }
 
+/// Объединённые события и версии источников, из которых они собраны.
+type MergedEvents = ((u64, u64), std::sync::Arc<Vec<online::RawEvent>>);
+
 pub struct Today {
     /// Выбранный пресет (индекс в `PRESETS`); `None` — время задано вручную.
     preset: Option<usize>,
@@ -122,7 +126,9 @@ pub struct Today {
     local: Vec<crate::online::LocalEvent>,
     local_ver: u64,
     /// Календарь по ссылкам вместе со своими событиями: (версии источников, список).
-    merged: Option<((u64, u64), std::sync::Arc<Vec<online::RawEvent>>)>,
+    merged: Option<MergedEvents>,
+    /// Открытая форма события острова (поверх месячного календаря).
+    ev_form: Option<event_form::EventForm>,
     /// Минута, до которой напоминания о событиях уже проверены.
     seen_min: i64,
     /// Ближайшее событие календаря (пересчитывается раз в минуту).
@@ -179,6 +185,7 @@ impl Default for Today {
             local: Vec::new(),
             local_ver: 0,
             merged: None,
+            ev_form: None,
             seen_min: 0,
             next: None,
             next_min: i64::MIN,
@@ -227,6 +234,7 @@ impl Today {
         self.month_t.snap();
         self.editing = false;
         self.cal_editing = false;
+        self.ev_form = None;
         self.edit = None;
         self.clock_pick = None;
     }

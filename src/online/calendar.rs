@@ -190,6 +190,8 @@ pub struct DayEvent {
     /// Минуты окончания от полуночи; `None` — весь день или не задано.
     pub end_minute: Option<i64>,
     pub title: String,
+    /// Номер события, созданного в самом острове (его можно править и удалять).
+    pub local_id: Option<u64>,
 }
 
 /// Ответ сервера — календарь iCal. Неверная ссылка часто отдаёт обычную страницу (вход,
@@ -562,6 +564,7 @@ pub fn events_by_day(raws: &[RawEvent], first_day: i64, days: usize, offset: i64
     let mut out: Vec<Vec<DayEvent>> = vec![Vec::new(); days];
     for raw in raws {
         let dur = if raw.end > raw.start { raw.end - raw.start } else { 0 };
+        let local_id = raw.uid.strip_prefix("island-local-").and_then(|n| n.parse().ok());
         let mut add = |t: i64| {
             let first = t.div_euclid(1440);
             let last = if dur > 0 { (t + dur - 1).div_euclid(1440).max(first) } else { first };
@@ -582,7 +585,7 @@ pub fn events_by_day(raws: &[RawEvent], first_day: i64, days: usize, offset: i64
                 } else {
                     minute
                 };
-                out[(d - lo) as usize].push(DayEvent { minute, end_minute, title: raw.title.clone() });
+                out[(d - lo) as usize].push(DayEvent { minute, end_minute, title: raw.title.clone(), local_id });
             }
         };
         if raw.rrule.is_none() {
