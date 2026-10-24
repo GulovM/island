@@ -8,7 +8,7 @@
 use std::sync::OnceLock;
 
 use super::layout::{Spec, TabSpec, HIDDEN};
-use super::{controls, stats, today, CONTROLS, STATS, TODAY};
+use super::{controls, stats, today};
 
 /// Размер сетки собственной вкладки в ячейках: 10 колонок, 5 рядов.
 pub const COLS: u8 = 10;
@@ -31,15 +31,6 @@ impl Owner {
             Owner::Controls => &controls::SPEC,
             Owner::Today => &today::SPEC,
             Owner::Stats => &stats::SPEC,
-        }
-    }
-
-    /// Номер вкладки-хозяина.
-    pub fn tab(self) -> usize {
-        match self {
-            Owner::Controls => CONTROLS,
-            Owner::Today => TODAY,
-            Owner::Stats => STATS,
         }
     }
 
@@ -69,11 +60,6 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// Номер виджета в каталоге по хозяину и номеру у него.
-    pub fn index(&self, owner: Owner, idx: usize) -> Option<usize> {
-        self.map.iter().position(|&m| m == (owner, idx))
-    }
-
     /// Хозяева виджетов, которые стоят на вкладке (не в лотке).
     pub fn owners_on(&self, lay: &super::layout::Layout) -> Vec<Owner> {
         let mut out: Vec<Owner> = Vec::new();
@@ -134,7 +120,6 @@ mod tests {
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), total, "ключи каталога не повторяются");
-        assert_eq!(c.index(Owner::Today, 0), Some(controls::SPEC.specs.len()));
     }
 
     #[test]
@@ -147,5 +132,22 @@ mod tests {
         for s in spec.specs {
             assert!(s.sizes.iter().any(|z| z.w <= COLS && z.h <= ROWS), "{} не помещается в сетку", s.key);
         }
+    }
+
+    #[test]
+    fn custom_layout_keeps_only_placed_widgets_and_round_trips() {
+        use super::super::layout::Layout;
+        let c = catalog();
+        let spec = super::super::layout::resolve_full(c.spec, 8);
+        let lay = Layout::parse(spec, "v2 controls.wifi@0,0 today.clock@2,0 -stats.cpu@0,0");
+        let visible: Vec<&str> = lay.entries.iter().filter(|e| !e.hidden).map(|e| spec.specs[e.idx].key).collect();
+        assert_eq!(visible, ["controls.wifi", "today.clock"]);
+        let text = lay.to_text(spec);
+        assert!(!text.contains("stats.cpu"), "нетронутые виджеты из лотка в строку не пишутся: {text}");
+        let back = Layout::parse(spec, &text);
+        assert_eq!(back.to_text(spec), text);
+        assert_eq!(back.entries.iter().filter(|e| !e.hidden).count(), 2);
+        // Виджет другого хозяина с тем же ключом на этой вкладке не появляется: ключи с приставкой.
+        assert_eq!(Layout::parse(spec, "v2 wifi@0,0").entries.iter().filter(|e| !e.hidden).count(), 0);
     }
 }

@@ -1137,6 +1137,10 @@ impl Layout {
         parts.push(VERSION.to_string());
         for e in &self.entries {
             let s = &spec.specs[e.idx];
+            // Лежит в лотке по умолчанию и не тронут: разбор вернёт его туда же, место в строке не нужно.
+            if e.hidden && s.row == HIDDEN && e.size == s.size {
+                continue;
+            }
             let mut t = String::new();
             if e.hidden {
                 t.push('-');
