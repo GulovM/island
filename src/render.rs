@@ -203,7 +203,7 @@ impl App {
             let r = ui::Rect::new(centre - fw / 2.0, 0.0, fw, fh);
             match slot {
                 Slot::Mini => self.live.draw_mini(ui, &cv, r),
-                Slot::Toast => self.live.draw_toast(&cv, r),
+                Slot::Toast => self.live.draw_toast(&cv, r, cursor),
                 Slot::Face => {
                     let label = self.live.timer().map(|t| t.label());
                     self.face.draw(&cv, r, label.as_deref().map(|l| (l, self.live.timer_pulse())));

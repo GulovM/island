@@ -46,9 +46,15 @@ fn alarm_wav() -> Vec<u8> {
     w
 }
 
+static PLAYING: AtomicBool = AtomicBool::new(false);
+
+/// Сигнал ещё звучит: уведомление на острове остаётся, пока он не закончится.
+pub fn is_playing() -> bool {
+    PLAYING.load(Ordering::Acquire)
+}
+
 /// Сигнал окончания таймера в отдельном потоке (не блокирует интерфейс).
 pub(super) fn play_alarm() {
-    static PLAYING: AtomicBool = AtomicBool::new(false);
     if PLAYING.swap(true, Ordering::AcqRel) {
         return;
     }

@@ -37,6 +37,10 @@ impl App {
             }
             Ev::LeaveTimer => self.on_leave_timer(),
             Ev::Down(x, y) => {
+                if self.hits_toast_close(x, y) {
+                    self.dismiss_toast();
+                    return true;
+                }
                 let switched = self.click(x, y);
                 if !switched && self.expanded {
                     self.ui.down = true;
@@ -83,7 +87,7 @@ impl App {
                 self.expanded
             }
             Ev::Char(c) => {
-                if self.ui.focus.is_some() && c >= 0x20 && c != 0x7f {
+                if self.ui.focus.is_some() && !self.live.alert() && c >= 0x20 && c != 0x7f {
                     // Суррогатные пары приходят двумя WM_CHAR: сводим их в один символ.
                     if (0xD800..0xDC00).contains(&c) {
                         self.high_surrogate = c;
@@ -187,11 +191,12 @@ impl App {
                 None => false,
             },
             Ev::ToastTimer => {
-                let _ = KillTimer(Some(self.hwnd), TOAST_TIMER);
-                let was = self.live.clear_toast();
-                self.retarget();
-                self.trim_pending = true;
-                was
+                // Уведомление о таймере живёт, пока звучит сигнал: закрываем его вслед за звуком.
+                if self.live.alert() && self.tabs.alarm_playing() {
+                    SetTimer(Some(self.hwnd), TOAST_TIMER, 400, None);
+                    return false;
+                }
+                self.dismiss_toast()
             }
             Ev::LiveTick => {
                 // Раз в секунду таймер заводится заново под следующую смену цифры.

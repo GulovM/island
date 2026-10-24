@@ -67,7 +67,8 @@ impl Toast {
     /// Сколько уведомление остаётся на экране.
     pub fn lifetime(&self) -> Duration {
         Duration::from_millis(match self {
-            Toast::Timer => 6000,
+            // Минимум; пока звучит сигнал, остров ждёт его конца (см. `ToastTimer`).
+            Toast::Timer => 4000,
             Toast::Volume { .. } | Toast::Brightness { .. } => 1700,
             Toast::Charging { .. } => 3000,
             Toast::LowBattery(_) => 5000,
@@ -214,6 +215,12 @@ impl Live {
         self.shown = Some(t);
     }
 
+    /// Показано уведомление об окончании таймера: остров ради него выходит из полоски, не раскрывается
+    /// от наведения и закрывается по ×, Esc или таймауту.
+    pub fn alert(&self) -> bool {
+        self.toast == Some(Toast::Timer)
+    }
+
     pub fn clear_toast(&mut self) -> bool {
         self.toast.take().is_some()
     }
@@ -343,8 +350,13 @@ impl Live {
         self.draw_timer_line(cv, r);
     }
 
-    /// Уведомление: значок слева, текст и значение справа.
-    pub unsafe fn draw_toast(&self, cv: &Canvas, r: Rect) {
+    /// Кнопка × в уведомлении о таймере (логические пиксели, `r` — прямоугольник уведомления).
+    pub fn close_rect(r: Rect) -> Rect {
+        Rect::new(r.right() - 32.0, r.cy() - 10.0, 20.0, 20.0)
+    }
+
+    /// Уведомление: значок слева, текст и значение справа. `cursor` — для подсветки ×.
+    pub unsafe fn draw_toast(&self, cv: &Canvas, r: Rect, cursor: (f32, f32)) {
         let Some(t) = self.shown else { return };
         let f = &cv.g.fonts;
         let cy = r.y + r.h / 2.0 - 1.0;
@@ -355,7 +367,11 @@ impl Live {
         match t {
             Toast::Timer => {
                 cv.glyph(icon::CLOCK, ic, false, cv.accent);
-                cv.text("Таймер завершён", Rect::new(tx, cy - 8.0, right - tx, 16.0), &f.body, txt());
+                cv.text(&crate::i18n::tr("Таймер завершён"), Rect::new(tx, cy - 8.0, Self::close_rect(r).x - tx, 16.0), &f.body, txt());
+                let x = Self::close_rect(r);
+                let hot = cursor.0 >= x.x - 4.0 && cursor.0 < x.right() + 4.0 && cursor.1 >= x.y - 4.0 && cursor.1 < x.bottom() + 4.0;
+                cv.circle(x.cx(), x.cy(), 9.0, crate::ui::mix(crate::ui::chip_bg(), txt(), if hot { 0.18 } else { 0.0 }));
+                cv.glyph(icon::CLOSE, x.inset(4.0), false, if hot { txt() } else { dim() });
             }
             Toast::Volume { level, muted } => {
                 let g = if muted || level <= 0.0 {
@@ -514,5 +530,16 @@ mod tests {
     #[test]
     fn toast_lifetimes_are_sane() {
         assert!(Toast::Volume { level: 0.5, muted: false }.lifetime() < Toast::Timer.lifetime());
+    }
+
+    #[test]
+    fn only_timer_toast_is_an_alert() {
+        let mut l = Live::new(true);
+        l.show(Toast::Volume { level: 0.5, muted: false });
+        assert!(!l.alert());
+        l.show(Toast::Timer);
+        assert!(l.alert());
+        l.clear_toast();
+        assert!(!l.alert(), "после закрытия остров возвращается в прежнее состояние");
     }
 }

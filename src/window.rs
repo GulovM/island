@@ -109,8 +109,9 @@ impl App {
 
     /// Остров стал тонкой полоской: выбран режим «всегда полоска» либо окно развёрнуто на весь экран
     /// и включён режим полоски (переключатель в Настройках или правый клик по острову). Иначе остров остаётся обычной чёлкой.
+    /// На время уведомления об окончании таймера остров выходит из полоски: его надо заметить.
     pub(crate) fn stripped(&self) -> bool {
-        self.cfg.always_strip || (self.covered && self.cfg.strip_over_maximized)
+        (self.cfg.always_strip || (self.covered && self.cfg.strip_over_maximized)) && !self.live.alert()
     }
 
     /// Правый клик по раскрытому острову включает/выключает режим полоски; действует с момента,
@@ -138,13 +139,51 @@ impl App {
 
     /// Показывает уведомление в свёрнутой форме. `true` — нужен кадр.
     pub(crate) unsafe fn show_toast(&mut self, t: live::Toast) -> bool {
-        if !self.cfg.live_toasts || self.expanded || self.stripped() || self.hidden || self.gfx.is_none() {
+        // Окончание таймера заметно и в режиме полоски; остальные уведомления полоска не показывает.
+        let strip_blocks = self.stripped() && t != live::Toast::Timer;
+        // В игре (остров спрятан) приходит только звук.
+        if !self.cfg.live_toasts || self.expanded || strip_blocks || self.hidden || self.gfx.is_none() {
             return false;
         }
         self.live.show(t);
         SetTimer(Some(self.hwnd), TOAST_TIMER, t.lifetime().as_millis() as u32, None);
+        if t == live::Toast::Timer {
+            // Клавиатура — на остров, чтобы закрыть уведомление по Esc; sync_focus запомнит прежнее окно.
+            self.ui.focus = Some(NOTICE_FOCUS);
+        }
         self.retarget();
         true
+    }
+
+    /// Закрывает уведомление и возвращает остров в прежнее состояние. Фокус ввода, если он был
+    /// у острова ради уведомления, уходит прежнему окну. `true` — что-то изменилось.
+    pub(crate) unsafe fn dismiss_toast(&mut self) -> bool {
+        let _ = KillTimer(Some(self.hwnd), TOAST_TIMER);
+        let was = self.live.clear_toast();
+        if self.ui.focus == Some(NOTICE_FOCUS) {
+            self.ui.blur();
+        }
+        self.retarget();
+        self.sync_focus();
+        self.trim_pending = true;
+        was
+    }
+
+    /// Центр острова по горизонтали и прямоугольник его уведомления (логические пиксели).
+    pub(crate) fn toast_rect(&self) -> ui::Rect {
+        let collapsed = self.collapsed();
+        let fw = live::TOAST.0.max(collapsed.0);
+        ui::Rect::new(self.win_w as f32 / self.scale / 2.0 - fw / 2.0, 0.0, fw, live::TOAST.1.max(collapsed.1))
+    }
+
+    /// Клик (в пикселях окна) попал в × уведомления о таймере.
+    pub(crate) fn hits_toast_close(&self, px: i32, py: i32) -> bool {
+        if !self.live.alert() || self.expanded {
+            return false;
+        }
+        let x = live::Live::close_rect(self.toast_rect());
+        let (px, py) = (px as f32 / self.scale, py as f32 / self.scale);
+        px >= x.x - 4.0 && px < x.right() + 4.0 && py >= x.y - 4.0 && py < x.bottom() + 4.0
     }
 
     pub(crate) unsafe fn set_expanded(&mut self, expanded: bool) {
@@ -153,8 +192,8 @@ impl App {
         }
         self.expanded = expanded;
         self.leave_hold = None;
-        if expanded && self.live.clear_toast() {
-            let _ = KillTimer(Some(self.hwnd), TOAST_TIMER);
+        if expanded {
+            self.dismiss_toast();
         }
         if expanded && self.cfg.system_colors {
             // Подстраховка на случай, если уведомление об смене системных цветов не пришло.
@@ -400,6 +439,10 @@ impl App {
     pub(crate) unsafe fn on_move(&mut self) -> bool {
         if self.hidden {
             return false;
+        }
+        // Над уведомлением о таймере остров не раскрывается: к × надо суметь дотянуться (кадр — на подсветку).
+        if self.live.alert() && !self.expanded {
+            return true;
         }
         let was_collapsed = !self.expanded;
         if was_collapsed {

@@ -99,6 +99,10 @@ impl App {
         if self.ui.focus.is_none() {
             return false;
         }
+        // Фокус у острова только ради уведомления о таймере: Esc закрывает его, остальное не нужно.
+        if self.live.alert() && self.ui.focus == Some(NOTICE_FOCUS) {
+            return vk == VK_ESCAPE.0 as u32 && self.dismiss_toast();
+        }
         let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
         // AltGr (польская, немецкая и др. раскладки) приходит как Ctrl+Alt: это ввод символа, не шорткат.
         let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0 && GetKeyState(VK_MENU.0 as i32) >= 0;
@@ -138,7 +142,17 @@ impl App {
             let ex = GetWindowLongW(self.hwnd, GWL_EXSTYLE) as u32 & !WS_EX_NOACTIVATE.0;
             SetWindowLongW(self.hwnd, GWL_EXSTYLE, ex as i32);
             self.ensure_topmost(true);
-            let _ = SetForegroundWindow(self.hwnd);
+            if !SetForegroundWindow(self.hwnd).as_bool() {
+                // Фоновому процессу Windows не отдаёт передний план просто так (таймер сработал сам по себе):
+                // на миг присоединяемся к потоку окна, которое сейчас в фокусе.
+                let fg_thread = GetWindowThreadProcessId(self.prev_fg, None);
+                let me = windows::Win32::System::Threading::GetCurrentThreadId();
+                if fg_thread != 0 && fg_thread != me {
+                    let _ = windows::Win32::System::Threading::AttachThreadInput(me, fg_thread, true);
+                    let _ = SetForegroundWindow(self.hwnd);
+                    let _ = windows::Win32::System::Threading::AttachThreadInput(me, fg_thread, false);
+                }
+            }
             let _ = SetFocus(Some(self.hwnd));
             self.ui.caret_on = true;
             SetTimer(Some(self.hwnd), CARET_TIMER, CARET_MS, None);
