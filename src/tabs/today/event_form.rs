@@ -158,7 +158,7 @@ impl Today {
         if ui.icon_button(cv, id(TODAY, DAY_NEXT), Rect::new(x + 110.0, dy, 18.0, 18.0), icon::RIGHT, false) {
             form.day += 1;
         }
-        cv.line(pick("Весь день", "All day"), &f.small, r.right() - 9.0 - 34.0 - 6.0, 70.0, dy + 9.0, Align::Trailing, dim());
+        cv.line(pick("Весь день", "All day"), &f.small, r.right() - 9.0 - 34.0 - 6.0 - 70.0, 70.0, dy + 9.0, Align::Trailing, dim());
         let mut all = form.all_day;
         ui.switch(cv, id(TODAY, ALL_DAY), Rect::new(r.right() - 9.0 - 34.0, dy + 1.0, 34.0, 16.0), &mut all, true);
         form.all_day = all;
