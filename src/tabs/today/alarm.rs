@@ -9,23 +9,38 @@ use windows::Win32::System::Diagnostics::Debug::Beep;
 /// WAV (16 бит, моно) с тремя двойными гудками: звучит через звуковое устройство по умолчанию,
 /// в отличие от `Beep` и звуков схемы Windows, которые на многих системах молчат.
 fn alarm_wav() -> Vec<u8> {
-    const RATE: u32 = 44_100;
     let mut pcm: Vec<i16> = Vec::new();
-    let tone = |pcm: &mut Vec<i16>, freq: f32, ms: u32| {
-        let n = RATE * ms / 1000;
-        for i in 0..n {
-            let t = i as f32 / RATE as f32;
-            // Короткое нарастание и затухание, чтобы не щёлкало.
-            let env = (i.min(n - i) as f32 / (RATE as f32 * 0.01)).min(1.0);
-            pcm.push((env * 0.4 * i16::MAX as f32 * (std::f32::consts::TAU * freq * t).sin()) as i16);
-        }
-    };
     for _ in 0..2 {
         tone(&mut pcm, 523.0, 220);
         tone(&mut pcm, 659.0, 220);
         tone(&mut pcm, 784.0, 420);
         pcm.extend(std::iter::repeat_n(0i16, (RATE * 400 / 1000) as usize));
     }
+    pcm_wav(&pcm)
+}
+
+/// Одиночный короткий сигнал для напоминания о событии.
+fn ding_wav() -> Vec<u8> {
+    let mut pcm: Vec<i16> = Vec::new();
+    tone(&mut pcm, 784.0, 160);
+    tone(&mut pcm, 1047.0, 260);
+    pcm_wav(&pcm)
+}
+
+const RATE: u32 = 44_100;
+
+/// Добавляет в `pcm` тон `freq` Гц длиной `ms` мс.
+fn tone(pcm: &mut Vec<i16>, freq: f32, ms: u32) {
+    let n = RATE * ms / 1000;
+    for i in 0..n {
+        let t = i as f32 / RATE as f32;
+        // Короткое нарастание и затухание, чтобы не щёлкало.
+        let env = (i.min(n - i) as f32 / (RATE as f32 * 0.01)).min(1.0);
+        pcm.push((env * 0.4 * i16::MAX as f32 * (std::f32::consts::TAU * freq * t).sin()) as i16);
+    }
+}
+
+fn pcm_wav(pcm: &[i16]) -> Vec<u8> {
     let bytes = (pcm.len() * 2) as u32;
     let mut w = Vec::with_capacity(44 + bytes as usize);
     w.extend_from_slice(b"RIFF");
@@ -140,6 +155,23 @@ pub(super) fn play_alarm() {
     });
 }
 
+/// Один короткий сигнал о событии календаря. Не мешает долгому сигналу таймера: пока тот звучит,
+/// второй не запускается.
+pub(super) fn play_ding() {
+    if PLAYING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    STOP.store(false, Ordering::Release);
+    std::thread::spawn(|| {
+        unsafe {
+            if !play_wav(&ding_wav(), 1) {
+                let _ = Beep(1047, 200);
+            }
+        }
+        PLAYING.store(false, Ordering::Release);
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +192,12 @@ mod tests {
         // Два раза по 220 + 220 + 420 + 400 мс.
         assert!((d.as_secs_f32() - 2.52).abs() < 0.01, "{d:?}");
         assert!(wav_duration(b"nope").is_none());
+    }
+
+    #[test]
+    fn ding_is_short_and_valid() {
+        let d = wav_duration(&ding_wav()).unwrap();
+        assert!(d.as_secs_f32() < 0.6, "{d:?}");
     }
 
     #[test]

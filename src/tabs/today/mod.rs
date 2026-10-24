@@ -5,6 +5,7 @@
 mod alarm;
 mod calendar;
 mod clock;
+mod events;
 mod timer;
 mod todo;
 mod weather;
@@ -25,6 +26,7 @@ use super::layout::{sz, Size, Spec, TabSpec};
 use super::{id, TODAY};
 use alarm::play_alarm;
 use calendar::MonthCache;
+pub use events::Notice;
 use todo::RowAnim;
 
 /// Число циферблатов часов.
@@ -116,6 +118,13 @@ pub struct Today {
     cal_editing: bool,
     cal_bad: bool,
     online: Online,
+    /// События, созданные в острове (`events.txt`); `local_ver` растёт при каждом изменении.
+    local: Vec<crate::online::LocalEvent>,
+    local_ver: u64,
+    /// Календарь по ссылкам вместе со своими событиями: (версии источников, список).
+    merged: Option<((u64, u64), std::sync::Arc<Vec<online::RawEvent>>)>,
+    /// Минута, до которой напоминания о событиях уже проверены.
+    seen_min: i64,
     /// Ближайшее событие календаря (пересчитывается раз в минуту).
     next: Option<Event>,
     next_min: i64,
@@ -167,6 +176,10 @@ impl Default for Today {
             cal_editing: false,
             cal_bad: false,
             online: Online::default(),
+            local: Vec::new(),
+            local_ver: 0,
+            merged: None,
+            seen_min: 0,
             next: None,
             next_min: i64::MIN,
             month_open: false,
@@ -220,6 +233,7 @@ impl Today {
 
     pub fn sync(&mut self) -> bool {
         self.online = online::snapshot();
+        self.merge_events();
         self.next_min = online::now_local_minutes();
         self.next = online::next_of(&self.online.cal, self.next_min, online::utc_offset_minutes());
         true

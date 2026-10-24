@@ -519,7 +519,7 @@ pub fn parse_ics(ics: &str, offset: i64) -> Vec<RawEvent> {
 }
 
 /// Начало следующего вхождения `raw` не раньше `from` с учётом исключений.
-fn occurrence_from(raw: &RawEvent, from: i64, offset: i64) -> Option<i64> {
+pub(super) fn occurrence_from(raw: &RawEvent, from: i64, offset: i64) -> Option<i64> {
     let mut from = from;
     for _ in 0..64 {
         let t = next_occurrence(raw.start, raw.all_day, raw.rrule.as_deref(), from, offset)?;
