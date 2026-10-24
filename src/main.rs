@@ -72,8 +72,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 // ---------- Раскладка (логические пиксели, умножаются на DPI-масштаб) ----------
 
-pub(crate) const TAB_COUNT: usize = 7;
-pub(crate) const TABS: [&str; TAB_COUNT] = ["Controls", "Today", "Stats", "Clipboard", "Apps", "Wallpaper", "Power"];
+pub(crate) const TABS: [&str; 7] = ["Controls", "Today", "Stats", "Clipboard", "Apps", "Wallpaper", "Power"];
 /// Высота «тонкой полоски», в которую остров сворачивается поверх развёрнутого на весь экран окна.
 pub(crate) const STRIP_H: f32 = 3.0;
 pub(crate) const TAB_H: f32 = 17.0;
@@ -198,7 +197,7 @@ fn run() -> Result<()> {
     // Прежний выбор из strip.txt переносится в config.toml один раз.
     if let Some(l) = tabs::read_lines(STRIP_FILE).first() {
         cfg.strip_over_maximized = l.trim() == "1";
-        config::save(&cfg, &TABS);
+        config::save(&cfg);
         let _ = std::fs::remove_file(sys::data_dir().join(STRIP_FILE));
     }
     i18n::set(i18n::from_config(&cfg.language));
@@ -352,7 +351,7 @@ fn run() -> Result<()> {
         }
         // Выход из трея сразу после правки: не теряем отложенное сохранение настроек.
         if app.save_pending {
-            config::save(&app.cfg, &TABS);
+            config::save(&app.cfg);
         }
         state::flush();
         for h in hooks {

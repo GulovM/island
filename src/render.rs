@@ -398,7 +398,7 @@ impl App {
                     ui::bare()
                 };
                 c.a *= content_p;
-                g.draw_text(crate::i18n::tab_name(self.order[i]), px, py, pw, ph, c);
+                g.draw_text(&self.cfg.tab_label(self.order[i]), px, py, pw, ph, c);
             }
 
             // Шестерёнка настроек: при наведении поворачивается, при открытых настройках залита акцентом.

@@ -37,6 +37,8 @@ pub const WALLPAPER: usize = 5;
 pub const POWER: usize = 6;
 /// Страница настроек: не вкладка ряда, а отдельный вид острова (шестерёнка); номер идёт после вкладок.
 pub const SETTINGS: usize = 7;
+/// Номер первой собственной вкладки; остальные идут следом в порядке `Config::custom`.
+pub const CUSTOM_BASE: usize = SETTINGS + 1;
 
 /// Верх области содержимого под рядом вкладок и боковое поле.
 pub const TOP: f32 = 38.0;

@@ -54,9 +54,11 @@ const N_SECTION: u32 = 30;
 /// Занимает пять номеров подряд (33–37) — по числу `MATERIALS`.
 const N_MATERIAL: u32 = 33;
 /// Три группы по номеру вкладки (+0..6): переключатель, «вверх», «вниз».
-const N_SWITCH: u32 = 40;
-const N_UP: u32 = 60;
-const N_DOWN: u32 = 80;
+/// Строки списка вкладок нумеруются номером вкладки; на каждую группу отведено `TAB_SLOTS` номеров.
+const TAB_SLOTS: u32 = 2000;
+const N_SWITCH: u32 = 1000;
+const N_UP: u32 = N_SWITCH + TAB_SLOTS;
+const N_DOWN: u32 = N_UP + TAB_SLOTS;
 
 /// Раздел страницы настроек.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -169,7 +171,8 @@ pub struct Settings {
     scale_drag: Option<f32>,
     autostart: bool,
     /// Вертикальные позиции строк вкладок по их номеру (плавная перестановка).
-    rows: [Spring; 7],
+    /// Положение строки списка вкладок по номеру вкладки.
+    rows: Vec<Spring>,
     rows_ready: bool,
     /// Выбранный раздел: помнится, пока программа работает (в конфиг не пишется).
     section: Section,
@@ -187,7 +190,7 @@ impl Default for Settings {
             glow: false,
             scale_drag: None,
             autostart: false,
-            rows: std::array::from_fn(|_| Spring::new(0.0, 520.0, 38.0)),
+            rows: Vec::new(),
             rows_ready: false,
             section: Section::Look,
             transparency_cache: None,
@@ -304,19 +307,20 @@ impl Settings {
     }
 
     /// Порядок вкладок: `order[позиция] = номер вкладки`.
-    fn order(&self) -> [usize; 7] {
-        self.cfg.resolve_order(&crate::TABS)
+    fn order(&self) -> Vec<usize> {
+        self.cfg.ordered_tabs()
     }
 
     fn hidden(&self, tab: usize) -> bool {
-        self.cfg.hidden_tabs.iter().any(|h| h.eq_ignore_ascii_case(crate::TABS[tab]))
+        let key = self.cfg.tab_key(tab);
+        self.cfg.hidden_tabs.iter().any(|h| h.eq_ignore_ascii_case(&key))
     }
 
     fn set_hidden(&mut self, tab: usize, hide: bool) {
-        let name = crate::TABS[tab];
-        self.cfg.hidden_tabs.retain(|h| !h.eq_ignore_ascii_case(name));
+        let key = self.cfg.tab_key(tab);
+        self.cfg.hidden_tabs.retain(|h| !h.eq_ignore_ascii_case(&key));
         if hide {
-            self.cfg.hidden_tabs.push(name.to_string());
+            self.cfg.hidden_tabs.push(key);
         }
         self.changed = true;
     }
@@ -324,7 +328,7 @@ impl Settings {
     fn move_tab(&mut self, pos: usize, to: usize) {
         let mut order = self.order();
         order.swap(pos, to);
-        self.cfg.tabs = order.iter().map(|&i| crate::TABS[i].to_string()).collect();
+        self.cfg.tabs = order.iter().map(|&i| self.cfg.tab_key(i)).collect();
         self.changed = true;
     }
 
@@ -342,7 +346,7 @@ impl Settings {
         self.cfg.ui_scale = DEFAULT_SCALE;
         self.scale_drag = None;
         self.cfg.hidden_tabs.clear();
-        self.cfg.tabs = crate::TABS.iter().map(|t| t.to_string()).collect();
+        self.cfg.tabs = self.cfg.tab_keys().into_iter().map(|(_, k)| k).collect();
         self.cfg.idle_face = true;
         self.cfg.strip_over_maximized = d.strip_over_maximized;
         self.hsv = theme::rgb_to_hsv(self.current());
@@ -691,7 +695,12 @@ impl Settings {
         cv.text("ВКЛАДКИ — ВКЛЮЧЕНИЕ И ПОРЯДОК", Rect::new(x, y, iw, 11.0), &f.caps, dim());
         y += 15.0;
         let order = self.order();
-        let visible = self.cfg.resolve_visible(&crate::TABS).len();
+        let visible = self.cfg.visible_tabs().len();
+        let slots = crate::tabs::CUSTOM_BASE + self.cfg.custom.len();
+        if self.rows.len() != slots {
+            self.rows.resize_with(slots, || Spring::new(0.0, 520.0, 38.0));
+            self.rows_ready = false;
+        }
         if !self.rows_ready {
             for (pos, &tab) in order.iter().enumerate() {
                 self.rows[tab].target = pos as f32 * ROW_PITCH;
@@ -711,7 +720,7 @@ impl Settings {
             if ui.switch(cv, id(SETTINGS, N_SWITCH + tab as u32), Rect::new(r.x + 6.0, r.y + 2.5, 30.0, 16.0), &mut on, can_toggle) {
                 self.set_hidden(tab, !on);
             }
-            cv.text(crate::i18n::tab_name(tab), Rect::new(r.x + 44.0, r.y, r.w - 92.0, r.h), &f.body, if hidden { dim() } else { txt() });
+            cv.text(&self.cfg.tab_label(tab), Rect::new(r.x + 44.0, r.y, r.w - 92.0, r.h), &f.body, if hidden { dim() } else { txt() });
             let up = Rect::new(r.right() - 44.0, r.y + 1.5, 18.0, 18.0);
             let down = Rect::new(r.right() - 23.0, r.y + 1.5, 18.0, 18.0);
             if pos > 0 {
@@ -874,7 +883,7 @@ mod tests {
         let mut c = s.take_change().unwrap();
         assert!(s.take_change().is_none(), "изменение отдаётся один раз");
         c.hidden_tabs.clear();
-        assert_eq!(c.resolve_order(&crate::TABS)[0], crate::tabs::TODAY);
+        assert_eq!(c.ordered_tabs()[0], crate::tabs::TODAY);
     }
 
     #[test]
@@ -930,7 +939,7 @@ mod tests {
         assert_eq!(s.cfg.palette_style, Config::default().palette_style);
         assert_eq!(s.cfg.accent_pill, Config::default().accent_pill);
         assert!(s.cfg.hidden_tabs.is_empty() && s.cfg.idle_face);
-        assert_eq!(s.cfg.resolve_visible(&crate::TABS).len(), 7);
+        assert_eq!(s.cfg.visible_tabs().len(), 7);
     }
 
     #[test]
@@ -967,7 +976,7 @@ mod tests {
 
     #[test]
     fn widget_ids_do_not_overlap() {
-        let tabs = crate::TABS.len() as u32;
+        let tabs = TAB_SLOTS;
         let groups = [
             (N_SYSTEM, 1),
             (N_CHIP_ACCENT, 1),

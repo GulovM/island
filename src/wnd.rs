@@ -453,12 +453,13 @@ pub(crate) unsafe fn monitor_scale(mon: HMONITOR) -> f32 {
 }
 
 /// Ширина подписи каждой вкладки (логические пиксели, вместе с внутренними полями).
-pub(crate) unsafe fn measure_tabs(dwrite: &IDWriteFactory, scale: f32) -> Result<[f32; TAB_COUNT]> {
+pub(crate) unsafe fn measure_tabs(dwrite: &IDWriteFactory, scale: f32, cfg: &crate::config::Config) -> Result<Vec<f32>> {
     let text = gfx::make_text(dwrite, scale)?;
     let tracking = gfx::tab_tracking(scale);
-    let mut widths = [0.0f32; TAB_COUNT];
+    // Индекс — номер вкладки; на странице настроек (между встроенными и собственными) подписи нет.
+    let mut widths = vec![0.0f32; crate::tabs::CUSTOM_BASE + cfg.custom.len()];
     for (i, width) in widths.iter_mut().enumerate() {
-        let wide: Vec<u16> = crate::i18n::tab_name(i).encode_utf16().collect();
+        let wide: Vec<u16> = cfg.tab_label(i).encode_utf16().collect();
         let layout = dwrite.CreateTextLayout(&wide, &text, 1000.0, 100.0)?;
         crate::ui::apply_tracking(&layout, tracking, wide.len() as u32);
         let mut m = DWRITE_TEXT_METRICS::default();

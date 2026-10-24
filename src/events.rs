@@ -324,7 +324,7 @@ impl App {
         }
         if self.save_pending && !self.ui.down {
             self.save_pending = false;
-            config::save(&self.cfg, &TABS);
+            config::save(&self.cfg);
         }
         // Остров светится, пока тянут ползунок радиуса углов.
         let glow = self.expanded && self.settings_open && self.tabs.settings.glowing();
