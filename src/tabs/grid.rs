@@ -187,6 +187,8 @@ pub struct Grid {
     stretching: Option<StretchDrag>,
     window: Window,
     min_cols: u8,
+    /// Размер окна в режиме правки (колонки, ряды): правка начинается минимум с него. (0, 0) — как есть.
+    edit_min: (u8, u8),
     overlay_rows: u8,
     /// Автоуплотнение раскладки (как в Пункте управления iOS); `false` — свободная раскладка с пустотами.
     compact: bool,
@@ -224,6 +226,7 @@ impl Default for Grid {
             stretching: None,
             window: Window { c0: 0, r0: 0, c1: 1, r1: 1 },
             min_cols: 1,
+            edit_min: (0, 0),
             overlay_rows: 0,
             compact: true,
             last_skip: 0,
@@ -448,6 +451,23 @@ impl Grid {
         self.edit.target = 1.0;
         self.tray_open = false;
         self.stretching = None;
+        if self.edit_min != (0, 0) {
+            let w = self.window;
+            let (mut c0, mut c1, mut r0, mut r1) = (w.c0, w.c1, w.r0, w.r1);
+            layout::expand_range(&mut c0, &mut c1, self.edit_min.0, self.spec.cols);
+            layout::expand_range(&mut r0, &mut r1, self.edit_min.1, self.spec.rows);
+            let win = Window { c0, r0, c1, r1 };
+            if win != w {
+                self.window = win;
+                self.resize = true;
+            }
+        }
+    }
+
+    /// Задаёт минимальный размер окна в режиме правки: пустую или маленькую вкладку удобно наполнять,
+    /// когда видна вся сетка и хватает места лотку.
+    pub fn set_edit_min(&mut self, cols: u8, rows: u8) {
+        self.edit_min = (cols, rows);
     }
 
     pub fn end_edit(&mut self) {

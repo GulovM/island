@@ -317,6 +317,13 @@ impl App {
             }
         }
 
+        // Размер вкладки мог измениться без просьбы (окно сетки подогнали под ряд вкладок после запуска,
+        // собственная вкладка выросла): остров идёт к актуальному размеру.
+        if self.expanded && self.body.expanded_goal() != self.expanded_target() {
+            self.retarget();
+            dirty = true;
+        }
+
         // Изменения со страницы настроек: применяем сразу, пока ползунок или палитру тянут.
         if let Some(c) = self.tabs.settings.take_change() {
             self.apply_settings(c);

@@ -305,18 +305,47 @@ impl Today {
     /// Рисует вкладку по сетке; месячный календарь раскрывается поверх неё. `h` — высота панели
     /// (с полосой правки).
     pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
-        self.month_t.target = if self.month_open { 1.0 } else { 0.0 };
-        let month_active = self.month_open || self.month_t.value > 0.0;
-        let overlay_rows = if month_active { today_overlay_rows(MONTH_H) } else { 0 };
-        grid.set_overlay_rows(overlay_rows);
-
+        grid.set_overlay_rows(self.prepare());
         let area = grid.area(w, h);
         let t = GetLocalTime();
         let dow = (t.wDayOfWeek as usize + 6) % 7;
         let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
         // Виджеты под календарём гаснут и не принимают нажатий (иначе они перехватят их у дней месяца).
-        let cover = (self.month_t.value > 0.004).then(|| self.month_rect(area));
+        let cover = self.cover(area);
         grid.draw(ui, cv, area, 0, |ui, cv, it| self.widget(ui, cv, it, cover, &t, today, dow));
+        self.finish(ui, cv, area, w, h);
+    }
+
+    /// Состояние месячного календаря на кадр: сколько рядов сетки он требует. Нужно и вкладке «Сегодня»,
+    /// и собственным вкладкам, на которых лежат её виджеты.
+    pub fn prepare(&mut self) -> u8 {
+        self.month_t.target = if self.month_open { 1.0 } else { 0.0 };
+        let month_active = self.month_open || self.month_t.value > 0.0;
+        if month_active { today_overlay_rows(MONTH_H) } else { 0 }
+    }
+
+    /// Область, которую закрывает месячный календарь; `None`, пока он не открыт.
+    pub fn cover(&self, area: Rect) -> Option<Rect> {
+        (self.month_t.value > 0.004).then(|| self.month_rect(area))
+    }
+
+    /// Насколько проявлено то, что под календарём (1 — календарь закрыт).
+    pub fn cover_visible(&self) -> f32 {
+        1.0 - self.month_t.value.clamp(0.0, 1.0)
+    }
+
+    /// Рисует виджет `it.idx` (номер в `SPEC` этой вкладки) на чужой сетке.
+    pub unsafe fn paint_hosted(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item, cover: Option<Rect>) {
+        let t = GetLocalTime();
+        let dow = (t.wDayOfWeek as usize + 6) % 7;
+        let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
+        self.widget(ui, cv, it, cover, &t, today, dow);
+    }
+
+    /// Рисует поверх сетки месячный календарь и подсказки.
+    pub unsafe fn finish(&mut self, ui: &mut Ui, cv: &Canvas, area: Rect, w: f32, h: f32) {
+        let t = GetLocalTime();
+        let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
         let mt = self.month_t.value.clamp(0.0, 1.0);
         if mt > 0.01 {
             let mut r = self.month_rect(area);
@@ -339,19 +368,6 @@ impl Today {
         let w = MONTH_W.min(area.w);
         let h = MONTH_H.min(area.h);
         Rect::new(wk.x.min(area.right() - w).max(area.x), wk.y.min(area.bottom() - h).max(area.y), w, h)
-    }
-
-    /// Рисует виджет `it.idx` на собственной вкладке. Месячный календарь раскрывается только на
-    /// вкладке «Сегодня», поэтому нажатие на неделю там ничего не открывает.
-    pub unsafe fn paint_foreign(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item) {
-        let t = GetLocalTime();
-        let dow = (t.wDayOfWeek as usize + 6) % 7;
-        let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
-        let was_open = self.month_open;
-        let week = self.week_rect;
-        self.widget(ui, cv, it, None, &t, today, dow);
-        self.month_open = was_open;
-        self.week_rect = week;
     }
 
     /// Один виджет сетки; если его закрывает месячный календарь, он гаснет и становится немым.

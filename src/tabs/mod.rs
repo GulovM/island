@@ -235,6 +235,7 @@ impl Tabs {
                 let mut g = grid::Grid::default();
                 g.set_compact(self.compact);
                 g.set_min_cols(self.min_cols);
+                g.set_edit_min(custom::COLS, custom::ROWS);
                 g.configure(CUSTOM_BASE + k, spec, &c.layout);
                 g
             })
@@ -344,6 +345,7 @@ impl Tabs {
 
     /// Рисует содержимое вкладки `tab` в панели размером `w`×`h` (логические пиксели).
     pub unsafe fn draw(&mut self, tab: usize, ui: &mut Ui, cv: &Canvas, w: f32, h: f32) {
+        let size_before = self.island_size(tab);
         let act = &mut self.actions;
         match tab {
             CONTROLS => self.controls.draw(ui, cv, &mut self.grids[CONTROLS], w, h),
@@ -360,6 +362,10 @@ impl Tabs {
         if tab != CLIPBOARD && tab != APPS {
             let _ = ui.take_nav();
         }
+        // Окно сетки изменилось во время кадра (режим правки, список поверх виджетов): остров подстраивается.
+        if self.island_size(tab) != size_before {
+            self.actions.push(Action::Resize);
+        }
         // Правка сетки: новую раскладку надо записать, окончание правки — пересчитать высоту острова.
         let grid = match tab.checked_sub(CUSTOM_BASE) {
             Some(k) => self.custom.get_mut(k),
@@ -375,28 +381,56 @@ impl Tabs {
         }
     }
 
-    /// Собственная вкладка: сетка с виджетами, которые рисуют их хозяева.
+    /// Собственная вкладка: сетка с виджетами, которые рисуют их хозяева. Выпадающий список устройств
+    /// Controls и месячный календарь Today раскрываются поверх сетки, как на своих вкладках.
     unsafe fn draw_custom(&mut self, tab: usize, ui: &mut Ui, cv: &Canvas, w: f32, h: f32) {
         let Some(grid) = tab.checked_sub(CUSTOM_BASE).and_then(|k| self.custom.get_mut(k)) else { return };
         let cat = custom::catalog();
-        let area = grid.area(w, h);
-        let controls = &mut self.controls;
+        let (controls, today, stats) = (&mut self.controls, &mut self.today, &mut self.stats);
         let skip = cat
             .map
             .iter()
             .enumerate()
             .filter(|(_, m)| m.0 == custom::Owner::Controls && controls.unavailable(m.1))
             .fold(0u32, |mask, (j, _)| mask | 1 << j);
-        let (today, stats) = (&mut self.today, &mut self.stats);
+        let (c_rows, low) = controls.prepare(grid);
+        grid.set_overlay_rows(c_rows.max(today.prepare()));
+        let area = grid.area(w, h);
+        let c_cover = controls.cover(area, low);
+        let t_cover = today.cover(area);
+        let (c_vis, t_vis) = (controls.cover_visible(), today.cover_visible());
         grid.draw(ui, cv, area, skip, |ui, cv, it| {
             let Some(&(owner, idx)) = cat.map.get(it.idx) else { return };
             let it = grid::Item { idx, size: it.size, rect: it.rect };
+            // Чужой открытый список закрывает виджет так же, как свои: он гаснет и не принимает нажатий.
+            let under = |cover: Option<crate::ui::Rect>, vis: f32| cover.filter(|c| c.intersects(&it.rect)).map(|_| vis);
+            let (c_under, t_under) = (under(c_cover, c_vis), under(t_cover, t_vis));
+            let (foreign_a, foreign_b) = match owner {
+                custom::Owner::Controls => (None, t_under),
+                custom::Owner::Today => (c_under, None),
+                custom::Owner::Stats => (c_under, t_under),
+            };
+            let k = foreign_a.unwrap_or(1.0) * foreign_b.unwrap_or(1.0);
+            if k < 0.004 {
+                return;
+            }
+            let sub = Canvas { g: cv.g, alpha: cv.alpha * k, accent: cv.accent };
+            let muted = (foreign_a.is_some() || foreign_b.is_some()).then(|| ui.mute());
             match owner {
-                custom::Owner::Controls => controls.paint_foreign(ui, cv, &it),
-                custom::Owner::Today => today.paint_foreign(ui, cv, &it),
-                custom::Owner::Stats => stats.paint_foreign(ui, cv, &it),
+                custom::Owner::Controls => controls.widget(ui, &sub, &it, c_cover),
+                custom::Owner::Today => today.paint_hosted(ui, &sub, &it, t_cover),
+                custom::Owner::Stats => stats.paint_foreign(ui, &sub, &it),
+            }
+            if let Some(m) = muted {
+                ui.unmute(m);
             }
         });
+        if c_rows > 0 || controls.cover_visible() < 1.0 {
+            controls.finish(ui, cv, area, low);
+        }
+        if today.cover_visible() < 1.0 || t_cover.is_some() {
+            today.finish(ui, cv, area, w, h);
+        }
     }
 
     /// Хозяева виджетов, стоящих на собственной вкладке `tab`.

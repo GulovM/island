@@ -470,7 +470,7 @@ impl App {
                 if alpha < 0.01 {
                     return;
                 }
-                let (w, h) = (self.tab_w(id), self.tab_h(id));
+                let (w, h) = (self.tab_w_in(tabs, id), tabs.island_size(id).1);
                 let ox = centre - w / 2.0 + dx;
                 g.dc.SetTransform(&ui::matrix(s, ox * s, 0.0));
                 ui.begin_content(ox, interactive);

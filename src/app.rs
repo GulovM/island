@@ -466,6 +466,11 @@ impl App {
         self.tabs.island_size(id).1
     }
 
+    /// То же для `tabs`, которые отрисовка забрала у `self` на время кадра (`self.tabs` в это время пуст).
+    pub(crate) fn tab_w_in(&self, tabs: &tabs::Tabs, id: usize) -> f32 {
+        tabs.island_size(id).0.max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT)
+    }
+
     /// Ширина панели вкладки: не уже ряда вкладок, иначе они обрезаются.
     pub(crate) fn tab_w(&self, id: usize) -> f32 {
         self.tabs.island_size(id).0.max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT)

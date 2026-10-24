@@ -132,8 +132,6 @@ pub struct Controls {
     bluetooth: bool,
     /// Режим полёта: все радио выключены.
     airplane: bool,
-    /// Виджет рисуется на собственной вкладке: выпадающих списков там нет, стрелки ведут в Параметры.
-    foreign: bool,
     /// Режим энергосбережения; `None` — батареи нет, плитка скрыта.
     saver: Option<bool>,
     dark: bool,
@@ -221,14 +219,6 @@ impl Controls {
 
     /// Открывает/закрывает список устройств по стрелке плитки.
     fn toggle(&mut self, kind: ListKind) {
-        if self.foreign {
-            sys::open(match kind {
-                ListKind::Wifi => "ms-settings:network-wifi",
-                ListKind::Bluetooth => "ms-settings:bluetooth",
-                ListKind::Audio => "ms-settings:sound",
-            });
-            return;
-        }
         self.join = None;
         if self.open == Some(kind) {
             self.open = None;
@@ -306,6 +296,19 @@ impl Controls {
     /// Рисует вкладку: виджеты по сетке, а поверх них — выпадающий список устройств. `h` — высота
     /// панели (с полосой правки).
     pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
+        let (rows, low) = self.prepare(grid);
+        grid.set_overlay_rows(rows);
+        let area = grid.area(w, h);
+        let skip = [BRIGHTNESS, SAVER].iter().filter(|&&i| self.unavailable(i)).fold(0u32, |m, &i| m | 1 << i);
+        // Виджеты под списком гаснут и не принимают нажатий (иначе они перехватят их у строк списка).
+        let cover = self.cover(area, low);
+        grid.draw(ui, cv, area, skip, |ui, cv, it| self.widget(ui, cv, it, cover));
+        self.overlay(ui, cv, area, low);
+    }
+
+    /// Состояние списка устройств на кадр: сколько рядов сетки он требует и где низ плиток (`low`).
+    /// Нужно и вкладке Controls, и собственным вкладкам, на которых лежат её плитки.
+    pub fn prepare(&mut self, grid: &Grid) -> (u8, f32) {
         if let Some(kind) = self.open {
             self.shown = Some(kind);
         }
@@ -313,21 +316,23 @@ impl Controls {
         if self.open.is_none() && self.list_t.0.settled() {
             self.shown = None;
         }
-
         let low = Self::tiles_low(grid);
         let list_active = self.open.is_some() || (self.shown.is_some() && self.list_t.0.value > 0.0);
-        let overlay_rows = if list_active {
-            controls_overlay_rows(low)
-        } else {
-            0
-        };
-        grid.set_overlay_rows(overlay_rows);
+        (if list_active { controls_overlay_rows(low) } else { 0 }, low)
+    }
 
-        let area = grid.area(w, h);
-        let skip = [BRIGHTNESS, SAVER].iter().filter(|&&i| self.unavailable(i)).fold(0u32, |m, &i| m | 1 << i);
-        // Виджеты под списком гаснут и не принимают нажатий (иначе они перехватят их у строк списка).
-        let cover = (self.list_t.0.value > 0.004).then(|| self.list_rect(area, low));
-        grid.draw(ui, cv, area, skip, |ui, cv, it| self.widget(ui, cv, it, cover));
+    /// Область, которую закрывает список; `None`, пока он не открыт.
+    pub fn cover(&self, area: Rect, low: f32) -> Option<Rect> {
+        (self.list_t.0.value > 0.004).then(|| self.list_rect(area, low))
+    }
+
+    /// Насколько проявлено то, что под списком (1 — список закрыт).
+    pub fn cover_visible(&self) -> f32 {
+        1.0 - self.list_t.0.value.clamp(0.0, 1.0)
+    }
+
+    /// Рисует поверх сетки выпадающий список устройств.
+    pub unsafe fn finish(&mut self, ui: &mut Ui, cv: &Canvas, area: Rect, low: f32) {
         self.overlay(ui, cv, area, low);
     }
 
@@ -353,7 +358,7 @@ impl Controls {
     }
 
     /// Один виджет сетки; если его закрывает открытый список, он гаснет и становится немым.
-    unsafe fn widget(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item, cover: Option<Rect>) {
+    pub unsafe fn widget(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item, cover: Option<Rect>) {
         let covered = cover.is_some_and(|c| c.intersects(&it.rect));
         let k = if covered { 1.0 - self.list_t.0.value.clamp(0.0, 1.0) } else { 1.0 };
         if k < 0.004 {
@@ -365,13 +370,6 @@ impl Controls {
         if let Some(p) = prev {
             ui.unmute(p);
         }
-    }
-
-    /// Рисует виджет `it.idx` на собственной вкладке.
-    pub unsafe fn paint_foreign(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item) {
-        self.foreign = true;
-        self.paint(ui, cv, it);
-        self.foreign = false;
     }
 
     /// Виджета нет на этом ПК (нет датчика яркости или батареи): на сетке его не рисуем.
