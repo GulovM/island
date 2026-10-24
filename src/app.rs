@@ -448,6 +448,9 @@ impl App {
             unsafe { self.refresh_language() };
         }
         if custom_changed {
+            // Порядок обновляется раньше ширин: иначе ряд вкладок обратится к удалённой вкладке.
+            self.order = self.cfg.visible_tabs();
+            self.tab = self.order.iter().position(|&i| i == current).unwrap_or(0);
             // Новые и переименованные вкладки: сетки и ширины подписей в ряду.
             self.tabs.sync_custom(&self.cfg);
             // SAFETY: оконный поток, DirectWrite-фабрика жива.

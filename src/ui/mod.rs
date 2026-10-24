@@ -61,10 +61,21 @@ impl Widget {
     }
 }
 
+/// Бегущая строка: заголовок, не влезший в плитку, один раз прокручивается и дальше стоит на месте.
+pub(super) struct Marquee {
+    /// Время с начала прокрутки, секунды.
+    pub(super) t: f32,
+    /// Полная длительность (пауза, прокрутка, пауза); пока `t` меньше, кадры нужны.
+    pub(super) total: f32,
+    /// Рисовалась ли строка в текущем кадре: пропавшая из кадра начнёт заново.
+    drawn: bool,
+}
+
 // ---------- Ui ----------
 
 #[derive(Default)]
 pub struct Ui {
+    marquees: HashMap<u32, Marquee>,
     /// Курсор в логических пикселях окна (не панели).
     cursor: (f32, f32),
     /// Курсор в координатах текущего слоя содержимого.
@@ -114,6 +125,30 @@ impl Ui {
         self.focus_claimed = false;
         self.sticky_focus = None;
         self.ime_pos = None;
+        // Строка, которой не было в прошлом кадре (другая вкладка, остров был закрыт), прокрутится заново.
+        self.marquees.retain(|_, m| m.drawn);
+        for m in self.marquees.values_mut() {
+            m.drawn = false;
+        }
+    }
+
+    /// Все бегущие строки начнут прокрутку заново (остров открыт, вкладка переключена).
+    pub fn reset_marquees(&mut self) {
+        self.marquees.clear();
+    }
+
+    /// Прокрутка заголовка `id`: смещение текста в пикселях при ширине текста `text_w` в окне `view_w`.
+    pub(super) fn marquee_offset(&mut self, id: u32, text_w: f32, view_w: f32) -> Option<f32> {
+        const PAUSE: f32 = 0.9;
+        const SPEED: f32 = 20.0;
+        let dist = text_w - view_w + 4.0;
+        let m = self.marquees.entry(id).or_insert(Marquee { t: 0.0, total: 0.0, drawn: false });
+        m.drawn = true;
+        m.total = 2.0 * PAUSE + dist / SPEED;
+        if m.t >= m.total {
+            return None;
+        }
+        Some(-((m.t - PAUSE) * SPEED).clamp(0.0, dist))
     }
 
     pub fn end_frame(&mut self) {
@@ -152,6 +187,9 @@ impl Ui {
             w.press.step(dt);
             w.on.step(dt);
         }
+        for m in self.marquees.values_mut().filter(|m| m.t < m.total) {
+            m.t += dt;
+        }
         for s in self.scrolls.values_mut() {
             s.off += s.vel * dt;
             s.vel *= (-SCROLL_FRICTION * dt).exp();
@@ -169,6 +207,7 @@ impl Ui {
 
     pub fn animating(&self) -> bool {
         self.widgets.values().any(|w| !w.settled())
+            || self.marquees.values().any(|m| m.drawn && m.t < m.total)
             || self.scrolls.values().any(|s| s.vel != 0.0 || !s.vis.settled())
     }
 

@@ -289,6 +289,11 @@ impl Canvas<'_> {
         self.symbol(g, r, size, c);
     }
 
+    /// Обычный значок, подогнанный по занимаемому месту под Wi-Fi (плитки Пункта управления).
+    pub unsafe fn glyph_matched(&self, g: &str, r: Rect, c: D2D1_COLOR_F) {
+        self.symbol(g, r, super::ICON * super::symbols::scale_to_wifi(self.g, g), c);
+    }
+
     /// Значок кеглем `size` (не больше прямоугольника `r`).
     pub unsafe fn symbol(&self, g: &str, r: Rect, size: f32, c: D2D1_COLOR_F) {
         self.g.brush.SetColor(&self.col(c));

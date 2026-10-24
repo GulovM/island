@@ -392,7 +392,6 @@ impl Stats {
         let c = &self.cur;
         let wide = size > 0;
         let iw = r.w - 2.0 * P;
-        let vy = r.y + 41.0;
         cv.card(r);
         match i {
             DISK => {
@@ -400,15 +399,21 @@ impl Stats {
                 header(cv, r, icon::FOLDER, "Диск C:", tint);
                 let frac = if c.disk_total > 0.0 { c.disk_used / c.disk_total } else { 0.0 };
                 let used = format!("{:.0}", c.disk_used / GB);
-                let uw = cv.digits_w(&used, 22.0, 600);
-                cv.digits(&used, r.x + P - 1.0, uw + 4.0, vy, 22.0, 600, Align::Leading, txt());
+                let dy = r.y + 42.0;
+                let uw = cv.digits_w(&used, 30.0, 600);
+                cv.digits(&used, r.x + P - 1.0, uw + 4.0, dy, 30.0, 600, Align::Leading, txt());
                 let total = format!("{} {:.0} {}", crate::i18n::pick("из", "of"), c.disk_total / GB, crate::i18n::pick("ГБ", "GB"));
-                cv.line(&total, &f.small, r.x + P + uw + 4.0, iw - uw - 4.0, vy + 3.0, Align::Leading, dim());
                 if wide {
-                    let free = format!("{:.0} {}", (c.disk_total - c.disk_used).max(0.0) / GB, crate::i18n::pick("ГБ свободно", "GB free"));
-                    cv.line(&free, &f.small, r.x + P, iw, vy + 3.0, Align::Trailing, dim());
+                    cv.line(&total, &f.small, r.x + P + uw + 4.0, iw - uw - 4.0, dy + 6.0, Align::Leading, dim());
+                } else {
+                    cv.line(&total, &f.small, r.x + P, iw, dy + 21.0, Align::Leading, dim());
                 }
-                cv.progress(Rect::new(r.x + P, r.bottom() - P - 4.0, iw, 4.0), frac, tint);
+                // Внизу: сколько свободно и какая доля занята, над ними полоса.
+                let free = format!("{:.0} {}", (c.disk_total - c.disk_used).max(0.0) / GB, crate::i18n::pick("ГБ своб.", "GB free"));
+                let foot = r.bottom() - P - 5.0;
+                cv.line(&free, &f.small, r.x + P, iw, foot, Align::Leading, dim());
+                cv.line(&format!("{:.0}%", frac * 100.0), &f.small_b, r.x + P, iw, foot, Align::Trailing, txt());
+                cv.progress(Rect::new(r.x + P, r.bottom() - P - 21.0, iw, 6.0), frac, tint);
             }
             NET => {
                 header(cv, r, icon::WIFI, "Сеть", hue(SysColor::Blue, cv.accent));
@@ -424,21 +429,29 @@ impl Stats {
                         cv.line(value, &f.title, x, iw / 2.0 - 6.0, r.y + 53.0, Align::Leading, txt());
                     }
                 } else {
-                    for (k, (arrow, value, col)) in [("↓", &rx, down), ("↑", &tx, up)].into_iter().enumerate() {
-                        let y = r.y + 39.0 + k as f32 * 17.0;
-                        let aw = cv.line(arrow, &f.body, r.x + P, 12.0, y, Align::Leading, col);
-                        cv.line(value, &f.body, r.x + P + aw + 2.0, iw - aw - 2.0, y, Align::Leading, txt());
+                    // Два блока друг под другом: подпись со стрелкой и крупное значение под ней.
+                    for (k, (arrow, label, value, col)) in [("↓ ", "Загрузка", &rx, down), ("↑ ", "Отдача", &tx, up)].into_iter().enumerate() {
+                        let top = r.y + 30.0 + k as f32 * 34.0;
+                        let aw = cv.line(arrow, &f.small_b, r.x + P, 12.0, top + 5.0, Align::Leading, col);
+                        cv.line(label, &f.small, r.x + P + aw, iw - aw, top + 5.0, Align::Leading, dim());
+                        cv.line(value, &f.title, r.x + P, iw, top + 21.0, Align::Leading, txt());
                     }
                 }
             }
             _ => {
                 header(cv, r, icon::POWER, "В работе", hue(SysColor::Indigo, cv.accent));
-                cv.line(&fmt_uptime(c.uptime_s), &f.num, r.x + P, iw, vy, Align::Leading, txt());
+                // Старшая единица крупно, остаток под ней, внизу — когда включили.
+                let (big, unit, rest) = uptime_parts(c.uptime_s);
+                let big = big.to_string();
+                let bw = cv.digits_w(&big, 34.0, 600);
+                cv.digits(&big, r.x + P - 1.0, bw + 4.0, r.y + 44.0, 30.0, 600, Align::Leading, txt());
+                cv.line(unit, &f.body, r.x + P + bw + 5.0, iw - bw - 5.0, r.y + 48.0, Align::Leading, dim());
+                cv.line(&rest, &f.body, r.x + P, iw, r.y + 67.0, Align::Leading, txt());
                 let since = fmt_since(online::now_local_minutes(), c.uptime_s);
-                cv.line(&since, &f.small, r.x + P, iw, r.bottom() - P - 4.0, Align::Leading, dim());
+                cv.line(&since, &f.small, r.x + P, iw, r.bottom() - P - 5.0, Align::Leading, dim());
                 if wide {
-                    cv.digits(&c.procs.to_string(), r.x + P, iw, vy, 22.0, 600, Align::Trailing, txt());
-                    cv.line(crate::i18n::pick("процессов", "processes"), &f.small, r.x + P, iw, r.bottom() - P - 4.0, Align::Trailing, dim());
+                    cv.digits(&c.procs.to_string(), r.x + P, iw, r.y + 44.0, 30.0, 600, Align::Trailing, txt());
+                    cv.line(crate::i18n::pick("процессов", "processes"), &f.small, r.x + P, iw, r.y + 67.0, Align::Trailing, dim());
                 }
             }
         }
@@ -513,10 +526,10 @@ impl Stats {
         let (bg, fg) = if sp.running { (chip_bg(), dim()) } else { (cv.accent, ink()) };
         let go;
         if size == 0 {
-            let dw = cv.digits_w(&d, 22.0, 600);
-            cv.digits(&d, r.x + P - 1.0, dw + 4.0, vy - 3.0, 22.0, 600, Align::Leading, txt());
-            cv.line(&format!("{unit} ↓"), &f.small, r.x + P + dw + 4.0, iw - dw - 4.0, vy, Align::Leading, dim());
-            cv.line(&format!("{u} {unit} ↑"), &f.small, r.x + P, iw, r.bottom() - P - 4.0, Align::Leading, dim());
+            let dw = cv.digits_w(&d, 30.0, 600);
+            cv.digits(&d, r.x + P - 1.0, dw + 4.0, vy + 6.0, 30.0, 600, Align::Leading, txt());
+            cv.line(&format!("{unit} ↓"), &f.small, r.x + P + dw + 4.0, iw - dw - 4.0, vy + 9.0, Align::Leading, dim());
+            cv.line(&format!("{u} {unit} ↑"), &f.body, r.x + P, iw, r.y + 86.0, Align::Leading, txt());
             let btn = Rect::new(r.right() - P - 18.0, r.y + 8.0, 18.0, 18.0);
             let (_, clicked) = ui.click_area(id(STATS, 11), btn);
             let hv = ui.hover_of(id(STATS, 11));
@@ -532,7 +545,6 @@ impl Stats {
             } else {
                 crate::i18n::pick("ещё не замеряли", "not measured yet").to_string()
             };
-            cv.line(&info, &f.small, r.x + P + iw / 2.0, iw / 2.0, r.y + 17.0, Align::Trailing, dim());
             let label = match (sp.running, sp.failed, size) {
                 (true, _, _) => crate::i18n::pick("Замер…", "Testing…"),
                 (_, true, _) => crate::i18n::pick("Повторить", "Retry"),
@@ -540,18 +552,17 @@ impl Stats {
                 _ => crate::i18n::pick("Замерить скорость", "Run speed test"),
             };
             let bw = cv.text_w(label, &f.small_c) + 26.0;
-            let btn = Rect::new(r.right() - P - bw, vy - 11.0, bw, 22.0);
+            // Нижняя строка: кнопка справа, слева — когда и где был последний замер.
+            let btn = Rect::new(r.right() - P - bw, r.bottom() - P - 22.0, bw, 22.0);
             go = ui.solid_button(cv, id(STATS, 11), btn, label, bg, fg, 11.0);
-            // Загрузка и отдача: число крупно, единица со стрелкой мелко.
-            let col_w = ((btn.x - r.x - P - 8.0) / 2.0).min(120.0);
-            // В узкой карточке единицы сокращаются до стрелки: «95 ↓ 41 ↑» читается и без подписи.
-            let short = col_w < 78.0;
-            for (k, (v, arrow)) in [(&d, "↓"), (&u, "↑")].into_iter().enumerate() {
+            cv.line(&info, &f.small, r.x + P, (btn.x - r.x - P - 8.0).max(0.0), btn.cy(), Align::Leading, dim());
+            // Загрузка и отдача: крупное число, под ним единица со стрелкой цвета направления.
+            let col_w = iw / 2.0;
+            for (k, (v, arrow, col)) in [(&d, "↓", hue(SysColor::Blue, cv.accent)), (&u, "↑", hue(SysColor::Green, cv.accent))].into_iter().enumerate() {
                 let x = r.x + P + k as f32 * col_w;
-                let vw = cv.digits_w(v, 22.0, 600);
-                cv.digits(v, x - 1.0, vw + 4.0, vy, 22.0, 600, Align::Leading, txt());
-                let cap = if short { arrow.to_string() } else { format!("{unit} {arrow}") };
-                cv.line(&cap, &f.small, x + vw + 4.0, col_w - vw - 8.0, vy + 3.0, Align::Leading, dim());
+                cv.digits(v, x - 1.0, col_w - 6.0, r.y + 40.0, 30.0, 600, Align::Leading, txt());
+                let aw = cv.line(&format!("{arrow} "), &f.small_b, x, 12.0, r.y + 58.0, Align::Leading, col);
+                cv.line(unit, &f.small, x + aw, col_w - aw - 6.0, r.y + 58.0, Align::Leading, dim());
             }
         }
         if go && !sp.running {

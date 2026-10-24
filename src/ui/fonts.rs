@@ -50,7 +50,6 @@ pub mod weight {
 /// | body_r      | Callout (emp)         | 8.5         | 600 | Callout     | Процент громкости, tnum             |
 /// | caps        | Footnote (emp)        | 7.0         | 660 | +0.04 em    | Заголовки секций прописными         |
 /// | caps_c      | Caption1 (emp)        | 6.5         | 600 | +0.02 em    | Мелкие подписи по центру, tnum      |
-/// | num         | Title1 (emp)          | 15.0        | 690 | 0           | Крупные числа слева, tnum           |
 /// | num_c       | Title1 (emp)          | 15.0        | 690 | 0           | Крупные числа по центру, tnum       |
 /// | wrap_b      | Body                  | 9.0         | 540 | Body        | Абзац по центру с переносом         |
 /// | wrap_l      | Subheadline           | 8.0         | 500 | Subheadline | Абзац слева с переносом (задачи)    |
@@ -70,7 +69,6 @@ pub const FORMAT_ROLE_MAP: &[(&str, Option<TextRole>, f32, u32)] = &[
     ("body_r", Some(TextRole::Callout), 8.5, weight::EMPHASIZED),
     ("caps", Some(TextRole::Footnote), 7.0, weight::CAPS),
     ("caps_c", Some(TextRole::Caption1), 6.5, weight::EMPHASIZED),
-    ("num", Some(TextRole::Title1), 15.0, weight::TITLE),
     ("num_c", Some(TextRole::Title1), 15.0, weight::TITLE),
     ("wrap_b", Some(TextRole::Body), 9.0, weight::BODY),
     ("wrap_l", Some(TextRole::Subheadline), 8.0, weight::PARAGRAPH),
@@ -128,7 +126,6 @@ pub struct Fonts {
     /// Заголовочный кегль по центру с табличными цифрами (время в кольце таймера).
     pub title_c: IDWriteTextFormat,
     /// Крупные числа: скорость интернета (слева) и температура (по центру).
-    pub num: IDWriteTextFormat,
     pub num_c: IDWriteTextFormat,
     /// Цифры часов по центру.
     pub big_c: IDWriteTextFormat,
@@ -305,7 +302,6 @@ impl Fonts {
         let icon_small = fmt(f, icons, reg, 7.5, true)?;
         let title = fmt_var(f, display, wt::TITLE, 12.5, false)?;
         let title_c = fmt_var(f, display, wt::TITLE, 12.5, true)?;
-        let num = fmt_var(f, display, wt::TITLE, 15.0, false)?;
         let num_c = fmt_var(f, display, wt::TITLE, 15.0, true)?;
         let big_c = fmt_var(f, display, wt::CLOCK, 26.0, true)?;
         let wrap_b = wrap(fmt_var(f, ui, wt::BODY, 9.0, true)?)?;
@@ -337,7 +333,7 @@ impl Fonts {
         reg_track(&wrap_l, ios::tracking_px(TextRole::Subheadline, 8.0));
 
         // Табличные цифры там, где числа меняются на глазах: проценты, время, скорость, часы.
-        let tabular = RefCell::new([&small_r, &body_r, &caps_c, &title_c, &num, &num_c, &big_c].iter().map(|t| t.as_raw() as usize).collect());
+        let tabular = RefCell::new([&small_r, &body_r, &caps_c, &title_c, &num_c, &big_c].iter().map(|t| t.as_raw() as usize).collect());
 
         Ok(Fonts {
             factory: f.clone(),
@@ -353,7 +349,6 @@ impl Fonts {
             icon_small,
             title,
             title_c,
-            num,
             num_c,
             big_c,
             wrap_b,
@@ -498,7 +493,6 @@ mod tests {
                 "body_r" => &fonts.body_r,
                 "caps" => &fonts.caps,
                 "caps_c" => &fonts.caps_c,
-                "num" => &fonts.num,
                 "num_c" => &fonts.num_c,
                 "wrap_b" => &fonts.wrap_b,
                 "wrap_l" => &fonts.wrap_l,
@@ -545,7 +539,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(mapped_count, 14);
+        assert_eq!(mapped_count, 13);
         assert_eq!(unmapped_count, 6);
     }
 

@@ -386,7 +386,7 @@ impl Controls {
         match it.idx {
             WIFI => {
                 let sub = if self.wifi { self.ssid.clone().unwrap_or_else(|| "Вкл".into()) } else { "Выкл".into() };
-                let hit = ui.tile_wide(cv, id(CONTROLS, 0), r, icon::WIFI, "Wi-Fi", &sub, &mut self.wifi, Chevron::Plain, hue(SysColor::Blue, cv.accent));
+                let hit = ui.tile_wide(cv, id(CONTROLS, 0), r, icon::WIFI, "Wi-Fi", &sub, &mut self.wifi, Chevron::Divided, hue(SysColor::Blue, cv.accent));
                 if hit.toggled {
                     bg::send(Cmd::Wifi(self.wifi));
                 }

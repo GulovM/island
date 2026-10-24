@@ -1,6 +1,7 @@
 //! Примитивы интерфейса: кнопки, плитки, слайдеры, переключатели, чипы, палитры.
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
+use windows::Win32::Graphics::Direct2D::D2D1_ANTIALIAS_MODE_ALIASED;
 
 use super::{card, chip_bg, dim, fg, icon, ink, mix, selection, track, txt, Canvas, Rect, Ui};
 
@@ -8,6 +9,9 @@ use super::{card, chip_bg, dim, fg, icon, ink, mix, selection, track, txt, Canva
 /// проявляется целиком.
 const NARROW_TILE: f32 = 84.0;
 const TILE_FADE: f32 = 28.0;
+
+/// Толщина полосы ползунка громкости и яркости относительно клетки сетки.
+const SLIDER_THICKNESS: f32 = 0.8;
 
 /// Стрелка справа на широкой плитке.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -122,19 +126,31 @@ impl Ui {
         cv.rr(rect, 10.0, fill);
         cv.hairline(rect, 10.0);
         // Бейдж: у узкой плитки по центру свободного места, у широкой слева.
-        let centered = rect.x + (rect.w - chev_w) / 2.0;
+        // Плитка без стрелки считает центр так, будто стрелка есть: значки в ряду стоят ровно.
+        let ref_w = if chevron == Chevron::None { (16.0 + 8.0 * full) * (full * 3.0).min(1.0) } else { chev_w };
+        let centered = rect.x + (rect.w - ref_w) / 2.0;
         let (bx, by) = (centered + (rect.x + 19.0 - centered) * full, rect.cy());
         cv.circle(bx, by, 11.0, badge);
-        cv.glyph(glyph, Rect::new(bx - 11.0, by - 11.0, 22.0, 22.0), false, mark);
+        cv.glyph_matched(glyph, Rect::new(bx - 11.0, by - 11.0, 22.0, 22.0), mark);
         // Текст слева, сразу за бейджем (как плитки Пункта управления iOS): заголовок полужирный,
         // подпись обычным начертанием — иерархия держится весом, а не только цветом.
         if full > 0.02 {
             let tcv = Canvas { g: cv.g, alpha: cv.alpha * full, accent: cv.accent };
-            let tx = rect.x + 38.0;
-            let tw = (rect.w - 38.0 - chev_w - 4.0).max(10.0);
+            let tx = rect.x + 40.0;
+            let tw = (rect.w - 40.0 - chev_w - 4.0).max(10.0);
             let fonts = &cv.g.fonts;
             let tf = if cv.text_w(title, &fonts.body) > tw { &fonts.small_b } else { &fonts.body };
-            tcv.text(title, Rect::new(tx, rect.cy() - 12.0, tw, 13.0), tf, fg);
+            let title_w = cv.text_w(title, tf);
+            let title_r = Rect::new(tx, rect.cy() - 12.0, tw, 13.0);
+            // Не влезший заголовок один раз прокручивается, потом стоит с многоточием.
+            match if title_w > tw { self.marquee_offset(id, title_w, tw) } else { None } {
+                Some(off) => {
+                    tcv.g.dc.PushAxisAlignedClip(&title_r.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
+                    tcv.text(title, Rect::new(tx + off, title_r.y, title_w + 2.0, title_r.h), tf, fg);
+                    tcv.g.dc.PopAxisAlignedClip();
+                }
+                None => tcv.text(title, title_r, tf, fg),
+            }
             tcv.text(sub, Rect::new(tx, rect.cy() + 1.0, tw, 11.0), &fonts.small, sub_c);
         }
         if chevron != Chevron::None {
@@ -156,6 +172,7 @@ impl Ui {
     pub unsafe fn slider_bar(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, value: &mut f32, fill: D2D1_COLOR_F) -> bool {
         let hit = Rect::new(r.x, r.y - 4.0, r.w, r.h + 8.0);
         let _ = self.interact(id, hit);
+        let r = Rect::new(r.x, r.cy() - r.h * SLIDER_THICKNESS / 2.0, r.w, r.h * SLIDER_THICKNESS);
         let mut changed = false;
         if self.is_dragging(id) {
             let v = ((self.mouse.0 - r.x) / r.w.max(1.0)).clamp(0.0, 1.0);
@@ -191,6 +208,7 @@ impl Ui {
     pub unsafe fn slider_bar_v(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, value: &mut f32, fill: D2D1_COLOR_F) -> bool {
         let hit = Rect::new(r.x - 4.0, r.y, r.w + 8.0, r.h);
         let _ = self.interact(id, hit);
+        let r = Rect::new(r.cx() - r.w * SLIDER_THICKNESS / 2.0, r.y, r.w * SLIDER_THICKNESS, r.h);
         let mut changed = false;
         if self.is_dragging(id) {
             let v = (1.0 - (self.mouse.1 - r.y) / r.h.max(1.0)).clamp(0.0, 1.0);
