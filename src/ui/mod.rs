@@ -194,6 +194,13 @@ impl Ui {
         w.on.value
     }
 
+    /// Плавно ведёт значение элемента (0..1) к `target`; возвращает текущее.
+    pub fn anim_to(&mut self, id: u32, target: f32) -> f32 {
+        let w = self.widget(id);
+        w.on.target = target;
+        w.on.value
+    }
+
     /// Нажатая кнопка мыши не досталась ни одному виджету (долгое нажатие по пустому месту).
     pub fn press_free(&self) -> bool {
         self.drag.is_none()

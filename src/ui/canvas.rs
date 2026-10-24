@@ -51,6 +51,26 @@ impl Canvas<'_> {
         );
     }
 
+    /// Текст, увеличенный в `k` раз вокруг центра рамки `r` (алфавитная полоса Apps).
+    pub unsafe fn text_scaled(&self, s: &str, r: Rect, f: &IDWriteTextFormat, c: D2D1_COLOR_F, k: f32) {
+        if (k - 1.0).abs() < 0.01 {
+            return self.text(s, r, f, c);
+        }
+        let mut base = Matrix3x2::default();
+        self.g.dc.GetTransform(&mut base);
+        let (tx, ty) = (r.cx() * (1.0 - k), r.cy() * (1.0 - k));
+        self.g.dc.SetTransform(&Matrix3x2 {
+            M11: k * base.M11,
+            M12: k * base.M12,
+            M21: k * base.M21,
+            M22: k * base.M22,
+            M31: tx * base.M11 + ty * base.M21 + base.M31,
+            M32: tx * base.M12 + ty * base.M22 + base.M32,
+        });
+        self.text(s, r, f, c);
+        self.g.dc.SetTransform(&base);
+    }
+
     pub unsafe fn text(&self, s: &str, r: Rect, f: &IDWriteTextFormat, c: D2D1_COLOR_F) {
         if s.is_empty() {
             return;

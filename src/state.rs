@@ -66,8 +66,6 @@ pub struct State {
     pub wallpaper_filter: usize,
     /// Вкладка «Приложения»: сетка вместо списка.
     pub apps_grid: bool,
-    /// Вкладка «Приложения»: сортировка по имени.
-    pub apps_sort_name: bool,
     /// Вкладка «Приложения»: показан полный список (false — только избранные).
     pub apps_all: bool,
     pub timer: TimerState,
@@ -84,7 +82,6 @@ impl Default for State {
             stats_top_by_cpu: false,
             wallpaper_filter: 0,
             apps_grid: false,
-            apps_sort_name: false,
             apps_all: false,
             timer: TimerState::default(),
             weather: WeatherState::default(),
@@ -127,7 +124,6 @@ pub fn serialize(state: &State) -> String {
     out.push_str(&format!("stats_top_by_cpu = {}\n", state.stats_top_by_cpu as u8));
     out.push_str(&format!("wallpaper_filter = {}\n", state.wallpaper_filter));
     out.push_str(&format!("apps_grid = {}\n", state.apps_grid as u8));
-    out.push_str(&format!("apps_sort_name = {}\n", state.apps_sort_name as u8));
     out.push_str(&format!("apps_all = {}\n", state.apps_all as u8));
 
     out.push_str("\n[timer]\n");
@@ -198,9 +194,6 @@ pub fn parse(text: &str) -> State {
             }
             ("", "apps_grid") => {
                 state.apps_grid = val == "1" || val.eq_ignore_ascii_case("true");
-            }
-            ("", "apps_sort_name") => {
-                state.apps_sort_name = val == "1" || val.eq_ignore_ascii_case("true");
             }
             ("", "apps_all") => {
                 state.apps_all = val == "1" || val.eq_ignore_ascii_case("true");
@@ -376,11 +369,10 @@ pub fn set_wallpaper_filter(filter: usize) {
     flush();
 }
 
-/// Запоминает вид, сортировку и режим («Избранные» / «Показать все») вкладки «Приложения».
-pub fn set_apps_view(grid: bool, sort_name: bool, all: bool) {
+/// Запоминает вид и режим («Избранные» / «Показать все») вкладки «Приложения».
+pub fn set_apps_view(grid: bool, all: bool) {
     update(|s| {
         s.apps_grid = grid;
-        s.apps_sort_name = sort_name;
         s.apps_all = all;
     });
     flush();
@@ -419,7 +411,6 @@ mod tests {
             stats_top_by_cpu: true,
             wallpaper_filter: 2,
             apps_grid: true,
-            apps_sort_name: true,
             apps_all: true,
             timer: TimerState {
                 duration: 600,

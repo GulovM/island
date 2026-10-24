@@ -406,6 +406,15 @@ fn parts(code: u32) -> Option<Vec<Part>> {
             Fill(rrect(3.8, 13.0, 7.2, 7.2, 2.0)),
             Fill(rrect(13.0, 13.0, 7.2, 7.2, 2.0)),
         ],
+        // list.bullet
+        0xE8FD => vec![
+            Fill(rrect(3.6, 4.9, 3.4, 3.4, 1.2)),
+            Fill(rrect(9.4, 5.5, 11.0, 2.2, 1.1)),
+            Fill(rrect(3.6, 10.3, 3.4, 3.4, 1.2)),
+            Fill(rrect(9.4, 10.9, 11.0, 2.2, 1.1)),
+            Fill(rrect(3.6, 15.7, 3.4, 3.4, 1.2)),
+            Fill(rrect(9.4, 16.3, 11.0, 2.2, 1.1)),
+        ],
         // backward.end.fill / forward.end.fill
         0xE892 => vec![Fill(rrect(4.4, 5.4, 2.7, 13.2, 1.35)), Fill(tri_left(8.4, 19.6, 5.6, 18.4))],
         0xE893 => vec![Fill(rrect(4.4, 5.4, 2.7, 13.2, 1.35).mirror()), Fill(tri_left(8.4, 19.6, 5.6, 18.4).mirror())],

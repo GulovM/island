@@ -193,7 +193,7 @@ impl Tabs {
         self.stats.load(state.stats_top_by_cpu);
         self.wall.load(state.wallpaper_filter);
         self.apps.configure(cfg);
-        self.apps.load(state.apps_grid, state.apps_sort_name, state.apps_all);
+        self.apps.load(state.apps_grid, state.apps_all);
         self.wall.configure(cfg);
         for (tab, g) in self.grids.iter_mut().enumerate() {
             g.set_compact(!cfg.free_layout);
