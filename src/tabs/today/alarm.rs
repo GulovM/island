@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use windows::Win32::Media::Audio::{PlaySoundW, SND_FILENAME, SND_MEMORY, SND_NODEFAULT, SND_SYNC};
+use windows::Win32::Media::Audio::{PlaySoundW, SND_FILENAME, SND_PURGE, SND_MEMORY, SND_NODEFAULT, SND_SYNC};
 use windows::Win32::System::Diagnostics::Debug::Beep;
 
 /// WAV (16 бит, моно) с тремя двойными гудками: звучит через звуковое устройство по умолчанию,
@@ -47,10 +47,22 @@ fn alarm_wav() -> Vec<u8> {
 }
 
 static PLAYING: AtomicBool = AtomicBool::new(false);
+/// Просьба оборвать сигнал (уведомление закрыли крестиком или Esc).
+static STOP: AtomicBool = AtomicBool::new(false);
 
 /// Сигнал ещё звучит: уведомление на острове остаётся, пока он не закончится.
 pub fn is_playing() -> bool {
     PLAYING.load(Ordering::Acquire)
+}
+
+/// Обрывает звучащий сигнал: текущее воспроизведение глушится, повторы и гудки не начинаются.
+pub fn stop_alarm() {
+    if PLAYING.load(Ordering::Acquire) {
+        STOP.store(true, Ordering::Release);
+        unsafe {
+            let _ = PlaySoundW(windows::core::PCWSTR::null(), None, SND_PURGE);
+        }
+    }
 }
 
 /// Сигнал окончания таймера в отдельном потоке (не блокирует интерфейс).
@@ -58,6 +70,7 @@ pub(super) fn play_alarm() {
     if PLAYING.swap(true, Ordering::AcqRel) {
         return;
     }
+    STOP.store(false, Ordering::Release);
     std::thread::spawn(|| {
         unsafe {
             // Стандартный сигнал будильника Windows (дважды); нет файла — мягкий звон из памяти,
@@ -66,17 +79,24 @@ pub(super) fn play_alarm() {
             let file: Vec<u16> = format!(r"{root}\Media\Alarm01.wav").encode_utf16().chain(Some(0)).collect();
             let mut ok = false;
             for _ in 0..2 {
+                if STOP.load(Ordering::Acquire) {
+                    ok = true;
+                    break;
+                }
                 ok = PlaySoundW(windows::core::PCWSTR(file.as_ptr()), None, SND_FILENAME | SND_SYNC | SND_NODEFAULT).as_bool();
                 if !ok {
                     break;
                 }
             }
-            if !ok {
+            if !ok && !STOP.load(Ordering::Acquire) {
                 let wav = alarm_wav();
                 ok = PlaySoundW(windows::core::PCWSTR(wav.as_ptr().cast()), None, SND_MEMORY | SND_SYNC | SND_NODEFAULT).as_bool();
             }
-            if !ok {
+            if !ok && !STOP.load(Ordering::Acquire) {
                 for _ in 0..3 {
+                    if STOP.load(Ordering::Acquire) {
+                        break;
+                    }
                     let _ = Beep(880, 150);
                     let _ = Beep(1175, 200);
                     std::thread::sleep(Duration::from_millis(250));

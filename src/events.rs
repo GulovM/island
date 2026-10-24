@@ -38,6 +38,7 @@ impl App {
             Ev::LeaveTimer => self.on_leave_timer(),
             Ev::Down(x, y) => {
                 if self.hits_toast_close(x, y) {
+                    self.tabs.stop_alarm();
                     self.dismiss_toast();
                     return true;
                 }

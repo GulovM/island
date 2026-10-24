@@ -101,7 +101,11 @@ impl App {
         }
         // Фокус у острова только ради уведомления о таймере: Esc закрывает его, остальное не нужно.
         if self.live.alert() && self.ui.focus == Some(NOTICE_FOCUS) {
-            return vk == VK_ESCAPE.0 as u32 && self.dismiss_toast();
+            if vk != VK_ESCAPE.0 as u32 {
+                return false;
+            }
+            self.tabs.stop_alarm();
+            return self.dismiss_toast();
         }
         let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
         // AltGr (польская, немецкая и др. раскладки) приходит как Ctrl+Alt: это ввод символа, не шорткат.

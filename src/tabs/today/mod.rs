@@ -243,6 +243,11 @@ impl Today {
         std::mem::take(&mut self.fired)
     }
 
+    /// Обрывает сигнал окончания таймера.
+    pub fn stop_alarm() {
+        alarm::stop_alarm();
+    }
+
     /// Звучит ли сейчас сигнал окончания таймера.
     pub fn alarm_playing() -> bool {
         alarm::is_playing()

@@ -375,6 +375,11 @@ impl Tabs {
         self.today.deadline()
     }
 
+    /// Обрывает сигнал окончания таймера.
+    pub fn stop_alarm(&self) {
+        today::Today::stop_alarm();
+    }
+
     /// Звучит ли сигнал окончания таймера (уведомление ждёт его конца).
     pub fn alarm_playing(&self) -> bool {
         today::Today::alarm_playing()
