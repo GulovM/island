@@ -9,6 +9,12 @@ impl App {
         }
         // Вкладка Apps выключена в настройках — горячей клавише нечего открывать.
         let Some(i) = self.order.iter().position(|&t| t == tabs::APPS) else { return false };
+        self.open_from_hotkey(i, tabs::APPS);
+        true
+    }
+
+    /// Раскрывает остров на вкладке в позиции `i` (индекс `tab` в `TABS`) и ставит фокус в её поле поиска.
+    pub(crate) unsafe fn open_from_hotkey(&mut self, i: usize, tab: usize) {
         if i != self.tab || self.settings_open {
             self.switch_tab(i);
         }
@@ -22,9 +28,8 @@ impl App {
         }
         self.disarm_leave();
         self.set_expanded(true);
-        self.ui.focus = Some(tabs::id(tabs::APPS, 0));
+        self.ui.focus = Some(tabs::id(tab, 0));
         self.sync_focus();
-        true
     }
 
     /// Обрабатывает событие, возвращает `true`, если нужна перерисовка.
@@ -88,7 +93,7 @@ impl App {
                 self.expanded
             }
             Ev::Char(c) => {
-                if self.ui.focus.is_some() && !self.live.alert() && c >= 0x20 && c != 0x7f {
+                if self.ui.focus.is_some() && !self.live.alert() && !self.tabs.recording_hotkey() && c >= 0x20 && c != 0x7f {
                     // Суррогатные пары приходят двумя WM_CHAR: сводим их в один символ.
                     if (0xD800..0xDC00).contains(&c) {
                         self.high_surrogate = c;
@@ -126,7 +131,8 @@ impl App {
             Ev::Tray(m) if m == WM_RBUTTONUP || m == WM_LBUTTONUP => self.tray_menu(),
             Ev::Tray(_) => false,
             Ev::Hot(h) => self.on_hot(h),
-            Ev::Hotkey => self.on_hotkey(),
+            Ev::Hotkey(id) if id == QUICK_HOTKEY_ID => self.on_quick_hotkey(),
+            Ev::Hotkey(_) => self.on_hotkey(),
             Ev::Shot => {
                 if self.cfg.hide_on_screenshot {
                     self.hide_for_shot();
@@ -163,7 +169,8 @@ impl App {
                 update::hourly(self.cfg.auto_update);
                 // Следующая проверка — в начале следующего часа, а не через 60 минут от этой.
                 SetTimer(Some(self.hwnd), UPDATE_TIMER, update::ms_to_next_hour(), None);
-                false
+                // Заодно история буфера теряет записи старше суток.
+                self.tabs.prune_clip() && self.expanded
             }
             Ev::FaceTick => {
                 if !self.face.visible() {
@@ -215,6 +222,10 @@ impl App {
                 sys::send_paste();
                 false
             }
+            Ev::DragEnter(ok) => self.on_drag_enter(ok),
+            Ev::DragLeave => self.on_drag_leave(),
+            Ev::Dropped(items) => self.on_dropped(items),
+            Ev::DropTimer => self.on_drop_timer(),
         }
     }
 
@@ -391,16 +402,27 @@ impl App {
                 tabs::Action::Copy(text) => {
                     sys::set_clipboard_text(self.hwnd, &text);
                 }
-                tabs::Action::PasteImage(file) => {
-                    if self.put_image(&file) {
+                tabs::Action::PasteImage(path) => {
+                    if self.put_image(&path) {
                         self.disarm_leave();
                         self.set_expanded(false);
                         SetTimer(Some(self.hwnd), PASTE_TIMER, PASTE_DELAY_MS, None);
                     }
                 }
-                tabs::Action::CopyImage(file) => {
-                    self.put_image(&file);
+                tabs::Action::CopyImage(path) => {
+                    self.put_image(&path);
                 }
+                tabs::Action::Open(target) => {
+                    if sys::open(&target) {
+                        self.disarm_leave();
+                        self.set_expanded(false);
+                    } else {
+                        // Файл исчез после последней проверки: запись помечается недоступной.
+                        self.tabs.mark_missing(&target);
+                    }
+                }
+                tabs::Action::DragOut(out) => self.run_drag_out(out),
+                tabs::Action::SetQuickHotkey(combo) => self.set_quick_hotkey(combo),
                 tabs::Action::Collapse => {
                     self.disarm_leave();
                     self.set_expanded(false);
@@ -414,16 +436,18 @@ impl App {
                 tabs::Action::Resize => self.retarget(),
             }
         }
+        // Приёму перетаскивания нужно знать об этом сразу, не дожидаясь события.
+        dnd::set_full(self.tabs.quick_full());
+        RECORDING.store(self.tabs.recording_hotkey(), std::sync::atomic::Ordering::Relaxed);
         dirty
     }
 
-    /// Кладёт PNG из истории в буфер обмена как изображение.
-    pub(crate) unsafe fn put_image(&self, file: &str) -> bool {
-        let path = tabs::clipboard::clip_dir().join(file);
-        match img::load_dib(&path) {
+    /// Кладёт PNG из истории или быстрого доступа в буфер обмена как изображение.
+    pub(crate) unsafe fn put_image(&self, path: &std::path::Path) -> bool {
+        match img::load_dib(path) {
             Some(dib) => sys::set_clipboard_dib(self.hwnd, &dib),
             None => {
-                log::error(&format!("не удалось прочитать изображение {file}"));
+                log::error(&format!("не удалось прочитать изображение {}", path.display()));
                 false
             }
         }

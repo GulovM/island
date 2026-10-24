@@ -101,6 +101,7 @@ impl App {
             match self.live_form() {
                 live::Form::Mini => (live::MINI.0.max(collapsed.0), live::MINI.1.max(collapsed.1)),
                 live::Form::Toast => (live::TOAST.0.max(collapsed.0), live::TOAST.1.max(collapsed.1)),
+                live::Form::Drop => (DROP_PILL.0.max(collapsed.0), DROP_PILL.1.max(collapsed.1)),
                 live::Form::Idle => collapsed,
             }
         };
@@ -111,7 +112,9 @@ impl App {
     /// и включён режим полоски (переключатель в Настройках или правый клик по острову). Иначе остров остаётся обычной чёлкой.
     /// На время уведомления об окончании таймера остров выходит из полоски: его надо заметить.
     pub(crate) fn stripped(&self) -> bool {
-        (self.cfg.always_strip || (self.covered && self.cfg.strip_over_maximized)) && !self.live.alert()
+        (self.cfg.always_strip || (self.covered && self.cfg.strip_over_maximized))
+            && !self.live.alert()
+            && self.drop_msg.is_none()
     }
 
     /// Правый клик по раскрытому острову включает/выключает режим полоски; действует с момента,
@@ -130,7 +133,12 @@ impl App {
     /// Форма свёрнутого острова: мини-плеер/уведомление показываются, только когда остров
     /// свёрнут, виден и ничем не закрыт.
     pub(crate) fn live_form(&self) -> live::Form {
-        if self.expanded || self.stripped() || self.hidden {
+        if self.expanded || self.hidden {
+            live::Form::Idle
+        } else if self.drop_msg.is_some() {
+            // Тащат файл, ссылку или текст: остров, даже «полоска», показывает плашку.
+            live::Form::Drop
+        } else if self.stripped() {
             live::Form::Idle
         } else {
             self.live.form()
@@ -718,15 +726,32 @@ impl App {
         }
     }
 
-    /// (Пере)регистрирует глобальную горячую клавишу из конфига.
+    /// (Пере)регистрирует глобальные горячие клавиши из конфига: Apps и «Быстрый доступ».
     pub(crate) unsafe fn register_hotkey(&mut self) {
         let _ = UnregisterHotKey(Some(self.hwnd), HOTKEY_ID);
-        if self.cfg.hotkey.is_empty() {
-            return;
+        let _ = UnregisterHotKey(Some(self.hwnd), QUICK_HOTKEY_ID);
+        let apps = self.cfg.hotkey.clone();
+        let quick = self.cfg.quick_hotkey.clone();
+        self.register_hotkey_id(HOTKEY_ID, &apps);
+        // Одно сочетание на два действия не занять: побеждает Apps.
+        if !quick.eq_ignore_ascii_case(&apps) {
+            self.register_hotkey_id(QUICK_HOTKEY_ID, &quick);
         }
-        let Some((mods, vk)) = config::parse_hotkey(&self.cfg.hotkey) else { return };
-        if let Err(e) = RegisterHotKey(Some(self.hwnd), HOTKEY_ID, HOT_KEY_MODIFIERS(mods) | MOD_NOREPEAT, vk) {
-            log::error(&format!("не удалось занять горячую клавишу «{}»: {e}", self.cfg.hotkey));
+    }
+
+    /// Занимает сочетание `text` («ctrl+alt+space») под номером `id`. Пустое — ничего не делает.
+    /// `false` — не занято (неверная запись или оно у другой программы).
+    pub(crate) unsafe fn register_hotkey_id(&mut self, id: i32, text: &str) -> bool {
+        if text.is_empty() {
+            return false;
+        }
+        let Some((mods, vk)) = config::parse_hotkey(text) else { return false };
+        match RegisterHotKey(Some(self.hwnd), id, HOT_KEY_MODIFIERS(mods) | MOD_NOREPEAT, vk) {
+            Ok(()) => true,
+            Err(e) => {
+                log::error(&format!("не удалось занять горячую клавишу «{text}»: {e}"));
+                false
+            }
         }
     }
 }

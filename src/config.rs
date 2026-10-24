@@ -112,6 +112,10 @@ tabs = ["Controls", "Today", "Stats", "Clipboard", "Apps", "Wallpaper", "Power"]
 # Модификаторы ctrl/alt/shift/win и клавиша (буква, цифра, space, enter, f1…f12); "" — отключить
 hotkey = "ctrl+alt+space"
 
+# Глобальная горячая клавиша раздела «Быстрый доступ» на вкладке «Буфер». Обычно её назначают
+# прямо в разделе (кнопка «Назначить горячую клавишу»); "" — не назначена
+quick_hotkey = ""
+
 # Папка с обоями для вкладки Wallpaper (по умолчанию «Изображения» пользователя)
 # wallpaper_dir = "D:/Pictures/Wallpapers"
 
@@ -213,6 +217,8 @@ pub struct Config {
     pub free_layout: bool,
     /// Глобальная горячая клавиша («ctrl+alt+space»); пустая — отключена.
     pub hotkey: String,
+    /// Горячая клавиша раздела «Быстрый доступ»; пустая — не назначена.
+    pub quick_hotkey: String,
     /// Мини-плеер в свёрнутой форме, пока играет музыка.
     pub live_media: bool,
     /// Короткие уведомления в свёрнутой форме (таймер, громкость, зарядка).
@@ -253,6 +259,7 @@ impl Default for Config {
             layouts: Default::default(),
             free_layout: false,
             hotkey: "ctrl+alt+space".into(),
+            quick_hotkey: String::new(),
             live_media: true,
             live_toasts: true,
         }
@@ -687,6 +694,12 @@ pub fn parse(text: &str) -> Config {
                     log::error(&format!("config.toml:{}: неверная горячая клавиша «{s}»", n + 1));
                 }
                 cfg.hotkey = s;
+            }
+            ("", "quick_hotkey", Value::Str(s)) => {
+                if !s.is_empty() && parse_hotkey(&s).is_none() {
+                    log::error(&format!("config.toml:{}: неверная горячая клавиша «{s}»", n + 1));
+                }
+                cfg.quick_hotkey = s;
             }
             ("", "wallpaper_dir", Value::Str(s)) => cfg.wallpaper_dir = Some(s).filter(|d| !d.is_empty()),
             ("keys", k, Value::Str(s)) => cfg.keys.push((k.to_string(), s)),

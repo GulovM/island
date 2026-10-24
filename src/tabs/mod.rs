@@ -3,7 +3,9 @@
 //!
 //! Файлы данных лежат в `%APPDATA%\island`, по одной записи в строке:
 //! - `todo.txt` — `D|текст` (D = 1, если выполнено);
-//! - `clipboard.txt` — `P|unix_секунды|текст` (P = 1, если закреплено; `\n`, `\r`, `\t`, `\\` экранированы);
+//! - `clipboard.txt` — `P|unix_секунды|текст` (история буфера; `\n`, `\r`, `\t`, `\\` экранированы; P = 0,
+//!   закрепление переехало в `quick.txt`, а прежние записи с P = 1 переносятся туда при чтении);
+//! - `quick.txt` — `unix_секунды|текст` («Быстрый доступ», до 30 записей, тот же вид текста; картинки — в `quick\`);
 //! - `apps.txt` — `запусков|unix_секунды|избранное|путь`;
 //! - `wallpapers.txt` — пути недавних обоев, новые сверху.
 
@@ -46,9 +48,15 @@ pub enum Action {
     Paste(String),
     /// Только положить текст в буфер обмена.
     Copy(String),
-    /// То же для изображения из истории (имя PNG-файла в `clip`).
-    PasteImage(String),
-    CopyImage(String),
+    /// То же для изображения из истории или быстрого доступа (путь к PNG).
+    PasteImage(PathBuf),
+    CopyImage(PathBuf),
+    /// Открыть файл или ссылку из быстрого доступа и свернуть остров.
+    Open(String),
+    /// Запись быстрого доступа потащили наружу.
+    DragOut(crate::dnd::Out),
+    /// Новая горячая клавиша раздела «Быстрый доступ» (пустая — снять).
+    SetQuickHotkey(String),
     /// Свернуть остров (после запуска приложения и т. п.).
     Collapse,
     /// Раскладка виджетов вкладки изменилась: записать строку в `config.toml`.
@@ -167,7 +175,7 @@ impl Default for Tabs {
 /// Фиксированные размеры вкладок без сетки и страницы настроек: (ширина, высота).
 /// Для вкладок с сеткой (Controls, Today, Stats) размеры вычисляются из `TabSpec`.
 const NON_GRID_SIZES: [(f32, f32); 5] = [
-    (590.0, 300.0), // CLIPBOARD
+    (590.0, 328.0), // CLIPBOARD
     (480.0, 420.0), // APPS
     (560.0, 236.0), // WALLPAPER
     (420.0, 112.0), // POWER
@@ -180,7 +188,8 @@ impl Tabs {
         self.today.load();
         self.today.load_timer(state);
         self.today.configure(cfg);
-        self.clip.load(state.clipboard_paused);
+        self.clip.load(state.clipboard_paused, state.clipboard_section);
+        self.clip.set_hotkey(&cfg.quick_hotkey);
         self.stats.load(state.stats_top_by_cpu);
         self.wall.load(state.wallpaper_filter);
         self.apps.configure(cfg);
@@ -192,6 +201,7 @@ impl Tabs {
     }
 
     pub fn apply_config(&mut self, cfg: &Config) {
+        self.clip.set_hotkey(&cfg.quick_hotkey);
         self.today.configure(cfg);
         self.apps.configure(cfg);
         self.wall.configure(cfg);
@@ -328,6 +338,7 @@ impl Tabs {
             APPS => self.apps.show(),
             WALLPAPER => self.wall.show(),
             TODAY => self.today.show(),
+            CLIPBOARD => self.clip.show(),
             _ => false,
         }
     }
@@ -347,6 +358,9 @@ impl Tabs {
         }
         if tab == TODAY {
             self.today.hide_overlays();
+        }
+        if tab == CLIPBOARD {
+            self.clip.hide();
         }
     }
 
@@ -408,6 +422,52 @@ impl Tabs {
         let e = self.clip.sync();
         let f = self.apps.sync();
         a | b | c | d | e | f
+    }
+
+    /// Открывает на вкладке «Буфер» раздел «Быстрый доступ» (горячая клавиша раздела).
+    pub fn open_quick(&mut self) {
+        self.clip.set_section(clipboard::Section::Quick);
+    }
+
+    /// Вкладка ждёт нажатия сочетания для горячей клавиши раздела.
+    pub fn recording_hotkey(&self) -> bool {
+        self.clip.recording()
+    }
+
+    /// Сочетание нажато: просьба сохранить его уходит главному окну.
+    pub fn hotkey_captured(&mut self, combo: String) {
+        self.clip.stop_recording();
+        self.actions.push(Action::SetQuickHotkey(combo));
+    }
+
+    pub fn cancel_hotkey_recording(&mut self) {
+        self.clip.stop_recording();
+    }
+
+    /// Горячая клавиша раздела сменилась (или не заняла: тогда с пояснением).
+    pub fn set_quick_hotkey(&mut self, hotkey: &str, note: Option<&'static str>) {
+        self.clip.set_hotkey(hotkey);
+        self.clip.set_note(note);
+    }
+
+    /// Брошенное на остров попадает в «Быстрый доступ».
+    pub fn add_quick(&mut self, entries: &[String]) -> clipboard::Added {
+        self.clip.add_quick(entries)
+    }
+
+    /// В «Быстром доступе» нет места.
+    pub fn quick_full(&self) -> bool {
+        self.clip.quick_full()
+    }
+
+    /// Файл из «Быстрого доступа» не открылся: пометить недоступным.
+    pub fn mark_missing(&mut self, path: &str) {
+        self.clip.mark_missing(path);
+    }
+
+    /// Срок хранения истории буфера (раз в час и при показе вкладки). `true` — список изменился.
+    pub fn prune_clip(&mut self) -> bool {
+        self.clip.prune()
     }
 
     /// Новый текст в буфере обмена (уже без «исключённых» и наших собственных записей).
@@ -474,7 +534,7 @@ mod tests {
         assert_eq!(tabs.island_size(STATS), (580.0, 268.0));
 
         // Вкладки без сетки:
-        assert_eq!(tabs.island_size(CLIPBOARD), (590.0, 300.0));
+        assert_eq!(tabs.island_size(CLIPBOARD), (590.0, 328.0));
         assert_eq!(tabs.island_size(APPS), (480.0, 420.0));
         assert_eq!(tabs.island_size(WALLPAPER), (560.0, 236.0));
         assert_eq!(tabs.island_size(POWER), (420.0, 112.0));

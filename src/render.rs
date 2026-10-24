@@ -177,11 +177,13 @@ impl App {
             Mini,
             Toast,
             Face,
+            Drop,
         }
         for (alpha, slot) in [
             (self.live.mini_alpha(), Slot::Mini),
             (self.live.toast_alpha(), Slot::Toast),
             (self.face.alpha(), Slot::Face),
+            (self.drag_a.value.clamp(0.0, 1.0), Slot::Drop),
         ] {
             let alpha = alpha * live_open;
             if alpha < 0.01 {
@@ -191,6 +193,7 @@ impl App {
                 Slot::Mini => live::MINI,
                 Slot::Toast => live::TOAST,
                 Slot::Face => self.collapsed(),
+                Slot::Drop => DROP_PILL,
             };
             let fw = fw.max(self.collapsed().0);
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
@@ -208,6 +211,7 @@ impl App {
                     let label = self.live.timer().map(|t| t.label());
                     self.face.draw(&cv, r, label.as_deref().map(|l| (l, self.live.timer_pulse())));
                 }
+                Slot::Drop => self.draw_drop_pill(&cv, r),
             }
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
             g.dc.PopAxisAlignedClip();
@@ -477,6 +481,13 @@ impl App {
                 layer(prev, content_p * (1.0 - fade), -self.tab_dir * SLIDE * fade, false, ui, tabs);
             }
             layer(self.cur_id(), content_p * fade, self.tab_dir * SLIDE * (1.0 - fade), true, ui, tabs);
+            // Над раскрытым островом тащат файл, ссылку или текст: надпись закрывает содержимое.
+            let drag = self.drag_a.value.clamp(0.0, 1.0) * content_p;
+            if self.expanded && drag > 0.01 {
+                g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
+                let cv = Canvas { g, alpha: drag, accent };
+                self.draw_drop_overlay(&cv, ui::Rect::new(x0 / s + 10.0, 34.0, aw / s - 20.0, (ah / s - 44.0).max(20.0)));
+            }
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
             g.dc.PopAxisAlignedClip();
             if let Some(params) = mask {

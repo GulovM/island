@@ -107,6 +107,10 @@ impl App {
             self.tabs.stop_alarm();
             return self.dismiss_toast();
         }
+        // Вкладка ждёт сочетание для горячей клавиши раздела: клавиши — ей, а не полю.
+        if self.tabs.recording_hotkey() {
+            return self.record_key(vk);
+        }
         let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
         // AltGr (польская, немецкая и др. раскладки) приходит как Ctrl+Alt: это ввод символа, не шорткат.
         let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0 && GetKeyState(VK_MENU.0 as i32) >= 0;

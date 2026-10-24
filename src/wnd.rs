@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use super::*;
 
@@ -29,8 +29,8 @@ pub(crate) enum Ev {
     Tray(u32),
     /// Курсор у верхнего края другого монитора (хэндл окна горячей зоны).
     Hot(isize),
-    /// Сработала глобальная горячая клавиша.
-    Hotkey,
+    /// Сработала глобальная горячая клавиша (`HOTKEY_ID` — Apps, `QUICK_HOTKEY_ID` — «Быстрый доступ»).
+    Hotkey(i32),
     /// Сменились мониторы, разрешение или DPI.
     Display,
     /// Компьютер проснулся или разблокирован.
@@ -71,7 +71,19 @@ pub(crate) enum Ev {
     Shot,
     /// Кнопку удерживают дольше `LONG_MS`.
     LongPress,
+    /// На остров навели перетаскиваемое: `true` — это можно добавить в «Быстрый доступ».
+    DragEnter(bool),
+    /// Перетаскиваемое ушло с острова, не будучи брошенным.
+    DragLeave,
+    /// Брошено на остров: записи для «Быстрого доступа» (пустой список — отказ).
+    Dropped(Vec<String>),
+    /// Итог броска показан достаточно.
+    DropTimer,
 }
+
+/// Вкладка ждёт сочетание для горячей клавиши: Alt+клавиша приходит как `WM_SYSKEYDOWN`, и её надо
+/// забрать себе, а не отдать системе.
+pub(crate) static RECORDING: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
     pub(crate) static EVENTS: RefCell<Vec<Ev>> = const { RefCell::new(Vec::new()) };
@@ -169,7 +181,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             LRESULT(0)
         }
         WM_HOTKEY => {
-            push(Ev::Hotkey);
+            push(Ev::Hotkey(wp.0 as i32));
             LRESULT(0)
         }
         WM_DISPLAYCHANGE | WM_DPICHANGED => {
@@ -221,6 +233,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             push(Ev::Key(wp.0 as u32));
             LRESULT(0)
         }
+        WM_SYSKEYDOWN if RECORDING.load(Ordering::Relaxed) => {
+            push(Ev::Key(wp.0 as u32));
+            LRESULT(0)
+        }
         WM_ACTIVATE => {
             if (wp.0 & 0xffff) as u32 == WA_INACTIVE {
                 push(Ev::Deactivated);
@@ -265,6 +281,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_TIMER if wp.0 == SYS_COLOR_TIMER => {
             push(Ev::SysColorsRetry);
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == DROP_TIMER => {
+            push(Ev::DropTimer);
             LRESULT(0)
         }
         WM_THEMECHANGED | WM_SYSCOLORCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
