@@ -148,14 +148,14 @@ impl App {
     /// Показывает уведомление в свёрнутой форме. `true` — нужен кадр.
     pub(crate) unsafe fn show_toast(&mut self, t: live::Toast) -> bool {
         // Окончание таймера заметно и в режиме полоски; остальные уведомления полоска не показывает.
-        let strip_blocks = self.stripped() && t != live::Toast::Timer;
+        let strip_blocks = self.stripped() && !t.is_alert();
         // В игре (остров спрятан) приходит только звук.
         if !self.cfg.live_toasts || self.expanded || strip_blocks || self.hidden || self.gfx.is_none() {
             return false;
         }
         self.live.show(t);
         SetTimer(Some(self.hwnd), TOAST_TIMER, t.lifetime().as_millis() as u32, None);
-        if t == live::Toast::Timer {
+        if t.is_alert() {
             // Клавиатура — на остров, чтобы закрыть уведомление по Esc; sync_focus запомнит прежнее окно.
             self.ui.focus = Some(NOTICE_FOCUS);
         }
@@ -620,6 +620,24 @@ impl App {
     // ---------- Сон, блокировка, потеря устройства ----------
 
     /// Остров не нужен на экране блокировки: сворачиваем, чтобы после входа не висел раскрытым.
+    /// Подписка на включение и выключение экрана: пока он погашен, напоминания о событиях ждут.
+    pub(crate) unsafe fn watch_display_power(&self) {
+        if let Err(e) = RegisterPowerSettingNotification(windows::Win32::Foundation::HANDLE(self.hwnd.0), &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE) {
+            log::error(&format!("не удалось подписаться на состояние экрана: {e}"));
+        }
+    }
+
+    /// Показывает напоминание о событии календаря, если оно наступило, а экран включён и сессия
+    /// не заблокирована. Звук играет и когда остров спрятан из-за игры. `true` — нужен кадр.
+    pub(crate) unsafe fn show_event_notice(&mut self) -> bool {
+        let Some(n) = self.tabs.take_event_notice(!self.locked && !self.screen_off) else { return false };
+        if !self.cfg.live_toasts || self.expanded || self.hidden || self.gfx.is_none() {
+            return false;
+        }
+        self.live.show_event(n.title, n.tag);
+        self.show_toast(live::Toast::Event)
+    }
+
     pub(crate) unsafe fn on_lock(&mut self) -> bool {
         self.disarm_leave();
         if self.expanded {

@@ -61,7 +61,9 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 use windows::Win32::System::DataExchange::{AddClipboardFormatListener, RemoveClipboardFormatListener};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Power::{RegisterPowerSettingNotification, POWERBROADCAST_SETTING};
 use windows::Win32::System::RemoteDesktop::WTSRegisterSessionNotification;
+use windows::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::HiDpi::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
@@ -148,6 +150,9 @@ pub(crate) const LONG_MS: u32 = 520;
 pub(crate) const SYS_COLOR_TIMER: usize = 13;
 /// Итог броска на остров показан достаточно.
 pub(crate) const DROP_TIMER: usize = 14;
+/// Проверка напоминаний о событиях календаря.
+pub(crate) const EVENT_TIMER: usize = 15;
+pub(crate) const EVENT_TICK_MS: u32 = 15_000;
 /// Плашка «Быстрый доступ» на свёрнутом острове при перетаскивании, логические пиксели.
 pub(crate) const DROP_PILL: (f32, f32) = (240.0, 40.0);
 pub(crate) const WM_CLIPBOARDUPDATE: u32 = 0x031D;
@@ -282,6 +287,8 @@ fn run() -> Result<()> {
         }
         start_env_timer(app.hwnd, app.cfg.env_poll_ms);
         SetTimer(Some(app.hwnd), UPDATE_TIMER, update::ms_to_next_hour(), None);
+        SetTimer(Some(app.hwnd), EVENT_TIMER, EVENT_TICK_MS, None);
+        app.watch_display_power();
         update::tick(app.cfg.auto_update);
 
         let mut msg = MSG::default();
