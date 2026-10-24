@@ -58,6 +58,8 @@ pub struct State {
     pub last_tab: String,
     /// Пауза записи буфера обмена («Не писать»).
     pub clipboard_paused: bool,
+    /// Открытый раздел вкладки «Буфер»: 0 — «Буфер», 1 — «Быстрый доступ».
+    pub clipboard_section: usize,
     /// Режим сортировки топа приложений в Stats (true — CPU, false — RAM).
     pub stats_top_by_cpu: bool,
     /// Выбранный раздел обоев в Wallpaper (0 — Все, 1 — Недавние, 2 — WE).
@@ -72,6 +74,7 @@ impl Default for State {
             version: STATE_VERSION,
             last_tab: String::new(),
             clipboard_paused: false,
+            clipboard_section: 0,
             stats_top_by_cpu: false,
             wallpaper_filter: 0,
             timer: TimerState::default(),
@@ -111,6 +114,7 @@ pub fn serialize(state: &State) -> String {
     out.push_str(&format!("version = {}\n", state.version));
     out.push_str(&format!("last_tab = \"{}\"\n", state.last_tab.replace('\\', "\\\\").replace('"', "\\\"")));
     out.push_str(&format!("clipboard_paused = {}\n", state.clipboard_paused as u8));
+    out.push_str(&format!("clipboard_section = {}\n", state.clipboard_section));
     out.push_str(&format!("stats_top_by_cpu = {}\n", state.stats_top_by_cpu as u8));
     out.push_str(&format!("wallpaper_filter = {}\n", state.wallpaper_filter));
 
@@ -166,6 +170,11 @@ pub fn parse(text: &str) -> State {
             }
             ("", "clipboard_paused") => {
                 state.clipboard_paused = val == "1" || val.eq_ignore_ascii_case("true");
+            }
+            ("", "clipboard_section") => {
+                if let Ok(s) = val.parse::<usize>() {
+                    state.clipboard_section = s.min(1);
+                }
             }
             ("", "stats_top_by_cpu") => {
                 state.stats_top_by_cpu = val == "1" || val.eq_ignore_ascii_case("true");
@@ -328,6 +337,12 @@ pub fn set_clipboard_paused(paused: bool) {
     flush();
 }
 
+/// Запоминает открытый раздел вкладки «Буфер».
+pub fn set_clipboard_section(section: usize) {
+    update(|s| s.clipboard_section = section);
+    flush();
+}
+
 /// Запоминает режим сортировки процессов в Stats.
 pub fn set_stats_top_by_cpu(top_by_cpu: bool) {
     update(|s| s.stats_top_by_cpu = top_by_cpu);
@@ -369,6 +384,7 @@ mod tests {
             version: STATE_VERSION,
             last_tab: "Today".to_string(),
             clipboard_paused: true,
+            clipboard_section: 1,
             stats_top_by_cpu: true,
             wallpaper_filter: 2,
             timer: TimerState {

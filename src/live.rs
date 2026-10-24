@@ -52,6 +52,8 @@ pub enum Form {
     Idle,
     Mini,
     Toast,
+    /// Плашка «Быстрый доступ», пока на остров тащат файл, ссылку или текст.
+    Drop,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

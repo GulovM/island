@@ -90,6 +90,11 @@ pub struct App {
     /// Единый прогресс раскрытия 0..1: от него зависят размер тела, скругление и гашение свёрнутой формы.
     pub(crate) open: Spring,
 
+    /// Надпись перетаскивания на острове (`None` — на остров ничего не тащат).
+    pub(crate) drop_msg: Option<crate::dragdrop::DropMsg>,
+    /// Появление надписи перетаскивания, 0..1.
+    pub(crate) drag_a: Spring,
+
     /// Тулкит и состояние вкладок.
     pub(crate) ui: Ui,
     pub(crate) tabs: tabs::Tabs,
@@ -277,6 +282,8 @@ impl App {
                 // Затухание чуть выше критического порога 0,7: почти без отскока, чтобы при сворачивании
                 // тело не уходило меньше свёрнутого размера.
                 open: Spring::unit(0.0, 420.0, 34.0),
+                drop_msg: None,
+                drag_a: Spring::unit(0.0, 260.0, 30.0),
                 ui: Ui::default(),
                 tabs: tabs::Tabs::default(),
                 shown_tab: None,
@@ -533,6 +540,7 @@ impl App {
             || !(self.pill_x.settled() && self.pill_w.settled() && self.pill_a.settled())
             || !self.tab_t.settled()
             || !self.glow.settled()
+            || !self.drag_a.settled()
             || self.face.animating()
             || self.live.animating()
             || self.ui.animating()
@@ -549,6 +557,10 @@ impl App {
         self.glow.step(dt);
         if self.glow.settled() {
             self.glow.snap();
+        }
+        self.drag_a.step(dt);
+        if self.drag_a.settled() {
+            self.drag_a.snap();
         }
         for p in [&mut self.pill_x, &mut self.pill_w, &mut self.pill_a] {
             p.step(dt);

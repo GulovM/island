@@ -37,9 +37,10 @@
 | `main.rs` | точка входа, `mod`-объявления, константы раскладки, `run` (окно, цикл сообщений) |
 | `app.rs` | `App`: состояние острова, тема, размеры вкладок, анимация |
 | `window.rs`, `events.rs`, `render.rs`, `input.rs`, `wnd.rs` | остальные `impl App`: геометрия окна, события, кадр, ввод; очередь сообщений и DPI |
+| `dnd.rs`, `dragdrop.rs` | перетаскивание: OLE-приём файлов, ссылок и текста на остров и отдача записей «Быстрого доступа» наружу (`dnd`), надпись «Быстрый доступ», итог броска, горячая клавиша раздела (`dragdrop`) |
 | `gfx.rs`, `anim.rs`, `theme.rs`, `face.rs`, `live.rs` | D3D11/Direct2D/DirectComposition, пружины, палитра, свёрнутый вид и индикатор |
 | `ui/` | UI-тулкит: `color`, `glyphs`, `geom`, `fonts`, `canvas`, `bitmap_cache`, `scroll`, `field` (текстовое поле), `widgets` |
-| `tabs/` | вкладки: `controls`, `power`, `clipboard`, `apps`, `wallpaper`, `settings`; `grid` и `layout` (сетка и раскладка виджетов, режим правки); `today/` (`alarm`, `clock`, `timer`, `calendar`, `todo`, `weather`), `stats/` (`procs`, `gpu`, `hw`, `format`) |
+| `tabs/` | вкладки: `controls`, `power`, `clipboard/` (`quick` — «Быстрый доступ»), `apps`, `wallpaper`, `settings`; `grid` и `layout` (сетка и раскладка виджетов, режим правки); `today/` (`alarm`, `clock`, `timer`, `calendar`, `todo`, `weather`), `stats/` (`procs`, `gpu`, `hw`, `format`) |
 | `bg/` | фоновый поток для WinRT/COM: `net`, `devices`, `audio_policy`, `volume`, `wifi`, `bluetooth`, `media`, `winrt` |
 | `sys/` | системная интеграция: `shell`, `clipboard`, `registry`, `appearance`, `night_light`, `seal` (DPAPI), `paths` |
 | `online/` | сеть без сторонних библиотек: `http` (WinHTTP), `weather`, `calendar` (iCal), `datetime`, `speedtest` |

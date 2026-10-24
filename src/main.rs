@@ -6,6 +6,8 @@ mod backdrop;
 mod bg;
 mod bright;
 mod config;
+mod dnd;
+mod dragdrop;
 mod face;
 mod gfx;
 mod glass;
@@ -144,9 +146,15 @@ pub(crate) const LONG_TIMER: usize = 12;
 pub(crate) const LONG_MS: u32 = 520;
 /// Повторная проверка системных цветов после смены темы/обоев (гонка записи в реестр).
 pub(crate) const SYS_COLOR_TIMER: usize = 13;
+/// Итог броска на остров показан достаточно.
+pub(crate) const DROP_TIMER: usize = 14;
+/// Плашка «Быстрый доступ» на свёрнутом острове при перетаскивании, логические пиксели.
+pub(crate) const DROP_PILL: (f32, f32) = (240.0, 40.0);
 pub(crate) const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 pub(crate) const WM_HOTKEY: u32 = 0x0312;
 pub(crate) const HOTKEY_ID: i32 = 1;
+/// Горячая клавиша раздела «Быстрый доступ».
+pub(crate) const QUICK_HOTKEY_ID: i32 = 2;
 /// Сдвиг содержимого при смене вкладки (логические пиксели).
 pub(crate) const SLIDE: f32 = 16.0;
 
@@ -200,6 +208,11 @@ fn run() -> Result<()> {
         online::init_cached_weather(state.weather.temp, state.weather.code, state.weather.city.clone());
     }
     online::init_cached_calendar(&cfg.calendar_ics);
+    // OLE (перетаскивание) требует STA: поток инициализируется до создания окон и очереди композиции.
+    let ole = dnd::init();
+    if !ole {
+        log::error("OLE недоступен: перетаскивание на остров и с него отключено");
+    }
     let mut app = App::new(cfg, &state)?;
     let mut last = Instant::now();
     let mut dirty = true;
@@ -215,6 +228,8 @@ fn run() -> Result<()> {
         // Ширина острова нужна сеткам до загрузки раскладки: виджеты «на весь остров» занимают её целиком.
         app.tabs.set_min_cols(app.min_grid_cols());
         app.tabs.load(&cfg, &state);
+        dnd::set_full(app.tabs.quick_full());
+        let drop_target = ole && dnd::register(app.hwnd);
         app.retarget();
         app.body.snap();
         if let Err(e) = AddClipboardFormatListener(app.hwnd) {
@@ -337,6 +352,9 @@ fn run() -> Result<()> {
             let _ = UnhookWinEvent(h);
         }
         let _ = RemoveClipboardFormatListener(app.hwnd);
+        if drop_target {
+            dnd::revoke(app.hwnd);
+        }
         sys::tray_remove(app.hwnd);
     }
     log::info("выход");
