@@ -363,14 +363,14 @@ impl Ui {
         }
     }
 
-    /// Рисует подсказку, заявленную в этом кадре, над кнопкой (или под ней, если сверху нет места);
+    /// Рисует подсказку, заявленную в этом кадре, под кнопкой (или над ней, если снизу нет места);
     /// не выходит за `bounds`.
     pub unsafe fn paint_tip(&mut self, cv: &Canvas, bounds: Rect) {
         let Some((r, text, hv)) = self.tip.take() else { return };
         let font = &cv.g.fonts.small;
         let (w, h) = (cv.text_w(&text, font) + 16.0, 22.0);
         let x = (r.cx() - w / 2.0).min(bounds.right() - w - 4.0).max(bounds.x + 4.0);
-        let y = if r.y - h - 4.0 >= bounds.y { r.y - h - 4.0 } else { r.bottom() + 4.0 };
+        let y = if r.bottom() + 4.0 + h <= bounds.bottom() { r.bottom() + 4.0 } else { r.y - h - 4.0 };
         let tip = Rect::new(x, y, w, h);
         let fade = Canvas { g: cv.g, alpha: cv.alpha * ((hv - 0.6) / 0.4).clamp(0.0, 1.0), accent: cv.accent };
         fade.rr(tip, 6.0, mix(chip_bg(), fg(), 0.1));

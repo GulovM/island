@@ -332,11 +332,11 @@ impl Today {
         ui.paint_tip(cv, Rect::new(0.0, 0.0, w, h));
     }
 
-    /// Где раскрывается месячный календарь: на месте карточки недели (она не меньше нужной
-    /// ширины), но не выходя за область вкладки.
+    /// Где раскрывается месячный календарь: с левого края карточки недели, размером ровно 4×4 ячейки,
+    /// но не выходя за область вкладки.
     fn month_rect(&self, area: Rect) -> Rect {
         let wk = self.week_rect;
-        let w = wk.w.max(MONTH_W).min(area.w);
+        let w = MONTH_W.min(area.w);
         let h = MONTH_H.min(area.h);
         Rect::new(wk.x.min(area.right() - w).max(area.x), wk.y.min(area.bottom() - h).max(area.y), w, h)
     }

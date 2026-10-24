@@ -243,14 +243,20 @@ pub fn format_event_range(minute: Option<i64>, end: Option<i64>) -> String {
 }
 
 /// Ширина кнопки-метки «ICS» рядом с кнопкой добавления события.
-const ICS_W: f32 = 32.0;
+const ICS_W: f32 = 26.0;
+
+/// Кнопка-метка «ICS»: только текст, без подложки; при наведении подсвечивается. `true` — нажата.
+unsafe fn ics_label(ui: &mut Ui, cv: &Canvas, r: Rect) -> bool {
+    let cid = id(TODAY, 99);
+    let (_, clicked) = ui.click_area(cid, r);
+    let hv = ui.hover_of(cid);
+    cv.text("ICS", r, &cv.g.fonts.small_c, mix(dim(), cv.accent, hv));
+    ui.tip(cid, r, tip_ics());
+    clicked
+}
 
 fn tip_add_event() -> &'static str {
     crate::i18n::pick("Добавить событие", "Add event")
-}
-
-fn tip_edit_event() -> &'static str {
-    crate::i18n::pick("Изменить событие", "Edit event")
 }
 
 fn tip_ics() -> &'static str {
@@ -314,11 +320,10 @@ impl Today {
             self.begin_event(ui, today);
         }
         ui.tip(id(TODAY, 98), add_r, tip_add_event());
-        let ics_r = Rect::new(add_r.right() + 4.0, head_cy - 9.0, ICS_W, 18.0);
-        if ui.chip(cv, id(TODAY, 99), ics_r, "ICS", false) {
+        let ics_r = Rect::new(add_r.right() + 2.0, head_cy - 9.0, ICS_W, 18.0);
+        if ics_label(ui, cv, ics_r) {
             self.begin_calendar_edit(ui);
         }
-        ui.tip(id(TODAY, 99), ics_r, tip_ics());
         // Диапазон недели: полный, короткий или (в узкой карточке) без него, если не хватает места.
         let months = crate::i18n::months_short();
         let month_of = |m: u32| months[(m as usize).clamp(1, 12) - 1];
@@ -427,11 +432,6 @@ impl Today {
         } else if self.online.calendar_failed {
             // Предупреждение об ошибке загрузки при наличии событий: нейтральная точка, без красного.
             cv.circle(ev.right() - 14.0, ev.y + 19.0, 2.5, dim());
-        }
-        if local.is_some() {
-            ui.tip(id(TODAY, 63), ev, tip_edit_event());
-        } else if connect {
-            ui.tip(id(TODAY, 63), ev, tip_ics());
         }
         if clicked {
             if let Some((lid, day)) = local {
@@ -546,7 +546,6 @@ impl Today {
                     cv.rr(row_r, 4.0, D2D1_COLOR_F { a: 0.06 * hv, ..fg() });
                     cv.glyph(icon::EDIT, Rect::new(row_r.right() - 18.0, row_r.y + 3.0, 14.0, 14.0), false, D2D1_COLOR_F { a: hv, ..dim() });
                 }
-                ui.tip(rid, row_r, tip_edit_event());
             }
             let when = format_event_range(item.minute, item.end_minute);
             cv.text(&when, Rect::new(row_r.x + 10.0, row_r.y + 2.0, TIME_COL_W, 14.0), &f.small_b, time_color);
@@ -758,21 +757,31 @@ impl Today {
         };
 
         // Шапка: «Октябрь 2026» (клик — к текущему месяцу), стрелки и свернуть.
-        let title = Rect::new(r.x + 9.0, r.y + 7.0, 118.0, 18.0);
+        let name = format!("{} {}", crate::i18n::months_full()[vm as usize - 1], vy);
+        let name_w = cv.text_w(&name, &f.body).ceil() + 2.0;
+        let title = Rect::new(r.x + 9.0, r.y + 7.0, name_w, 18.0);
         let (_, jump) = ui.click_area(id(TODAY, 91), title);
         let hv = ui.hover_of(id(TODAY, 91));
-        cv.text(&format!("{} {}", crate::i18n::months_full()[vm as usize - 1], vy), title, &f.body, mix(txt(), cv.accent, hv));
+        cv.text(&name, title, &f.body, mix(txt(), cv.accent, hv));
+        // Новое событие и подключение календаря по ссылке — те же кнопки, что в карточке недели.
+        let add_r = Rect::new(title.right() + 4.0, r.y + 7.0, 16.0, 18.0);
+        let add = ui.icon_button(cv, id(TODAY, 97), add_r, icon::ADD, false);
+        ui.tip(id(TODAY, 97), add_r, tip_add_event());
+        if ics_label(ui, cv, Rect::new(add_r.right() + 2.0, r.y + 7.0, ICS_W, 18.0)) {
+            self.month_open = false;
+            self.begin_calendar_edit(ui);
+        }
         if self.online.calendar_failed {
-            cv.circle(r.right() - 82.0, r.y + 16.0, 2.5, dim());
+            cv.circle(r.right() - 62.0, r.y + 16.0, 2.5, dim());
         }
         let mut shift = 0;
-        if ui.icon_button(cv, id(TODAY, 92), Rect::new(r.right() - 72.0, r.y + 7.0, 18.0, 18.0), icon::LEFT, false) {
+        if ui.icon_button(cv, id(TODAY, 92), Rect::new(r.right() - 58.0, r.y + 7.0, 16.0, 18.0), icon::LEFT, false) {
             shift = -1;
         }
-        if ui.icon_button(cv, id(TODAY, 93), Rect::new(r.right() - 50.0, r.y + 7.0, 18.0, 18.0), icon::RIGHT, false) {
+        if ui.icon_button(cv, id(TODAY, 93), Rect::new(r.right() - 40.0, r.y + 7.0, 16.0, 18.0), icon::RIGHT, false) {
             shift = 1;
         }
-        let close = ui.icon_button(cv, id(TODAY, 94), Rect::new(r.right() - 26.0, r.y + 7.0, 18.0, 18.0), icon::UP, false);
+        let close = ui.icon_button(cv, id(TODAY, 94), Rect::new(r.right() - 22.0, r.y + 7.0, 16.0, 18.0), icon::UP, false);
 
         // Сетка месяца.
         let cw = (r.w - 14.0) / 7.0;
@@ -823,17 +832,7 @@ impl Today {
         if self.sel == today {
             head.push_str(crate::i18n::pick(" • сегодня", " • today"));
         }
-        // Справа в шапке дня: подключение календаря по ссылке (ICS) и новое событие.
-        let add_r = Rect::new(det.right() - 24.0, det.y + 1.0, 18.0, 18.0);
-        let ics_r = Rect::new(add_r.x - 4.0 - ICS_W, det.y + 1.0, ICS_W, 18.0);
-        let add = ui.icon_button(cv, id(TODAY, 97), add_r, icon::ADD, false);
-        ui.tip(id(TODAY, 97), add_r, tip_add_event());
-        if ui.chip(cv, id(TODAY, 99), ics_r, "ICS", false) {
-            self.month_open = false;
-            self.begin_calendar_edit(ui);
-        }
-        ui.tip(id(TODAY, 99), ics_r, tip_ics());
-        cv.text(&head, Rect::new(det.x + 8.0, det.y + 3.0, (ics_r.x - det.x - 12.0).max(10.0), 14.0), &f.small_b, txt());
+        cv.text(&head, Rect::new(det.x + 8.0, det.y + 3.0, det.w - 16.0, 14.0), &f.small_b, txt());
         let list: &[DayEvent] = evs.get((self.sel - start) as usize).map(Vec::as_slice).unwrap_or(&[]);
         let view = Rect::new(det.x + 4.0, det.y + 19.0, det.w - 8.0, (det.h - 21.0).max(PITCH));
         if list.is_empty() {
