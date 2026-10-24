@@ -20,15 +20,16 @@ pub(super) fn fmt_bytes(b: f64) -> String {
     }
 }
 
-pub(super) fn fmt_uptime(secs: u64) -> String {
+/// Время работы двумя частями: старшая единица (число и её подпись) и остаток под ней.
+pub(super) fn uptime_parts(secs: u64) -> (u64, &'static str, String) {
     let (d, h, m) = (secs / 86_400, secs / 3600 % 24, secs / 60 % 60);
     let (du, hu, mu) = if crate::i18n::en() { ("d", "h", "min") } else { ("д", "ч", "мин") };
     if d > 0 {
-        format!("{d} {du} {h} {hu}")
+        (d, du, format!("{h} {hu} {m} {mu}"))
     } else if h > 0 {
-        format!("{h} {hu} {m} {mu}")
+        (h, hu, format!("{m} {mu}"))
     } else {
-        format!("{m} {mu}")
+        (m, mu, String::new())
     }
 }
 
@@ -51,9 +52,9 @@ mod tests {
         assert_eq!(fmt_rate(500.0), "500 Б/с");
         assert_eq!(fmt_rate(2048.0), "2 КБ/с");
         assert_eq!(fmt_rate(3.5 * 1024.0 * 1024.0), "3.5 МБ/с");
-        assert_eq!(fmt_uptime(90_000), "1 д 1 ч");
-        assert_eq!(fmt_uptime(3_700), "1 ч 1 мин");
-        assert_eq!(fmt_uptime(120), "2 мин");
+        assert_eq!(uptime_parts(90_000), (1, "д", "1 ч 0 мин".to_string()));
+        assert_eq!(uptime_parts(3_700), (1, "ч", "1 мин".to_string()));
+        assert_eq!(uptime_parts(120), (2, "мин", String::new()));
         assert_eq!(fmt_bytes(1.5 * 1024.0 * 1024.0 * 1024.0), "1.5 ГБ");
         assert_eq!(fmt_bytes(820.0 * 1024.0 * 1024.0), "820 МБ");
         // 2026-10-22 10:09 минус 3 д 4 ч 17 мин — 19 октября, 05:52.
