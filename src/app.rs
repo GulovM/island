@@ -4,6 +4,16 @@ use std::time::Instant;
 
 use super::*;
 
+/// Чем сейчас тикает `LIVE_TIMER` свёрнутого острова.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LiveTick {
+    Off,
+    /// ~30 кадров в секунду: эквалайзер мини-плеера и мигание паузы таймера.
+    Frames,
+    /// Раз в секунду, по смене цифры таймера.
+    Seconds,
+}
+
 /// Невидимая полоска на верхнем краю монитора, где острова сейчас нет.
 pub struct HotZone {
     pub(crate) hwnd: HWND,
@@ -100,7 +110,7 @@ pub struct App {
     /// Индикатор в свёрнутой форме: мини-плеер и уведомления.
     pub(crate) live: live::Live,
     /// Включён ли секундный тик мини-плеера.
-    pub(crate) live_tick_on: bool,
+    pub(crate) live_tick_on: LiveTick,
     /// Режим «полоска над развёрнутыми окнами» (по умолчанию выключен).
     /// Клавиатурный ввод включён: окно временно активно и принимает фокус.
     pub(crate) kbd: bool,
@@ -280,7 +290,7 @@ impl App {
                 pill_sig: (0, 0, 0),
                 tab_dir: 1.0,
                 live: live::Live::new(cfg.live_media),
-                live_tick_on: false,
+                live_tick_on: LiveTick::Off,
                 kbd: false,
                 prev_fg: HWND(std::ptr::null_mut()),
                 high_surrogate: 0,
@@ -498,7 +508,7 @@ impl App {
         self.live.set_form(form);
         // Часы, раскладка и Wi-Fi — только когда свёрнутому острову больше нечего показывать.
         let idle = form == live::Form::Idle && !self.expanded && !self.stripped() && !self.hidden;
-        self.face.set_visible(idle);
+        self.face.set_visible(idle, self.live.timer().is_some());
     }
 
     /// Наводит каплю на выбранную вкладку; при свёрнутом острове или смене набора вкладок — без анимации.

@@ -375,6 +375,11 @@ impl Tabs {
         self.today.deadline()
     }
 
+    /// Запущенный или стоящий на паузе таймер Today (для свёрнутого острова).
+    pub fn timer_view(&self) -> Option<crate::live::TimerView> {
+        self.today.view()
+    }
+
     /// Таймер дошёл до нуля (для уведомления в свёрнутой форме).
     pub fn take_timer_fired(&mut self) -> bool {
         self.today.take_fired()

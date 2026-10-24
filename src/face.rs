@@ -7,7 +7,7 @@ use windows::Win32::System::SystemInformation::GetLocalTime;
 
 use crate::anim::Spring;
 use crate::bg::{self, NetStatus};
-use crate::ui::{dim, track, txt, Canvas, Rect};
+use crate::ui::{dim, icon, status_orange, track, txt, Canvas, Rect};
 
 pub struct Face {
     enabled: bool,
@@ -61,8 +61,9 @@ impl Face {
     }
 
     /// Нужно ли показывать лицо (остров свёрнут, ничего не играет, ничто не закрывает).
-    pub fn set_visible(&mut self, v: bool) {
-        self.visible = v && self.enabled;
+    /// `timer` — на острове есть таймер: лицо показывается, даже если выключено в настройках.
+    pub fn set_visible(&mut self, v: bool, timer: bool) {
+        self.visible = v && (self.enabled || timer);
         self.alpha.target = if self.visible { 1.0 } else { 0.0 };
     }
 
@@ -131,11 +132,21 @@ impl Face {
     }
 
     /// Рисует лицо внутри свёрнутого острова `r` (логические пиксели).
-    pub unsafe fn draw(&self, cv: &Canvas, r: Rect) {
+    /// Если есть таймер, по центру вместо времени — его остаток (на паузе мигает).
+    pub unsafe fn draw(&self, cv: &Canvas, r: Rect, timer: Option<(&str, f32)>) {
         let f = &cv.g.fonts;
         let pad = (r.w * 0.09).clamp(8.0, 16.0);
         cv.text(&self.lang_text, Rect::new(r.x + pad, r.y, 34.0, r.h - 1.0), &f.small_b, dim());
-        cv.text(&self.time, Rect::new(r.x, r.y, r.w, r.h - 1.0), &f.body_c, txt());
+        match timer {
+            Some((label, pulse)) => {
+                let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
+                // Значок слева от текста: ширина цифр табличная, около 7 px на знак.
+                let half = label.chars().count() as f32 * 3.6;
+                t.glyph(icon::CLOCK, Rect::new(r.cx() - half - 20.0, r.cy() - 9.0, 16.0, 16.0), false, status_orange());
+                t.text(label, Rect::new(r.x, r.y, r.w, r.h - 1.0), &f.body_c, txt());
+            }
+            None => cv.text(&self.time, Rect::new(r.x, r.y, r.w, r.h - 1.0), &f.body_c, txt()),
+        }
         self.wifi(cv, r.right() - pad - 6.5, r.cy() + 3.2);
     }
 
@@ -191,19 +202,21 @@ mod tests {
     #[test]
     fn hidden_face_fades_out() {
         let mut f = Face::new(true);
-        f.set_visible(true);
+        f.set_visible(true, false);
         for _ in 0..120 {
             f.step(1.0 / 60.0);
         }
         assert!((f.alpha() - 1.0).abs() < 0.01 && !f.animating());
-        f.set_visible(false);
+        f.set_visible(false, false);
         for _ in 0..120 {
             f.step(1.0 / 60.0);
         }
         assert_eq!(f.alpha(), 0.0);
-        // Выключенное в настройках лицо не показывается никогда.
+        // Выключенное в настройках лицо не показывается, кроме случая, когда на острове идёт таймер.
         let mut off = Face::new(false);
-        off.set_visible(true);
+        off.set_visible(true, false);
         assert!(!off.visible());
+        off.set_visible(true, true);
+        assert!(off.visible());
     }
 }

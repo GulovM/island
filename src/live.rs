@@ -19,6 +19,33 @@ pub const TOAST: (f32, f32) = (232.0, 36.0);
 /// Заряд, ниже которого (и без питания от сети) показывается предупреждение.
 const LOW_PCT: u8 = 20;
 
+/// Что свёрнутый остров знает о запущенном (или стоящем на паузе) таймере вкладки Today.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TimerView {
+    /// Сколько осталось от полного времени, 0..1.
+    pub frac: f32,
+    /// Осталось секунд (округление вверх, как на карточке).
+    pub secs: u64,
+    pub paused: bool,
+    /// Через сколько миллисекунд сменится секунда на экране.
+    pub next_ms: u32,
+}
+
+impl TimerView {
+    /// Остаток: «03:25» или «1:02:05».
+    pub fn label(&self) -> String {
+        let s = self.secs;
+        if s >= 3600 {
+            format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+        } else {
+            format!("{:02}:{:02}", s / 60, s % 60)
+        }
+    }
+}
+
+/// Период мигания полоски на паузе: не быстрее раза в 2 секунды.
+const PULSE_SECS: f32 = 2.4;
+
 /// Какую форму принимает свёрнутый остров.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Form {
@@ -74,6 +101,9 @@ pub struct Live {
     low: bool,
     volume: Option<(f32, bool)>,
     brightness: Option<f32>,
+    /// Таймер Today для свёрнутой формы и плавная доля полоски.
+    timer: Option<TimerView>,
+    timer_frac: Spring,
     /// Начало отсчёта анимации эквалайзера.
     t0: Instant,
 }
@@ -92,6 +122,8 @@ impl Live {
             low: false,
             volume: None,
             brightness: None,
+            timer: None,
+            timer_frac: Spring::unit(1.0, 160.0, 22.0),
             t0: Instant::now(),
         };
         // Начальное состояние питания запоминаем без уведомления.
@@ -111,6 +143,41 @@ impl Live {
             Form::Mini
         } else {
             Form::Idle
+        }
+    }
+
+    pub fn timer(&self) -> Option<TimerView> {
+        self.timer
+    }
+
+    /// Новое состояние таймера. Возвращает `(изменилось видимое, появился или пропал)`.
+    pub fn set_timer(&mut self, t: Option<TimerView>) -> (bool, bool) {
+        let appeared = self.timer.is_some() != t.is_some();
+        // Миллисекунды до смены секунды видимого не меняют.
+        let changed = appeared || self.timer.map(|o| (o.secs, o.paused)) != t.map(|n| (n.secs, n.paused));
+        if let Some(n) = t {
+            self.timer_frac.target = n.frac.clamp(0.0, 1.0);
+            if self.timer.is_none() {
+                self.timer_frac.snap();
+            }
+        }
+        self.timer = t;
+        (changed, appeared)
+    }
+
+    /// Плавная доля оставшегося времени для полоски.
+    pub fn timer_frac(&self) -> f32 {
+        self.timer_frac.value.clamp(0.0, 1.0)
+    }
+
+    /// Прозрачность полоски таймера: на паузе плавно мигает, иначе 1.
+    pub fn timer_pulse(&self) -> f32 {
+        match self.timer {
+            Some(t) if t.paused => {
+                let k = 0.5 + 0.5 * (self.t0.elapsed().as_secs_f32() * std::f32::consts::TAU / PULSE_SECS).sin();
+                0.3 + 0.7 * k
+            }
+            _ => 1.0,
         }
     }
 
@@ -198,6 +265,10 @@ impl Live {
     pub fn step(&mut self, dt: f32) {
         self.mini_a.step(dt);
         self.toast_a.step(dt);
+        self.timer_frac.step(dt);
+        if self.timer_frac.settled() {
+            self.timer_frac.snap();
+        }
         if self.mini_a.settled() {
             self.mini_a.snap();
         }
@@ -210,7 +281,17 @@ impl Live {
     }
 
     pub fn animating(&self) -> bool {
-        !(self.mini_a.settled() && self.toast_a.settled())
+        !(self.mini_a.settled() && self.toast_a.settled() && self.timer_frac.settled())
+    }
+
+    /// Тонкая линия таймера под прогрессом трека в мини-плеере.
+    pub unsafe fn draw_timer_line(&self, cv: &Canvas, r: Rect) {
+        if self.timer.is_none() {
+            return;
+        }
+        let line = Canvas { g: cv.g, alpha: cv.alpha * self.timer_pulse(), accent: cv.accent };
+        let track_r = Rect::new(r.x + 14.0, r.bottom() - 3.0, r.w - 28.0, 1.5);
+        line.rr(Rect::new(track_r.x, track_r.y, track_r.w * self.timer_frac(), track_r.h), 0.75, status_orange());
     }
 
     pub fn mini_alpha(&self) -> f32 {
@@ -257,7 +338,9 @@ impl Live {
             cv.rr(Rect::new(bx + i as f32 * 5.0, r.y + 17.0 - h / 2.0, 3.0, h), 1.5, cv.accent);
         }
         let frac = if m.dur > 0.0 { m.position_now() / m.dur } else { 0.0 };
-        cv.progress(Rect::new(r.x + 14.0, r.bottom() - 6.0, r.w - 28.0, 2.0), frac, cv.accent);
+        // Прогресс трека поднят на 1 px, чтобы под ним поместилась линия таймера.
+        cv.progress(Rect::new(r.x + 14.0, r.bottom() - 7.0, r.w - 28.0, 2.0), frac, cv.accent);
+        self.draw_timer_line(cv, r);
     }
 
     /// Уведомление: значок слева, текст и значение справа.

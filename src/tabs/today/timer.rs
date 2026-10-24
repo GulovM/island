@@ -89,6 +89,28 @@ impl Today {
         }
     }
 
+    /// Состояние таймера для свёрнутого острова: идёт или стоит на паузе после старта.
+    /// Нетронутый таймер (остаток равен полному времени) острову не показывается.
+    pub fn view(&self) -> Option<crate::live::TimerView> {
+        if self.total.is_zero() {
+            return None;
+        }
+        let paused = self.deadline.is_none();
+        if paused && (self.left >= self.total || self.left.is_zero()) {
+            return None;
+        }
+        let rem = self.remaining();
+        let secs = rem.as_secs_f32().ceil() as u64;
+        // Секунда на экране меняется, когда остаток переходит через целое число секунд.
+        let sub_ms = (rem.as_millis() % 1000) as u32;
+        Some(crate::live::TimerView {
+            frac: (rem.as_secs_f32() / self.total.as_secs_f32()).clamp(0.0, 1.0),
+            secs,
+            paused,
+            next_ms: if sub_ms == 0 { 1000 } else { sub_ms } + 15,
+        })
+    }
+
     fn toggle_run(&mut self) {
         if let Some(d) = self.deadline.take() {
             self.left = d.saturating_duration_since(Instant::now());
@@ -268,6 +290,29 @@ mod tests {
         assert!(t.left <= t.total && t.left > Duration::from_secs(290));
         t.set_preset(0);
         assert_eq!(t.left, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn view_hidden_until_started() {
+        let mut t = Today::default();
+        assert!(t.view().is_none(), "нетронутый таймер острову не нужен");
+        t.toggle_run();
+        let v = t.view().unwrap();
+        assert!(!v.paused && v.frac > 0.99 && v.next_ms <= 1015);
+        t.toggle_run();
+        let v = t.view().unwrap();
+        assert!(v.paused, "после паузы таймер остаётся виден");
+        t.left = t.total;
+        assert!(t.view().is_none(), "сброс убирает таймер с острова");
+    }
+
+    #[test]
+    fn view_fraction_follows_remaining() {
+        let mut t = Today::default();
+        t.total = Duration::from_secs(100);
+        t.left = Duration::from_secs(25);
+        let v = t.view().unwrap();
+        assert!((v.frac - 0.25).abs() < 0.001 && v.secs == 25 && v.paused);
     }
 
     #[test]
