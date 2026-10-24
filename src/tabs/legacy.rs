@@ -91,7 +91,11 @@ mod tests {
         use crate::tabs::{controls, stats, today};
         for spec in [&controls::SPEC, &today::SPEC, &stats::SPEC] {
             for s in spec.specs {
-                let (olds, def) = old_sizes(s.key).unwrap_or_else(|| panic!("нет старых размеров для {}", s.key));
+                // Виджеты, появившиеся после перехода на крупную сетку, в старых конфигах не встречаются.
+                let Some((olds, def)) = old_sizes(s.key) else {
+                    assert_eq!(s.row, crate::tabs::layout::HIDDEN, "нет старых размеров для {}", s.key);
+                    continue;
+                };
                 assert!(def < olds.len());
                 for old in 0..olds.len() {
                     let n = migrate_size(s.key, s.sizes, Some(old)).unwrap();

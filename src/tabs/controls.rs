@@ -13,7 +13,7 @@ use crate::ios::SysColor;
 use crate::ui::{hue, icon, mix, on_color, slider_fill, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink, txt, WHITE};
 
 use super::grid::{Grid, Item};
-use super::layout::{sz, Size, Spec, TabSpec, CELL, GAP, TALL, WIDE};
+use super::layout::{sz, Size, HIDDEN, Spec, TabSpec, CELL, GAP, TALL, WIDE};
 use super::{id, CONTROLS};
 
 /// Сколько после перетаскивания слайдера не принимать громкость из снимка (иначе ползунок дёргается).
@@ -28,6 +28,8 @@ const DARK: usize = 4;
 const VOLUME: usize = 5;
 const BRIGHTNESS: usize = 6;
 const MEDIA: usize = 7;
+const AIRPLANE: usize = 8;
+const SAVER: usize = 9;
 
 /// Высота выпадающего списка устройств.
 const LIST_H: f32 = 116.0;
@@ -60,6 +62,8 @@ pub static SPEC: TabSpec = TabSpec {
         Spec { key: "volume", title: "Громкость", sizes: &SLIDER, size: 1, col: 3, row: 2 },
         Spec { key: "brightness", title: "Яркость", sizes: &SLIDER, size: 1, col: 3, row: 3 },
         Spec { key: "media", title: "Плеер", sizes: &PLAYER, size: 0, col: 0, row: 2 },
+        Spec { key: "airplane", title: "Режим полёта", sizes: &TILE, size: 1, col: 0, row: HIDDEN },
+        Spec { key: "saver", title: "Энергосбережение", sizes: &TILE, size: 1, col: 0, row: HIDDEN },
     ],
 };
 
@@ -126,6 +130,10 @@ fn seek_relative(current_pos: f32, offset: f32, dur: f32, min_seek: f32, max_see
 pub struct Controls {
     wifi: bool,
     bluetooth: bool,
+    /// Режим полёта: все радио выключены.
+    airplane: bool,
+    /// Режим энергосбережения; `None` — батареи нет, плитка скрыта.
+    saver: Option<bool>,
     dark: bool,
     /// Ночной свет; `None` — запись в реестре незнакомая, переключать нельзя (плитка открывает Параметры).
     night: Option<bool>,
@@ -180,6 +188,7 @@ impl Controls {
     pub fn show(&mut self) -> bool {
         self.dark = sys::dark_mode();
         self.night = sys::night_light();
+        self.saver = sys::energy_saver();
         self.seek_hold = None;
         self.last_seek_send = None;
         self.list_t.0.target = 0.0;
@@ -227,6 +236,10 @@ impl Controls {
         let night = sys::night_light();
         let night_changed = night != self.night;
         self.night = night;
+        // Энергосбережение тоже переключается из Windows; чтение состояния питания дешёвое.
+        let saver = sys::energy_saver();
+        let saver_changed = saver != self.saver;
+        self.saver = saver;
         if let Some(kind) = self.open {
             self.open_ticks += 1;
             if kind != ListKind::Bluetooth || self.open_ticks % 6 == 0 {
@@ -236,7 +249,7 @@ impl Controls {
         // Сообщение о подключении гаснет по времени — перерисовываем, пока оно есть.
         let status = self.open.is_some_and(|k| bg::status(k).is_some());
         // Прогресс трека двигается и между обновлениями снимка.
-        night_changed || status || self.media.as_ref().is_some_and(|m| m.playing)
+        night_changed || saver_changed || status || self.media.as_ref().is_some_and(|m| m.playing)
     }
 
     /// Забирает свежий снимок фонового потока. `true` — что-то изменилось.
@@ -248,6 +261,7 @@ impl Controls {
         self.rev = s.rev;
         self.wifi = s.wifi.unwrap_or(false);
         self.bluetooth = s.bluetooth.unwrap_or(false);
+        self.airplane = s.airplane.unwrap_or(false);
         self.muted = s.muted;
         let holding = self.hold_until.is_some_and(|t| Instant::now() < t);
         if let (Some(v), false) = (s.volume, holding) {
@@ -300,7 +314,7 @@ impl Controls {
         grid.set_overlay_rows(overlay_rows);
 
         let area = grid.area(w, h);
-        let skip = if crate::bright::available() { 0 } else { 1 << BRIGHTNESS };
+        let skip = (if crate::bright::available() { 0 } else { 1 << BRIGHTNESS }) | (if self.saver.is_some() { 0 } else { 1 << SAVER });
         // Виджеты под списком гаснут и не принимают нажатий (иначе они перехватят их у строк списка).
         let cover = (self.list_t.0.value > 0.004).then(|| self.list_rect(area, low));
         grid.draw(ui, cv, area, skip, |ui, cv, it| self.widget(ui, cv, it, cover));
@@ -392,6 +406,25 @@ impl Controls {
                         crate::log::error("не удалось переключить ночной свет");
                     }
                     self.night = sys::night_light();
+                }
+            }
+            AIRPLANE => {
+                let hit = ui.tile_wide(cv, id(CONTROLS, 5), r, icon::AIRPLANE, "Режим полёта", state(self.airplane), &mut self.airplane, Chevron::None, hue(SysColor::Orange, cv.accent));
+                if hit.toggled {
+                    bg::send(Cmd::Airplane(self.airplane));
+                }
+            }
+            SAVER => {
+                let mut on = self.saver.unwrap_or(false);
+                let hit = ui.tile_wide(cv, id(CONTROLS, 6), r, icon::BATTERY, "Энергосбережение", state(on), &mut on, Chevron::None, hue(SysColor::Green, cv.accent));
+                if hit.toggled {
+                    // Запись схемы питания не в потоке интерфейса; состояние подхватит `poll`.
+                    self.saver = Some(on);
+                    std::thread::spawn(move || {
+                        if !sys::set_energy_saver(on) {
+                            crate::log::error("не удалось переключить энергосбережение");
+                        }
+                    });
                 }
             }
             DARK => {

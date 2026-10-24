@@ -1722,7 +1722,7 @@ mod tests {
         let m = g.layout().entry(7).unwrap();
         assert_eq!(g.spec.specs[7].sizes[m.size].w, 8);
         // Остальные виджеты никуда не делись
-        assert!(g.layout().visible_count(0) == SPEC.specs.len());
+        assert!(g.layout().visible_count(0) == SPEC.specs.iter().filter(|s| s.row != layout::HIDDEN).count());
         assert!(g.layout().fits(g.spec, 0, 0.0));
     }
 

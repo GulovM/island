@@ -280,6 +280,8 @@ const TABLE: &[(&str, &str)] = &[
     ("Аудио", "Audio"),
     ("Параметры", "Settings"),
     ("Ночной свет", "Night light"),
+    ("Режим полёта", "Airplane mode"),
+    ("Энергосбережение", "Energy saver"),
     ("Тёмная тема", "Dark theme"),
     ("СЕТИ WI-FI", "WI-FI NETWORKS"),
     ("УСТРОЙСТВА ВЫВОДА", "OUTPUT DEVICES"),

@@ -34,6 +34,8 @@ pub fn notify() {
 pub struct Snapshot {
     pub wifi: Option<bool>,
     pub bluetooth: Option<bool>,
+    /// Режим полёта: все радио выключены; `None` — радио в системе нет.
+    pub airplane: Option<bool>,
     pub volume: Option<f32>,
     /// Яркость экрана, 0..=1; `None`, если устройство её не поддерживает.
     pub brightness: Option<f32>,
@@ -91,6 +93,8 @@ pub enum Cmd {
     Net,
     Wifi(bool),
     Bluetooth(bool),
+    /// Режим полёта: выключить все радио или вернуть те, что были включены.
+    Airplane(bool),
     Volume(f32),
     Brightness(f32),
     Mute(bool),
@@ -136,7 +140,7 @@ pub fn start(hwnd: HWND) {
                 batch.push(c);
             }
             // Слайдер громкости шлёт десятки значений — исполняем только последнее.
-            let batch_full = batch.iter().any(|c| matches!(c, Cmd::Refresh | Cmd::Wifi(_) | Cmd::Bluetooth(_)));
+            let batch_full = batch.iter().any(|c| matches!(c, Cmd::Refresh | Cmd::Wifi(_) | Cmd::Bluetooth(_) | Cmd::Airplane(_)));
             let only_media = batch.iter().all(|c| matches!(c, Cmd::Media | Cmd::Net));
             let wants_net = batch.iter().any(|c| matches!(c, Cmd::Net));
             let only_net = batch.iter().all(|c| matches!(c, Cmd::Net));
@@ -193,6 +197,7 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool) {
         }
         Cmd::Wifi(on) => set_radio(windows::Devices::Radios::RadioKind::WiFi, on, radio_access),
         Cmd::Bluetooth(on) => set_radio(windows::Devices::Radios::RadioKind::Bluetooth, on, radio_access),
+        Cmd::Airplane(on) => set_airplane(on, radio_access),
         Cmd::Volume(v) => {
             if let Some(ep) = endpoint() {
                 let _ = ep.SetMasterVolumeLevelScalar(v.clamp(0.0, 1.0), std::ptr::null());
@@ -233,6 +238,43 @@ pub(super) unsafe fn set_radio(kind: windows::Devices::Radios::RadioKind, on: bo
     }
 }
 
+/// Радио, которые были включены до режима полёта (`RadioKind` как число), чтобы вернуть их при выходе.
+static BEFORE_AIRPLANE: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+
+/// Режим полёта: выключает все радио, при выходе включает те, что работали до него (если запомненных
+/// нет, например после перезапуска, — Wi-Fi и Bluetooth).
+pub(super) unsafe fn set_airplane(on: bool, access: &mut bool) {
+    use windows::Devices::Radios::{Radio, RadioKind, RadioState};
+    if !*access {
+        let _ = wait(Radio::RequestAccessAsync());
+        *access = true;
+    }
+    let Ok(radios) = wait(Radio::GetRadiosAsync()) else { return };
+    let mut before = BEFORE_AIRPLANE.lock().unwrap_or_else(|e| e.into_inner());
+    if on {
+        before.clear();
+        before.extend(radios.into_iter().filter(|r| r.State().ok() == Some(RadioState::On)).filter_map(|r| r.Kind().ok()).map(|k| k.0));
+    }
+    let restore = if before.is_empty() { vec![RadioKind::WiFi.0, RadioKind::Bluetooth.0] } else { before.clone() };
+    let Ok(radios) = wait(Radio::GetRadiosAsync()) else { return };
+    for r in radios {
+        let Ok(kind) = r.Kind() else { continue };
+        let state = if on {
+            RadioState::Off
+        } else if restore.contains(&kind.0) {
+            RadioState::On
+        } else {
+            continue;
+        };
+        if let Err(e) = wait(r.SetStateAsync(state)) {
+            log::error(&format!("не удалось переключить радио: {e}"));
+        }
+    }
+    if !on {
+        before.clear();
+    }
+}
+
 unsafe fn refresh(full: bool) {
     use windows::Devices::Radios::{Radio, RadioKind, RadioState};
     let mut snap = Snapshot::default();
@@ -241,6 +283,7 @@ unsafe fn refresh(full: bool) {
         if let Ok(radios) = wait(Radio::GetRadiosAsync()) {
             for r in radios {
                 let on = r.State().ok() == Some(RadioState::On);
+                snap.airplane = Some(snap.airplane.unwrap_or(true) & !on);
                 match r.Kind() {
                     Ok(RadioKind::WiFi) => snap.wifi = Some(snap.wifi.unwrap_or(false) | on),
                     Ok(RadioKind::Bluetooth) => snap.bluetooth = Some(snap.bluetooth.unwrap_or(false) | on),
@@ -252,6 +295,7 @@ unsafe fn refresh(full: bool) {
         let prev = snapshot();
         snap.wifi = prev.wifi;
         snap.bluetooth = prev.bluetooth;
+        snap.airplane = prev.airplane;
     }
     snap.brightness = if full || snapshot().brightness.is_none() && crate::bright::available() {
         crate::bright::get()

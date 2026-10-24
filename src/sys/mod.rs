@@ -8,6 +8,7 @@ use windows::Win32::System::Threading::CreateMutexW;
 
 mod appearance;
 mod clipboard;
+mod energy_saver;
 mod night_light;
 mod paths;
 mod registry;
@@ -22,6 +23,7 @@ pub use clipboard::{
     clipboard_excluded, clipboard_has_image, clipboard_has_text, clipboard_image, clipboard_owned_by,
     clipboard_text, send_paste, set_clipboard_dib, set_clipboard_text,
 };
+pub use energy_saver::{energy_saver, set_energy_saver};
 pub use night_light::{night_light, set_night_light};
 pub use paths::{pictures_dir, system_drive_root, windows_dir};
 pub use registry::reg_str;

@@ -568,7 +568,8 @@ mod tests {
             let placed = lay.pack(spec, 0);
 
             // Проверяем, что все виджеты на месте
-            assert_eq!(placed.len(), spec.specs.len(), "вкладка {tab}: не все виджеты упакованы");
+            let shown = spec.specs.iter().filter(|s| s.row != layout::HIDDEN).count();
+            assert_eq!(placed.len(), shown, "вкладка {tab}: не все виджеты упакованы");
 
             // Проверяем, что нет пересечений
             for (i, a) in placed.iter().enumerate() {
