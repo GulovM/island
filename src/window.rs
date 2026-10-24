@@ -197,6 +197,7 @@ impl App {
     pub(crate) unsafe fn set_expanded(&mut self, expanded: bool) {
         if expanded && !self.expanded {
             self.ensure_topmost(true);
+            self.ui.reset_marquees();
         }
         self.expanded = expanded;
         self.leave_hold = None;

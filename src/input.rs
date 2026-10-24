@@ -12,6 +12,7 @@ impl App {
         self.settings_open = false;
         self.hold_leave();
         self.ui.blur();
+        self.ui.reset_marquees();
         if let Some(&id) = self.order.get(i) {
             crate::state::set_last_tab(&self.cfg.tab_key(id));
         }

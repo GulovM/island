@@ -314,6 +314,29 @@ fn parts(code: u32) -> Option<Vec<Part>> {
             }
             v
         }
+        // airplane (режим полёта): силуэт, повёрнутый носом вправо-вверх
+        0xE709 => {
+            let nose_up = [
+                (12.0, 2.6), (13.5, 4.2), (13.5, 9.0), (21.6, 13.8), (21.6, 16.0), (13.5, 13.5), (13.5, 18.2),
+                (15.8, 20.0), (15.8, 21.4), (12.0, 20.4), (8.2, 21.4), (8.2, 20.0), (10.5, 18.2), (10.5, 13.5),
+                (2.4, 16.0), (2.4, 13.8), (10.5, 9.0), (10.5, 4.2),
+            ];
+            let a = 45.0 * PI / 180.0;
+            let pts: Vec<(f32, f32)> = nose_up
+                .iter()
+                .map(|&(x, y)| {
+                    let (dx, dy) = (x - 12.0, y - 12.0);
+                    (12.0 + dx * a.cos() - dy * a.sin(), 12.0 + dx * a.sin() + dy * a.cos())
+                })
+                .collect();
+            vec![Fill(poly(&pts, true)), Stroke(poly(&pts, true), 1.2)]
+        }
+        // battery (энергосбережение): корпус, контакт и заряд
+        0xE83F => vec![
+            Stroke(rrect(2.6, 7.0, 16.4, 10.0, 2.6), 1.9),
+            Fill(rrect(20.2, 10.4, 1.8, 3.2, 0.9)),
+            Fill(rrect(5.3, 9.6, 8.2, 4.8, 1.1)),
+        ],
         // moon.fill
         0xE708 => vec![Fill(circle(11.2, 12.9, 8.6)), Cut(circle(17.0, 8.3, 7.2))],
         // gearshape.fill
@@ -578,14 +601,30 @@ pub(crate) fn place(base: &Matrix3x2, r: Rect, size: f32) -> Matrix3x2 {
     }
 }
 
+/// Готовая геометрия значка из кэша `Gfx`; `None` — векторного значка нет.
+unsafe fn geometry(g: &crate::gfx::Gfx, glyph: &str) -> Option<ID2D1Geometry> {
+    let code = code_of(glyph)?;
+    let mut cache = g.symbols.borrow_mut();
+    cache.entry(code).or_insert_with(|| build(&g.d2d, &g.round, code)).clone()
+}
+
+/// Во сколько раз значок нужно увеличить, чтобы он занимал на глаз столько же места, сколько
+/// Wi-Fi: сравниваются корни площадей описанных прямоугольников. 1 — если сравнить не с чем.
+pub(crate) unsafe fn scale_to_wifi(g: &crate::gfx::Gfx, glyph: &str) -> f32 {
+    let extent = |s: &str| {
+        let b = geometry(g, s)?.GetBounds(None).ok()?;
+        let e = ((b.right - b.left) * (b.bottom - b.top)).sqrt();
+        (e > 0.0).then_some(e)
+    };
+    match (extent(super::glyphs::icon::WIFI), extent(glyph)) {
+        (Some(wifi), Some(e)) => (wifi / e).clamp(0.6, 1.6),
+        _ => 1.0,
+    }
+}
+
 /// Рисует значок `glyph` заливкой текущей кистью `brush`. `false` — векторного значка нет.
 pub(crate) unsafe fn draw(g: &crate::gfx::Gfx, glyph: &str, r: Rect, size: f32) -> bool {
-    let Some(code) = code_of(glyph) else { return false };
-    let geo = {
-        let mut cache = g.symbols.borrow_mut();
-        cache.entry(code).or_insert_with(|| build(&g.d2d, &g.round, code)).clone()
-    };
-    let Some(geo) = geo else { return false };
+    let Some(geo) = geometry(g, glyph) else { return false };
     let mut base = Matrix3x2::default();
     g.dc.GetTransform(&mut base);
     g.dc.SetTransform(&place(&base, r, size));
@@ -628,7 +667,7 @@ mod tests {
             WIFI, BLUETOOTH, BRIGHTNESS, MOON, SETTINGS, LOCK, SEARCH, VOLUME, MUTE, VOLUME1, VOLUME2, VOLUME3, PLAY,
             PLAY_SOLID, PAUSE, POWER, RESTART, COPY, LINK, PICTURE, PIN, DELETE, ADD, CHECK, CLOCK, CALENDAR, FOLDER,
             APPS, PREV, NEXT, REWIND, FAST_FORWARD, MUSIC, CLOSE, PASTE, LEFT, RIGHT, STAR, REFRESH, DOWN, UP, EDIT,
-            STAR_FILL, SETTINGS_GEAR, RINGER, SPEAKER, CONTRAST, SUN, CLOUD, FORWARD, TEXT_DOC, BOLT,
+            STAR_FILL, SETTINGS_GEAR, RINGER, SPEAKER, CONTRAST, SUN, CLOUD, FORWARD, TEXT_DOC, BOLT, AIRPLANE, BATTERY,
         ] {
             assert!(parts(code_of(g).unwrap()).is_some(), "нет значка для U+{:04X}", code_of(g).unwrap());
         }
