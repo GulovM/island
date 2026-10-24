@@ -375,6 +375,21 @@ impl Tabs {
         self.today.deadline()
     }
 
+    /// Обрывает сигнал окончания таймера.
+    pub fn stop_alarm(&self) {
+        today::Today::stop_alarm();
+    }
+
+    /// Звучит ли сигнал окончания таймера (уведомление ждёт его конца).
+    pub fn alarm_playing(&self) -> bool {
+        today::Today::alarm_playing()
+    }
+
+    /// Запущенный или стоящий на паузе таймер Today (для свёрнутого острова).
+    pub fn timer_view(&self) -> Option<crate::live::TimerView> {
+        self.today.view()
+    }
+
     /// Таймер дошёл до нуля (для уведомления в свёрнутой форме).
     pub fn take_timer_fired(&mut self) -> bool {
         self.today.take_fired()

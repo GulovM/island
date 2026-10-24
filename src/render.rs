@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::status_orange;
 
 impl App {
     /// Тулкит и состояние вкладок на время кадра выносятся из `self`, чтобы рисовать с `&self`.
@@ -202,11 +203,34 @@ impl App {
             let r = ui::Rect::new(centre - fw / 2.0, 0.0, fw, fh);
             match slot {
                 Slot::Mini => self.live.draw_mini(ui, &cv, r),
-                Slot::Toast => self.live.draw_toast(&cv, r),
-                Slot::Face => self.face.draw(&cv, r),
+                Slot::Toast => self.live.draw_toast(&cv, r, cursor),
+                Slot::Face => {
+                    let label = self.live.timer().map(|t| t.label());
+                    self.face.draw(&cv, r, label.as_deref().map(|l| (l, self.live.timer_pulse())));
+                }
             }
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
             g.dc.PopAxisAlignedClip();
+        }
+
+        // Остров-полоска: таймер — убывающая полоска внутри неё (на паузе мигает).
+        if self.live.timer().is_some() && self.stripped() {
+            let a = thin * live_open;
+            if a > 0.01 {
+                g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
+                g.dc.PushAxisAlignedClip(
+                    &D2D_RECT_F { left: x0, top: 0.0, right: x0 + aw, bottom: ah },
+                    D2D1_ANTIALIAS_MODE_ALIASED,
+                );
+                g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
+                let cv = Canvas { g, alpha: a * self.live.timer_pulse(), accent };
+                // Скругления тела по краям не задеваем: полоска начинается чуть правее левого угла.
+                let inset = r / s * 0.6;
+                let full = aw / s - 2.0 * inset;
+                cv.rr(ui::Rect::new(x0 / s + inset, 0.0, full * self.live.timer_frac(), ah / s), ah / s / 2.0, status_orange());
+                g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
+                g.dc.PopAxisAlignedClip();
+            }
         }
 
         if content_p > 0.001 {

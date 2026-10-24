@@ -89,6 +89,28 @@ impl Today {
         }
     }
 
+    /// Состояние таймера для свёрнутого острова: идёт или стоит на паузе после старта.
+    /// Нетронутый таймер (остаток равен полному времени) острову не показывается.
+    pub fn view(&self) -> Option<crate::live::TimerView> {
+        if self.total.is_zero() {
+            return None;
+        }
+        let paused = self.deadline.is_none();
+        if paused && (self.left >= self.total || self.left.is_zero()) {
+            return None;
+        }
+        let rem = self.remaining();
+        let secs = rem.as_secs_f32().ceil() as u64;
+        // Секунда на экране меняется, когда остаток переходит через целое число секунд.
+        let sub_ms = (rem.as_millis() % 1000) as u32;
+        Some(crate::live::TimerView {
+            frac: (rem.as_secs_f32() / self.total.as_secs_f32()).clamp(0.0, 1.0),
+            secs,
+            paused,
+            next_ms: if sub_ms == 0 { 1000 } else { sub_ms } + 15,
+        })
+    }
+
     fn toggle_run(&mut self) {
         if let Some(d) = self.deadline.take() {
             self.left = d.saturating_duration_since(Instant::now());
@@ -171,8 +193,8 @@ impl Today {
         }
         let secs = rem.as_secs_f32().ceil() as u64;
         let label = clock_label(secs);
-        // Цвет таймера — акцент: оранжевый вместе с остальными цветами «Сегодня» был слишком пёстрым (#10).
-        let tint = cv.accent;
+        // Цвет таймера — оранжевый, как его полоска на свёрнутом острове.
+        let tint = crate::ui::status_orange();
 
         if compact {
             // Полоса 248×56: кольцо, остаток крупно и «из 05:00», справа круглые кнопки.
@@ -188,7 +210,7 @@ impl Today {
             let reset_x = tm.right() - P - 14.0;
             let run_x = reset_x - 34.0;
             let run_icon = if self.deadline.is_some() { icon::PAUSE } else { icon::PLAY_SOLID };
-            if round_button(ui, cv, id(TODAY, 40), run_x, cy, 14.0, run_icon, tint, crate::ui::on_color(tint)) {
+            if round_button(ui, cv, id(TODAY, 40), run_x, cy, 14.0, run_icon, tint, crate::ui::WHITE) {
                 self.toggle_run();
             }
             if round_button(ui, cv, id(TODAY, 41), reset_x, cy, 14.0, icon::RESTART, chip_bg(), txt()) {
@@ -236,14 +258,14 @@ impl Today {
         // Пресеты.
         for (i, m) in PRESETS.iter().enumerate() {
             let r = Rect::new(bx + i as f32 * p_step, tm.y + 42.0, p_step - 4.0, 18.0);
-            if ui.chip_ex(cv, id(TODAY, i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, None) {
+            if ui.chip_ex(cv, id(TODAY, i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, Some(tint)) {
                 self.set_preset(i);
             }
         }
 
         // Старт / пауза и сброс.
         let start = if self.deadline.is_some() { "Пауза" } else { "Старт" };
-        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 68.0, btn_w, 26.0), start, tint, crate::ui::on_color(tint), 6.0) {
+        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 68.0, btn_w, 26.0), start, tint, crate::ui::WHITE, 6.0) {
             self.toggle_run();
         }
         if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + btn_w + 6.0, tm.y + 68.0, btn_w, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
@@ -268,6 +290,29 @@ mod tests {
         assert!(t.left <= t.total && t.left > Duration::from_secs(290));
         t.set_preset(0);
         assert_eq!(t.left, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn view_hidden_until_started() {
+        let mut t = Today::default();
+        assert!(t.view().is_none(), "нетронутый таймер острову не нужен");
+        t.toggle_run();
+        let v = t.view().unwrap();
+        assert!(!v.paused && v.frac > 0.99 && v.next_ms <= 1015);
+        t.toggle_run();
+        let v = t.view().unwrap();
+        assert!(v.paused, "после паузы таймер остаётся виден");
+        t.left = t.total;
+        assert!(t.view().is_none(), "сброс убирает таймер с острова");
+    }
+
+    #[test]
+    fn view_fraction_follows_remaining() {
+        let mut t = Today::default();
+        t.total = Duration::from_secs(100);
+        t.left = Duration::from_secs(25);
+        let v = t.view().unwrap();
+        assert!((v.frac - 0.25).abs() < 0.001 && v.secs == 25 && v.paused);
     }
 
     #[test]

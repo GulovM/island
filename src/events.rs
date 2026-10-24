@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::LiveTick;
 
 impl App {
     /// Горячая клавиша: раскрыть остров на вкладке Apps и поставить фокус в поиск.
@@ -36,6 +37,11 @@ impl App {
             }
             Ev::LeaveTimer => self.on_leave_timer(),
             Ev::Down(x, y) => {
+                if self.hits_toast_close(x, y) {
+                    self.tabs.stop_alarm();
+                    self.dismiss_toast();
+                    return true;
+                }
                 let switched = self.click(x, y);
                 if !switched && self.expanded {
                     self.ui.down = true;
@@ -82,7 +88,7 @@ impl App {
                 self.expanded
             }
             Ev::Char(c) => {
-                if self.ui.focus.is_some() && c >= 0x20 && c != 0x7f {
+                if self.ui.focus.is_some() && !self.live.alert() && c >= 0x20 && c != 0x7f {
                     // Суррогатные пары приходят двумя WM_CHAR: сводим их в один символ.
                     if (0xD800..0xDC00).contains(&c) {
                         self.high_surrogate = c;
@@ -186,13 +192,22 @@ impl App {
                 None => false,
             },
             Ev::ToastTimer => {
-                let _ = KillTimer(Some(self.hwnd), TOAST_TIMER);
-                let was = self.live.clear_toast();
-                self.retarget();
-                self.trim_pending = true;
-                was
+                // Уведомление о таймере живёт, пока звучит сигнал: закрываем его вслед за звуком.
+                if self.live.alert() && self.tabs.alarm_playing() {
+                    SetTimer(Some(self.hwnd), TOAST_TIMER, 400, None);
+                    return false;
+                }
+                self.dismiss_toast()
             }
-            Ev::LiveTick => self.live_form() == live::Form::Mini,
+            Ev::LiveTick => {
+                // Раз в секунду таймер заводится заново под следующую смену цифры.
+                if self.live_tick_on == LiveTick::Seconds {
+                    if let Some(t) = self.tabs.timer_view() {
+                        SetTimer(Some(self.hwnd), LIVE_TIMER, t.next_ms, None);
+                    }
+                }
+                self.live_form() == live::Form::Mini || self.live.timer().is_some()
+            }
             Ev::RightClick => self.toggle_strip_mode(),
             Ev::Clip => self.on_clipboard(),
             Ev::PasteNow => {
@@ -318,14 +333,35 @@ impl App {
             dirty |= self.show_toast(live::Toast::Timer);
         }
 
-        // Тик кадров нужен, только пока на острове виден играющий плеер.
-        let tick = self.live_form() == live::Form::Mini && self.live.playing();
+        // Таймер Today на свёрнутом острове (полоска, линия под музыкой или остаток вместо часов).
+        let (timer_changed, timer_appeared) = self.live.set_timer(self.tabs.timer_view());
+        if timer_appeared {
+            self.retarget();
+        }
+        dirty |= timer_changed && !self.expanded;
+
+        // Тик нужен, только пока на острове виден играющий плеер или таймер: кадры 30 в секунду для
+        // эквалайзера и мигания паузы, иначе — раз в секунду по смене цифры.
+        let timer_shown = !self.expanded && !self.hidden && self.live.timer().is_some();
+        let tick = if self.live_form() == live::Form::Mini && self.live.playing() || timer_shown && self.live.timer().is_some_and(|t| t.paused) {
+            LiveTick::Frames
+        } else if timer_shown {
+            LiveTick::Seconds
+        } else {
+            LiveTick::Off
+        };
         if tick != self.live_tick_on {
             self.live_tick_on = tick;
-            if tick {
-                SetTimer(Some(self.hwnd), LIVE_TIMER, LIVE_TICK_MS, None);
-            } else {
-                let _ = KillTimer(Some(self.hwnd), LIVE_TIMER);
+            match tick {
+                LiveTick::Frames => {
+                    SetTimer(Some(self.hwnd), LIVE_TIMER, LIVE_TICK_MS, None);
+                }
+                LiveTick::Seconds => {
+                    SetTimer(Some(self.hwnd), LIVE_TIMER, self.live.timer().map_or(1000, |t| t.next_ms), None);
+                }
+                LiveTick::Off => {
+                    let _ = KillTimer(Some(self.hwnd), LIVE_TIMER);
+                }
             }
         }
 
