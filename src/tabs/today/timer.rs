@@ -258,7 +258,7 @@ impl Today {
         // Пресеты.
         for (i, m) in PRESETS.iter().enumerate() {
             let r = Rect::new(bx + i as f32 * p_step, tm.y + 42.0, p_step - 4.0, 18.0);
-            if ui.chip_ex(cv, id(TODAY, i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, None) {
+            if ui.chip_ex(cv, id(TODAY, i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, Some(tint)) {
                 self.set_preset(i);
             }
         }

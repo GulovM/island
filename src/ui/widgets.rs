@@ -360,8 +360,8 @@ impl Ui {
         self.chip_ex(cv, id, r, label, selected, false, None)
     }
 
-    /// Чип с выбором стиля: `tint` — цвет выбранного вместо сплошного акцента (выбранный пресет
-    /// таймера: тёмно-оранжевый фон и оранжевый текст).
+    /// Чип с выбором стиля: `tint` — цвет заливки выбранного вместо акцента, текст на ней белый
+    /// (выбранный пресет таймера: оранжевая заливка).
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn chip_ex(
         &mut self,
@@ -384,7 +384,7 @@ impl Ui {
             // Плоский невыбранный: только текст.
         } else {
             let mut bg = match tint {
-                Some(t) => mix(base, D2D1_COLOR_F { a: 1.0, ..mix(card(), t, 0.28) }, ov),
+                Some(t) => mix(base, D2D1_COLOR_F { a: 1.0, ..t }, ov),
                 None => mix(base, cv.accent, ov),
             };
             if flat {
@@ -394,7 +394,7 @@ impl Ui {
             cv.hairline(bg_rect, bg_rect.h / 2.0);
         }
         let fg = match tint {
-            Some(t) => mix(mix(dim(), txt(), hv), t, ov),
+            Some(_) => mix(mix(dim(), txt(), hv), super::color::WHITE, ov),
             None => mix(mix(dim(), txt(), hv), ink(), ov),
         };
         cv.text(label, r, &cv.g.fonts.small_c, fg);
