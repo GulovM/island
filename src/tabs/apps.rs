@@ -2,6 +2,8 @@
 //! Приложения», счётчик запусков, быстрые ссылки (сниппеты) из `[snippets]` конфига.
 //! Иконки берутся из Shell в фоновом потоке (`icons`), UWP-приложения добавляются из
 //! `shell:AppsFolder`; пока иконка не пришла, в строке — первая буква названия.
+//! Вид (список / сетка), сортировка по имени и режим «Избранные / Показать все» запоминаются
+//! в `state.txt`; по умолчанию показаны только избранные.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -18,6 +20,11 @@ const FILE: &str = "apps.txt";
 const HIDDEN_FILE: &str = "apps_hidden.txt";
 const MAX_DEPTH: u32 = 4;
 const RECENT_COUNT: usize = 5;
+/// Размеры плитки в виде «сетка».
+const CELL_W: f32 = 84.0;
+const CELL_H: f32 = 64.0;
+/// Сторона иконки в плитке сетки.
+const ICON_BIG: f32 = 30.0;
 struct Entry {
     name: String,
     lower: String,
@@ -41,6 +48,12 @@ pub struct Apps {
     stats: HashMap<String, (u32, u64, bool)>,
     icons_gen: u32,
     hidden: HashSet<String>,
+    /// Вид «сетка» вместо списка.
+    grid: bool,
+    /// Сортировка по имени (иначе: у избранных — по числу запусков, в полном списке — секции).
+    sort_name: bool,
+    /// Полный список (иначе только избранные).
+    show_all: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -52,6 +65,17 @@ enum Item {
 impl Apps {
     pub fn configure(&mut self, cfg: &Config) {
         self.snippets = cfg.snippets.clone();
+    }
+
+    /// Восстанавливает сохранённые вид, сортировку и режим.
+    pub fn load(&mut self, grid: bool, sort_name: bool, show_all: bool) {
+        self.grid = grid;
+        self.sort_name = sort_name;
+        self.show_all = show_all;
+    }
+
+    fn persist(&self) {
+        crate::state::set_apps_view(self.grid, self.sort_name, self.show_all);
     }
 
     pub fn show(&mut self) -> bool {
@@ -181,11 +205,24 @@ impl Apps {
         write_lines(FILE, &lines);
     }
 
-    /// Список под запрос с названием секции для каждого элемента. Без запроса: избранное,
-    /// недавние, остальное по алфавиту; с запросом — одним списком по убыванию совпадения.
+    /// Список под запрос с названием секции для каждого элемента. Без запроса: только избранные
+    /// (или, в полном режиме, избранное, недавние и остальное по алфавиту; при сортировке по
+    /// имени — одним списком); с запросом — всё найденное по убыванию совпадения.
     fn results(&self, query: &str) -> Vec<(Item, &'static str)> {
         let q = query.trim().to_lowercase();
         if q.is_empty() {
+            // `entries` всегда отсортирован по имени, поэтому стабильная сортировка по запускам
+            // оставляет алфавитный порядок при равенстве.
+            if !self.show_all {
+                let mut favs: Vec<usize> = (0..self.entries.len()).filter(|&i| self.entries[i].fav).collect();
+                if !self.sort_name {
+                    favs.sort_by_key(|&i| std::cmp::Reverse(self.entries[i].launches));
+                }
+                return favs.into_iter().map(|i| (Item::App(i), "")).collect();
+            }
+            if self.sort_name {
+                return (0..self.entries.len()).map(|i| (Item::App(i), "")).collect();
+            }
             let mut out = Vec::new();
             for (i, e) in self.entries.iter().enumerate() {
                 if e.fav {
@@ -269,13 +306,16 @@ impl Apps {
             Submit::Keep,
         );
         let query = ui.field_text(fid);
-        let items = self.results(&query);
+        let mut items = self.results(&query);
+        let searching = !query.trim().is_empty();
+        let cols_for = |grid: bool| if grid { (((w - 2.0 * PAD - 4.0) / CELL_W) as usize).max(1) } else { 1 };
+        let mut cols = cols_for(self.grid);
 
         // Клавиатура: стрелки двигают выбор, Ctrl+P — избранное, Enter запускает.
         for n in ui.take_nav() {
             match n {
-                Nav::Down => self.sel = Some(self.sel.map_or(0, |s| (s + 1).min(items.len().saturating_sub(1)))),
-                Nav::Up => self.sel = Some(self.sel.map_or(0, |s| s.saturating_sub(1))),
+                Nav::Down => self.sel = Some(self.sel.map_or(0, |s| (s + cols).min(items.len().saturating_sub(1)))),
+                Nav::Up => self.sel = Some(self.sel.map_or(0, |s| s.saturating_sub(cols))),
                 Nav::Pin => {
                     if let Some((Item::App(i), _)) = self.sel.and_then(|s| items.get(s)).copied() {
                         self.entries[i].fav = !self.entries[i].fav;
@@ -298,17 +338,64 @@ impl Apps {
             }
         }
 
-        // Быстрые ссылки плашками под поиском (пока запрос пуст).
+        // Ряд управления: слева «Избранные» (в полном списке), справа вид, сортировка и
+        // «Показать все» (в избранном). Во время поиска скрыт — поиск идёт по всем приложениям.
         let mut y_list = TOP + 33.0;
         let mut launch = None;
-        if query.trim().is_empty() && !self.snippets.is_empty() {
+        let mut changed = false;
+        if !searching {
+            let y = TOP + 34.0;
+            let mut right = w - PAD;
+            if !self.show_all {
+                let bw = cv.chip_w("Показать все");
+                right -= bw;
+                if ui.chip(cv, id(APPS, 10), Rect::new(right, y, bw, 17.0), "Показать все", false) {
+                    self.show_all = true;
+                    changed = true;
+                }
+                right -= 5.0;
+            } else {
+                let bw = cv.chip_w("Избранные");
+                if ui.chip(cv, id(APPS, 11), Rect::new(PAD, y, bw, 17.0), "Избранные", false) {
+                    self.show_all = false;
+                    changed = true;
+                }
+            }
+            let bw = cv.chip_w("А–Я");
+            right -= bw;
+            if ui.chip(cv, id(APPS, 12), Rect::new(right, y, bw, 17.0), "А–Я", self.sort_name) {
+                self.sort_name = !self.sort_name;
+                changed = true;
+            }
+            right -= 10.0;
+            for (k, (name, grid)) in [("Сетка", true), ("Список", false)].into_iter().enumerate() {
+                let bw = cv.chip_w(name);
+                right -= bw;
+                if ui.chip(cv, id(APPS, 13 + k as u32), Rect::new(right, y, bw, 17.0), name, self.grid == grid) && self.grid != grid {
+                    self.grid = grid;
+                    changed = true;
+                }
+                right -= 3.0;
+            }
+            y_list = TOP + 55.0;
+        }
+        if changed {
+            self.sel = None;
+            self.persist();
+            // Остаток кадра рисуется уже по новому режиму.
+            items = self.results(&query);
+            cols = cols_for(self.grid);
+        }
+
+        // Быстрые ссылки плашками под поиском (пока запрос пуст).
+        if !searching && !self.snippets.is_empty() {
             let mut x = PAD;
             for (i, (name, _)) in self.snippets.iter().enumerate() {
                 let pw = name.chars().count() as f32 * 5.2 + 30.0;
                 if x + pw > w - PAD {
                     break;
                 }
-                let r = Rect::new(x, TOP + 35.0, pw, 20.0);
+                let r = Rect::new(x, y_list + 2.0, pw, 20.0);
                 let pid = id(APPS, 600 + i as u32);
                 let (_, clicked) = ui.click_area(pid, r);
                 let hv = ui.hover_of(pid);
@@ -321,32 +408,48 @@ impl Apps {
                 }
                 x += pw + 5.0;
             }
-            y_list = TOP + 59.0;
+            y_list += 26.0;
         }
 
-        // Список с заголовками секций.
+        // Список (или сетка) с заголовками секций.
         const ROW: f32 = 24.0;
         const PITCH: f32 = 26.0;
         const HEAD: f32 = 18.0;
         let view = Rect::new(PAD, y_list, w - 2.0 * PAD, (h - y_list - 8.0).max(ROW));
-        let mut rows: Vec<(f32, Option<&'static str>, usize)> = Vec::new();
-        let (mut y, mut last) = (0.0f32, None::<&'static str>);
+        let pitch = if self.grid { CELL_H } else { PITCH };
+        // (y, заголовок секции, позиция в `items`, колонка)
+        let mut rows: Vec<(f32, Option<&'static str>, usize, usize)> = Vec::new();
+        let (mut y, mut last, mut col) = (0.0f32, None::<&'static str>, 0usize);
         for (p, &(_, sec)) in items.iter().enumerate() {
             if !sec.is_empty() && last != Some(sec) {
-                rows.push((y, Some(sec), p));
+                if col != 0 {
+                    y += pitch;
+                    col = 0;
+                }
+                rows.push((y, Some(sec), p, 0));
                 y += HEAD;
                 last = Some(sec);
             }
-            rows.push((y, None, p));
-            y += PITCH;
+            rows.push((y, None, p, col));
+            col += 1;
+            if col == cols {
+                col = 0;
+                y += pitch;
+            }
         }
+        if col != 0 {
+            y += pitch;
+        }
+        let cell_w = (view.w - 4.0) / cols as f32;
 
-        let sid = id(APPS, 100);
+        // Своя прокрутка на каждую комбинацию режима и вида: переключение «Избранные» ↔
+        // «Показать все» возвращает на прежнее место списка.
+        let sid = id(APPS, 100 + self.show_all as u32 * 2 + self.grid as u32);
         let off = ui.scroll_begin(cv, sid, view, y);
         let mut fav = None;
-        for (ry, head, p) in rows {
+        for (ry, head, p, col) in rows {
             let yy = view.y + ry - off;
-            let hgt = if head.is_some() { HEAD } else { ROW };
+            let hgt = if head.is_some() { HEAD } else if self.grid { CELL_H } else { ROW };
             if yy + hgt < view.y || yy > view.bottom() {
                 continue;
             }
@@ -355,7 +458,11 @@ impl Apps {
                 continue;
             }
             let (it, _) = items[p];
-            let r = Rect::new(view.x, yy, view.w - 4.0, ROW);
+            let r = if self.grid {
+                Rect::new(view.x + col as f32 * cell_w, yy, cell_w - 2.0, CELL_H - 4.0)
+            } else {
+                Rect::new(view.x, yy, view.w - 4.0, ROW)
+            };
             let selected = self.sel == Some(p);
             let rid = id(APPS, 1000 + p as u32);
             match it {
@@ -366,31 +473,39 @@ impl Apps {
                     } else {
                         e.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default()
                     };
-                    let right = if selected { "↵ Открыть" } else { "Приложение" };
                     // Звезда регистрирует нажатие раньше строки, иначе строка захватит мышь
                     // и клик по звезде запустит приложение.
-                    let star = Rect::new(r.right() - 25.0, yy + 3.0, 18.0, 18.0);
+                    let star = if self.grid {
+                        Rect::new(r.right() - 20.0, r.y + 2.0, 18.0, 18.0)
+                    } else {
+                        Rect::new(r.right() - 25.0, yy + 3.0, 18.0, 18.0)
+                    };
                     let sid_star = id(APPS, 5000 + p as u32);
                     let show = e.fav || ui.hover_of(rid) > 0.3 || ui.hover_of(sid_star) > 0.3;
                     if show {
                         ui.click_area(sid_star, star);
                     }
-                    if ui.row_compact(cv, rid, r, &letter, false, &e.name, right, 26.0, selected, false) {
-                        launch = Some(it);
-                    }
-                    if let Some(px) = &e.icon {
+                    if self.grid {
+                        let (_, clicked) = ui.click_area(rid, r);
+                        let hv = ui.hover_of(rid);
+                        cv.rr(r, 10.0, mix(card(), fg(), 0.06 * hv + if selected { 0.08 } else { 0.0 }));
+                        let tile = Rect::new(r.cx() - ICON_BIG / 2.0, r.y + 7.0, ICON_BIG, ICON_BIG);
+                        if !paint_icon(ui, cv, e, tile) {
+                            cv.circle(tile.cx(), tile.cy(), ICON_BIG / 2.0, mix(card(), cv.accent, 0.25));
+                            cv.text(&letter, tile, &f.body_c, txt());
+                        }
+                        cv.text(&e.name, Rect::new(r.x + 3.0, r.y + 7.0 + ICON_BIG + 4.0, r.w - 6.0, 14.0), &f.small_c, txt());
+                        if clicked {
+                            launch = Some(it);
+                        }
+                    } else {
+                        let right = if selected { "↵ Открыть" } else { "Приложение" };
+                        if ui.row_compact(cv, rid, r, &letter, false, &e.name, right, 26.0, selected, false) {
+                            launch = Some(it);
+                        }
                         // Иконка поверх плашки строки (той же геометрии, что у `row_compact`).
                         let ts = (r.h - 7.0).clamp(12.0, 17.0);
-                        let tile = Rect::new(r.x + 6.0, r.cy() - ts / 2.0, ts, ts);
-                        let key = {
-                            use std::hash::{Hash, Hasher};
-                            let mut hs = std::collections::hash_map::DefaultHasher::new();
-                            e.path.hash(&mut hs);
-                            (0x41u64 << 56) | (hs.finish() >> 8)
-                        };
-                        if let Some(bmp) = ui.cache.get(&cv.g.dc, key, icons::SIZE_PX, icons::SIZE_PX, || px.clone()) {
-                            cv.bitmap(&bmp, tile, 1.0);
-                        }
+                        paint_icon(ui, cv, e, Rect::new(r.x + 6.0, r.cy() - ts / 2.0, ts, ts));
                     }
                     // Звезда видна у избранного и при наведении на строку.
                     if show {
@@ -403,17 +518,36 @@ impl Apps {
                 }
                 Item::Snippet(i) => {
                     let (name, _) = &self.snippets[i];
-                    let right = if selected { "↵ Открыть" } else { "Ссылка" };
-                    if ui.row_compact_tinted(cv, rid, r, icon::LINK, true, name, right, 26.0, selected, false, Some(crate::ui::hue(crate::ios::SysColor::Blue, cv.accent))) {
-                        launch = Some(it);
+                    if self.grid {
+                        let (_, clicked) = ui.click_area(rid, r);
+                        let hv = ui.hover_of(rid);
+                        cv.rr(r, 10.0, mix(card(), fg(), 0.06 * hv + if selected { 0.08 } else { 0.0 }));
+                        let tile = Rect::new(r.cx() - ICON_BIG / 2.0, r.y + 7.0, ICON_BIG, ICON_BIG);
+                        cv.circle(tile.cx(), tile.cy(), ICON_BIG / 2.0, crate::ui::hue(crate::ios::SysColor::Blue, cv.accent));
+                        cv.symbol(icon::LINK, tile, 14.0, crate::ui::WHITE);
+                        cv.text(name, Rect::new(r.x + 3.0, r.y + 7.0 + ICON_BIG + 4.0, r.w - 6.0, 14.0), &f.small_c, txt());
+                        if clicked {
+                            launch = Some(it);
+                        }
+                    } else {
+                        let right = if selected { "↵ Открыть" } else { "Ссылка" };
+                        if ui.row_compact_tinted(cv, rid, r, icon::LINK, true, name, right, 26.0, selected, false, Some(crate::ui::hue(crate::ios::SysColor::Blue, cv.accent))) {
+                            launch = Some(it);
+                        }
                     }
                 }
             }
         }
         ui.scroll_end(cv, sid);
         if items.is_empty() {
-            let msg = if self.entries.is_empty() { "Ярлыки меню «Пуск» не найдены" } else { "Ничего не найдено" };
-            cv.text(msg, Rect::new(view.x + 6.0, view.y + 6.0, view.w, 18.0), &f.small, bare());
+            let msg = if self.entries.is_empty() {
+                "Ярлыки меню «Пуск» не найдены"
+            } else if !searching && !self.show_all {
+                "Нет избранных приложений. Отметьте их звёздочкой или нажмите «Показать все»"
+            } else {
+                "Ничего не найдено"
+            };
+            cv.text(msg, Rect::new(view.x + 6.0, view.y + 6.0, view.w - 12.0, 36.0), &f.small, bare());
         }
         if let Some(i) = fav {
             self.entries[i].fav = !self.entries[i].fav;
@@ -421,6 +555,24 @@ impl Apps {
         } else if let Some(it) = launch {
             self.launch(it, act);
         }
+    }
+}
+
+/// Рисует иконку приложения в `tile`; `false` — иконка ещё не загружена.
+unsafe fn paint_icon(ui: &mut Ui, cv: &Canvas, e: &Entry, tile: Rect) -> bool {
+    let Some(px) = &e.icon else { return false };
+    let key = {
+        use std::hash::{Hash, Hasher};
+        let mut hs = std::collections::hash_map::DefaultHasher::new();
+        e.path.hash(&mut hs);
+        (0x41u64 << 56) | (hs.finish() >> 8)
+    };
+    match ui.cache.get(&cv.g.dc, key, icons::SIZE_PX, icons::SIZE_PX, || px.clone()) {
+        Some(bmp) => {
+            cv.bitmap(&bmp, tile, 1.0);
+            true
+        }
+        None => false,
     }
 }
 
@@ -493,11 +645,48 @@ mod tests {
     fn sections_without_query() {
         let mut a = Apps::default();
         a.entries = vec![entry("alpha", false, 0), entry("beta", true, 3), entry("gamma", false, 5), entry("delta", false, 0)];
+        a.show_all = true;
         let r = a.results("");
         assert_eq!(r[0], (Item::App(1), "ИЗБРАННОЕ"));
         assert_eq!(r[1], (Item::App(2), "НЕДАВНИЕ"));
         assert_eq!(r[2], (Item::App(0), "ПРИЛОЖЕНИЯ"));
         assert_eq!(r[3], (Item::App(3), "ПРИЛОЖЕНИЯ"));
+    }
+
+    #[test]
+    fn default_mode_shows_only_favorites_most_used_first() {
+        let mut a = Apps::default();
+        a.entries = vec![entry("alpha", true, 1), entry("beta", false, 9), entry("gamma", true, 4), entry("delta", true, 4)];
+        let r = a.results("");
+        assert_eq!(r, vec![(Item::App(2), ""), (Item::App(3), ""), (Item::App(0), "")]);
+    }
+
+    #[test]
+    fn favorites_sort_by_name_and_empty_favorites() {
+        let mut a = Apps::default();
+        a.entries = vec![entry("alpha", true, 1), entry("beta", false, 9), entry("gamma", true, 4)];
+        a.sort_name = true;
+        assert_eq!(a.results("").iter().map(|r| r.0).collect::<Vec<_>>(), vec![Item::App(0), Item::App(2)]);
+        a.entries[0].fav = false;
+        a.entries[2].fav = false;
+        assert!(a.results("").is_empty());
+    }
+
+    #[test]
+    fn show_all_with_name_sort_is_flat_alphabetical() {
+        let mut a = Apps::default();
+        a.entries = vec![entry("alpha", false, 0), entry("beta", true, 3), entry("gamma", false, 5)];
+        a.show_all = true;
+        a.sort_name = true;
+        let r = a.results("");
+        assert_eq!(r, vec![(Item::App(0), ""), (Item::App(1), ""), (Item::App(2), "")]);
+    }
+
+    #[test]
+    fn search_ignores_favorites_only_mode() {
+        let mut a = Apps::default();
+        a.entries = vec![entry("alpha", false, 0), entry("gamma", true, 5)];
+        assert_eq!(a.results("alp")[0].0, Item::App(0));
     }
 
     #[test]
