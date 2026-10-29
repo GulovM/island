@@ -123,9 +123,11 @@ pub fn body_layers(
 
     let tint_alpha = body_alpha(translucent, min_alpha, opacity, p, k);
 
-    // Цвет RGB тинта: всегда цвет фона острова (bg) для обоих стилей.
-    // При сжатии в полоску (k < 1) фон пропорционально темнеет к чистому чёрному.
-    let tint_color = [bg[0] * k, bg[1] * k, bg[2] * k];
+    // Цвет RGB тинта: цвет фона острова (bg) при полном раскрытии, для обоих стилей.
+    // Свёрнутый остров (p → 0) всегда чистый чёрный, не цвет темы/акцента — так же, как при
+    // сжатии в полоску (k → 0); оба случая просто темнят фон к чёрному пропорционально.
+    let darken = p.clamp(0.0, 1.0) * k.clamp(0.0, 1.0);
+    let tint_color = [bg[0] * darken, bg[1] * darken, bg[2] * darken];
 
     // Множитель стеклянных эффектов (осветление сверху, кромка).
     // Полоска (k = 0), свёрнутый остров (p = 0) или выключенное стекло гасят эффекты в ноль,
@@ -468,12 +470,13 @@ mod tests {
         assert_eq!(strip.rim.hi_alpha, 0.0);
         assert_eq!(strip.tint_color, [0.0, 0.0, 0.0]);
 
-        // Свёрнутое состояние (p = 0): сплошное тело (alpha = 1.0), эффекты погашены
+        // Свёрнутое состояние (p = 0): сплошное тело (alpha = 1.0), эффекты погашены, цвет
+        // чёрный — не цвет темы/акцента, независимо от bg (см. комментарий в body_layers).
         let collapsed = body_layers(Material::Regular, bg, true, true, 50.0, 0.0, 1.0);
         assert_eq!(collapsed.tint_alpha, 1.0);
         assert_eq!(collapsed.sheen.alpha, 0.0);
         assert_eq!(collapsed.rim.hi_alpha, 0.0);
-        assert_eq!(collapsed.tint_color, bg);
+        assert_eq!(collapsed.tint_color, [0.0, 0.0, 0.0]);
 
         // Выключенное стекло (translucent = false): плоское тело (alpha = 1.0), эффекты погашены
         let disabled = body_layers(Material::Regular, bg, false, true, 50.0, 1.0, 1.0);
