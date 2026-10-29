@@ -7,7 +7,7 @@ use windows::Win32::System::SystemInformation::GetLocalTime;
 
 use crate::anim::Spring;
 use crate::bg::{self, NetStatus};
-use crate::ui::{dim, icon, status_orange, track, txt, Canvas, Rect};
+use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, icon, status_orange, Canvas, Rect};
 
 pub struct Face {
     enabled: bool,
@@ -136,16 +136,16 @@ impl Face {
     pub unsafe fn draw(&self, cv: &Canvas, r: Rect, timer: Option<(&str, f32)>) {
         let f = &cv.g.fonts;
         let pad = (r.w * 0.09).clamp(8.0, 16.0);
-        cv.text(&self.lang_text, Rect::new(r.x + pad, r.y, 34.0, r.h - 1.0), &f.small_b, dim());
+        cv.text(&self.lang_text, Rect::new(r.x + pad, r.y, 34.0, r.h - 1.0), &f.small_b, collapsed_dim());
         match timer {
             Some((label, pulse)) => {
                 let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
                 // Значок слева от текста: ширина цифр табличная, около 7 px на знак.
                 let half = label.chars().count() as f32 * 3.6;
                 t.glyph(icon::CLOCK, Rect::new(r.cx() - half - 20.0, r.cy() - 9.0, 16.0, 16.0), false, status_orange());
-                t.text(label, Rect::new(r.x, r.y, r.w, r.h - 1.0), &f.body_c, txt());
+                t.text(label, Rect::new(r.x, r.y, r.w, r.h - 1.0), &f.body_c, collapsed_txt());
             }
-            None => cv.text(&self.time, Rect::new(r.x, r.y, r.w, r.h - 1.0), &f.body_c, txt()),
+            None => cv.text(&self.time, Rect::new(r.x, r.y, r.w, r.h - 1.0), &f.body_c, collapsed_txt()),
         }
         self.wifi(cv, r.right() - pad - 6.5, r.cy() + 3.2);
     }
@@ -154,8 +154,8 @@ impl Face {
     /// `(cx, cy)` — точка-источник у нижнего края значка.
     unsafe fn wifi(&self, cv: &Canvas, cx: f32, cy: f32) {
         let level = signal_level(self.net);
-        let off = track();
-        let on = txt();
+        let off = collapsed_track();
+        let on = collapsed_txt();
         for i in 0..3u8 {
             let radius = 3.4 + 3.0 * i as f32;
             cv.stroke_arc(cx, cy, radius, -46.0, 46.0, 1.4, if level > i { on } else { off });
@@ -163,7 +163,7 @@ impl Face {
         cv.circle(cx, cy, 1.25, if level > 0 { on } else { off });
         if level == 0 {
             // Нет сети: перечёркнутый значок.
-            cv.stroke_line((cx - 6.5, cy - 9.5), (cx + 6.5, cy + 1.5), 1.4, dim());
+            cv.stroke_line((cx - 6.5, cy - 9.5), (cx + 6.5, cy + 1.5), 1.4, collapsed_dim());
         }
     }
 }

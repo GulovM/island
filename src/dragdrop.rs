@@ -228,10 +228,10 @@ impl App {
         let tx = ic.right() + 10.0;
         let tw = (r.right() - tx - 14.0).max(10.0);
         if sub.is_empty() {
-            cv.text(&title, Rect::new(tx, r.cy() - 8.0, tw, 16.0), &f.body, ui::txt());
+            cv.text(&title, Rect::new(tx, r.cy() - 8.0, tw, 16.0), &f.body, ui::collapsed_txt());
         } else {
-            cv.text(&title, Rect::new(tx, r.y + 6.0, tw, 16.0), &f.body, ui::txt());
-            cv.text(&sub, Rect::new(tx, r.y + 22.0, tw, 12.0), &f.small, ui::dim());
+            cv.text(&title, Rect::new(tx, r.y + 6.0, tw, 16.0), &f.body, ui::collapsed_txt());
+            cv.text(&sub, Rect::new(tx, r.y + 22.0, tw, 12.0), &f.small, ui::collapsed_dim());
         }
     }
 
