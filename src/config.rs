@@ -14,16 +14,10 @@ pub const DEFAULT_RADIUS: f32 = 14.0;
 pub const MAX_RADIUS: f32 = 30.0;
 /// Прозрачность стекла по умолчанию: 0 — почти прозрачное, 100 — сплошное тело.
 pub const DEFAULT_GLASS_OPACITY: f32 = 70.0;
-/// Масштаб интерфейса (шрифты и панель вместе) в процентах шкалы 50–150: по умолчанию и пределы.
-/// 50 — суммарный масштаб 130% (минимально комфортный), 100 — 170% (оптимальный), 150 — 210%.
-pub const DEFAULT_SCALE: f32 = 100.0;
-pub const MIN_SCALE: f32 = 50.0;
-pub const MAX_SCALE: f32 = 150.0;
-
-/// Процент шкалы 50–150 → суммарный масштаб интерфейса (1.3…2.1 от логических пикселей).
-pub fn scale_total(percent: f32) -> f32 {
-    1.3 + (percent - MIN_SCALE) * 0.008
-}
+/// Масштаб интерфейса (шрифты и панель вместе): по умолчанию и пределы.
+pub const DEFAULT_SCALE: f32 = 1.2;
+pub const MIN_SCALE: f32 = 0.9;
+pub const MAX_SCALE: f32 = 2.0;
 
 pub const DEFAULT_TEMPLATE: &str = r##"# Island — настройки. Изменения применяются из меню в трее: «Перечитать конфиг».
 
@@ -61,9 +55,8 @@ palette_style = "windows"
 # 1 — капля выбора вкладки залита акцентом (как до стекла); 0 — нейтральная плашка. Меняется и в Настройках.
 accent_pill = 0
 
-# Масштаб интерфейса: шрифты и панель увеличиваются вместе, шкала 50–150 (100 — оптимальный).
-# Меняется и в Настройках.
-ui_scale_percent = 100
+# Масштаб интерфейса: шрифты и панель увеличиваются вместе (0.9–2.0). Меняется и в Настройках.
+ui_scale = 1.2
 
 # Язык интерфейса: "auto" (как в Windows), "ru" или "en". Меняется и в Настройках.
 language = "auto"
@@ -404,7 +397,7 @@ fn save_updates(cfg: &Config) -> Vec<(&'static str, String)> {
         ("material", fmt_str(cfg.material.as_str())),
         ("palette_style", fmt_str(cfg.palette_style.as_str())),
         ("accent_pill", (cfg.accent_pill as u8).to_string()),
-        ("ui_scale_percent", format!("{}", cfg.ui_scale.round() as i32)),
+        ("ui_scale", format!("{:.3}", cfg.ui_scale)),
         ("strip_over_maximized", (cfg.strip_over_maximized as u8).to_string()),
         ("collapsed_mode", fmt_str(if cfg.always_strip { "strip" } else { "auto" })),
         ("language", fmt_str(&cfg.language)),
@@ -653,7 +646,7 @@ fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
         "material",
         "palette_style",
         "accent_pill",
-        "ui_scale_percent",
+        "ui_scale",
         "strip_over_maximized",
         "collapsed_mode",
         "language",
@@ -737,9 +730,7 @@ pub fn parse(text: &str) -> Config {
             // Ключ тестовых сборок с подложкой размытия: больше ничего не значит, молча пропускаем.
             ("", "glass_hint_dismissed", _) => {}
             ("", "accent_pill", Value::Num(v)) => cfg.accent_pill = v != 0.0,
-            // Ключ `ui_scale` (множитель к DPI) до 0.5.2 — другая шкала, старое значение не переносим.
-            ("", "ui_scale", _) => {}
-            ("", "ui_scale_percent", Value::Num(v)) => cfg.ui_scale = (v as f32).clamp(MIN_SCALE, MAX_SCALE),
+            ("", "ui_scale", Value::Num(v)) => cfg.ui_scale = (v as f32).clamp(MIN_SCALE, MAX_SCALE),
             ("", "strip_over_maximized", Value::Num(v)) => cfg.strip_over_maximized = v != 0.0,
             ("", "collapsed_mode", Value::Str(s)) => cfg.always_strip = s.trim().eq_ignore_ascii_case("strip"),
             ("", "language", Value::Str(s)) => {
@@ -1065,10 +1056,8 @@ gmail = \"https://mail.google.com\"
         assert!((c.bg[2] - 0x30 as f32 / 255.0).abs() < 0.001);
         assert!(c.system_colors && !c.idle_face);
         assert_eq!(c.corner_radius, MAX_RADIUS);
-        assert_eq!(parse("ui_scale_percent = 900").ui_scale, MAX_SCALE);
-        assert_eq!(parse("ui_scale_percent = 1").ui_scale, MIN_SCALE);
-        assert_eq!(parse("ui_scale = 1.2").ui_scale, DEFAULT_SCALE);
-        assert!((scale_total(50.0) - 1.3).abs() < 1e-4 && (scale_total(100.0) - 1.7).abs() < 1e-4 && (scale_total(150.0) - 2.1).abs() < 1e-4);
+        assert_eq!(parse("ui_scale = 9").ui_scale, MAX_SCALE);
+        assert_eq!(parse("ui_scale = 0.1").ui_scale, MIN_SCALE);
         assert_eq!(c.hidden_tabs, vec!["Power".to_string(), "stats".to_string()]);
         let d = parse(DEFAULT_TEMPLATE);
         assert_eq!((d.corner_radius, d.system_colors, d.idle_face), (DEFAULT_RADIUS, false, true));
@@ -1124,7 +1113,7 @@ gmail = \"https://mail.google.com\"
         c.material = Material::Thin;
         c.palette_style = PaletteStyle::Ios;
         c.accent_pill = true;
-        c.ui_scale = 125.0;
+        c.ui_scale = 1.5;
         c.strip_over_maximized = false;
         c.hidden_tabs = vec!["Power".into(), "Wallpaper".into()];
         c.tabs = vec!["Apps".into(), "Controls".into()];
@@ -1140,7 +1129,7 @@ gmail = \"https://mail.google.com\"
             ("material", fmt_str(c.material.as_str())),
             ("palette_style", fmt_str(c.palette_style.as_str())),
             ("accent_pill", "1".to_string()),
-            ("ui_scale_percent", "125".to_string()),
+            ("ui_scale", format!("{:.3}", c.ui_scale)),
             ("strip_over_maximized", "0".to_string()),
             ("tabs", fmt_list(&c.tabs)),
             ("hidden_tabs", fmt_list(&c.hidden_tabs)),

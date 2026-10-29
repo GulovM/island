@@ -225,10 +225,11 @@ fn rgb_of(c: D2D1_COLOR_F) -> Rgb {
     [c.r, c.g, c.b]
 }
 
-/// Доля ползунка (0..1) → процент шкалы 50–150 с шагом 5.
-fn snap_scale(frac: f32) -> f32 {
+/// Доля ползунка (0..1) → множитель к DPI. Шаг — 5 п.п. суммарного масштаба (DPI × множитель),
+/// именно его пользователь видит в подписи.
+fn snap_scale(frac: f32, dpi: f32) -> f32 {
     let v = MIN_SCALE + frac.clamp(0.0, 1.0) * (MAX_SCALE - MIN_SCALE);
-    ((v / 5.0).round() * 5.0).clamp(MIN_SCALE, MAX_SCALE)
+    (((v * dpi * 20.0).round() / 20.0) / dpi).clamp(MIN_SCALE, MAX_SCALE)
 }
 
 fn close(a: Rgb, b: Rgb) -> bool {
@@ -737,13 +738,14 @@ impl Settings {
 
         // Масштаб интерфейса (шаг 0.05): применяется, когда мышь отпущена.
         let shown = self.scale_drag.unwrap_or(self.cfg.ui_scale);
+        let dpi = crate::wnd::dpi_factor();
         cv.text("Масштаб интерфейса", Rect::new(x, y, 170.0, 13.0), &f.body, txt());
-        cv.text(&format!("{}%", shown.round() as i32), Rect::new(rc.right() - 70.0, y, 60.0, 13.0), &f.body_r, dim());
+        cv.text(&format!("{}%", (shown * dpi * 100.0).round() as i32), Rect::new(rc.right() - 70.0, y, 60.0, 13.0), &f.body_r, dim());
         y += 21.0;
         let mut frac = (shown - MIN_SCALE) / (MAX_SCALE - MIN_SCALE);
         let sid = id(SETTINGS, N_SCALE);
         if ui.slider_thin(cv, sid, Rect::new(x + 6.0, y, iw - 12.0, 14.0), &mut frac) {
-            self.scale_drag = Some(snap_scale(frac));
+            self.scale_drag = Some(snap_scale(frac, dpi));
         }
 
         let reset = Rect::new(x, rc.bottom() - 10.0 - 22.0, iw, 22.0);
@@ -1060,16 +1062,19 @@ mod tests {
 
     #[test]
     fn scale_snaps_to_five_percent() {
-        assert_eq!(snap_scale(0.0), MIN_SCALE);
-        assert_eq!(snap_scale(1.0), MAX_SCALE);
-        assert_eq!(snap_scale(0.5), DEFAULT_SCALE);
-        assert_eq!(snap_scale(0.27), 75.0);
+        assert_eq!(snap_scale(0.0, 1.0), MIN_SCALE);
+        assert_eq!(snap_scale(1.0, 1.0), MAX_SCALE);
+        assert!((snap_scale(0.27, 1.0) - 1.2).abs() < 1e-4);
+        assert!((snap_scale(0.5, 1.0) - 1.45).abs() < 1e-4);
+        // При 125% суммарный масштаб кратен 5%: 1.2 × 125% = 150%.
+        let total = snap_scale(0.27, 1.25) * 1.25 * 100.0;
+        assert!((total / 5.0 - (total / 5.0).round()).abs() < 1e-2, "{total}");
     }
 
     #[test]
     fn reset_restores_defaults() {
         let mut s = settings();
-        s.cfg.ui_scale = 140.0;
+        s.cfg.ui_scale = 1.8;
         s.cfg.corner_radius = 3.0;
         s.cfg.glass = false;
         s.cfg.glass_opacity = 20.0;
