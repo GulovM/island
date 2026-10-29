@@ -11,7 +11,7 @@ use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 
 use crate::anim::Spring;
 use crate::bg::{self, Media, Snapshot};
-use crate::ui::{dim, icon, status_green, status_orange, status_red, txt, Canvas, Rect, Ui, WHITE};
+use crate::ui::{collapsed_chip_bg, collapsed_dim, collapsed_txt, icon, status_green, status_orange, status_red, Canvas, Rect, Ui, WHITE};
 
 /// Размеры форм (логические пиксели). Ширина не меньше ширины свёрнутого острова.
 pub const MINI: (f32, f32) = (252.0, 36.0);
@@ -353,8 +353,8 @@ impl Live {
         }
         let tx = cover.right() + 8.0;
         let tw = (r.right() - 36.0 - tx).max(10.0);
-        cv.text(&m.title, Rect::new(tx, r.y + 4.0, tw, 14.0), &f.small_b, txt());
-        cv.text(&m.artist, Rect::new(tx, r.y + 16.0, tw, 12.0), &f.small, dim());
+        cv.text(&m.title, Rect::new(tx, r.y + 4.0, tw, 14.0), &f.small_b, collapsed_txt());
+        cv.text(&m.artist, Rect::new(tx, r.y + 16.0, tw, 12.0), &f.small, collapsed_dim());
         // «Эквалайзер»: столбики плавно качаются по своим синусам (не под музыку). Кадры идут
         // от таймера мини-плеера (~30 в секунду) и только пока он виден и музыка играет.
         let t = self.t0.elapsed().as_secs_f32();
@@ -383,28 +383,28 @@ impl Live {
         let ic = Rect::new(r.x + 12.0, cy - 9.0, 18.0, 18.0);
         let tx = r.x + 38.0;
         let right = r.right() - 14.0;
-        let value = |s: &str| cv.text(s, Rect::new(right - 40.0, cy - 8.0, 40.0, 16.0), &f.body_r, txt());
+        let value = |s: &str| cv.text(s, Rect::new(right - 40.0, cy - 8.0, 40.0, 16.0), &f.body_r, collapsed_txt());
         match t {
             Toast::Timer => {
                 cv.glyph(icon::CLOCK, ic, false, cv.accent);
-                cv.text(&crate::i18n::tr("Таймер завершён"), Rect::new(tx, cy - 8.0, Self::close_rect(r).x - tx, 16.0), &f.body, txt());
+                cv.text(&crate::i18n::tr("Таймер завершён"), Rect::new(tx, cy - 8.0, Self::close_rect(r).x - tx, 16.0), &f.body, collapsed_txt());
                 let x = Self::close_rect(r);
                 let hot = cursor.0 >= x.x - 4.0 && cursor.0 < x.right() + 4.0 && cursor.1 >= x.y - 4.0 && cursor.1 < x.bottom() + 4.0;
-                cv.circle(x.cx(), x.cy(), 9.0, crate::ui::mix(crate::ui::chip_bg(), txt(), if hot { 0.18 } else { 0.0 }));
-                cv.glyph(icon::CLOSE, x.inset(4.0), false, if hot { txt() } else { dim() });
+                cv.circle(x.cx(), x.cy(), 9.0, crate::ui::mix(collapsed_chip_bg(), collapsed_txt(), if hot { 0.18 } else { 0.0 }));
+                cv.glyph(icon::CLOSE, x.inset(4.0), false, if hot { collapsed_txt() } else { collapsed_dim() });
             }
             Toast::Event => {
                 let (title, tag) = self.event.as_ref().map_or(("", ""), |(a, b)| (a.as_str(), b.as_str()));
                 cv.glyph(icon::CALENDAR, ic, false, cv.accent);
                 let x = Self::close_rect(r);
                 let tag_w = if tag.is_empty() { 0.0 } else { 44.0 };
-                cv.text(title, Rect::new(tx, cy - 8.0, x.x - tx - tag_w - 4.0, 16.0), &f.body, txt());
+                cv.text(title, Rect::new(tx, cy - 8.0, x.x - tx - tag_w - 4.0, 16.0), &f.body, collapsed_txt());
                 if tag_w > 0.0 {
-                    cv.text(tag, Rect::new(x.x - tag_w, cy - 8.0, tag_w, 16.0), &f.small, dim());
+                    cv.text(tag, Rect::new(x.x - tag_w, cy - 8.0, tag_w, 16.0), &f.small, collapsed_dim());
                 }
                 let hot = cursor.0 >= x.x - 4.0 && cursor.0 < x.right() + 4.0 && cursor.1 >= x.y - 4.0 && cursor.1 < x.bottom() + 4.0;
-                cv.circle(x.cx(), x.cy(), 9.0, crate::ui::mix(crate::ui::chip_bg(), txt(), if hot { 0.18 } else { 0.0 }));
-                cv.glyph(icon::CLOSE, x.inset(4.0), false, if hot { txt() } else { dim() });
+                cv.circle(x.cx(), x.cy(), 9.0, crate::ui::mix(collapsed_chip_bg(), collapsed_txt(), if hot { 0.18 } else { 0.0 }));
+                cv.glyph(icon::CLOSE, x.inset(4.0), false, if hot { collapsed_txt() } else { collapsed_dim() });
             }
             Toast::Volume { level, muted } => {
                 let g = if muted || level <= 0.0 {
@@ -416,18 +416,18 @@ impl Live {
                 } else {
                     icon::VOLUME3
                 };
-                cv.glyph(g, ic, false, txt());
+                cv.glyph(g, ic, false, collapsed_txt());
                 value(&if muted { "Выкл".to_string() } else { format!("{}%", (level * 100.0).round() as i32) });
                 cv.progress(Rect::new(tx, cy - 1.5, right - 46.0 - tx, 3.0), if muted { 0.0 } else { level }, cv.accent);
             }
             Toast::Brightness { level } => {
-                cv.glyph(icon::BRIGHTNESS, ic, false, txt());
+                cv.glyph(icon::BRIGHTNESS, ic, false, collapsed_txt());
                 value(&format!("{}%", (level * 100.0).round() as i32));
                 cv.progress(Rect::new(tx, cy - 1.5, right - 46.0 - tx, 3.0), level, cv.accent);
             }
             Toast::Charging { on, percent } => {
-                self.battery(cv, ic, percent, if on { status_green() } else { txt() });
-                cv.text(if on { "Зарядка" } else { "От батареи" }, Rect::new(tx, cy - 8.0, right - 44.0 - tx, 16.0), &f.body, txt());
+                self.battery(cv, ic, percent, if on { status_green() } else { collapsed_txt() });
+                cv.text(if on { "Зарядка" } else { "От батареи" }, Rect::new(tx, cy - 8.0, right - 44.0 - tx, 16.0), &f.body, collapsed_txt());
                 value(&format!("{percent}%"));
             }
             Toast::LowBattery(percent) => {
@@ -441,8 +441,8 @@ impl Live {
     /// Батарейка, нарисованная примитивами (глифов зарядки в шрифте может не быть).
     unsafe fn battery(&self, cv: &Canvas, r: Rect, percent: u8, fill: D2D1_COLOR_F) {
         let body = Rect::new(r.x, r.y + 4.5, 15.0, 9.0);
-        cv.rr_line(body, 2.5, dim(), 1.2);
-        cv.rr(Rect::new(body.right() + 0.8, body.y + 2.5, 1.8, 4.0), 0.9, dim());
+        cv.rr_line(body, 2.5, collapsed_dim(), 1.2);
+        cv.rr(Rect::new(body.right() + 0.8, body.y + 2.5, 1.8, 4.0), 0.9, collapsed_dim());
         let w = 11.0 * (percent.min(100) as f32 / 100.0);
         if w > 0.5 {
             cv.rr(Rect::new(body.x + 2.0, body.y + 2.0, w, 5.0), 1.0, fill);
