@@ -1,6 +1,6 @@
 [package]
 name = "island"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 description = "Dynamic island for Windows 10/11: a GPU-drawn notch at the top of the screen"
 license = "MIT"
