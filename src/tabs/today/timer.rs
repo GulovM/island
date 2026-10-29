@@ -218,7 +218,12 @@ impl Today {
                 self.deadline = None;
                 self.save_timer();
             }
-            if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(run_x - 14.0 - 26.0, cy - 10.0, 20.0, 20.0), icon::RINGER, self.sound, tint) {
+            let sound_tip = if self.sound {
+                crate::i18n::pick("Выключить звук сигнала", "Mute alarm sound")
+            } else {
+                crate::i18n::pick("Включить звук сигнала", "Unmute alarm sound")
+            };
+            if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(run_x - 14.0 - 26.0, cy - 10.0, 20.0, 20.0), icon::RINGER, self.sound, tint, sound_tip) {
                 self.sound = !self.sound;
                 self.save_timer();
             }
@@ -229,7 +234,12 @@ impl Today {
         // Оставшееся время — крупными табличными цифрами: главное в карточке.
         cv.text(&label, Rect::new(cx - 25.0, cy - 10.0, 50.0, 20.0), &f.title_c, txt());
         // Звук сигнала — под кольцом, по его оси.
-        if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(cx - 9.0, tm.y + 77.0, 18.0, 18.0), icon::RINGER, self.sound, tint) {
+        let sound_tip = if self.sound {
+            crate::i18n::pick("Выключить звук сигнала", "Mute alarm sound")
+        } else {
+            crate::i18n::pick("Включить звук сигнала", "Unmute alarm sound")
+        };
+        if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(cx - 9.0, tm.y + 77.0, 18.0, 18.0), icon::RINGER, self.sound, tint, sound_tip) {
             self.sound = !self.sound;
             self.save_timer();
         }

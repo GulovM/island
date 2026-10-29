@@ -14,10 +14,11 @@ mod paths;
 mod registry;
 mod seal;
 mod shell;
+mod uia;
 
 pub use appearance::{
-    current_wallpaper, dark_mode, light_mode, set_dark_mode, set_wallpaper, system_colors,
-    transparency_enabled, ColorRetry, is_theme_setting_str,
+    animations_enabled, current_wallpaper, dark_mode, light_mode, set_dark_mode, set_wallpaper, system_colors,
+    text_scale_factor, transparency_enabled, ColorRetry, is_theme_setting_str,
 };
 pub use clipboard::{
     clipboard_excluded, clipboard_has_image, clipboard_has_text, clipboard_image, clipboard_owned_by,
@@ -27,6 +28,7 @@ pub use energy_saver::{energy_saver, set_energy_saver};
 pub use night_light::{night_light, set_night_light};
 pub use paths::{pictures_dir, system_drive_root, windows_dir};
 pub use registry::reg_str;
+pub(crate) use uia::{handle_get_object, report_focus};
 pub(in crate::sys) use registry::{read_binary, read_dword};
 pub use seal::{is_sealed, seal, unseal};
 pub use shell::{

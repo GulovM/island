@@ -358,6 +358,9 @@ impl Tabs {
             SETTINGS => self.settings.draw(ui, cv, w, h),
             _ => self.draw_custom(tab, ui, cv, w, h),
         }
+        // Кольцо клавиатурного фокуса — одна точка для всех вкладок сразу, после того как они
+        // отрисовали виджеты и `interact()` знает актуальный прямоугольник сфокусированного.
+        ui.paint_focus_ring(cv);
         // Клавиши навигации, которых не ждала ни одна вкладка, не копятся.
         if tab != CLIPBOARD && tab != APPS {
             let _ = ui.take_nav();

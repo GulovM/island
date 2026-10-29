@@ -468,6 +468,7 @@ impl Settings {
                 }
             }
         }
+        ui.paint_tip(cv, Rect::new(0.0, 0.0, w, h));
     }
 
     // ---------- «Внешний вид», левая карточка: цвета и радиус ----------
@@ -566,7 +567,14 @@ impl Settings {
                 }
             }
         }
-        ui.text_field_ex(cv, hex_id, Rect::new(x, y, iw - 30.0, 24.0), "#RRGGBB", icon::CONTRAST, Submit::None);
+        let hex_r = Rect::new(x, y, iw - 30.0, 24.0);
+        ui.text_field_ex(cv, hex_id, hex_r, "#RRGGBB", icon::CONTRAST, Submit::None);
+        // Нераспознанный ввод (опечатка, не 6 знаков) молча не применялся — теперь поле подсвечивается,
+        // пока текст не станет валидным цветом или не исчезнет фокус.
+        let hex_text = ui.field_text(hex_id);
+        if ui.has_focus(hex_id) && !hex_text.is_empty() && theme::parse_hex(&hex_text).is_none() {
+            cv.rr_line(hex_r, 10.0, crate::ui::status_red(), 1.5);
+        }
         cv.circle(lc.right() - 10.0 - 11.0, y + 12.0, 10.0, chip_bg());
         cv.circle(lc.right() - 10.0 - 11.0, y + 12.0, 8.6, col(self.current()));
         y += 36.0;
@@ -790,14 +798,14 @@ impl Settings {
             let up = Rect::new(r.right() - 44.0, r.y + 1.5, 18.0, 18.0);
             let down = Rect::new(r.right() - 23.0, r.y + 1.5, 18.0, 18.0);
             if pos > 0 {
-                if ui.icon_button(cv, id(SETTINGS, N_UP + tab as u32), up, icon::UP, false) {
+                if ui.icon_button(cv, id(SETTINGS, N_UP + tab as u32), up, icon::UP, false, crate::i18n::pick("Переместить выше", "Move up")) {
                     action = Some((pos, -1));
                 }
             } else {
                 cv.glyph(icon::UP, up, false, D2D1_COLOR_F { a: 0.25, ..dim() });
             }
             if pos + 1 < order.len() {
-                if ui.icon_button(cv, id(SETTINGS, N_DOWN + tab as u32), down, icon::DOWN, false) {
+                if ui.icon_button(cv, id(SETTINGS, N_DOWN + tab as u32), down, icon::DOWN, false, crate::i18n::pick("Переместить ниже", "Move down")) {
                     action = Some((pos, 1));
                 }
             } else {
@@ -806,12 +814,17 @@ impl Settings {
             if let Some(k) = custom {
                 let pencil = Rect::new(r.right() - 86.0, r.y + 1.5, 18.0, 18.0);
                 let bin = Rect::new(r.right() - 65.0, r.y + 1.5, 18.0, 18.0);
-                if ui.icon_button(cv, id(SETTINGS, N_EDIT + tab as u32), pencil, icon::EDIT, self.renaming == Some(k)) {
+                if ui.icon_button(cv, id(SETTINGS, N_EDIT + tab as u32), pencil, icon::EDIT, self.renaming == Some(k), crate::i18n::pick("Переименовать", "Rename")) {
                     edit = Some(k);
                 }
                 // Первое нажатие корзины просит подтверждения, второе удаляет.
                 let confirm = self.confirm_del == Some(k);
-                if ui.icon_button(cv, id(SETTINGS, N_DEL + tab as u32), bin, if confirm { icon::CHECK } else { icon::DELETE }, confirm) {
+                let del_tip = if confirm {
+                    crate::i18n::pick("Подтвердить удаление", "Confirm delete")
+                } else {
+                    crate::i18n::pick("Удалить", "Delete")
+                };
+                if ui.icon_button(cv, id(SETTINGS, N_DEL + tab as u32), bin, if confirm { icon::CHECK } else { icon::DELETE }, confirm, del_tip) {
                     if confirm {
                         del = Some(k);
                     } else {

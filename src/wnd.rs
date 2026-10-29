@@ -136,6 +136,11 @@ pub(crate) unsafe fn is_theme_setting_change(wp: WPARAM, lp: LPARAM) -> bool {
     if wp.0 == windows::Win32::UI::WindowsAndMessaging::SPI_SETDESKWALLPAPER.0 as usize {
         return true;
     }
+    // Специальные возможности → «Показывать анимацию»: как и смена обоев, приходит без строки
+    // параметра (`lp` нулевой), поэтому проверяем `wp` отдельно, а не общей веткой `lp.0 == 0`.
+    if wp.0 == windows::Win32::UI::WindowsAndMessaging::SPI_SETCLIENTAREAANIMATION.0 as usize {
+        return true;
+    }
     if lp.0 == 0 {
         return wp.0 == 0;
     }
@@ -343,6 +348,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             push(Ev::TaskbarCreated);
             LRESULT(0)
         }
+        WM_GETOBJECT => match sys::handle_get_object(hwnd, wp, lp) {
+            Some(r) => r,
+            None => DefWindowProcW(hwnd, msg, wp, lp),
+        },
         _ => DefWindowProcW(hwnd, msg, wp, lp),
     }
 }

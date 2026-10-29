@@ -94,12 +94,25 @@ pub struct Ui {
     widgets: HashMap<u32, Widget>,
     scrolls: HashMap<u32, Scroll>,
     fields: HashMap<u32, Field>,
-    /// Поле с клавиатурным фокусом.
+    /// Поле или виджет с клавиатурным фокусом.
     pub focus: Option<u32>,
     /// Поле, которое возвращает себе фокус после нажатия мимо полей (поиск в буфере обмена).
     pub sticky_focus: Option<u32>,
     pub caret_on: bool,
     focus_claimed: bool,
+    /// Все интерактивные id, прошедшие через `interact()` в этом кадре, в порядке отрисовки —
+    /// по ним идёт `Tab`/`Shift+Tab`, когда фокус не на текстовом поле.
+    focusables: Vec<u32>,
+    /// Последний прямоугольник сфокусированного виджета в этом кадре (для кольца фокуса).
+    focus_rect: Option<Rect>,
+    /// Дикторское имя сфокусированного виджета в этом кадре, если оно было зарегистрировано
+    /// (`tip()` на icon-only кнопках) — для `report_focus` (UI Automation).
+    focus_name: Option<String>,
+    /// Фокус пришёл клавишей `Tab`, а не кликом мыши: кольцо фокуса рисуется только в этом случае
+    /// (`:focus-visible`), не при обычном наведении или клике.
+    kbd_nav: bool,
+    /// Enter/Space на сфокусированном нетекстовом виджете — активирует его в этом кадре, как клик.
+    key_activate: bool,
     /// Куда поставить окно IME: (x, y) в логических пикселях окна.
     pub ime_pos: Option<(f32, f32)>,
     /// Текст, который нужно положить в буфер обмена (Ctrl+C / Ctrl+X).
@@ -125,6 +138,9 @@ impl Ui {
         self.focus_claimed = false;
         self.sticky_focus = None;
         self.ime_pos = None;
+        self.focusables.clear();
+        self.focus_rect = None;
+        self.focus_name = None;
         // Строка, которой не было в прошлом кадре (другая вкладка, остров был закрыт), прокрутится заново.
         self.marquees.retain(|_, m| m.drawn);
         for m in self.marquees.values_mut() {
@@ -162,6 +178,7 @@ impl Ui {
         self.pressed = false;
         self.released = false;
         self.wheel = 0.0;
+        self.key_activate = false;
     }
 
     /// Начало слоя содержимого: `ox` — левый край панели в логических пикселях окна.
@@ -179,6 +196,55 @@ impl Ui {
 
     pub fn blur(&mut self) {
         self.focus = None;
+    }
+
+    /// `id` сейчас в фокусе ради ввода текста (а не ради клавиатурной активации клика).
+    pub fn is_field(&self, id: u32) -> bool {
+        self.fields.contains_key(&id)
+    }
+
+    /// `Tab`/`Shift+Tab` вне текстового поля: следующий/предыдущий виджет из прошлого кадра
+    /// (`focusables` заполняется заново каждый кадр, так что к моменту вызова он уже готов).
+    /// Без фокуса идёт к первому (или последнему при `shift`) виджету.
+    pub fn request_tab(&mut self, shift: bool) {
+        if self.focusables.is_empty() {
+            return;
+        }
+        let last = self.focusables.len() - 1;
+        let cur = self.focus.and_then(|id| self.focusables.iter().position(|&x| x == id));
+        let next = match cur {
+            Some(i) if shift => if i == 0 { last } else { i - 1 },
+            Some(i) => if i == last { 0 } else { i + 1 },
+            None if shift => last,
+            None => 0,
+        };
+        self.focus = Some(self.focusables[next]);
+        self.kbd_nav = true;
+    }
+
+    /// `Enter`/`Space` на сфокусированном нетекстовом виджете — засчитывается как клик по нему
+    /// в этом кадре (одноразово, сбрасывается в `end_frame`).
+    pub fn request_activate(&mut self) {
+        self.key_activate = true;
+    }
+
+    /// Виджет, до которого дошли клавиатурой (`Tab`) в этом кадре, и его дикторское имя, если оно
+    /// было зарегистрировано (`tip()`) — для сообщения экранному диктору (UI Automation).
+    pub fn kbd_focus(&self) -> Option<(u32, Option<&str>)> {
+        if !self.kbd_nav {
+            return None;
+        }
+        self.focus.map(|id| (id, self.focus_name.as_deref()))
+    }
+
+    /// Кольцо вокруг виджета, к которому дошли клавиатурой (`Tab`), а не мышью: рисуется поверх
+    /// всего в конце кадра, как подсказка — само решает, нужно ли показываться.
+    pub unsafe fn paint_focus_ring(&self, cv: &Canvas) {
+        if !self.kbd_nav {
+            return;
+        }
+        let Some(r) = self.focus_rect else { return };
+        cv.rr_line(r.inset(-2.0), 8.0, cv.accent, 1.5);
     }
 
     pub fn step(&mut self, dt: f32) {
@@ -247,21 +313,32 @@ impl Ui {
         self.drag.is_none()
     }
 
-    /// Hit-testing: (наведён, клик). Клик — отпускание над тем же элементом, где нажали.
+    /// Hit-testing: (наведён, клик). Клик — отпускание над тем же элементом, где нажали, или
+    /// `Enter`/`Space`, пока `id` в клавиатурном фокусе (`request_activate`).
     pub(super) fn interact(&mut self, id: u32, r: Rect) -> (bool, bool) {
+        if self.interactive {
+            self.focusables.push(id);
+            if self.focus == Some(id) {
+                self.focus_rect = Some(r);
+            }
+        }
         let inside = self.interactive
             && r.contains(self.mouse)
             && self.clip.is_none_or(|c| c.contains(self.mouse));
         let hover = inside && (self.drag.is_none() || self.drag == Some(id));
         if hover && self.pressed {
             self.drag = Some(id);
+            // Настоящий клик мышью переключает управление обратно на неё: кольцо фокуса,
+            // показанное клавиатурной навигацией, больше не нужно.
+            self.kbd_nav = false;
         }
         let mine = self.drag == Some(id);
-        let clicked = mine && self.released && inside;
+        let key_clicked = self.interactive && self.key_activate && self.focus == Some(id);
+        let clicked = (mine && self.released && inside) || key_clicked;
         let down = self.down;
         let w = self.widget(id);
         w.hover.target = if hover || (mine && down) { 1.0 } else { 0.0 };
-        w.press.target = if mine && down && inside { 1.0 } else { 0.0 };
+        w.press.target = if (mine && down && inside) || key_clicked { 1.0 } else { 0.0 };
         (hover, clicked)
     }
 
@@ -282,5 +359,89 @@ impl Ui {
 
     pub fn unmute(&mut self, prev: bool) {
         self.interactive = prev;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const R: Rect = Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 };
+
+    /// Один кадр интерактивного слоя: курсор заведомо вне `R`, чтобы мышь не мешала проверке клавиатуры.
+    fn frame(ui: &mut Ui) {
+        ui.begin_frame((9000.0, 9000.0), true);
+        ui.begin_content(0.0, true);
+        ui.pressed = false;
+        ui.released = false;
+        ui.down = false;
+    }
+
+    #[test]
+    fn tab_cycles_through_focusables_in_draw_order() {
+        let mut ui = Ui::default();
+        frame(&mut ui);
+        let _ = ui.interact(1, R);
+        let _ = ui.interact(2, R);
+        let _ = ui.interact(3, R);
+        ui.end_frame();
+
+        ui.request_tab(false);
+        assert_eq!(ui.focus, Some(1));
+        ui.request_tab(false);
+        assert_eq!(ui.focus, Some(2));
+        ui.request_tab(true);
+        assert_eq!(ui.focus, Some(1));
+        // С конца назад — заворачивает на последний.
+        ui.request_tab(true);
+        assert_eq!(ui.focus, Some(3));
+    }
+
+    #[test]
+    fn enter_activates_focused_widget_without_mouse() {
+        let mut ui = Ui::default();
+        frame(&mut ui);
+        let _ = ui.interact(1, R);
+        let _ = ui.interact(2, R);
+        ui.end_frame();
+
+        ui.request_tab(false); // фокус -> 1
+        ui.request_activate();
+
+        frame(&mut ui);
+        let (_, clicked1) = ui.interact(1, R);
+        let (_, clicked2) = ui.interact(2, R);
+        assert!(clicked1, "Enter/Space на виджете 1 должен засчитаться как клик по нему");
+        assert!(!clicked2, "а не по соседнему виджету 2");
+    }
+
+    #[test]
+    fn real_mouse_press_clears_keyboard_focus_ring() {
+        let mut ui = Ui::default();
+        frame(&mut ui);
+        let _ = ui.interact(1, R);
+        ui.end_frame();
+        ui.request_tab(false);
+        assert!(ui.kbd_nav, "после Tab кольцо фокуса должно быть видимым");
+
+        // Настоящий клик мышью по тому же виджету.
+        ui.begin_frame((5.0, 5.0), true);
+        ui.begin_content(0.0, true);
+        ui.pressed = true;
+        ui.down = true;
+        let _ = ui.interact(1, R);
+        assert!(!ui.kbd_nav, "клик мышью возвращает управление ей — кольцо больше не нужно");
+    }
+
+    #[test]
+    fn is_field_distinguishes_text_fields_from_ordinary_widgets() {
+        let mut ui = Ui::default();
+        frame(&mut ui);
+        let _ = ui.interact(1, R);
+        ui.set_field_text(2, "текст");
+        ui.end_frame();
+
+        assert!(!ui.is_field(1));
+        assert!(ui.is_field(2));
     }
 }

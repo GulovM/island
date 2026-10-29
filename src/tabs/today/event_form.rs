@@ -138,7 +138,7 @@ impl Today {
 
         let head = if form.id == 0 { pick("Новое событие", "New event") } else { pick("Событие", "Event") };
         cv.text(head, Rect::new(x, r.y + 7.0, w - 28.0, 18.0), &f.body, txt());
-        if ui.icon_button(cv, id(TODAY, CLOSE), Rect::new(r.right() - 26.0, r.y + 7.0, 18.0, 18.0), icon::CLOSE, false) {
+        if ui.icon_button(cv, id(TODAY, CLOSE), Rect::new(r.right() - 26.0, r.y + 7.0, 18.0, 18.0), icon::CLOSE, false, crate::i18n::pick("Закрыть", "Close")) {
             keep = false;
         }
 
@@ -149,13 +149,13 @@ impl Today {
 
         // Дата и «весь день».
         let dy = r.y + 58.0;
-        if ui.icon_button(cv, id(TODAY, DAY_PREV), Rect::new(x, dy, 18.0, 18.0), icon::LEFT, false) {
+        if ui.icon_button(cv, id(TODAY, DAY_PREV), Rect::new(x, dy, 18.0, 18.0), icon::LEFT, false, crate::i18n::pick("Предыдущий день", "Previous day")) {
             form.day -= 1;
         }
         let (_, m, d) = civil_from_days(form.day);
         let date = format!("{} {} {}", crate::i18n::weekdays()[weekday(form.day) as usize], d, crate::i18n::months_short()[(m as usize).clamp(1, 12) - 1]);
         cv.line(&date, &f.small_b, x + 18.0, 62.0, dy + 9.0, Align::Center, txt());
-        if ui.icon_button(cv, id(TODAY, DAY_NEXT), Rect::new(x + 80.0, dy, 18.0, 18.0), icon::RIGHT, false) {
+        if ui.icon_button(cv, id(TODAY, DAY_NEXT), Rect::new(x + 80.0, dy, 18.0, 18.0), icon::RIGHT, false, crate::i18n::pick("Следующий день", "Next day")) {
             form.day += 1;
         }
         cv.line(pick("Весь день", "All day"), &f.small, r.right() - 9.0 - 34.0 - 6.0 - 70.0, 70.0, dy + 9.0, Align::Trailing, dim());

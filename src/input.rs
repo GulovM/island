@@ -97,7 +97,9 @@ impl App {
     // ---------- Клавиатура ----------
 
     pub(crate) unsafe fn on_key(&mut self, vk: u32) -> bool {
-        if self.ui.focus.is_none() {
+        // Остров без фокуса клавиатуры (свёрнут, и ни одно поле его не держит) эти сообщения
+        // вообще не получает — проверка здесь на случай, если что-то всё же пробилось.
+        if !self.kbd {
             return false;
         }
         // Фокус у острова только ради уведомления о таймере: Esc закрывает его, остальное не нужно.
@@ -115,6 +117,20 @@ impl App {
         let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
         // AltGr (польская, немецкая и др. раскладки) приходит как Ctrl+Alt: это ввод символа, не шорткат.
         let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0 && GetKeyState(VK_MENU.0 as i32) >= 0;
+        // Фокус не на текстовом поле: Tab — клавиатурная навигация по виджетам (а не «следующий
+        // фильтр», как у поля), Enter/Space на уже сфокусированном виджете — активация, как клик.
+        // Пустой фокус (остров только открылся) — тоже сюда: первый Tab должен на что-то попасть.
+        let field_focus = self.ui.focus.is_some_and(|id| self.ui.is_field(id));
+        if !field_focus {
+            if vk == VK_TAB.0 as u32 {
+                self.ui.request_tab(shift);
+                return true;
+            }
+            if (vk == VK_RETURN.0 as u32 || vk == VK_SPACE.0 as u32) && self.ui.focus.is_some() {
+                self.ui.request_activate();
+                return true;
+            }
+        }
         let ev = match vk {
             v if v == VK_LEFT.0 as u32 => KeyEv::Left(shift),
             v if v == VK_RIGHT.0 as u32 => KeyEv::Right(shift),
@@ -144,7 +160,9 @@ impl App {
     /// Включает/выключает активацию окна под фокус ввода. Остров не NOACTIVATE-окно только
     /// пока в поле есть фокус; после этого активным снова становится прежнее окно.
     pub(crate) unsafe fn sync_focus(&mut self) {
-        let want = self.ui.focus.is_some();
+        // Остров открыт — держит фокус клавиатуры всё время, не только пока в поле есть ввод,
+        // иначе Tab/Enter не на что было бы послать: NOACTIVATE-окно без фокуса их не получает.
+        let want = self.expanded || self.ui.focus.is_some();
         if want && !self.kbd {
             self.kbd = true;
             self.prev_fg = GetForegroundWindow();

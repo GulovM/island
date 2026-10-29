@@ -321,7 +321,8 @@ impl Apps {
             let y = TOP + 34.0;
             let view_btn = Rect::new(w - PAD - 22.0, y - 1.0, 22.0, 19.0);
             let glyph = if self.grid { icon::APPS } else { icon::LIST };
-            if ui.icon_button(cv, id(APPS, 13), view_btn, glyph, false) {
+            let tip = if self.grid { crate::i18n::pick("Список", "List") } else { crate::i18n::pick("Сетка", "Grid") };
+            if ui.icon_button(cv, id(APPS, 13), view_btn, glyph, false, tip) {
                 self.grid = !self.grid;
                 self.sel = None;
                 self.persist();
@@ -531,8 +532,13 @@ impl Apps {
                     // Звезда видна у избранного и при наведении на строку.
                     if show {
                         let glyph = if e.fav { icon::STAR_FILL } else { icon::STAR };
+                        let tip = if e.fav {
+                            crate::i18n::pick("Убрать из избранного", "Remove from favorites")
+                        } else {
+                            crate::i18n::pick("В избранное", "Add to favorites")
+                        };
                         // Звезда избранного — жёлтая, как в iOS.
-                        if ui.icon_button_tinted(cv, sid_star, star, glyph, e.fav, crate::ui::hue(crate::ios::SysColor::Yellow, cv.accent)) {
+                        if ui.icon_button_tinted(cv, sid_star, star, glyph, e.fav, crate::ui::hue(crate::ios::SysColor::Yellow, cv.accent), tip) {
                             fav = Some(i);
                         }
                     }
@@ -593,6 +599,7 @@ impl Apps {
         } else if let Some(it) = launch {
             self.launch(it, act);
         }
+        ui.paint_tip(cv, Rect::new(0.0, 0.0, w, h));
     }
 }
 

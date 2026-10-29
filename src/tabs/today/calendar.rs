@@ -310,16 +310,15 @@ impl Today {
         let head_cy = wk.y + if low { 17.0 } else if tight { 14.0 } else { 16.0 };
         let tw = cv.line("Эта неделя", &f.body, wk.x + 12.0, 120.0, head_cy, crate::ui::Align::Leading, txt());
         // Раскрыть месяц.
-        if ui.icon_button(cv, id(TODAY, 90), Rect::new(wk.x + 12.0 + tw + 1.0, head_cy - 9.0, 18.0, 18.0), icon::DOWN, false) {
+        if ui.icon_button(cv, id(TODAY, 90), Rect::new(wk.x + 12.0 + tw + 1.0, head_cy - 9.0, 18.0, 18.0), icon::DOWN, false, crate::i18n::pick("Месяц", "Month")) {
             self.open_month(today);
         }
         // Новое событие: месячный календарь раскрывается сразу с формой на сегодня.
         let add_r = Rect::new(wk.x + 12.0 + tw + 21.0, head_cy - 9.0, 18.0, 18.0);
-        if ui.icon_button(cv, id(TODAY, 98), add_r, icon::ADD, false) {
+        if ui.icon_button(cv, id(TODAY, 98), add_r, icon::ADD, false, tip_add_event()) {
             self.open_month(today);
             self.begin_event(ui, today);
         }
-        ui.tip(id(TODAY, 98), add_r, tip_add_event());
         let ics_r = Rect::new(add_r.right() + 2.0, head_cy - 9.0, ICS_W, 18.0);
         if ics_label(ui, cv, ics_r) {
             self.begin_calendar_edit(ui);
@@ -637,7 +636,7 @@ impl Today {
             txt(),
         );
         let close_btn = Rect::new(wk.right() - 24.0, wk.y + 6.0, 16.0, 16.0);
-        if ui.icon_button(cv, id(TODAY, 64), close_btn, icon::CLOSE, false) {
+        if ui.icon_button(cv, id(TODAY, 64), close_btn, icon::CLOSE, false, crate::i18n::pick("Закрыть", "Close")) {
             self.cal_editing = false;
             ui.blur();
             return;
@@ -718,7 +717,7 @@ impl Today {
             let abbrev = abbreviate_url(url);
             cv.text(&abbrev, Rect::new(row.x + 17.0, row.y + 1.0, row.w - 35.0, 13.0), &f.small, txt());
             let del_btn = Rect::new(row.right() - 17.0, row.y + 1.0, 14.0, 14.0);
-            if ui.icon_button(cv, id(TODAY, 700 + i as u32), del_btn, icon::CLOSE, false) {
+            if ui.icon_button(cv, id(TODAY, 700 + i as u32), del_btn, icon::CLOSE, false, crate::i18n::pick("Удалить подписку", "Remove subscription")) {
                 remove_idx = Some(i);
             }
         }
@@ -765,8 +764,7 @@ impl Today {
         cv.text(&name, title, &f.body, mix(txt(), cv.accent, hv));
         // Новое событие и подключение календаря по ссылке — те же кнопки, что в карточке недели.
         let add_r = Rect::new(title.right() + 4.0, r.y + 7.0, 16.0, 18.0);
-        let add = ui.icon_button(cv, id(TODAY, 97), add_r, icon::ADD, false);
-        ui.tip(id(TODAY, 97), add_r, tip_add_event());
+        let add = ui.icon_button(cv, id(TODAY, 97), add_r, icon::ADD, false, tip_add_event());
         if ics_label(ui, cv, Rect::new(add_r.right() + 2.0, r.y + 7.0, ICS_W, 18.0)) {
             self.month_open = false;
             self.begin_calendar_edit(ui);
@@ -775,13 +773,13 @@ impl Today {
             cv.circle(r.right() - 62.0, r.y + 16.0, 2.5, dim());
         }
         let mut shift = 0;
-        if ui.icon_button(cv, id(TODAY, 92), Rect::new(r.right() - 58.0, r.y + 7.0, 16.0, 18.0), icon::LEFT, false) {
+        if ui.icon_button(cv, id(TODAY, 92), Rect::new(r.right() - 58.0, r.y + 7.0, 16.0, 18.0), icon::LEFT, false, crate::i18n::pick("Предыдущий месяц", "Previous month")) {
             shift = -1;
         }
-        if ui.icon_button(cv, id(TODAY, 93), Rect::new(r.right() - 40.0, r.y + 7.0, 16.0, 18.0), icon::RIGHT, false) {
+        if ui.icon_button(cv, id(TODAY, 93), Rect::new(r.right() - 40.0, r.y + 7.0, 16.0, 18.0), icon::RIGHT, false, crate::i18n::pick("Следующий месяц", "Next month")) {
             shift = 1;
         }
-        let close = ui.icon_button(cv, id(TODAY, 94), Rect::new(r.right() - 22.0, r.y + 7.0, 16.0, 18.0), icon::UP, false);
+        let close = ui.icon_button(cv, id(TODAY, 94), Rect::new(r.right() - 22.0, r.y + 7.0, 16.0, 18.0), icon::UP, false, crate::i18n::pick("Свернуть", "Collapse"));
 
         // Сетка месяца.
         let cw = (r.w - 14.0) / 7.0;

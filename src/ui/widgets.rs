@@ -241,13 +241,16 @@ impl Ui {
         changed
     }
 
-    /// Прозрачная кнопка-иконка (звезда, крестик): `active` красит её акцентом.
-    pub unsafe fn icon_button(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, active: bool) -> bool {
-        self.icon_button_tinted(cv, id, r, glyph, active, cv.accent)
+    /// Прозрачная кнопка-иконка (звезда, крестик): `active` красит её акцентом. `tip` — подсказка
+    /// под курсором и доступное имя кнопки: без видимого текста рядом иначе не на что опереться
+    /// ни мышиному пользователю при первом взгляде, ни экранному диктору.
+    pub unsafe fn icon_button(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, active: bool, tip: &str) -> bool {
+        self.icon_button_tinted(cv, id, r, glyph, active, cv.accent, tip)
     }
 
     /// Кнопка-иконка, которая во включённом состоянии красится цветом `tint` (жёлтая звезда избранного).
-    pub unsafe fn icon_button_tinted(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, active: bool, tint: D2D1_COLOR_F) -> bool {
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn icon_button_tinted(&mut self, cv: &Canvas, id: u32, r: Rect, glyph: &str, active: bool, tint: D2D1_COLOR_F, tip: &str) -> bool {
         let (_, clicked) = self.interact(id, r);
         let w = self.widget(id);
         let (hv, pr) = (w.hover.value, w.press.value);
@@ -256,6 +259,9 @@ impl Ui {
         cv.rr(r, r.h / 2.0, bg);
         let col = if active { tint } else { mix(dim(), txt(), hv) };
         cv.glyph(glyph, r.inset(1.0 * pr), false, col);
+        if !tip.is_empty() {
+            self.tip(id, r, tip);
+        }
         clicked
     }
 
@@ -375,6 +381,11 @@ impl Ui {
     /// Подсказка к кнопке `id` в прямоугольнике `r`: появляется, пока на ней курсор. Рисуется
     /// позже и поверх всего через [`Ui::paint_tip`].
     pub fn tip(&mut self, id: u32, r: Rect, text: &str) {
+        // Тот же текст — дикторское имя, если `id` сейчас в клавиатурном фокусе (независимо от
+        // того, наведена ли мышь): без этого экранный диктор не узнал бы имя icon-only кнопки.
+        if self.focus == Some(id) {
+            self.focus_name = Some(text.to_string());
+        }
         let hv = self.hover_of(id);
         if hv > 0.6 && self.tip.is_none() {
             self.tip = Some((r, text.to_string(), hv));
@@ -525,7 +536,8 @@ impl Ui {
         }
         let kx = r.x + r.w * v;
         // Ручка: белая круглая с мягкой тенью (вместо трёх кругов), под нажатием слегка растёт (подобрано).
-        let kr = 5.5 + 0.4 * hv + 1.2 * pr;
+        // Чуть крупнее в покое (было 5.5): едва заметно глазу, но заметнее как цель для клика.
+        let kr = 6.0 + 0.4 * hv + 1.2 * pr;
         cv.circle(kx, cy + 1.2, kr + 1.0, D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.12 });
         cv.circle(kx, cy + 0.6, kr + 0.3, D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.15 });
         cv.circle(kx, cy, kr, super::color::WHITE);

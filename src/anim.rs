@@ -26,6 +26,10 @@ impl Spring {
     }
 
     pub fn step(&mut self, dt: f32) {
+        // Системная настройка «Показывать анимацию» выключена: пружина сходится в разы быстрее
+        // вместо мгновенного прыжка без перехода — само движение остаётся, просто не воспринимается
+        // глазом (как и просит системная настройка), а не исчезает как класс.
+        let dt = if crate::theme::reduced_motion() { dt * 8.0 } else { dt };
         // Мелкие подшаги держат интегрирование устойчивым при редких кадрах.
         let n = ((dt / 0.004).ceil() as u32).clamp(1, 16);
         let h = dt / n as f32;
@@ -139,6 +143,27 @@ mod tests {
         }
         assert!(s.settled());
         assert!((s.value - 100.0).abs() < 0.1);
+    }
+
+    /// При выключенной системной настройке «Показывать анимацию» та же пружина доходит до цели
+    /// за меньшее число кадров — движение быстрее, а не отсутствует совсем.
+    #[test]
+    fn reduced_motion_converges_faster() {
+        let steps_to_settle = |reduced: bool| {
+            crate::theme::set_reduced_motion(reduced);
+            let mut s = Spring::new(0.0, 420.0, 30.0);
+            s.target = 100.0;
+            let mut n = 0;
+            while !s.settled() && n < 300 {
+                s.step(1.0 / 60.0);
+                n += 1;
+            }
+            n
+        };
+        let normal = steps_to_settle(false);
+        let reduced = steps_to_settle(true);
+        crate::theme::set_reduced_motion(false);
+        assert!(reduced < normal, "reduced={reduced} против normal={normal}");
     }
 
     /// Пружина считает по реальному `dt`, поэтому результат не зависит от частоты кадров.

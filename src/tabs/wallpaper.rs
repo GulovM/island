@@ -359,7 +359,7 @@ impl Wall {
             self.choose_folder();
         }
         cv.circle(fb.cx(), fb.cy(), 9.5, card());
-        if ui.icon_button(cv, id(WALLPAPER, 7), fb, icon::FOLDER, false) && !self.dir_label.is_empty() {
+        if ui.icon_button(cv, id(WALLPAPER, 7), fb, icon::FOLDER, false, crate::i18n::pick("Выбрать папку", "Choose folder")) && !self.dir_label.is_empty() {
             sys::open(&self.dir_label);
         }
 
@@ -467,6 +467,7 @@ impl Wall {
                 self.apply_static(fi);
             }
         }
+        ui.paint_tip(cv, Rect::new(0.0, 0.0, w, h));
     }
 
     /// Включает проект WE: его рендерит сам Wallpaper Engine (анимация, плагины, настройки проекта).

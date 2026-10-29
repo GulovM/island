@@ -179,6 +179,9 @@ pub(crate) unsafe fn fmt_var(
     size: f32,
     center: bool,
 ) -> Result<IDWriteTextFormat> {
+    // Системная настройка «Размер текста» (потолок намеренно жёстче системных 2.25 — см.
+    // `theme::text_scale`): только настоящий текст, не иконочные форматы (те берут `fmt` напрямую).
+    let size = size * crate::theme::text_scale();
     if font_exists(f, w!("Segoe UI Variable Text")) {
         if let Ok(f6) = f.cast::<IDWriteFactory6>() {
             let axes = [
@@ -555,6 +558,27 @@ mod tests {
             let wide: Vec<u16> = "Проверка шрифта".encode_utf16().collect();
             let layout_res = f.CreateTextLayout(&wide, &text_fmt, 200.0, 50.0);
             assert!(layout_res.is_ok(), "Создание TextLayout на Segoe UI не должно падать");
+        }
+    }
+
+    #[test]
+    fn fmt_var_applies_text_scale_but_fmt_does_not() {
+        unsafe {
+            let factory: Result<IDWriteFactory> = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED);
+            let Ok(f) = factory else { return };
+            let ui = if font_exists(&f, w!("Segoe UI Variable Text")) { w!("Segoe UI Variable Text") } else { w!("Segoe UI") };
+
+            crate::theme::set_text_scale(1.15);
+            let scaled = fmt_var(&f, ui, weight::BODY, 9.0, false);
+            // Иконочный формат (`fmt` напрямую, как `icon`/`icon_small`/`icon_big` в `Fonts::new`)
+            // масштаб игнорирует — иконки не должны расти вместе с текстом.
+            let icon_fmt = fmt(&f, ui, DWRITE_FONT_WEIGHT_REGULAR, 9.0, false);
+            crate::theme::set_text_scale(1.0);
+
+            let Ok(scaled) = scaled else { return };
+            let Ok(icon_fmt) = icon_fmt else { return };
+            assert!((scaled.GetFontSize() - 9.0 * 1.15).abs() < 1e-3, "{}", scaled.GetFontSize());
+            assert!((icon_fmt.GetFontSize() - 9.0).abs() < 1e-3, "{}", icon_fmt.GetFontSize());
         }
     }
 

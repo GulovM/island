@@ -231,6 +231,9 @@ impl App {
             let cw = (WIN_LOGICAL.0 * scale).ceil() as i32;
             let ch = (WIN_LOGICAL.1 * scale).ceil() as i32;
 
+            // До создания `Fonts` внутри `Gfx::new`: размер формата фиксируется при создании,
+            // живьём не перечитываем (см. theme::text_scale).
+            theme::set_text_scale(sys::text_scale_factor());
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let gfx = Gfx::new(hwnd, cw, ch, scale, &dwrite)?;
             let tab_widths = measure_tabs(&dwrite, scale, &cfg)?;
@@ -260,7 +263,10 @@ impl App {
                 glass_wnd,
                 blur_ok,
                 backdrop,
-                transparency: sys::transparency_enabled(),
+                transparency: {
+                    theme::set_reduced_motion(!sys::animations_enabled());
+                    sys::transparency_enabled()
+                },
                 dwrite,
                 gfx: Some(gfx),
                 tab_widths,
@@ -365,6 +371,7 @@ impl App {
     /// Проверяет системные цвета и эффекты прозрачности. Возвращает `true`, если палитра или
     /// прозрачность изменились и нужен кадр перерисовки.
     pub(crate) fn check_sys_colors(&mut self) -> bool {
+        theme::set_reduced_motion(!sys::animations_enabled());
         let t = sys::transparency_enabled();
         let flipped = std::mem::replace(&mut self.transparency, t) != t;
         let theme_changed = self.cfg.system_colors && self.apply_theme();

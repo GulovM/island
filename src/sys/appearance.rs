@@ -7,8 +7,8 @@ use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RegSetKeyValueW, REG_DWORD};
 use windows::Win32::UI::WindowsAndMessaging::{
     SendMessageTimeoutW, SystemParametersInfoW, HWND_BROADCAST, SMTO_ABORTIFHUNG, SPIF_SENDCHANGE,
-    SPIF_UPDATEINIFILE, SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
-    WM_SETTINGCHANGE,
+    SPIF_UPDATEINIFILE, SPI_GETCLIENTAREAANIMATION, SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, WM_SETTINGCHANGE,
 };
 
 use crate::theme::{parse_accent_palette, SystemColors};
@@ -33,6 +33,34 @@ pub fn light_mode() -> bool {
 /// В Windows включены «Эффекты прозрачности» (без значения в реестре — включены).
 pub fn transparency_enabled() -> bool {
     read_dword(PERSONALIZE, w!("EnableTransparency")) != Some(0)
+}
+
+/// Доля из `TextScaleFactor` (проценты) → множитель кегля, 1.0..=1.15. Потолок ниже системных
+/// 2.25 намеренно: вёрстка острова плотная (хардкоженные смещения виджетов) и не проверена на
+/// кегль крупнее — безопасный диапазон даёт что-то, не рискуя обрезкой/наездами.
+fn clamp_text_scale(percent: u32) -> f32 {
+    (percent as f32 / 100.0).clamp(1.0, 1.15)
+}
+
+/// Множитель кегля от системной настройки «Размер текста» (Специальные возможности).
+pub fn text_scale_factor() -> f32 {
+    let percent = read_dword(w!("Software\\Microsoft\\Accessibility"), w!("TextScaleFactor")).unwrap_or(100);
+    clamp_text_scale(percent)
+}
+
+/// В Windows включена «Показывать анимацию» (Параметры → Специальные возможности → Эффекты
+/// визуализации): без неё пружины острова должны сходиться почти мгновенно.
+pub fn animations_enabled() -> bool {
+    let mut on = windows::core::BOOL(1);
+    unsafe {
+        let ok = SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some(&mut on as *mut _ as *mut c_void),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
+        ok.is_err() || on.as_bool()
+    }
 }
 
 /// Переключает тему приложений и системы и сообщает всем окнам (`WM_SETTINGCHANGE`).
@@ -166,6 +194,17 @@ pub fn is_theme_setting_str(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_scale_clamps_to_safe_ceiling() {
+        assert_eq!(clamp_text_scale(100), 1.0);
+        assert_eq!(clamp_text_scale(110), 1.10);
+        // Системные 125%, 150%, 225% — всё упирается в безопасный потолок 1.15.
+        assert_eq!(clamp_text_scale(125), 1.15);
+        assert_eq!(clamp_text_scale(225), 1.15);
+        // Значение меньше 100% (в реестре такого не бывает, но на всякий случай) не уменьшает текст.
+        assert_eq!(clamp_text_scale(80), 1.0);
+    }
 
     #[test]
     fn color_retry_lifecycle() {

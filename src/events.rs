@@ -93,7 +93,8 @@ impl App {
                 self.expanded
             }
             Ev::Char(c) => {
-                if self.ui.focus.is_some() && !self.live.alert() && !self.tabs.recording_hotkey() && c >= 0x20 && c != 0x7f {
+                let field_focus = self.ui.focus.is_some_and(|id| self.ui.is_field(id));
+                if field_focus && !self.live.alert() && !self.tabs.recording_hotkey() && c >= 0x20 && c != 0x7f {
                     // Суррогатные пары приходят двумя WM_CHAR: сводим их в один символ.
                     if (0xD800..0xDC00).contains(&c) {
                         self.high_surrogate = c;

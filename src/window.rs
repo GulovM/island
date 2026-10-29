@@ -208,6 +208,11 @@ impl App {
             // Подстраховка на случай, если уведомление об смене системных цветов не пришло.
             self.apply_theme();
         }
+        if expanded {
+            // Остров берёт фокус клавиатуры сам, как Пункт управления Windows 11: иначе Tab/Enter
+            // не на что было бы послать (NOACTIVATE-окно без фокуса их просто не получает).
+            self.sync_focus();
+        }
         if !expanded {
             crate::state::flush();
             self.trim_pending = true;

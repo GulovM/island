@@ -254,6 +254,35 @@ pub fn parse_accent_palette(bytes: &[u8]) -> Option<SystemColors> {
 thread_local! {
     static PALETTE: Cell<Palette> = Cell::new(derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows));
     static GLASS: Cell<bool> = const { Cell::new(true) };
+    /// Системная настройка «Показывать анимацию» (Параметры → Специальные возможности → Эффекты
+    /// визуализации) выключена: пружины (`anim::Spring`) сходятся гораздо быстрее вместо прыжка
+    /// без анимации — она остаётся, просто не воспринимается глазом.
+    static REDUCED_MOTION: Cell<bool> = const { Cell::new(false) };
+    /// Множитель кегля от системной настройки «Сделать текст больше» (Специальные возможности →
+    /// Размер текста), считанный один раз при старте — см. `sys::text_scale_factor`. Живьём не
+    /// перечитывается: шрифты (`IDWriteTextFormat`) создаются один раз и размер зафиксирован,
+    /// а плотная вёрстка острова (хардкоженные смещения, бейджи, ширины шевронов) не проверена
+    /// на реакцию на кегль крупнее — поэтому потолок намеренно жёсткий (1.15), а не до системных 2.25.
+    static TEXT_SCALE: Cell<f32> = const { Cell::new(1.0) };
+}
+
+/// Включён ли режим сокращённой анимации (системная настройка выключена).
+pub fn reduced_motion() -> bool {
+    REDUCED_MOTION.with(|c| c.get())
+}
+
+pub fn set_reduced_motion(on: bool) {
+    REDUCED_MOTION.with(|c| c.set(on));
+}
+
+/// Множитель кегля текстовых форматов (1.0 — без изменений).
+pub fn text_scale() -> f32 {
+    TEXT_SCALE.with(|c| c.get())
+}
+
+/// Задаёт множитель кегля; вызывать до создания `Fonts` (размер формата фиксируется при создании).
+pub fn set_text_scale(v: f32) {
+    TEXT_SCALE.with(|c| c.set(v));
 }
 
 /// Эффект стекла включён (ключ `glass`): виджеты рисуют волосяные границы и блики.

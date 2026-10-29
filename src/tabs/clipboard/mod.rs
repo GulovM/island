@@ -542,6 +542,7 @@ impl Clip {
         let mut l = std::mem::take(self.list_mut(sec));
         self.draw_list(ui, cv, w, h, act, sec, &mut l);
         *self.list_mut(sec) = l;
+        ui.paint_tip(cv, Rect::new(0.0, 0.0, w, h));
     }
 
     /// Верхняя строка: переключатель разделов, справа — горячая клавиша (в быстром доступе)
@@ -581,7 +582,7 @@ impl Clip {
         let mut end = right;
         if clear {
             let r = Rect::new(end - 18.0, TOP + 2.0, 18.0, 18.0);
-            if ui.icon_button(cv, id(CLIPBOARD, 23), r, icon::CLOSE, false) {
+            if ui.icon_button(cv, id(CLIPBOARD, 23), r, icon::CLOSE, false, crate::i18n::pick("Сбросить горячую клавишу", "Clear hotkey")) {
                 self.hotkey.clear();
                 self.note = None;
                 act.push(Action::SetQuickHotkey(String::new()));
@@ -638,7 +639,12 @@ impl Clip {
             }
             px += widths[i] + 4.0;
         }
-        if !quick_sec && ui.icon_button(cv, id(CLIPBOARD, 6), gear, icon::SETTINGS_GEAR, self.paused) {
+        let gear_tip = if self.paused {
+            crate::i18n::pick("Возобновить запись буфера", "Resume clipboard recording")
+        } else {
+            crate::i18n::pick("Приостановить запись буфера", "Pause clipboard recording")
+        };
+        if !quick_sec && ui.icon_button(cv, id(CLIPBOARD, 6), gear, icon::SETTINGS_GEAR, self.paused, gear_tip) {
             self.paused = !self.paused;
             crate::state::set_clipboard_paused(self.paused);
         }

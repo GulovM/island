@@ -499,6 +499,15 @@ impl App {
         g.dc.EndDraw(None, None)?;
         perf::draw_done(t0);
         g.swapchain.Present(1, DXGI_PRESENT(0)).ok()?;
+        // Экранный диктор: сообщаем имя виджета, до которого дошли клавиатурой в этом кадре
+        // (пусто — фокуса сейчас нет, в т. ч. остров свёрнут).
+        match ui.kbd_focus() {
+            Some((id, name)) => {
+                let name = name.unwrap_or_else(|| crate::i18n::pick("Элемент управления", "Control"));
+                sys::report_focus(self.hwnd, Some(id), name);
+            }
+            None => sys::report_focus(self.hwnd, None, ""),
+        }
         ui.end_frame();
         Ok(())
     }
