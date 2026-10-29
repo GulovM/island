@@ -79,6 +79,24 @@ pub(crate) unsafe fn handle_get_object(hwnd: HWND, wparam: WPARAM, lparam: LPARA
     Some(UiaReturnRawElementProvider(hwnd, wparam, lparam, &provider))
 }
 
+/// Сообщает дикторское имя клавиатурно сфокусированного элемента (`None` — фокуса сейчас нет).
+/// Шлёт `UiaRaiseAutomationEvent` только при смене `id`, а не каждый кадр.
+pub(crate) unsafe fn report_focus(hwnd: HWND, id: Option<u32>, name: &str) {
+    if let Ok(mut n) = FOCUS_NAME.lock() {
+        n.clear();
+        n.push_str(name);
+    }
+    let Ok(mut last) = LAST_FOCUS_ID.lock() else { return };
+    if *last == id {
+        return;
+    }
+    *last = id;
+    if id.is_some() {
+        let provider: IRawElementProviderSimple = FocusProvider { hwnd }.into();
+        let _ = UiaRaiseAutomationEvent(&provider, UIA_AutomationFocusChangedEventId);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,23 +123,5 @@ mod tests {
             report_focus(HWND::default(), None, "");
             assert_eq!(*LAST_FOCUS_ID.lock().unwrap(), None);
         }
-    }
-}
-
-/// Сообщает дикторское имя клавиатурно сфокусированного элемента (`None` — фокуса сейчас нет).
-/// Шлёт `UiaRaiseAutomationEvent` только при смене `id`, а не каждый кадр.
-pub(crate) unsafe fn report_focus(hwnd: HWND, id: Option<u32>, name: &str) {
-    if let Ok(mut n) = FOCUS_NAME.lock() {
-        n.clear();
-        n.push_str(name);
-    }
-    let Ok(mut last) = LAST_FOCUS_ID.lock() else { return };
-    if *last == id {
-        return;
-    }
-    *last = id;
-    if id.is_some() {
-        let provider: IRawElementProviderSimple = FocusProvider { hwnd }.into();
-        let _ = UiaRaiseAutomationEvent(&provider, UIA_AutomationFocusChangedEventId);
     }
 }
