@@ -561,8 +561,15 @@ impl App {
     /// Выставляет целевые альфы и обновляет данные лица при входе или продолжении peek.
     fn enter_peek_targets(&mut self) {
         self.face.refresh_all();
+        self.set_peek_fade(true);
         self.live.set_mini_target(0.0);
         self.face.set_alpha_target(1.0);
+    }
+
+    /// Переключает пружины прозрачности лица и мини-плеера между медленным peek и обычным проявлением.
+    fn set_peek_fade(&mut self, slow: bool) {
+        self.face.tune_alpha(if slow { peek::PEEK_FADE_SPRING } else { anim::FADE_SPRING });
+        self.live.tune_mini(if slow { peek::PEEK_FADE_SPRING } else { anim::FADE_SPRING });
     }
 
     /// Запускает мгновенный или периодический peek лица на свёрнутом острове.
@@ -581,6 +588,7 @@ impl App {
         if !self.can_peek() {
             if self.peek.needs_reset() {
                 self.peek.cancel();
+                self.set_peek_fade(false);
             }
             return;
         }
@@ -595,6 +603,7 @@ impl App {
         if !self.can_peek() {
             if self.peek.needs_reset() {
                 self.peek.cancel();
+                self.set_peek_fade(false);
                 self.retarget();
             }
             return;
@@ -614,6 +623,7 @@ impl App {
                 self.face.set_alpha_target(0.0);
             }
             peek::PeekTransition::Finish => {
+                self.set_peek_fade(false);
                 self.retarget();
             }
             peek::PeekTransition::None => {}

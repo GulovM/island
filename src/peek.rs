@@ -2,9 +2,11 @@
 //! во время воспроизведения музыки в мини-плеере.
 
 /// Интервал между периодическими показами лица (секунды).
-pub const PEEK_INTERVAL_SECS: f32 = 15.0;
+pub const PEEK_INTERVAL_SECS: f32 = 20.0;
 /// Время удержания лица на экране перед возвратом в мини-плеер (секунды).
 pub const PEEK_HOLD_SECS: f32 = 1.2;
+/// Жёсткость и затухание пружин прозрачности на время peek: медленнее обычного проявления.
+pub const PEEK_FADE_SPRING: (f32, f32) = (40.0, 13.0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PeekPhase {
@@ -113,7 +115,7 @@ impl Peek {
 
     /// Шаг состояния.
     /// `dt`: прошедшее время в секундах.
-    /// `paused`: курсор над островом или идёт перетаскивание (приостанавливает накопление 15с).
+    /// `paused`: курсор над островом или идёт перетаскивание (приостанавливает накопление 20с).
     /// `face_settled`: пружина лица достигла цели (alpha >= 0.95 и settled).
     /// `mini_settled`: пружина мини-плеера достигла цели (mini_a >= 0.95 и settled).
     pub fn step(
@@ -172,9 +174,9 @@ mod tests {
         assert!(!peek.animating());
         assert_eq!(peek.target_alphas(), None);
 
-        // Симуляция тиков по ~33 мс в течение 14.9 секунд: всё ещё Idle
+        // Симуляция тиков по ~33 мс в течение 19.9 секунд: всё ещё Idle
         let dt = 0.033;
-        let steps = (14.9 / dt) as usize;
+        let steps = (19.9 / dt) as usize;
         for _ in 0..steps {
             let tr = peek.step(dt, false, false, true);
             assert_eq!(tr, PeekTransition::None);
@@ -182,7 +184,7 @@ mod tests {
             assert!(!peek.animating());
         }
 
-        // Превышаем 15.0 секунд: должен сработать PeekTransition::Start
+        // Превышаем 20.0 секунд: должен сработать PeekTransition::Start
         let tr = peek.step(0.2, false, false, true);
         assert_eq!(tr, PeekTransition::Start);
         assert_eq!(peek.phase(), PeekPhase::In);
@@ -248,11 +250,11 @@ mod tests {
         assert!((peek.elapsed() - 5.0).abs() < 1e-4);
 
         // Курсор ушёл (paused = false): продолжаем ровно с 5.0 секунд
-        peek.step(9.9, false, false, false);
-        assert!((peek.elapsed() - 14.9).abs() < 1e-4);
+        peek.step(14.9, false, false, false);
+        assert!((peek.elapsed() - 19.9).abs() < 1e-4);
         assert_eq!(peek.phase(), PeekPhase::Idle);
 
-        // На 15.0 срабатывает
+        // На 20.0 срабатывает
         let tr = peek.step(0.2, false, false, false);
         assert_eq!(tr, PeekTransition::Start);
         assert_eq!(peek.phase(), PeekPhase::In);
@@ -279,8 +281,8 @@ mod tests {
         assert_eq!(peek.phase(), PeekPhase::Idle);
         assert_eq!(peek.elapsed(), 0.0);
 
-        // Проверяем, что после внепланового peek периодический таймер отсчитывает полные 15 секунд
-        peek.step(14.9, false, false, false);
+        // Проверяем, что после внепланового peek периодический таймер отсчитывает полные 20 секунд
+        peek.step(19.9, false, false, false);
         assert_eq!(peek.phase(), PeekPhase::Idle);
 
         let tr = peek.step(0.2, false, false, false);
@@ -290,7 +292,7 @@ mod tests {
     #[test]
     fn test_cancel_when_mini_form_lost() {
         let mut peek = Peek::new();
-        peek.step(15.0, false, false, false); // -> In
+        peek.step(20.0, false, false, false); // -> In
         peek.step(0.1, false, true, false);  // -> Hold
         assert_eq!(peek.phase(), PeekPhase::Hold);
         assert!(peek.animating());

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 
-use crate::anim::Spring;
+use crate::anim::{Spring, FADE_SPRING};
 use crate::bg::{self, Media, Snapshot};
 use crate::ui::{collapsed_chip_bg, collapsed_dim, collapsed_txt, icon, status_green, status_orange, status_red, Canvas, Rect, Ui, WHITE};
 
@@ -130,7 +130,7 @@ impl Live {
             toast: None,
             shown: None,
             event: None,
-            mini_a: Spring::unit(0.0, 260.0, 30.0),
+            mini_a: Spring::unit(0.0, FADE_SPRING.0, FADE_SPRING.1),
             toast_a: Spring::unit(0.0, 260.0, 30.0),
             rev: 0,
             ac: None,
@@ -292,6 +292,11 @@ impl Live {
     /// Точечное управление целевой альфой мини-плеера (для временного peek лица).
     pub fn set_mini_target(&mut self, target: f32) {
         self.mini_a.target = target;
+    }
+
+    /// Меняет жёсткость и затухание пружины мини-плеера (медленный peek).
+    pub fn tune_mini(&mut self, (stiffness, damping): (f32, f32)) {
+        self.mini_a.tune(stiffness, damping);
     }
 
     pub fn mini_settled(&self) -> bool {

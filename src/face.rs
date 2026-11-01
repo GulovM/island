@@ -5,7 +5,7 @@
 
 use windows::Win32::System::SystemInformation::GetLocalTime;
 
-use crate::anim::Spring;
+use crate::anim::{Spring, FADE_SPRING};
 use crate::bg::{self, NetStatus};
 use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, status_orange, Canvas, Rect, WHITE};
 
@@ -46,7 +46,7 @@ impl Face {
         let mut f = Face {
             enabled,
             visible: false,
-            alpha: Spring::unit(0.0, 260.0, 30.0),
+            alpha: Spring::unit(0.0, FADE_SPRING.0, FADE_SPRING.1),
             time: String::new(),
             lang: 0,
             lang_text: String::new(),
@@ -81,6 +81,11 @@ impl Face {
 
     pub fn set_alpha_target(&mut self, target: f32) {
         self.alpha.target = target;
+    }
+
+    /// Меняет жёсткость и затухание пружины прозрачности (медленный peek).
+    pub fn tune_alpha(&mut self, (stiffness, damping): (f32, f32)) {
+        self.alpha.tune(stiffness, damping);
     }
 
     pub fn alpha(&self) -> f32 {
