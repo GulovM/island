@@ -149,6 +149,14 @@ impl Gfx {
         let d2d: ID2D1Factory1 = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
         let d2d_dev = d2d.CreateDevice(&dxgi)?;
         let dc = d2d_dev.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
+        // Для прозрачного composited-окна со swapchain в режиме DXGI_ALPHA_MODE_PREMULTIPLIED
+        // (см. CreateSwapChainForComposition выше) субпиксельное сглаживание ClearType (режим по
+        // умолчанию D2D1_TEXT_ANTIALIAS_MODE_DEFAULT) математически некорректно: ClearType рассчитывает
+        // цветные субпиксели в предположении о фиксированном непрозрачном фоне под текстом.
+        // На альфа-поверхности композитинг DWM смешивает эти субпиксели с динамическим фоном рабочего
+        // стола, приводя к цветным ореолам и смазанным/расплывчатым краям букв.
+        // Режим Grayscale выполняет честное альфа-сглаживание по яркости без субпиксельных цветовых искажений.
+        dc.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
         let brush = dc.CreateSolidColorBrush(&theme::get().bg, None)?;
         let text = make_text(dwrite, scale)?;
         let fonts = Fonts::new(dwrite)?;

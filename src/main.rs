@@ -16,6 +16,7 @@ mod ios;
 mod log;
 mod online;
 mod perf;
+mod peek;
 mod sys;
 mod theme;
 mod tabs;
@@ -309,7 +310,6 @@ fn run() -> Result<()> {
                 }
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
-                last = Instant::now();
             }
 
             let events: Vec<Ev> = EVENTS.with(|v| std::mem::take(&mut *v.borrow_mut()));

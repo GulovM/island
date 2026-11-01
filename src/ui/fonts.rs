@@ -43,6 +43,7 @@ pub mod weight {
 /// |-------------|-----------------------|-------------|-----|-------------|-------------------------------------|
 /// | body        | Body                  | 9.0         | 540 | Body        | Основной текст                      |
 /// | body_c      | Headline              | 9.0         | 600 | Headline    | Основной по центру, кнопки          |
+/// | body_b      | Headline              | 9.0         | 600 | Headline    | Основной жирный слева               |
 /// | small       | Subheadline           | 8.0         | 430 | Subheadline | Вторичный текст                     |
 /// | small_c     | Subheadline (emp)     | 8.0         | 600 | Subheadline | Чипы и кнопки                       |
 /// | small_b     | Subheadline (emp)     | 8.0         | 600 | Subheadline | Мелкий жирный слева                 |
@@ -62,6 +63,7 @@ pub mod weight {
 pub const FORMAT_ROLE_MAP: &[(&str, Option<TextRole>, f32, u32)] = &[
     ("body", Some(TextRole::Body), 9.0, weight::BODY),
     ("body_c", Some(TextRole::Headline), 9.0, weight::EMPHASIZED),
+    ("body_b", Some(TextRole::Headline), 9.0, weight::EMPHASIZED),
     ("small", Some(TextRole::Subheadline), 8.0, weight::SECONDARY),
     ("small_c", Some(TextRole::Subheadline), 8.0, weight::EMPHASIZED),
     ("small_b", Some(TextRole::Subheadline), 8.0, weight::EMPHASIZED),
@@ -109,6 +111,8 @@ pub struct Fonts {
     pub factory: IDWriteFactory,
     pub body: IDWriteTextFormat,
     pub body_c: IDWriteTextFormat,
+    /// Основной жирный по левому краю (раскладка свёрнутого острова).
+    pub body_b: IDWriteTextFormat,
     pub small: IDWriteTextFormat,
     pub small_c: IDWriteTextFormat,
     /// Мелкий жирный по левому краю.
@@ -295,6 +299,13 @@ impl Fonts {
 
         let body = fmt_var(f, ui, wt::BODY, 9.0, false)?;
         let body_c = fmt_var(f, ui, wt::EMPHASIZED, 9.0, true)?;
+        // Формат body_b (9pt, вес 600 / EMPHASIZED, левое выравнивание):
+        // Выбран отдельный неизменяемый формат вместо динамического вызова SetTextAlignment на body_c.
+        // В Windows-rs / DirectWrite IDWriteTextFormat является COM-указателем (интерфейсом IUnknown);
+        // вызов clone() лишь увеличивает счётчик ссылок (AddRef), поэтому мутация выравнивания на таком
+        // объекте затронула бы все места использования body_c (центрированные метки времени и кнопок),
+        // нарушила бы целостность хеш-кэша раскладок Fonts::layouts и потокобезопасность.
+        let body_b = fmt_var(f, ui, wt::EMPHASIZED, 9.0, false)?;
         let small = fmt_var(f, ui, wt::SECONDARY, 8.0, false)?;
         let small_c = fmt_var(f, ui, wt::EMPHASIZED, 8.0, true)?;
         let small_b = fmt_var(f, ui, wt::EMPHASIZED, 8.0, false)?;
@@ -321,6 +332,7 @@ impl Fonts {
 
         reg_track(&body, ios::tracking_px(TextRole::Body, 9.0));
         reg_track(&body_c, ios::tracking_px(TextRole::Headline, 9.0));
+        reg_track(&body_b, ios::tracking_px(TextRole::Headline, 9.0));
         reg_track(&small, ios::tracking_px(TextRole::Subheadline, 8.0));
         reg_track(&small_c, ios::tracking_px(TextRole::Subheadline, 8.0));
         reg_track(&small_b, ios::tracking_px(TextRole::Subheadline, 8.0));
@@ -342,6 +354,7 @@ impl Fonts {
             factory: f.clone(),
             body,
             body_c,
+            body_b,
             small,
             small_c,
             small_b,
@@ -489,6 +502,7 @@ mod tests {
             let fmt: &IDWriteTextFormat = match name {
                 "body" => &fonts.body,
                 "body_c" => &fonts.body_c,
+                "body_b" => &fonts.body_b,
                 "small" => &fonts.small,
                 "small_c" => &fonts.small_c,
                 "small_b" => &fonts.small_b,
@@ -542,7 +556,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(mapped_count, 13);
+        assert_eq!(mapped_count, 14);
         assert_eq!(unmapped_count, 6);
     }
 

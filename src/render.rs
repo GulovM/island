@@ -92,6 +92,20 @@ impl App {
         // Тело острова рисуется по BodyLayers (тинт материала или фона)
         let body = self.body_path(g, x0, aw, ah, ear, r, false)?;
 
+        // Мягкое оранжевое свечение вокруг свёрнутого острова при активном таймере.
+        if self.live.timer().is_some() {
+            let op_frac = if self.cfg.glass { (opacity / 100.0).clamp(0.0, 1.0) } else { 1.0 };
+            let glow_a = op_frac * self.live.timer_pulse() * (1.0 - open).max(0.0);
+            if glow_a > 0.005 {
+                let mut c = status_orange();
+                for (width, alpha) in [(8.0, 0.07), (5.0, 0.14), (2.5, 0.28), (1.2, 0.55)] {
+                    c.a = alpha * glow_a;
+                    g.brush.SetColor(&c);
+                    g.dc.DrawGeometry(&body, &g.brush, width * s, None);
+                }
+            }
+        }
+
         g.brush.SetColor(&D2D1_COLOR_F {
             r: layers.tint_color[0],
             g: layers.tint_color[1],
@@ -192,7 +206,13 @@ impl App {
             let (fw, fh) = match slot {
                 Slot::Mini => live::MINI,
                 Slot::Toast => live::TOAST,
-                Slot::Face => self.collapsed(),
+                Slot::Face => {
+                    if self.live_form() == live::Form::Mini {
+                        (live::MINI.0.max(self.collapsed().0), live::MINI.1.max(self.collapsed().1))
+                    } else {
+                        self.collapsed()
+                    }
+                }
                 Slot::Drop => DROP_PILL,
             };
             let fw = fw.max(self.collapsed().0);

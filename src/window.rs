@@ -585,7 +585,11 @@ impl App {
             }
         }
         // Раскладка клавиатуры окна в фокусе: событий об её смене нет, проверяем вместе с окружением.
-        if self.face.visible() && self.face.poll_lang() {
+        // Опрашиваем, когда остров свёрнут, не полоска, не скрыт игрой и показ лица разрешён (или активен таймер).
+        if should_poll_lang(self.expanded, self.hidden, self.stripped(), self.cfg.idle_face, self.live.timer().is_some())
+            && self.face.poll_lang()
+        {
+            self.trigger_peek();
             changed = true;
         }
         if game != self.hidden {
@@ -863,9 +867,41 @@ pub(crate) fn is_fullscreen_game(
     true
 }
 
+/// Нужно ли опрашивать раскладку клавиатуры окна в фокусе:
+/// только когда остров свёрнут, не скрыт полноэкранной игрой, не является полоской,
+/// и показ лица либо включён в настройках, либо оправдан активным таймером Today.
+#[inline]
+pub(crate) fn should_poll_lang(expanded: bool, hidden: bool, stripped: bool, idle_face: bool, timer_active: bool) -> bool {
+    !expanded && !hidden && !stripped && (idle_face || timer_active)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn poll_lang_gated_by_idle_face_and_timer() {
+        // При idle_face = false и без активного таймера опрос раскладки заблокирован (не тратит CPU)
+        assert!(!should_poll_lang(false, false, false, false, false));
+
+        // Если активен таймер Today, опрос разрешён даже при idle_face = false
+        assert!(should_poll_lang(false, false, false, false, true));
+
+        // Если idle_face включён, опрос разрешён на свёрнутом острове (не полоска)
+        assert!(should_poll_lang(false, false, false, true, false));
+
+        // В режиме полоски (stripped == true) опрос всегда запрещён независимо от остальных параметров
+        assert!(!should_poll_lang(false, false, true, true, false));
+        assert!(!should_poll_lang(false, false, true, false, true));
+        assert!(!should_poll_lang(false, false, true, true, true));
+        assert!(!should_poll_lang(false, false, true, false, false));
+
+        // На развёрнутом или скрытом игрой острове опрос всегда запрещён
+        assert!(!should_poll_lang(true, false, false, true, true));
+        assert!(!should_poll_lang(false, true, false, true, true));
+        assert!(!should_poll_lang(true, true, false, true, true));
+        assert!(!should_poll_lang(true, true, true, true, true));
+    }
 
     #[test]
     fn quns_non_d3d_states_do_not_hide_island() {

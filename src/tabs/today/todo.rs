@@ -114,8 +114,24 @@ impl RowAnim {
     }
 }
 
+/// Состояние перетаскивания задачи мышью внутри списка.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct TodoDrag {
+    /// Исходный индекс перетаскиваемой задачи в `todo`.
+    pub(super) idx: usize,
+    /// Координаты мыши в момент нажатия.
+    pub(super) press_pos: (f32, f32),
+    /// Смещение курсора от верхнего края строки в момент нажатия.
+    pub(super) grab_y: f32,
+    /// Движение превысило порог гистерезиса: жест стал перетаскиванием, а не кликом.
+    pub(super) live: bool,
+    /// Целевой индекс вставки, под который освобождено место.
+    pub(super) target: usize,
+}
+
 impl Today {
     pub fn load(&mut self) {
+        self.todo_drag = None;
         let (sort, day, items) = parse_todo(&read_lines(TODO_FILE));
         self.todo_sort = sort;
         self.todo_day = day;
@@ -140,6 +156,7 @@ impl Today {
 
     /// Выбрасывает выполненные задачи из памяти; невыполненные не трогает. `true` — что-то убрано.
     fn remove_done(&mut self) -> bool {
+        self.todo_drag = None;
         let keep: Vec<bool> = self.todo.iter().map(|(d, _)| !*d).collect();
         if keep.iter().all(|&k| k) {
             return false;
@@ -182,6 +199,7 @@ impl Today {
 
     /// Переставляет задачи по выбранной сортировке; пружины строк едут на новые места сами.
     fn resort(&mut self) {
+        self.todo_drag = None;
         let items: Vec<(bool, u64)> = self.todo.iter().map(|(d, _)| *d).zip(self.todo_ts.iter().copied()).collect();
         let ord = sorted_order(self.todo_sort, &items);
         if ord.iter().enumerate().all(|(n, &i)| n == i) || self.anim.len() != self.todo.len() {
@@ -196,6 +214,38 @@ impl Today {
             self.todo_ts.push(ts[i]);
         }
         self.edit = self.edit.and_then(|e| ord.iter().position(|&i| i == e));
+    }
+
+    /// Переставляет задачу с позиции `from` на позицию `to`, синхронно сдвигая
+    /// параллельные векторы `todo`, `todo_ts`, `anim` и корректируя `edit`.
+    pub(super) fn reorder(&mut self, from: usize, to: usize) {
+        let n = self.todo.len();
+        if from >= n || to >= n || from == to {
+            return;
+        }
+        if self.todo_ts.len() != n || self.anim.len() != n {
+            return;
+        }
+        let item = self.todo.remove(from);
+        self.todo.insert(to, item);
+
+        let ts = self.todo_ts.remove(from);
+        self.todo_ts.insert(to, ts);
+
+        let anim = self.anim.remove(from);
+        self.anim.insert(to, anim);
+
+        if let Some(e) = self.edit {
+            self.edit = Some(if e == from {
+                to
+            } else if from < to && e > from && e <= to {
+                e - 1
+            } else if from > to && e >= to && e < from {
+                e + 1
+            } else {
+                e
+            });
+        }
     }
 
     pub(super) unsafe fn todo_card(&mut self, ui: &mut Ui, cv: &Canvas, card: Rect) {
@@ -280,6 +330,7 @@ impl Today {
                     self.todo.insert(0, (false, text.to_string()));
                     self.todo_ts.insert(0, crate::sys::now_secs());
                     self.anim.insert(0, RowAnim::new(false, true));
+                    self.todo_drag = None;
                     self.resort();
                     self.save();
                 }
@@ -316,36 +367,138 @@ impl Today {
         }
         let sid = id(TODAY, 100);
         let off = ui.scroll_begin(cv, sid, view, total);
+
+        // Перетаскивание строк мышью: 1:1 следование за курсором и плавный сдвиг
+        // остальных строк пружинами anim[i].pos.target в ручном режиме сортировки.
+        let mut dropped = None;
+        if let Some(mut d) = self.todo_drag.take() {
+            if d.idx < self.todo.len() && self.todo_sort == Sort::Manual {
+                let drag_id = id(TODAY, 200 + d.idx as u32);
+                let ptr = ui.pointer();
+                if ui.is_dragging(drag_id) {
+                    if !d.live && (ptr.0 - d.press_pos.0).hypot(ptr.1 - d.press_pos.1) > 4.0 {
+                        d.live = true;
+                    }
+                    if d.live {
+                        // Автопрокрутка у краёв списка
+                        const SCROLL_ZONE: f32 = 16.0;
+                        const SCROLL_SPEED: f32 = 3.0;
+                        if ptr.1 < view.y + SCROLL_ZONE {
+                            ui.scroll_jump(sid, (off - SCROLL_SPEED).max(0.0));
+                        } else if ptr.1 > view.bottom() - SCROLL_ZONE {
+                            ui.scroll_jump(sid, off + SCROLL_SPEED);
+                        }
+
+                        let drag_pos = (ptr.1 - d.grab_y - view.y + off).clamp(0.0, (total - rows[d.idx].1).max(0.0));
+                        self.anim[d.idx].pos.value = drag_pos;
+                        self.anim[d.idx].pos.target = drag_pos;
+                        self.anim[d.idx].pos.snap();
+
+                        // Целевой слот по устойчивым серединам остальных строк
+                        let drag_cy = drag_pos + rows[d.idx].1 / 2.0;
+                        let mut target = 0;
+                        let mut acc = 0.0f32;
+                        for (k, other_idx) in (0..self.todo.len()).filter(|&j| j != d.idx).enumerate() {
+                            let h = rows[other_idx].1;
+                            let mid = acc + h / 2.0;
+                            if drag_cy > mid {
+                                target = k + 1;
+                            }
+                            acc += h + GAP;
+                        }
+                        d.target = target;
+
+                        // Раздвигаем соседей под целевой слот
+                        let mut virtual_order: Vec<usize> = (0..self.todo.len()).collect();
+                        virtual_order.remove(d.idx);
+                        virtual_order.insert(d.target, d.idx);
+                        let mut y = 0.0f32;
+                        for &item_idx in &virtual_order {
+                            let h = rows[item_idx].1;
+                            if item_idx != d.idx {
+                                self.anim[item_idx].pos.target = y;
+                            }
+                            y += h + GAP;
+                        }
+                    }
+                    self.todo_drag = Some(d);
+                } else if d.live {
+                    dropped = Some((d.idx, d.target));
+                    // Фиксируем цели пружин на момент отпускания, чтобы строки не дергались назад до перестановки
+                    let mut virtual_order: Vec<usize> = (0..self.todo.len()).collect();
+                    virtual_order.remove(d.idx);
+                    virtual_order.insert(d.target, d.idx);
+                    let mut y = 0.0f32;
+                    for &item_idx in &virtual_order {
+                        let h = rows[item_idx].1;
+                        self.anim[item_idx].pos.target = y;
+                        y += h + GAP;
+                    }
+                }
+            }
+        }
+
+        let mut live_drag_idx = self.todo_drag.as_ref().filter(|d| d.live).map(|d| d.idx);
+        if live_drag_idx.is_none() {
+            live_drag_idx = dropped.map(|(from, _)| from);
+        }
+        let mut draw_order: Vec<usize> = (0..self.todo.len()).collect();
+        if let Some(drag_idx) = live_drag_idx {
+            if drag_idx < draw_order.len() {
+                draw_order.remove(drag_idx);
+                draw_order.push(drag_idx);
+            }
+        }
+
         let mut toggled = None;
         let mut removed = None;
         let mut edit_req = None;
-        for (i, (is_done, text)) in self.todo.iter().enumerate() {
+        for i in draw_order {
+            let is_done = &self.todo[i].0;
+            let text = &self.todo[i].1;
+            let is_dragged = live_drag_idx == Some(i);
             let (_, rh, lines, lh) = rows[i];
             let (fade, dn) = (self.anim[i].fade.value.clamp(0.0, 1.0), self.anim[i].done.value.clamp(0.0, 1.0));
             let rcv = Canvas { g: cv.g, alpha: cv.alpha * fade, accent: cv.accent };
             let cv = &rcv;
             let y = view.y + self.anim[i].pos.value - off;
-            if y + rh < view.y || y > view.bottom() {
+            if !is_dragged && (y + rh < view.y || y > view.bottom()) {
                 continue;
             }
             let r = Rect::new(view.x, y, view.w - 4.0, rh);
             let rid = id(TODAY, 200 + i as u32);
-            // Кнопки справа («изменить», «удалить») видны при наведении; их области регистрируются
-            // раньше строки, иначе строка заберёт нажатие себе.
+            // Кнопки справа («изменить», «удалить») видны при наведении; при активном перетаскивании
+            // скрываются, чтобы не мешать жесту.
             let (eid, did) = (id(TODAY, 600 + i as u32), id(TODAY, 400 + i as u32));
             let del = Rect::new(r.right() - 21.0, r.y + row / 2.0 - 9.0, 18.0, 18.0);
             let edit = Rect::new(del.x - 20.0, del.y, 18.0, 18.0);
-            let show = ui.hover_of(rid) > 0.3 || ui.hover_of(did) > 0.3 || ui.hover_of(eid) > 0.3;
+            let show = live_drag_idx.is_none() && (ui.hover_of(rid) > 0.3 || ui.hover_of(did) > 0.3 || ui.hover_of(eid) > 0.3);
             let (mut edit_clicked, mut del_clicked) = (false, false);
             if show {
                 edit_clicked = ui.click_area(eid, edit).1;
                 del_clicked = ui.click_area(did, del).1;
             }
             let (_, clicked) = ui.click_area(rid, r);
+            if self.todo_sort == Sort::Manual && self.todo.len() > 1 && self.todo_drag.is_none() && ui.is_dragging(rid) {
+                self.todo_drag = Some(TodoDrag {
+                    idx: i,
+                    press_pos: ui.pointer(),
+                    grab_y: ui.pointer().1 - r.y,
+                    live: false,
+                    target: i,
+                });
+            }
             let hv = ui.hover_of(rid);
-            cv.rr(r, 8.0, mix(inset(), fg(), 0.035 * hv));
-            if self.edit == Some(i) {
-                cv.rr_line(r, 8.0, crate::ui::hue(crate::ios::SysColor::Blue, cv.accent), 1.0);
+            if is_dragged {
+                // Приподнятая карточка в руке: контрастный фон и контур акцента
+                cv.rr(r, 8.0, mix(crate::ui::card(), fg(), 0.12));
+                let rem = crate::ui::hue(crate::ios::SysColor::Blue, cv.accent);
+                cv.rr_line(r, 8.0, if self.edit == Some(i) { rem } else { mix(fg(), cv.accent, 0.45) }, 1.2);
+            } else {
+                cv.rr(r, 8.0, mix(inset(), fg(), 0.035 * hv));
+                if self.edit == Some(i) {
+                    cv.rr_line(r, 8.0, crate::ui::hue(crate::ios::SysColor::Blue, cv.accent), 1.0);
+                }
             }
             let (cx, cy) = (r.x + 13.0, r.y + row / 2.0);
             // Отметка выполнения проявляется плавно: кольцо гаснет, зелёный круг с галочкой нарастает.
@@ -403,12 +556,18 @@ impl Today {
                 Some(e) if e > i => self.edit = Some(e - 1),
                 _ => {}
             }
+            self.todo_drag = None;
             self.save();
         } else if let Some(i) = edit_req {
             self.edit = Some(i);
             ui.set_field_text(fid, &self.todo[i].1);
             ui.focus = Some(fid);
             ui.caret_on = true;
+        } else if let Some((from, to)) = dropped {
+            if from != to {
+                self.reorder(from, to);
+                self.save();
+            }
         } else if let Some(i) = toggled {
             self.todo[i].0 = !self.todo[i].0;
             if let Some(a) = self.anim.get_mut(i) {
@@ -490,5 +649,73 @@ mod tests {
         for s in [Sort::Manual, Sort::Date, Sort::Status] {
             assert_eq!(Sort::parse(s.as_str()), s);
         }
+    }
+
+    #[test]
+    fn reorder_moves_parallel_vectors_and_tracks_edit() {
+        let mut t = Today::default();
+        t.todo = vec![
+            (false, "a".into()),
+            (true, "b".into()),
+            (false, "c".into()),
+            (false, "d".into()),
+        ];
+        t.todo_ts = vec![10, 20, 30, 40];
+        t.anim = t.todo.iter().map(|(d, _)| RowAnim::new(*d, false)).collect();
+
+        // 1. Сдвиг сверху вниз: задача 0 ("a") перемещается на позицию 2
+        // Ожидаемый порядок: "b", "c", "a", "d"
+        t.edit = Some(0);
+        t.reorder(0, 2);
+        assert_eq!(t.todo, vec![
+            (true, "b".to_string()),
+            (false, "c".to_string()),
+            (false, "a".to_string()),
+            (false, "d".to_string()),
+        ]);
+        assert_eq!(t.todo_ts, vec![20, 30, 10, 40]);
+        assert_eq!(t.anim.len(), 4);
+        assert_eq!(t.edit, Some(2), "правка следует за перемещаемой задачей при сдвиге вниз");
+
+        // 2. Сдвиг снизу вверх: задача 2 ("a") перемещается обратно на позицию 0
+        // Если при этом редактировалась задача 1 ("c"), она сдвигается вправо на позицию 2
+        t.edit = Some(1);
+        t.reorder(2, 0);
+        assert_eq!(t.todo, vec![
+            (false, "a".to_string()),
+            (true, "b".to_string()),
+            (false, "c".to_string()),
+            (false, "d".to_string()),
+        ]);
+        assert_eq!(t.todo_ts, vec![10, 20, 30, 40]);
+        assert_eq!(t.anim.len(), 4);
+        assert_eq!(t.edit, Some(2), "правка сдвигается вправо при перемещении задачи перед ней");
+
+        // 3. Перемещение снизу вверх самой редактируемой задачи (3 -> 1)
+        t.edit = Some(3);
+        t.reorder(3, 1);
+        assert_eq!(t.todo, vec![
+            (false, "a".to_string()),
+            (false, "d".to_string()),
+            (true, "b".to_string()),
+            (false, "c".to_string()),
+        ]);
+        assert_eq!(t.todo_ts, vec![10, 40, 20, 30]);
+        assert_eq!(t.edit, Some(1), "правка следует за перемещаемой задачей при сдвиге вверх");
+
+        // 4. Задача за пределами диапазона перестановки не меняет индекс редактирования
+        t.edit = Some(0);
+        t.reorder(2, 3);
+        assert_eq!(t.edit, Some(0));
+
+        // 5. Некорректные индексы или перемещение на то же место — no-op
+        t.edit = Some(1);
+        t.reorder(1, 1);
+        t.reorder(0, 100);
+        t.reorder(100, 0);
+        assert_eq!(t.edit, Some(1));
+        assert_eq!(t.todo.len(), 4);
+        assert_eq!(t.todo_ts.len(), 4);
+        assert_eq!(t.anim.len(), 4);
     }
 }

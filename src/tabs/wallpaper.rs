@@ -206,15 +206,9 @@ impl Wall {
             // Обои могли сменить в самом WE, пока остров был свёрнут.
             self.we_current = we::current(inst);
         }
-        if self.scanned && self.loaded_we == want_we {
-            self.center_on_current();
-            return true;
-        }
-        self.scanned = true;
-        self.loaded_we = want_we;
         self.recent = read_lines(FILE).into_iter().filter(|l| !l.is_empty()).take(MAX_RECENT).collect();
 
-        self.files.clear();
+        let prev_files = std::mem::take(&mut self.files);
         self.we_items.clear();
         self.dir_label.clear();
         match (want_we, &self.we) {
@@ -225,10 +219,16 @@ impl Wall {
             }
             _ => self.scan_folder(),
         }
-        self.offset.value = 0.0;
-        self.offset.target = 0.0;
-        self.request_thumbs();
-        self.center_on_current();
+        let changed = !self.scanned || self.loaded_we != want_we || self.files != prev_files;
+        self.scanned = true;
+        self.loaded_we = want_we;
+
+        if changed {
+            self.offset.value = 0.0;
+            self.offset.target = 0.0;
+            self.request_thumbs();
+            self.center_on_current();
+        }
         true
     }
 
@@ -354,13 +354,9 @@ impl Wall {
         let max_off = n.saturating_sub(1) as f32;
         cv.text(&format!("{n} {}", crate::i18n::pick("изобр.", "images")), Rect::new(x + 4.0, y, 100.0, 17.0), &f.small, bare());
         let fb = Rect::new(w - PAD - 19.0, y - 1.0, 19.0, 19.0);
-        let pick_w = cv.chip_w("Выбрать папку…");
-        if ui.chip(cv, id(WALLPAPER, 8), Rect::new(fb.x - 6.0 - pick_w, y, pick_w, 17.0), "Выбрать папку…", false) {
-            self.choose_folder();
-        }
         cv.circle(fb.cx(), fb.cy(), 9.5, card());
-        if ui.icon_button(cv, id(WALLPAPER, 7), fb, icon::FOLDER, false, crate::i18n::pick("Выбрать папку", "Choose folder")) && !self.dir_label.is_empty() {
-            sys::open(&self.dir_label);
+        if ui.icon_button(cv, id(WALLPAPER, 7), fb, icon::FOLDER, false, crate::i18n::pick("Выбрать папку", "Choose folder")) {
+            self.choose_folder();
         }
 
         // Карусель как в макете: центральная карточка широкая, соседние узкие; все наклонены.
@@ -567,5 +563,37 @@ mod tests {
         }
         assert_eq!(w.recent.len(), MAX_RECENT);
         assert_eq!(w.recent[0], "p19");
+    }
+
+    #[test]
+    fn rescan_detects_changes_and_preserves_unmodified() {
+        let root = std::env::temp_dir().join(format!("island-wall-rescan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("1.jpg"), b"1").unwrap();
+
+        let mut w = Wall::default();
+        w.dir = Some(root.to_string_lossy().to_string());
+        w.show();
+        assert_eq!(w.files.len(), 1);
+
+        // Сдвигаем смещение карусели
+        w.offset.target = 3.0;
+        w.offset.value = 3.0;
+
+        // Повторный show() без изменений на диске не трогает смещение
+        w.show();
+        assert_eq!(w.files.len(), 1);
+        assert_eq!(w.offset.target, 3.0);
+        assert_eq!(w.offset.value, 3.0);
+
+        // Добавляем файл: show() должен обнаружить изменение и пересчитать смещение
+        std::fs::write(root.join("2.png"), b"2").unwrap();
+        w.show();
+        assert_eq!(w.files.len(), 2);
+        // При изменении смещение сбрасывается и центрируется на текущих обоях
+        assert_eq!(w.offset.target, 1.0);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

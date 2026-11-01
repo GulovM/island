@@ -25,8 +25,9 @@ use windows::Win32::UI::Shell::{
     SIGDN_FILESYSPATH,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateIcon, CreateWindowExW, DestroyWindow, GetForegroundWindow, GetSystemMetrics, GetWindowThreadProcessId, HICON,
-    SM_CMONITORS, SW_SHOWNORMAL, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CreateIcon, CreateWindowExW, DestroyWindow, GetForegroundWindow, GetGUIThreadInfo, GetSystemMetrics,
+    GetWindowThreadProcessId, GUITHREADINFO, HICON, SM_CMONITORS, SW_SHOWNORMAL, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    WS_POPUP,
 };
 
 use super::wz;
@@ -179,12 +180,41 @@ pub fn open(target: &str) -> bool {
     }
 }
 
-/// Код языка (младшие 16 бит HKL) раскладки окна в фокусе: у каждого окна своя раскладка.
-pub fn foreground_lang() -> u32 {
+/// Код языка (младшие 16 бит HKL) раскладки окна в фокусе ввода.
+///
+/// Возвращает `None`, если активного окна нет (переходное состояние: Alt+Tab, экран
+/// блокировки, UAC) — в эти моменты нельзя подставлять раскладку острова, иначе виджет
+/// покажет ложный язык вместо сохранения предыдущего.
+///
+/// Для UWP-приложений (Параметры, Почта и т.п.) окно верхнего уровня принадлежит процессу-хосту
+/// `ApplicationFrameHost.exe`. Поток этого хост-окна не всегда держит фокус ввода и раскладка
+/// активного ввода к нему не привязана — реальный фокус и раскладка живут в потоке сфокусированного
+/// дочернего окна (`hwndFocus` из `GetGUIThreadInfo`).
+pub fn foreground_lang() -> Option<u32> {
     unsafe {
         let fg = GetForegroundWindow();
-        let tid = if fg.0.is_null() { 0 } else { GetWindowThreadProcessId(fg, None) };
-        (GetKeyboardLayout(tid).0 as usize & 0xFFFF) as u32
+        if fg.0.is_null() {
+            return None;
+        }
+        let top_tid = GetWindowThreadProcessId(fg, None);
+        if top_tid == 0 {
+            return None;
+        }
+        let mut info = GUITHREADINFO {
+            cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+            ..Default::default()
+        };
+        let tid = if GetGUIThreadInfo(top_tid, &mut info).is_ok() && !info.hwndFocus.0.is_null() {
+            let focus_tid = GetWindowThreadProcessId(info.hwndFocus, None);
+            if focus_tid != 0 {
+                focus_tid
+            } else {
+                top_tid
+            }
+        } else {
+            top_tid
+        };
+        Some((GetKeyboardLayout(tid).0 as usize & 0xFFFF) as u32)
     }
 }
 
@@ -247,5 +277,21 @@ pub fn pick_folder(initial: Option<&str>) -> Option<String> {
             CoUninitialize();
         }
         path
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_foreground_lang_does_not_panic() {
+        let _ = foreground_lang();
+    }
+
+    #[test]
+    fn test_lang_code_formatting() {
+        assert_eq!(lang_code(0x0409), "EN");
+        assert_eq!(lang_code(0x0419), "RU");
     }
 }

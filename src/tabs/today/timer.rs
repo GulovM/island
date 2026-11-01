@@ -148,6 +148,17 @@ impl Today {
         self.set_time(0, PRESETS[i]);
     }
 
+    /// Колёсико мыши меняет часы (0), минуты (1) или секунды (2).
+    pub(crate) fn wheel_time(&mut self, k: usize, wheel: f32) {
+        if wheel != 0.0 {
+            let d = if wheel > 0.0 { 1i32 } else { -1 };
+            let mut v = [self.hours as i32, self.minutes as i32, self.seconds as i32];
+            v[k] = (v[k] + d).max(0);
+            self.preset = None;
+            self.set_time_hms(v[0] as u32, v[1] as u32, v[2] as u32);
+        }
+    }
+
     /// Таймер. `size`: 0 — низкая карточка (круг, Старт/Сброс, без ввода времени и пресетов),
     /// 1 и 2 — полная; в широкой содержимое центрируется по ширине.
     pub(super) unsafe fn timer_card(&mut self, ui: &mut Ui, cv: &Canvas, tm: Rect, size: usize) {
@@ -207,6 +218,8 @@ impl Today {
             cv.digits(&label, tx - 1.0, 90.0, cy - 6.0, 22.0, 600, Align::Leading, txt());
             let of = format!("{} {}", crate::i18n::pick("из", "of"), clock_label(self.total.as_secs()));
             cv.line(&of, &f.small, tx, 90.0, cy + 13.0, Align::Leading, dim());
+            let wheel = ui.wheel_in(Rect::new(tx, tm.y, 90.0, tm.h));
+            self.wheel_time(1, wheel);
             let reset_x = tm.right() - P - 14.0;
             let run_x = reset_x - 34.0;
             let run_icon = if self.deadline.is_some() { icon::PAUSE } else { icon::PLAY_SOLID };
@@ -256,13 +269,7 @@ impl Today {
             ui.text_field_at(cv, tf[k], b, "0", "", Submit::Keep, 8.0, 16.0);
             cv.text(units[k], Rect::new(b.right() - 15.0, b.y + 1.0, 12.0, b.h), &f.small, dim());
             let wheel = ui.wheel_in(b);
-            if wheel != 0.0 {
-                let d = if wheel > 0.0 { 1i32 } else { -1 };
-                let mut v = [self.hours as i32, self.minutes as i32, self.seconds as i32];
-                v[k] = (v[k] + d).max(0);
-                self.preset = None;
-                self.set_time_hms(v[0] as u32, v[1] as u32, v[2] as u32);
-            }
+            self.wheel_time(k, wheel);
         }
 
         // Пресеты.
@@ -334,6 +341,41 @@ mod tests {
         assert_eq!(t.total, Duration::from_secs(60));
         t.set_time(20, 99);
         assert_eq!((t.hours, t.minutes), (9, 59));
+    }
+
+    #[test]
+    fn wheel_time_compact_and_full() {
+        let mut t = Today::default();
+        t.set_time(0, 5);
+        assert_eq!(t.total, Duration::from_secs(5 * 60));
+        assert_eq!(t.left, Duration::from_secs(5 * 60));
+
+        // Колёсико мыши в компактном виде (k == 1, минуты) увеличивает время
+        t.wheel_time(1, 1.0);
+        assert_eq!(t.minutes, 6);
+        assert_eq!(t.total, Duration::from_secs(6 * 60));
+        assert_eq!(t.left, Duration::from_secs(6 * 60));
+
+        // Колёсико мыши вниз уменьшает время
+        t.wheel_time(1, -1.0);
+        assert_eq!(t.minutes, 5);
+        assert_eq!(t.total, Duration::from_secs(5 * 60));
+        assert_eq!(t.left, Duration::from_secs(5 * 60));
+
+        // Сброс пресета при прокрутке колёсиком
+        t.preset = Some(0);
+        t.wheel_time(1, 1.0);
+        assert_eq!(t.preset, None);
+
+        // В полном виде k == 0 (часы) и k == 2 (секунды) также меняют время
+        t.wheel_time(0, 1.0);
+        assert_eq!(t.hours, 1);
+        assert_eq!(t.minutes, 6);
+        assert_eq!(t.total, Duration::from_secs(3600 + 6 * 60));
+
+        t.wheel_time(2, 30.0);
+        assert_eq!(t.seconds, 1);
+        assert_eq!(t.total, Duration::from_secs(3600 + 6 * 60 + 1));
     }
 
     #[test]

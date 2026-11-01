@@ -289,6 +289,15 @@ impl Live {
         self.toast_a.target = if form == Form::Toast { 1.0 } else { 0.0 };
     }
 
+    /// Точечное управление целевой альфой мини-плеера (для временного peek лица).
+    pub fn set_mini_target(&mut self, target: f32) {
+        self.mini_a.target = target;
+    }
+
+    pub fn mini_settled(&self) -> bool {
+        self.mini_a.settled()
+    }
+
     pub fn step(&mut self, dt: f32) {
         self.mini_a.step(dt);
         self.toast_a.step(dt);

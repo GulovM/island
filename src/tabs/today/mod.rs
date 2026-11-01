@@ -28,7 +28,7 @@ use super::{id, TODAY};
 use alarm::play_alarm;
 use calendar::MonthCache;
 pub use events::Notice;
-use todo::RowAnim;
+use todo::{RowAnim, TodoDrag};
 
 /// Число циферблатов часов.
 pub const CLOCK_STYLES: usize = 5;
@@ -113,6 +113,8 @@ pub struct Today {
     todo_day: i64,
     /// Состояние анимации каждой задачи (та же длина, что у `todo`).
     anim: Vec<RowAnim>,
+    /// Перетаскивание задачи мышью для ручной перестановки.
+    todo_drag: Option<TodoDrag>,
     /// 0 — неделя и таймер, 1 — месячный календарь (плавная смена).
     month_t: Spring,
     city: String,
@@ -176,6 +178,7 @@ impl Default for Today {
             clean_done: false,
             todo_day: 0,
             anim: Vec::new(),
+            todo_drag: None,
             month_t: Spring::unit(0.0, 240.0, 26.0),
             city: String::new(),
             editing: false,
@@ -493,6 +496,7 @@ impl Today {
         ];
         self.todo_ts = vec![0; self.todo.len()];
         self.anim = self.todo.iter().map(|(d, _)| RowAnim::new(*d, false)).collect();
+        self.todo_drag = None;
     }
 
     pub fn set_clock_style(&mut self, s: usize) {

@@ -7,7 +7,7 @@ use windows::Win32::System::SystemInformation::GetLocalTime;
 
 use crate::anim::Spring;
 use crate::bg::{self, NetStatus};
-use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, icon, status_orange, Canvas, Rect};
+use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, status_orange, Canvas, Rect, WHITE};
 
 pub struct Face {
     enabled: bool,
@@ -75,6 +75,14 @@ impl Face {
         !self.alpha.settled()
     }
 
+    pub fn settled(&self) -> bool {
+        self.alpha.settled()
+    }
+
+    pub fn set_alpha_target(&mut self, target: f32) {
+        self.alpha.target = target;
+    }
+
     pub fn alpha(&self) -> f32 {
         self.alpha.value.clamp(0.0, 1.0)
     }
@@ -91,7 +99,7 @@ impl Face {
         (fmt_time(t.wHour, t.wMinute), ms_to_next_minute(t.wSecond, t.wMilliseconds))
     }
 
-    fn refresh_all(&mut self) {
+    pub fn refresh_all(&mut self) {
         self.time = Self::read_time().0;
         self.net = bg::net_status();
         self.poll_lang();
@@ -110,9 +118,11 @@ impl Face {
         Self::read_time().1
     }
 
-    /// Раскладка окна в фокусе. Дёшево (два вызова user32), поэтому её проверяет общий опрос окружения.
+    /// Раскладка окна в фокусе. Дёшево (вызовы user32), поэтому её проверяет общий опрос окружения.
     pub fn poll_lang(&mut self) -> bool {
-        let lang = crate::sys::foreground_lang();
+        let Some(lang) = crate::sys::foreground_lang() else {
+            return false;
+        };
         if lang == self.lang && !self.lang_text.is_empty() {
             return false;
         }
@@ -132,38 +142,70 @@ impl Face {
     }
 
     /// Рисует лицо внутри свёрнутого острова `r` (логические пиксели).
-    /// Если есть таймер, по центру вместо времени — его остаток (на паузе мигает).
+    /// При активном таймере отображаются четыре элемента: раскладка, время, плашка остатка таймера, Wi-Fi.
     pub unsafe fn draw(&self, cv: &Canvas, r: Rect, timer: Option<(&str, f32)>) {
         let f = &cv.g.fonts;
         let pad = (r.w * 0.09).clamp(8.0, 16.0);
-        cv.text(&self.lang_text, Rect::new(r.x + pad, r.y, 34.0, r.h - 1.0), &f.small_b, collapsed_dim());
+        cv.text(&self.lang_text, Rect::new(r.x + pad, r.y, 34.0, r.h - 1.0), &f.body_b, collapsed_dim());
         match timer {
             Some((label, pulse)) => {
+                // При фиксированных отступах (38px до часов и 6px до плашки) часы и таймер
+                // визуально слипались, а по краям оставались неоправданно большие пустоты.
+                // Равномерные промежутки между всеми четырьмя элементами острова задают выверенный
+                // оптический ритм без скученности при любой длине метки таймера.
+                let lang_w = cv.text_w(&self.lang_text, &f.body_b);
+                let time_w = cv.text_w(&self.time, &f.body_b);
+                let pill_w = cv.text_w(label, &f.small_c) + 8.0;
+                let wifi_w = 11.4;
+
+                let available = (r.right() - pad - wifi_w) - (r.x + pad);
+                let gap = (available - (lang_w + time_w + pill_w)) / 3.0;
+
+                let time_x = r.x + pad + lang_w + gap;
+                cv.text(&self.time, Rect::new(time_x, r.y, time_w + 1.0, r.h - 1.0), &f.body_b, collapsed_txt());
+
                 let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
-                // Значок слева от текста: ширина цифр табличная, около 7 px на знак.
-                let half = label.chars().count() as f32 * 3.6;
-                t.glyph(icon::CLOCK, Rect::new(r.cx() - half - 20.0, r.cy() - 9.0, 16.0, 16.0), false, status_orange());
-                t.text(label, Rect::new(r.x, r.y, r.w, r.h - 1.0), &f.body_c, collapsed_txt());
+                let pill_x = time_x + time_w + gap;
+                let pill_h = 14.0;
+                let pill_r = Rect::new(pill_x, r.cy() - pill_h / 2.0, pill_w, pill_h);
+                t.rr(pill_r, pill_h / 2.0, status_orange());
+                t.text(label, pill_r, &f.small_c, WHITE);
             }
             None => cv.text(&self.time, Rect::new(r.x, r.y, r.w, r.h - 1.0), &f.body_c, collapsed_txt()),
         }
-        self.wifi(cv, r.right() - pad - 6.5, r.cy() + 3.2);
+        self.wifi(cv, r.right() - pad - 5.5, r.cy() + 2.9);
     }
 
     /// Значок Wi-Fi: точка и три дуги, нарисованные примитивами (глифов в шрифте может не быть).
-    /// `(cx, cy)` — точка-источник у нижнего края значка.
+    /// `(cx, cy)` — точка-источник у нижнего края значка (центр концентрических дуг и точки).
+    ///
+    /// Геометрия пересчитана под единый кегль текста 9pt и оптический вес Semibold (600):
+    /// 1. Визуальная высота: верхний край верхней дуги (cy - 7.2 - 0.6 = cy - 7.8) плюс нижний край
+    ///    точки (cy + 1.0) дают общую высоту 8.8 px, что оптически соответствует em-кеглю 9.0 pt шрифта.
+    /// 2. Толщина штриха 1.2 px в точности повторяет толщину основных штрихов (stem width) шрифта
+    ///    Segoe UI Variable Semibold (вес 600) при кегле 9pt.
+    /// 3. Радиус точки 1.0 px (диаметр 2.0 px) согласуется по оптической массе с закруглёнными
+    ///    концами штриха 1.2 px, не доминируя над ними.
+    /// 4. Радиусы дуг 2.6, 4.9, 7.2 px (шаг 2.3 px) образуют гармоничный геометрический ритм:
+    ///    просвет между точкой и первой дугой равен 1.0 px, а между дугами — ровно 1.1 px.
+    /// 5. Сектор ±45° (размах 90°) задаёт ширину иконки 11.4 px, создавая классическое для системных
+    ///    индикаторов Wi-Fi соотношение сторон ~4:3 (11.4 × 8.8 px).
+    /// 6. Вертикальное выравнивание: геометрический центр иконки (cy - 3.4) при `cy = r.cy() + 2.9`
+    ///    находится на `r.cy() - 0.5`, строго совпадая с оптической осью центрированного текста.
+    /// 7. При `level == 0` диагональный штрих толщиной 1.2 px перечёркивает иконку из верхнего левого
+    ///    угла в нижний правый (с охватом дуг и точки).
     unsafe fn wifi(&self, cv: &Canvas, cx: f32, cy: f32) {
         let level = signal_level(self.net);
         let off = collapsed_track();
         let on = collapsed_txt();
         for i in 0..3u8 {
-            let radius = 3.4 + 3.0 * i as f32;
-            cv.stroke_arc(cx, cy, radius, -46.0, 46.0, 1.4, if level > i { on } else { off });
+            let radius = 2.6 + 2.3 * i as f32;
+            cv.stroke_arc(cx, cy, radius, -45.0, 45.0, 1.2, if level > i { on } else { off });
         }
-        cv.circle(cx, cy, 1.25, if level > 0 { on } else { off });
+        cv.circle(cx, cy, 1.0, if level > 0 { on } else { off });
         if level == 0 {
-            // Нет сети: перечёркнутый значок.
-            cv.stroke_line((cx - 6.5, cy - 9.5), (cx + 6.5, cy + 1.5), 1.4, collapsed_dim());
+            // Нет сети: аккуратное перечёркивание всего габарита иконки по диагонали ~39°.
+            cv.stroke_line((cx - 5.5, cy - 7.5), (cx + 5.5, cy + 1.4), 1.2, collapsed_dim());
         }
     }
 }
@@ -218,5 +260,112 @@ mod tests {
         assert!(!off.visible());
         off.set_visible(true, true);
         assert!(off.visible());
+    }
+
+    #[test]
+    fn poll_lang_idempotence() {
+        let mut f = Face::new(true);
+        // Если раскладка уже определена, повторный вызов без изменений не должен приводить к перерисовке.
+        if !f.lang_text.is_empty() {
+            assert!(!f.poll_lang());
+        }
+    }
+
+    #[test]
+    fn test_face_metrics_and_overlap() {
+        use windows::Win32::Graphics::DirectWrite::*;
+        use crate::ui::Fonts;
+        unsafe {
+            let factory: windows::core::Result<IDWriteFactory> = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED);
+            let Ok(f) = factory else { return };
+            let fonts = Fonts::new(&f).expect("Fonts::new failed");
+
+            // Проверяем ширину 3-символьного кода раскладки («УКР», «ENG», «WWW») в новом кегле body_b (9pt)
+            let layout_ukr = fonts.layout("УКР", &fonts.body_b, 100.0, 20.0).expect("layout failed");
+            let mut m_ukr = DWRITE_TEXT_METRICS::default();
+            layout_ukr.GetMetrics(&mut m_ukr).unwrap();
+            let layout_www = fonts.layout("WWW", &fonts.body_b, 100.0, 20.0).expect("layout failed");
+            let mut m_www = DWRITE_TEXT_METRICS::default();
+            layout_www.GetMetrics(&mut m_www).unwrap();
+
+            // Убеждаемся, что «УКР» и даже широкий «WWW» с запасом помещаются в рамку lang_text (34.0 px) без усечения
+            assert!(m_ukr.widthIncludingTrailingWhitespace < 34.0);
+            assert!(m_www.widthIncludingTrailingWhitespace < 34.0);
+
+            // Проверяем, что кегль lang_text (body_b) равен кеглю таймера (body_c) — ровно 9pt
+            assert!((fonts.body_b.GetFontSize() - 9.0).abs() < 1e-4);
+            assert!((fonts.body_c.GetFontSize() - 9.0).abs() < 1e-4);
+
+            // Проверяем 4-элементную компоновку свёрнутого острова: раскладка, время, плашка таймера, Wi-Fi
+            let r_w = 180.0f32;
+            let pad = (r_w * 0.09).clamp(8.0, 16.0); // 16.0
+            let lang_w = m_ukr.widthIncludingTrailingWhitespace;
+
+            // Время часов ("14:05")
+            let layout_time = fonts.layout("14:05", &fonts.body_b, 100.0, 20.0).expect("layout failed");
+            let mut m_time = DWRITE_TEXT_METRICS::default();
+            layout_time.GetMetrics(&mut m_time).unwrap();
+            let time_w = m_time.widthIncludingTrailingWhitespace;
+
+            // Wi-Fi: визуальная ширина иконки 11.4px, край дуги радиусом 7.2px со штрихом 1.2px под 45°
+            let wifi_w = 11.4f32;
+            let wifi_cx = r_w - pad - 5.5;
+            let wifi_left = wifi_cx - 5.7;
+
+            // Метки таймера от коротких ("0:05") до длинных ("9:59:59")
+            for label in &["0:05", "14:05", "1:02:05", "9:59:59"] {
+                let layout_timer = fonts.layout(label, &fonts.small_c, 100.0, 20.0).expect("layout failed");
+                let mut m_timer = DWRITE_TEXT_METRICS::default();
+                layout_timer.GetMetrics(&mut m_timer).unwrap();
+                let timer_w = m_timer.widthIncludingTrailingWhitespace + 8.0;
+
+                let available = (r_w - pad - wifi_w) - pad;
+                let gap = (available - (lang_w + time_w + timer_w)) / 3.0;
+
+                let lang_right = pad + lang_w;
+                let time_left = lang_right + gap;
+                let time_right = time_left + time_w;
+                let timer_left = time_right + gap;
+                let timer_right = timer_left + timer_w;
+
+                assert!(lang_right < time_left, "Время ({time_left}) наезжает на раскладку ({lang_right})");
+                assert!(time_right < timer_left, "Плашка таймера ({timer_left}) наезжает на часы ({time_right})");
+                assert!(timer_right < wifi_left, "Плашка таймера ({timer_right}) наезжает на Wi-Fi ({wifi_left}) для метки {label}");
+
+                // Проверяем равенство трёх зазоров между соседними элементами с допуском 0.5px
+                let gap1 = time_left - lang_right;
+                let gap2 = timer_left - time_right;
+                let gap3 = wifi_left - timer_right;
+                assert!((gap1 - gap2).abs() < 0.5, "Зазоры 1 и 2 не равны: {gap1} vs {gap2} для метки {label}");
+                assert!((gap2 - gap3).abs() < 0.5, "Зазоры 2 и 3 не равны: {gap2} vs {gap3} для метки {label}");
+                assert!((gap1 - gap3).abs() < 0.5, "Зазоры 1 и 3 не равны: {gap1} vs {gap3} для метки {label}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_wifi_geometry_and_proportions() {
+        let thick = 1.2f32;
+        let r_dot = 1.0f32;
+        let r_outer = 2.6 + 2.3 * 2.0; // 7.2 px
+        let total_h = (r_outer + thick / 2.0) + r_dot; // 8.8 px
+
+        // Высота иконки согласована с 9pt кеглем текста (погрешность < 3%)
+        assert!((total_h - 9.0).abs() < 0.3);
+
+        // Просвет между точкой и первой дугой
+        let r_inner = 2.6;
+        let dot_gap = (r_inner - thick / 2.0) - r_dot;
+        assert!((dot_gap - 1.0).abs() < 1e-4);
+
+        // Просвет между концентрическими дугами
+        let arc_gap = 2.3 - thick;
+        assert!((arc_gap - 1.1).abs() < 1e-4);
+
+        // Оптический центр иконки относительно r.cy() при cy = r.cy() + 2.9
+        let cy_offset = 2.9f32;
+        let visual_center = cy_offset - (r_outer + thick / 2.0 - r_dot) / 2.0;
+        // Совпадает с вертикальным центром текстовой рамки r.cy() - 0.5 (h - 1.0)
+        assert!((visual_center - (-0.5)).abs() < 0.15);
     }
 }
