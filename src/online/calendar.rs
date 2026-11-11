@@ -1,15 +1,503 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::{bg, log};
 
+use super::caldav::{self, APPLE_CALDAV_BASE, GOOGLE_CALDAV_BASE};
 use super::datetime::{civil_from_days, days_from_civil, offset_at, weekday, SYSTEM_TZ};
 use super::http::get_text;
+use super::oauth::{self, OAuthError};
 use super::{spawn, stale, with, RETRY_AFTER};
 
 const CALENDAR_TTL: Duration = Duration::from_secs(5 * 60);
 const CALENDAR_CACHE_PREFIX: &str = "calendar_cache_";
 const LEGACY_CALENDAR_CACHE_FILE: &str = "calendar_cache.ics";
+const ACCOUNTS_FILE: &str = "cal_accounts.bin";
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GoogleAccount {
+    pub email: String,
+    pub refresh_token: String,
+    pub access_token: String,
+    pub expires_at: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AppleAccount {
+    pub apple_id: String,
+    pub app_password: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CalendarAccounts {
+    pub google: Option<GoogleAccount>,
+    pub apple: Option<AppleAccount>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CalAccountStatus {
+    pub google_email: Option<String>,
+    pub google_busy: bool,
+    pub apple_id: Option<String>,
+    pub apple_busy: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Default)]
+struct AuthUiState {
+    google_busy: bool,
+    apple_busy: bool,
+    error: Option<String>,
+}
+
+static ACCOUNTS_STORE: Mutex<Option<CalendarAccounts>> = Mutex::new(None);
+static AUTH_UI: Mutex<AuthUiState> = Mutex::new(AuthUiState {
+    google_busy: false,
+    apple_busy: false,
+    error: None,
+});
+
+fn serialize_accounts(acc: &CalendarAccounts) -> String {
+    let mut out = String::from("# Island CalDAV accounts\n");
+    if let Some(g) = &acc.google {
+        out.push_str("[google]\n");
+        out.push_str(&format!("email={}\n", g.email.replace('\n', "")));
+        out.push_str(&format!("refresh_token={}\n", g.refresh_token.replace('\n', "")));
+        out.push_str(&format!("access_token={}\n", g.access_token.replace('\n', "")));
+        out.push_str(&format!("expires_at={}\n", g.expires_at));
+    }
+    if let Some(a) = &acc.apple {
+        out.push_str("[apple]\n");
+        out.push_str(&format!("apple_id={}\n", a.apple_id.replace('\n', "")));
+        out.push_str(&format!("app_password={}\n", a.app_password.replace('\n', "")));
+    }
+    out
+}
+
+fn parse_accounts(text: &str) -> CalendarAccounts {
+    let mut acc = CalendarAccounts::default();
+    let mut section = "";
+    let mut g = GoogleAccount::default();
+    let mut has_g = false;
+    let mut a = AppleAccount::default();
+    let mut has_a = false;
+
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(sec) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            section = sec.trim();
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let (k, v) = (k.trim(), v.trim());
+        match (section, k) {
+            ("google", "email") => {
+                g.email = v.to_string();
+                has_g = true;
+            }
+            ("google", "refresh_token") => {
+                g.refresh_token = v.to_string();
+                has_g = true;
+            }
+            ("google", "access_token") => {
+                g.access_token = v.to_string();
+                has_g = true;
+            }
+            ("google", "expires_at") => {
+                g.expires_at = v.parse().unwrap_or(0);
+            }
+            ("apple", "apple_id") => {
+                a.apple_id = v.to_string();
+                has_a = true;
+            }
+            ("apple", "app_password") => {
+                a.app_password = v.to_string();
+                has_a = true;
+            }
+            _ => {}
+        }
+    }
+    if has_g && (!g.refresh_token.is_empty() || !g.access_token.is_empty()) {
+        if g.email.is_empty() {
+            g.email = "Google".to_string();
+        }
+        acc.google = Some(g);
+    }
+    if has_a && !a.apple_id.is_empty() && !a.app_password.is_empty() {
+        acc.apple = Some(a);
+    }
+    acc
+}
+
+pub fn pack_accounts(acc: &CalendarAccounts) -> Option<Vec<u8>> {
+    crate::sys::seal(serialize_accounts(acc).as_bytes())
+}
+
+pub fn unpack_accounts(bytes: &[u8]) -> Option<CalendarAccounts> {
+    if bytes.is_empty() || !crate::sys::is_sealed(bytes) {
+        return None;
+    }
+    let plain = crate::sys::unseal(bytes)?;
+    let text = String::from_utf8_lossy(&plain);
+    if !text.starts_with("# Island CalDAV accounts\n") {
+        return None;
+    }
+    Some(parse_accounts(&text))
+}
+
+fn read_accounts_from_disk() -> CalendarAccounts {
+    let path = crate::sys::data_dir().join(ACCOUNTS_FILE);
+    let Ok(bytes) = std::fs::read(&path) else {
+        return CalendarAccounts::default();
+    };
+    if bytes.is_empty() {
+        return CalendarAccounts::default();
+    }
+    match unpack_accounts(&bytes) {
+        Some(acc) => acc,
+        None => {
+            log::error("не удалось расшифровать cal_accounts.bin (DPAPI), аккаунты календаря сброшены");
+            CalendarAccounts::default()
+        }
+    }
+}
+
+pub fn load_accounts() -> CalendarAccounts {
+    let mut guard = ACCOUNTS_STORE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(acc) = guard.as_ref() {
+        return acc.clone();
+    }
+    let acc = read_accounts_from_disk();
+    *guard = Some(acc.clone());
+    acc
+}
+
+fn save_accounts(acc: &CalendarAccounts) {
+    if let Ok(mut guard) = ACCOUNTS_STORE.lock() {
+        *guard = Some(acc.clone());
+    }
+    if acc.google.is_none() && acc.apple.is_none() {
+        let _ = std::fs::remove_file(crate::sys::data_dir().join(ACCOUNTS_FILE));
+        return;
+    }
+    if let Some(sealed) = pack_accounts(acc) {
+        crate::tabs::write_bytes(ACCOUNTS_FILE, &sealed);
+    } else {
+        log::error("DPAPI недоступен, не удалось сохранить cal_accounts.bin");
+    }
+}
+
+/// Возвращает список активных ключей источников календаря (ICS-ссылки + подключённые аккаунты CalDAV).
+pub fn active_calendar_keys_for(ics_urls: &[String], acc: &CalendarAccounts) -> Vec<String> {
+    let mut keys: Vec<String> = ics_urls
+        .iter()
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty())
+        .collect();
+    if let Some(g) = &acc.google {
+        if !g.refresh_token.is_empty() || !g.access_token.is_empty() {
+            keys.push(format!("caldav:google:{}", g.email));
+        }
+    }
+    if let Some(a) = &acc.apple {
+        if !a.apple_id.is_empty() && !a.app_password.is_empty() {
+            keys.push(format!("caldav:apple:{}", a.apple_id));
+        }
+    }
+    keys
+}
+
+/// Возвращает список активных ключей календаря с учётом сохранённых аккаунтов Google/Apple.
+pub fn active_calendar_keys(ics_urls: &[String]) -> Vec<String> {
+    #[cfg(test)]
+    {
+        active_calendar_keys_for(ics_urls, &CalendarAccounts::default())
+    }
+    #[cfg(not(test))]
+    {
+        active_calendar_keys_for(ics_urls, &load_accounts())
+    }
+}
+
+pub fn cal_account_status() -> CalAccountStatus {
+    let acc = load_accounts();
+    let ui = AUTH_UI.lock().unwrap_or_else(|e| e.into_inner());
+    CalAccountStatus {
+        google_email: acc.google.map(|g| g.email),
+        google_busy: ui.google_busy,
+        apple_id: acc.apple.map(|a| a.apple_id),
+        apple_busy: ui.apple_busy,
+        error: ui.error.clone(),
+    }
+}
+
+pub fn clear_cal_auth_error() {
+    if let Ok(mut ui) = AUTH_UI.lock() {
+        ui.error = None;
+    }
+}
+
+fn set_cal_auth_error(msg: impl Into<String>) {
+    if let Ok(mut ui) = AUTH_UI.lock() {
+        ui.error = Some(msg.into());
+    }
+    bg::notify();
+}
+
+/// Запускает подключение Google Календаря в фоновом потоке.
+pub fn connect_google(ics_urls: Vec<String>) {
+    {
+        let mut ui = AUTH_UI.lock().unwrap_or_else(|e| e.into_inner());
+        if ui.google_busy {
+            return;
+        }
+        ui.google_busy = true;
+        ui.error = None;
+    }
+    bg::notify();
+    spawn("island-google-oauth", move || {
+        let res = (|| -> Result<GoogleAccount, String> {
+            let tok = oauth::authorize_google().map_err(|e| e.message())?;
+            let auth = format!("Bearer {}", tok.access_token);
+            let (email_opt, _) = caldav::discover_calendars(GOOGLE_CALDAV_BASE, &auth)?;
+            let email = email_opt.unwrap_or_else(|| "Google".to_string());
+            let expires_at = crate::sys::now_secs() + tok.expires_in.saturating_sub(60);
+            Ok(GoogleAccount {
+                email,
+                refresh_token: tok.refresh_token.unwrap_or_default(),
+                access_token: tok.access_token,
+                expires_at,
+            })
+        })();
+
+        match res {
+            Ok(g_acc) => {
+                let mut acc = load_accounts();
+                acc.google = Some(g_acc);
+                save_accounts(&acc);
+                if let Ok(mut ui) = AUTH_UI.lock() {
+                    ui.google_busy = false;
+                    ui.error = None;
+                }
+                with(|s| s.cal_at = None);
+                bg::notify();
+                refresh_calendar_age(&ics_urls, Duration::ZERO);
+            }
+            Err(err) => {
+                if let Ok(mut ui) = AUTH_UI.lock() {
+                    ui.google_busy = false;
+                    ui.error = Some(err);
+                }
+                bg::notify();
+            }
+        }
+    });
+}
+
+/// Отключает аккаунт Google Календаря и очищает его зашифрованный кэш.
+pub fn disconnect_google(ics_urls: &[String]) {
+    let mut acc = load_accounts();
+    acc.google = None;
+    save_accounts(&acc);
+    clear_cal_auth_error();
+    let keys = active_calendar_keys_for(ics_urls, &acc);
+    clean_orphan_caches(&keys);
+    with(|s| {
+        s.cal_at = None;
+        s.cal_key.clear();
+        if keys.is_empty() {
+            s.snap.cal = Arc::default();
+            s.snap.cal_ver += 1;
+            s.snap.calendar_set = false;
+            s.snap.calendar_failed = false;
+        }
+    });
+    bg::notify();
+    if !keys.is_empty() {
+        refresh_calendar_age(ics_urls, Duration::ZERO);
+    }
+}
+
+/// Проверяет и подключает аккаунт Apple iCloud Календаря по Apple ID и паролю приложения.
+pub fn connect_apple(apple_id: String, app_password: String, ics_urls: Vec<String>) {
+    let apple_id = apple_id.trim().to_string();
+    let app_password = app_password.trim().replace('-', "");
+    if apple_id.is_empty() || app_password.is_empty() {
+        return;
+    }
+    {
+        let mut ui = AUTH_UI.lock().unwrap_or_else(|e| e.into_inner());
+        if ui.apple_busy {
+            return;
+        }
+        ui.apple_busy = true;
+        ui.error = None;
+    }
+    bg::notify();
+    spawn("island-apple-caldav", move || {
+        let auth = caldav::basic_auth_header(&apple_id, &app_password);
+        match caldav::discover_calendars(APPLE_CALDAV_BASE, &auth) {
+            Ok((_, cals)) if !cals.is_empty() => {
+                let mut acc = load_accounts();
+                acc.apple = Some(AppleAccount { apple_id, app_password });
+                save_accounts(&acc);
+                if let Ok(mut ui) = AUTH_UI.lock() {
+                    ui.apple_busy = false;
+                    ui.error = None;
+                }
+                with(|s| s.cal_at = None);
+                bg::notify();
+                refresh_calendar_age(&ics_urls, Duration::ZERO);
+            }
+            Ok(_) => {
+                if let Ok(mut ui) = AUTH_UI.lock() {
+                    ui.apple_busy = false;
+                    ui.error = Some("В аккаунте iCloud не найдено календарей".into());
+                }
+                bg::notify();
+            }
+            Err(e) => {
+                let msg = if e.contains("401") || e.contains("403") {
+                    "Неверный Apple ID или пароль приложения iCloud".to_string()
+                } else {
+                    format!("Ошибка iCloud CalDAV: {e}")
+                };
+                if let Ok(mut ui) = AUTH_UI.lock() {
+                    ui.apple_busy = false;
+                    ui.error = Some(msg);
+                }
+                bg::notify();
+            }
+        }
+    });
+}
+
+/// Отключает аккаунт Apple iCloud Календаря и очищает его кэш.
+pub fn disconnect_apple(ics_urls: &[String]) {
+    let mut acc = load_accounts();
+    acc.apple = None;
+    save_accounts(&acc);
+    clear_cal_auth_error();
+    let keys = active_calendar_keys_for(ics_urls, &acc);
+    clean_orphan_caches(&keys);
+    with(|s| {
+        s.cal_at = None;
+        s.cal_key.clear();
+        if keys.is_empty() {
+            s.snap.cal = Arc::default();
+            s.snap.cal_ver += 1;
+            s.snap.calendar_set = false;
+            s.snap.calendar_failed = false;
+        }
+    });
+    bg::notify();
+    if !keys.is_empty() {
+        refresh_calendar_age(ics_urls, Duration::ZERO);
+    }
+}
+
+fn caldav_time_window() -> (String, String) {
+    let now_days = (crate::sys::now_secs() / 86_400) as i64;
+    let (y1, m1, d1) = civil_from_days(now_days - 7);
+    let (y2, m2, d2) = civil_from_days(now_days + 60);
+    (
+        format!("{y1:04}{m1:02}{d1:02}T000000Z"),
+        format!("{y2:04}{m2:02}{d2:02}T235959Z"),
+    )
+}
+
+fn fetch_all_caldav_events(cals: &[String], auth_header: &str) -> Result<String, String> {
+    let (start_utc, end_utc) = caldav_time_window();
+    let mut combined = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n");
+    let mut any_ok = false;
+    let mut last_err = String::new();
+    for cal_url in cals {
+        match caldav::fetch_calendar_events(cal_url, auth_header, &start_utc, &end_utc) {
+            Ok(ics) => {
+                any_ok = true;
+                for line in ics.lines() {
+                    let t = line.trim_end_matches('\r');
+                    if !t.eq_ignore_ascii_case("BEGIN:VCALENDAR")
+                        && !t.eq_ignore_ascii_case("END:VCALENDAR")
+                        && !t.to_ascii_uppercase().starts_with("VERSION:")
+                    {
+                        combined.push_str(t);
+                        combined.push_str("\r\n");
+                    }
+                }
+            }
+            Err(e) => last_err = e,
+        }
+    }
+    if !any_ok && !cals.is_empty() {
+        return Err(last_err);
+    }
+    combined.push_str("END:VCALENDAR\r\n");
+    Ok(combined)
+}
+
+fn refresh_google_account_token(g: &mut GoogleAccount) -> Result<(), String> {
+    if g.refresh_token.is_empty() {
+        return Err("нет refresh_token для Google Календаря".into());
+    }
+    match oauth::refresh_google_token(&g.refresh_token) {
+        Ok(tok) => {
+            g.access_token = tok.access_token;
+            if let Some(rt) = tok.refresh_token {
+                if !rt.is_empty() {
+                    g.refresh_token = rt;
+                }
+            }
+            g.expires_at = crate::sys::now_secs() + tok.expires_in.saturating_sub(60);
+            let mut acc = load_accounts();
+            acc.google = Some(g.clone());
+            save_accounts(&acc);
+            Ok(())
+        }
+        Err(OAuthError::InvalidGrant) => {
+            let msg = OAuthError::InvalidGrant.message();
+            set_cal_auth_error(msg.clone());
+            Err(msg)
+        }
+        Err(e) => Err(e.message()),
+    }
+}
+
+fn sync_google_caldav(mut g: GoogleAccount) -> Result<String, String> {
+    let now = crate::sys::now_secs();
+    if g.access_token.is_empty() || now + 60 >= g.expires_at {
+        refresh_google_account_token(&mut g)?;
+    }
+    let auth = format!("Bearer {}", g.access_token);
+    let cals = match caldav::discover_calendars(GOOGLE_CALDAV_BASE, &auth) {
+        Ok((_, cals)) => cals,
+        Err(e) if e.contains("401") && !g.refresh_token.is_empty() => {
+            refresh_google_account_token(&mut g)?;
+            let retry_auth = format!("Bearer {}", g.access_token);
+            caldav::discover_calendars(GOOGLE_CALDAV_BASE, &retry_auth)?.1
+        }
+        Err(e) => return Err(e),
+    };
+    let final_auth = format!("Bearer {}", g.access_token);
+    fetch_all_caldav_events(&cals, &final_auth)
+}
+
+fn sync_apple_caldav(a: AppleAccount) -> Result<String, String> {
+    let auth = caldav::basic_auth_header(&a.apple_id, &a.app_password);
+    let (_, cals) = match caldav::discover_calendars(APPLE_CALDAV_BASE, &auth) {
+        Ok(res) => res,
+        Err(e) => {
+            if e.contains("401") || e.contains("403") {
+                set_cal_auth_error("Неверный Apple ID или пароль приложения iCloud");
+            }
+            return Err(e);
+        }
+    };
+    fetch_all_caldav_events(&cals, &auth)
+}
 
 fn hash_url(url: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
@@ -85,9 +573,10 @@ fn load_cached_calendar(url: &str) -> Option<String> {
     None
 }
 
-/// Удаляет файлы кэша, хэши которых не соответствуют ни одной из настроенных ссылок.
+/// Удаляет файлы кэша, хэши которых не соответствуют ни одной из настроенных ссылок и аккаунтов CalDAV.
 pub fn clean_orphan_caches(urls: &[String]) {
-    let valid_hashes: std::collections::HashSet<String> = urls.iter().map(|u| hash_url(u)).collect();
+    let active = active_calendar_keys(urls);
+    let valid_hashes: std::collections::HashSet<String> = active.iter().map(|u| hash_url(u)).collect();
     let data_dir = crate::sys::data_dir();
     let Ok(entries) = std::fs::read_dir(&data_dir) else { return };
     for entry in entries.flatten() {
@@ -99,22 +588,22 @@ pub fn clean_orphan_caches(urls: &[String]) {
             }
         }
     }
-    if urls.is_empty() {
+    if active.is_empty() {
         let _ = std::fs::remove_file(data_dir.join(LEGACY_CALENDAR_CACHE_FILE));
     }
 }
 
 /// Инициализирует снимок календаря сохранённым зашифрованным кэшем с диска (до первого сетевого ответа).
-/// Загружает кэш только для тех ссылок, которые сейчас настроены; кэши удалённых ссылок удаляются.
+/// Загружает кэш только для тех ссылок и аккаунтов CalDAV, которые сейчас настроены; кэши удалённых удаляются.
 pub fn init_cached_calendar(urls: &[String]) {
-    let active_urls: Vec<String> = urls.iter().map(|u| u.trim().to_string()).filter(|u| !u.is_empty()).collect();
-    clean_orphan_caches(&active_urls);
-    if active_urls.is_empty() {
+    let active_keys = active_calendar_keys(urls);
+    clean_orphan_caches(urls);
+    if active_keys.is_empty() {
         return;
     }
     let mut cached_lists = Vec::new();
-    for url in &active_urls {
-        if let Some(ics) = load_cached_calendar(url) {
+    for key in &active_keys {
+        if let Some(ics) = load_cached_calendar(key) {
             let raws = parse_ics(&ics, SYSTEM_TZ);
             if !raws.is_empty() {
                 cached_lists.push(raws);
@@ -128,7 +617,7 @@ pub fn init_cached_calendar(urls: &[String]) {
                 s.snap.cal = Arc::new(merged);
                 s.snap.cal_ver = 1;
                 s.snap.calendar_set = true;
-                s.cal_key = active_urls.join("\n");
+                s.cal_key = active_keys.join("\n");
             }
         });
     }
@@ -219,19 +708,24 @@ pub fn refresh_calendar_age(urls: &[String], max_age: Duration) {
         .map(|u| u.trim().to_string())
         .filter(|u| !u.is_empty())
         .collect();
-    let key = clean_urls.join("\n");
+    #[cfg(test)]
+    let acc = CalendarAccounts::default();
+    #[cfg(not(test))]
+    let acc = load_accounts();
+    let active_keys = active_calendar_keys_for(&clean_urls, &acc);
+    let key = active_keys.join("\n");
     let go = with(|s| {
-        s.snap.calendar_set = !clean_urls.is_empty();
+        s.snap.calendar_set = !active_keys.is_empty();
         if s.cal_busy || (s.cal_key == key && !stale(s.cal_at, max_age)) {
             return false;
         }
         if s.cal_key != key && !s.snap.cal.is_empty() {
-            // Список ссылок сменился: сбрасываем старые события
+            // Список источников сменился: сбрасываем старые события
             s.snap.cal = Arc::default();
             s.snap.cal_ver += 1;
         }
         s.snap.calendar_failed = false;
-        if clean_urls.is_empty() {
+        if active_keys.is_empty() {
             s.cal_key.clear();
             s.cal_at = Some(Instant::now());
             clean_orphan_caches(&[]);
@@ -244,41 +738,43 @@ pub fn refresh_calendar_age(urls: &[String], max_age: Duration) {
         return;
     }
     spawn("island-calendar", move || {
-        let mut fetched = Vec::with_capacity(clean_urls.len());
-        if clean_urls.len() <= 1 {
+        let mut fetched: Vec<(String, Result<String, String>)> = Vec::with_capacity(active_keys.len());
+        std::thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(active_keys.len());
             for url in &clean_urls {
-                fetched.push((url.clone(), get_text(url).and_then(check_ics)));
+                handles.push(scope.spawn(move || (url.clone(), get_text(url).and_then(check_ics))));
             }
-        } else {
-            std::thread::scope(|scope| {
-                let mut handles = Vec::with_capacity(clean_urls.len());
-                for url in &clean_urls {
-                    handles.push(scope.spawn(move || (url.clone(), get_text(url).and_then(check_ics))));
+            if let Some(g) = acc.google.clone() {
+                let g_key = format!("caldav:google:{}", g.email);
+                handles.push(scope.spawn(move || (g_key, sync_google_caldav(g))));
+            }
+            if let Some(a) = acc.apple.clone() {
+                let a_key = format!("caldav:apple:{}", a.apple_id);
+                handles.push(scope.spawn(move || (a_key, sync_apple_caldav(a))));
+            }
+            for h in handles {
+                if let Ok(res) = h.join() {
+                    fetched.push(res);
                 }
-                for h in handles {
-                    if let Ok(res) = h.join() {
-                        fetched.push(res);
-                    }
-                }
-            });
-        }
+            }
+        });
 
         let mut all_events = Vec::new();
         let mut any_success = false;
         let mut any_failed = false;
 
-        for (url, res) in fetched {
+        for (src_key, res) in fetched {
             match res {
                 Ok(ics) => {
-                    save_cached_calendar(&url, &ics);
+                    save_cached_calendar(&src_key, &ics);
                     let raws = parse_ics(&ics, SYSTEM_TZ);
                     all_events.push(raws);
                     any_success = true;
                 }
                 Err(e) => {
-                    log::error(&format!("календарь {url}: {e}"));
+                    log::error(&format!("календарь {src_key}: {e}"));
                     any_failed = true;
-                    if let Some(cached_ics) = load_cached_calendar(&url) {
+                    if let Some(cached_ics) = load_cached_calendar(&src_key) {
                         let raws = parse_ics(&cached_ics, SYSTEM_TZ);
                         if !raws.is_empty() {
                             all_events.push(raws);
@@ -884,5 +1380,37 @@ END:VEVENT
         assert_ne!(cache_filename(u1), cache_filename(u2));
         assert!(cache_filename(u1).starts_with(CALENDAR_CACHE_PREFIX));
         assert!(cache_filename(u1).ends_with(".ics"));
+    }
+
+    #[test]
+    fn cal_accounts_dpapi_roundtrip_and_active_keys() {
+        let acc = CalendarAccounts {
+            google: Some(GoogleAccount {
+                email: "user@gmail.com".into(),
+                refresh_token: "1//refresh".into(),
+                access_token: "ya29.access".into(),
+                expires_at: 1800000000,
+            }),
+            apple: Some(AppleAccount {
+                apple_id: "user@icloud.com".into(),
+                app_password: "abcd-efgh-ijkl-mnop".into(),
+            }),
+        };
+        let sealed = pack_accounts(&acc).expect("DPAPI seal");
+        assert!(crate::sys::is_sealed(&sealed));
+        let unpacked = unpack_accounts(&sealed).expect("DPAPI unseal");
+        assert_eq!(unpacked, acc);
+        assert_eq!(unpack_accounts(b"corrupted"), None);
+        assert_eq!(unpack_accounts(b""), None);
+
+        let keys = active_calendar_keys_for(&["https://example.com/a.ics".to_string()], &acc);
+        assert_eq!(
+            keys,
+            vec![
+                "https://example.com/a.ics".to_string(),
+                "caldav:google:user@gmail.com".to_string(),
+                "caldav:apple:user@icloud.com".to_string(),
+            ]
+        );
     }
 }

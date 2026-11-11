@@ -1,20 +1,16 @@
-//! Остров как индикатор (этап 4): в свёрнутой форме показывает мини-плеер, пока играет музыка,
-//! и короткие уведомления (таймер, громкость, зарядка). Формы — это только целевые размеры тех же
-//! пружин ширины/высоты, что и у раскрытия, поэтому «чёлка» ↔ мини-плеер ↔ панель переходят друг в
-//! друга одной цепочкой без отдельной анимации. Никаких своих таймеров в простое: данные приходят
-//! событиями (медиасессия, громкость, питание), секундный тик — только пока виден играющий плеер.
+//! Остров как индикатор (этап 4): в свёрнутой форме отслеживает воспроизведение музыки (для волны
+//! эквалайзера в `Face`) и короткие уведомления (таймер, громкость, зарядка). Никаких своих таймеров
+//! в простое: данные приходят событиями (медиасессия, громкость, питание).
 
 use std::time::{Duration, Instant};
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
-use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 
 use crate::anim::{Spring, FADE_SPRING};
-use crate::bg::{self, Media, Snapshot};
-use crate::ui::{collapsed_chip_bg, collapsed_dim, collapsed_txt, icon, status_green, status_orange, status_red, Canvas, Rect, Ui, WHITE};
+use crate::bg::{Media, Snapshot};
+use crate::ui::{collapsed_chip_bg, collapsed_dim, collapsed_txt, icon, status_green, status_orange, status_red, Canvas, Rect};
 
-/// Размеры форм (логические пиксели). Ширина не меньше ширины свёрнутого острова.
-pub const MINI: (f32, f32) = (252.0, 36.0);
+/// Размеры формы уведомления (логические пиксели). Ширина не меньше ширины свёрнутого острова.
 pub const TOAST: (f32, f32) = (232.0, 36.0);
 /// Заряд, ниже которого (и без питания от сети) показывается предупреждение.
 const LOW_PCT: u8 = 20;
@@ -50,7 +46,6 @@ const PULSE_SECS: f32 = 2.4;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Form {
     Idle,
-    Mini,
     Toast,
     /// Плашка «Быстрый доступ», пока на остров тащат файл, ссылку или текст.
     Drop,
@@ -108,7 +103,7 @@ pub struct Live {
     shown: Option<Toast>,
     /// Текст уведомления о событии календаря.
     event: Option<(String, String)>,
-    mini_a: Spring,
+    wave_a: Spring,
     toast_a: Spring,
     rev: u64,
     ac: Option<bool>,
@@ -130,7 +125,7 @@ impl Live {
             toast: None,
             shown: None,
             event: None,
-            mini_a: Spring::unit(0.0, FADE_SPRING.0, FADE_SPRING.1),
+            wave_a: Spring::unit(0.0, FADE_SPRING.0, FADE_SPRING.1),
             toast_a: Spring::unit(0.0, 260.0, 30.0),
             rev: 0,
             ac: None,
@@ -154,8 +149,6 @@ impl Live {
     pub fn form(&self) -> Form {
         if self.toast.is_some() {
             Form::Toast
-        } else if self.playing() {
-            Form::Mini
         } else {
             Form::Idle
         }
@@ -266,52 +259,43 @@ impl Live {
     /// Читает состояние питания и возвращает уведомление, если оно изменилось. Настольный ПК без
     /// батареи уведомлений не даёт.
     pub fn power_event(&mut self) -> Option<Toast> {
-        let mut s = SYSTEM_POWER_STATUS::default();
-        unsafe {
-            if GetSystemPowerStatus(&mut s).is_err() {
-                return None;
-            }
-        }
-        // BatteryFlag: 128 — батареи нет, 255 — неизвестно; процент 255 — неизвестен.
-        if s.BatteryFlag == 255 || s.BatteryFlag & 128 != 0 || s.BatteryLifePercent > 100 || s.ACLineStatus > 1 {
-            return None;
-        }
-        let ac = s.ACLineStatus == 1;
-        let (toast, low) = power_transition(self.ac, self.low, ac, s.BatteryLifePercent);
-        self.ac = Some(ac);
+        let b = crate::sys::battery_status()?;
+        let (toast, low) = power_transition(self.ac, self.low, b.ac_online, b.percent);
+        self.ac = Some(b.ac_online);
         self.low = low;
         toast
     }
 
     /// Выставляет целевую прозрачность содержимого форм.
     pub fn set_form(&mut self, form: Form) {
-        self.mini_a.target = if form == Form::Mini { 1.0 } else { 0.0 };
         self.toast_a.target = if form == Form::Toast { 1.0 } else { 0.0 };
+        if form != Form::Idle {
+            self.wave_a.target = 0.0;
+        }
     }
 
-    /// Точечное управление целевой альфой мини-плеера (для временного peek лица).
-    pub fn set_mini_target(&mut self, target: f32) {
-        self.mini_a.target = target;
+    /// Выставляет целевую прозрачность волны эквалайзера в свёрнутой чёлке.
+    pub fn set_wave_active(&mut self, active: bool) {
+        self.wave_a.target = if active { 1.0 } else { 0.0 };
     }
 
-    /// Меняет жёсткость и затухание пружины мини-плеера (медленный peek).
-    pub fn tune_mini(&mut self, (stiffness, damping): (f32, f32)) {
-        self.mini_a.tune(stiffness, damping);
+    pub fn wave_alpha(&self) -> f32 {
+        self.wave_a.value.clamp(0.0, 1.0)
     }
 
-    pub fn mini_settled(&self) -> bool {
-        self.mini_a.settled()
+    pub fn wave_phase(&self) -> f32 {
+        self.t0.elapsed().as_secs_f32()
     }
 
     pub fn step(&mut self, dt: f32) {
-        self.mini_a.step(dt);
+        self.wave_a.step(dt);
         self.toast_a.step(dt);
         self.timer_frac.step(dt);
         if self.timer_frac.settled() {
             self.timer_frac.snap();
         }
-        if self.mini_a.settled() {
-            self.mini_a.snap();
+        if self.wave_a.settled() {
+            self.wave_a.snap();
         }
         if self.toast_a.settled() {
             self.toast_a.snap();
@@ -322,21 +306,7 @@ impl Live {
     }
 
     pub fn animating(&self) -> bool {
-        !(self.mini_a.settled() && self.toast_a.settled() && self.timer_frac.settled())
-    }
-
-    /// Тонкая линия таймера под прогрессом трека в мини-плеере.
-    pub unsafe fn draw_timer_line(&self, cv: &Canvas, r: Rect) {
-        if self.timer.is_none() {
-            return;
-        }
-        let line = Canvas { g: cv.g, alpha: cv.alpha * self.timer_pulse(), accent: cv.accent };
-        let track_r = Rect::new(r.x + 14.0, r.bottom() - 3.0, r.w - 28.0, 1.5);
-        line.rr(Rect::new(track_r.x, track_r.y, track_r.w * self.timer_frac(), track_r.h), 0.75, status_orange());
-    }
-
-    pub fn mini_alpha(&self) -> f32 {
-        self.mini_a.value.clamp(0.0, 1.0)
+        !(self.wave_a.settled() && self.toast_a.settled() && self.timer_frac.settled())
     }
 
     pub fn toast_alpha(&self) -> f32 {
@@ -344,45 +314,6 @@ impl Live {
     }
 
     // ---------- Отрисовка ----------
-
-    /// Мини-плеер: обложка, название, исполнитель, «эквалайзер» и тонкий прогресс внизу.
-    pub unsafe fn draw_mini(&self, ui: &mut Ui, cv: &Canvas, r: Rect) {
-        let Some(m) = &self.media else { return };
-        let f = &cv.g.fonts;
-        let cover = Rect::new(r.x + 12.0, r.y + 6.0, 22.0, 22.0);
-        let mut has_cover = false;
-        if let Some(px) = &m.art {
-            // Тот же ключ, что у плеера на вкладке Controls: битмап общий.
-            let key = (0x4Du64 << 56) | (m.key >> 8);
-            if let Some(bmp) = ui.cache.get(&cv.g.dc, key, bg::ART, bg::ART, || px.to_vec()) {
-                cv.bitmap_quad(Some(&bmp), cover, 0.0, 1.0);
-                has_cover = true;
-            }
-        }
-        if !has_cover {
-            let top = D2D1_COLOR_F { r: 0.35, g: 0.22, b: 0.47, a: 1.0 };
-            let bottom = D2D1_COLOR_F { r: 0.76, g: 0.42, b: 0.60, a: 1.0 };
-            cv.gradient_rr(cover, 5.0, top, bottom);
-            cv.glyph(icon::MUSIC, cover, false, D2D1_COLOR_F { a: 0.7, ..WHITE });
-        }
-        let tx = cover.right() + 8.0;
-        let tw = (r.right() - 36.0 - tx).max(10.0);
-        cv.text(&m.title, Rect::new(tx, r.y + 4.0, tw, 14.0), &f.small_b, collapsed_txt());
-        cv.text(&m.artist, Rect::new(tx, r.y + 16.0, tw, 12.0), &f.small, collapsed_dim());
-        // «Эквалайзер»: столбики плавно качаются по своим синусам (не под музыку). Кадры идут
-        // от таймера мини-плеера (~30 в секунду) и только пока он виден и музыка играет.
-        let t = self.t0.elapsed().as_secs_f32();
-        let bx = r.right() - 27.0;
-        for (i, (a, b, p)) in [(5.1f32, 8.3f32, 0.0f32), (6.7, 4.9, 2.1), (4.3, 7.7, 4.2)].iter().enumerate() {
-            let k = 0.5 + 0.5 * (0.6 * (t * a + p).sin() + 0.4 * (t * b + 1.3 * p).sin());
-            let h = 3.0 + 10.0 * k;
-            cv.rr(Rect::new(bx + i as f32 * 5.0, r.y + 17.0 - h / 2.0, 3.0, h), 1.5, cv.accent);
-        }
-        let frac = if m.dur > 0.0 { m.position_now() / m.dur } else { 0.0 };
-        // Прогресс трека поднят на 1 px, чтобы под ним поместилась линия таймера.
-        cv.progress(Rect::new(r.x + 14.0, r.bottom() - 7.0, r.w - 28.0, 2.0), frac, cv.accent);
-        self.draw_timer_line(cv, r);
-    }
 
     /// Кнопка × в уведомлении о таймере (логические пиксели, `r` — прямоугольник уведомления).
     pub fn close_rect(r: Rect) -> Rect {
@@ -490,13 +421,16 @@ mod tests {
     }
 
     #[test]
-    fn mini_only_while_playing() {
+    fn playing_stays_idle_form() {
         let mut l = Live::new(true);
         assert_eq!(l.form(), Form::Idle);
+        assert!(!l.playing());
         assert!(l.sync_media(&media(true, 1, 1)));
-        assert_eq!(l.form(), Form::Mini);
+        assert_eq!(l.form(), Form::Idle);
+        assert!(l.playing());
         assert!(l.sync_media(&media(false, 1, 2)));
         assert_eq!(l.form(), Form::Idle);
+        assert!(!l.playing());
     }
 
     #[test]
@@ -507,23 +441,23 @@ mod tests {
     }
 
     #[test]
-    fn disabled_media_stays_idle() {
+    fn disabled_media_suppresses_playing() {
         let mut l = Live::new(false);
         l.sync_media(&media(true, 1, 1));
-        assert_eq!(l.form(), Form::Idle);
+        assert!(!l.playing());
         l.set_media_enabled(true);
-        assert_eq!(l.form(), Form::Mini);
+        assert!(l.playing());
     }
 
     #[test]
-    fn toast_beats_mini_and_expires() {
+    fn toast_sets_form_and_expires_to_idle() {
         let mut l = Live::new(true);
         l.sync_media(&media(true, 1, 1));
         l.show(Toast::Timer);
         assert_eq!(l.form(), Form::Toast);
         assert!(l.clear_toast());
         assert!(!l.clear_toast());
-        assert_eq!(l.form(), Form::Mini);
+        assert_eq!(l.form(), Form::Idle);
     }
 
     #[test]

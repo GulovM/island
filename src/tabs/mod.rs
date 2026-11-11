@@ -394,7 +394,9 @@ impl Tabs {
             .map
             .iter()
             .enumerate()
-            .filter(|(_, m)| m.0 == custom::Owner::Controls && controls.unavailable(m.1))
+            .filter(|(_, m)| {
+                (m.0 == custom::Owner::Controls && controls.unavailable(m.1)) || (m.0 == custom::Owner::Stats && stats.unavailable(m.1))
+            })
             .fold(0u32, |mask, (j, _)| mask | 1 << j);
         let (c_rows, low) = controls.prepare(grid);
         grid.set_overlay_rows(c_rows.max(today.prepare()));
@@ -692,10 +694,10 @@ mod tests {
         let tabs = Tabs::default();
 
         // Вкладки с сеткой: из формулы cols*56-8+2*PAD и TOP+rows*56-8+PAD по окну сетки.
-        // Окно по умолчанию — все виджеты в сетке 6×4 (Controls) и 10×4 (Today, Stats).
+        // Окно по умолчанию — все виджеты в сетке 6×4 (Controls), 10×4 (Today) и 12×4 (Stats, с карточкой батареи).
         assert_eq!(tabs.island_size(CONTROLS), (356.0, 268.0));
         assert_eq!(tabs.island_size(TODAY), (580.0, 268.0));
-        assert_eq!(tabs.island_size(STATS), (580.0, 268.0));
+        assert_eq!(tabs.island_size(STATS), (692.0, 268.0));
 
         // Вкладки без сетки:
         assert_eq!(tabs.island_size(CLIPBOARD), (590.0, 328.0));

@@ -198,28 +198,74 @@ impl Today {
             ui.select_all(tf[k]);
         }
         self.time_focus = focused;
-        if compact && focused.is_some() {
-            // Полей времени в этом виде нет: ввод завершается (значение применится в следующем кадре).
-            ui.blur();
-        }
         let secs = rem.as_secs_f32().ceil() as u64;
         let label = clock_label(secs);
         // Цвет таймера — оранжевый, как его полоска на свёрнутом острове.
         let tint = crate::ui::status_orange();
 
         if compact {
-            // Полоса 248×56: кольцо, остаток крупно и «из 05:00», справа круглые кнопки.
+            // Полоса 216×48..248×56: кольцо, поля/остаток времени и справа круглые кнопки.
             const P: f32 = 12.0;
             let r = tm.h / 2.0 - 10.0;
             let (rx, cy) = (tm.x + P + r, tm.cy());
             cv.ring(rx, cy, r, 3.0, self.ring.value, tint);
-            cv.glyph(icon::CLOCK, Rect::new(rx - 8.0, cy - 8.0, 16.0, 16.0), false, tint);
+            let sound_tip = if self.sound {
+                crate::i18n::pick("Выключить звук сигнала", "Mute alarm sound")
+            } else {
+                crate::i18n::pick("Включить звук сигнала", "Unmute alarm sound")
+            };
+            if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(rx - 9.0, cy - 9.0, 18.0, 18.0), icon::RINGER, self.sound, tint, sound_tip) {
+                self.sound = !self.sound;
+                self.save_timer();
+            }
             let tx = rx + r + 10.0;
-            cv.digits(&label, tx - 1.0, 90.0, cy - 6.0, 22.0, 600, Align::Leading, txt());
-            let of = format!("{} {}", crate::i18n::pick("из", "of"), clock_label(self.total.as_secs()));
-            cv.line(&of, &f.small, tx, 90.0, cy + 13.0, Align::Leading, dim());
-            let wheel = ui.wheel_in(Rect::new(tx, tm.y, 90.0, tm.h));
-            self.wheel_time(1, wheel);
+            let vals = [self.hours, self.minutes, self.seconds];
+            if self.deadline.is_some() {
+                let compact_label = format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60);
+                cv.digits(&compact_label, tx - 1.0, 90.0, cy - 6.0, 22.0, 600, Align::Leading, txt());
+                let of_secs = self.total.as_secs();
+                let of_label = format!("{}:{:02}:{:02}", of_secs / 3600, of_secs / 60 % 60, of_secs % 60);
+                let of = format!("{} {}", crate::i18n::pick("из", "of"), of_label);
+                cv.line(&of, &f.small, tx, 90.0, cy + 13.0, Align::Leading, dim());
+                let digits_r = Rect::new(tx - 2.0, tm.y + 4.0, 86.0, tm.h - 8.0);
+                if ui.click_area(id(TODAY, 39), digits_r).1 {
+                    self.toggle_run();
+                    ui.set_field_text(tf[1], &format!("{:02}", self.minutes));
+                    ui.select_all(tf[1]);
+                    ui.focus = Some(tf[1]);
+                    ui.caret_on = true;
+                    self.time_focus = Some(1);
+                }
+                let wheel = ui.wheel_in(digits_r);
+                self.wheel_time(1, wheel);
+            } else {
+                let (box_w, gap) = (24.0f32, 6.0f32);
+                let box_h = 24.0f32;
+                let by = cy - box_h / 2.0;
+                let mut wheel_handled = false;
+                for (slot, k) in (0..3).enumerate() {
+                    let bx = tx + slot as f32 * (box_w + gap);
+                    let b = Rect::new(bx, by, box_w, box_h);
+                    if self.time_focus != Some(k) {
+                        ui.set_field_text(tf[k], &if k == 0 { vals[k].to_string() } else { format!("{:02}", vals[k]) });
+                    }
+                    ui.text_field_at(cv, tf[k], b, "00", "", Submit::Keep, 0.0, 0.0);
+                    if k < 2 {
+                        cv.text(":", Rect::new(b.right(), by - 1.0, gap, box_h), &f.mono_c, dim());
+                    }
+                    let w = ui.wheel_in(b);
+                    if w != 0.0 {
+                        self.wheel_time(k, w);
+                        wheel_handled = true;
+                    }
+                }
+                if !wheel_handled {
+                    let w = ui.wheel_in(Rect::new(tx, tm.y, 88.0, tm.h));
+                    if w != 0.0 {
+                        self.wheel_time(self.time_focus.unwrap_or(1), w);
+                    }
+                }
+            }
             let reset_x = tm.right() - P - 14.0;
             let run_x = reset_x - 34.0;
             let run_icon = if self.deadline.is_some() { icon::PAUSE } else { icon::PLAY_SOLID };
@@ -229,15 +275,6 @@ impl Today {
             if round_button(ui, cv, id(TODAY, 41), reset_x, cy, 14.0, icon::RESTART, chip_bg(), txt()) {
                 self.left = self.total;
                 self.deadline = None;
-                self.save_timer();
-            }
-            let sound_tip = if self.sound {
-                crate::i18n::pick("Выключить звук сигнала", "Mute alarm sound")
-            } else {
-                crate::i18n::pick("Включить звук сигнала", "Unmute alarm sound")
-            };
-            if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(run_x - 14.0 - 26.0, cy - 10.0, 20.0, 20.0), icon::RINGER, self.sound, tint, sound_tip) {
-                self.sound = !self.sound;
                 self.save_timer();
             }
             return;

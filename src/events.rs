@@ -228,7 +228,8 @@ impl App {
                         SetTimer(Some(self.hwnd), LIVE_TIMER, t.next_ms, None);
                     }
                 }
-                self.live_form() == live::Form::Mini || self.live.timer().is_some()
+                let wave_on = self.cfg.live_media && self.live.playing() && !self.expanded && !self.stripped() && !self.hidden;
+                wave_on || self.live.timer().is_some()
             }
             Ev::RightClick => self.toggle_strip_mode(),
             Ev::Clip => self.on_clipboard(),
@@ -373,10 +374,11 @@ impl App {
         }
         dirty |= timer_changed && !self.expanded;
 
-        // Тик нужен, только пока на острове виден играющий плеер или таймер: кадры 30 в секунду для
+        // Тик нужен, только пока на острове виден эквалайзер музыки или таймер: кадры ~15 в секунду для
         // эквалайзера и мигания паузы, иначе — раз в секунду по смене цифры.
         let timer_shown = !self.expanded && !self.hidden && self.live.timer().is_some();
-        let tick = if self.live_form() == live::Form::Mini && self.live.playing() || timer_shown && self.live.timer().is_some_and(|t| t.paused) {
+        let wave_shown = self.cfg.live_media && self.live.playing() && !self.expanded && !self.stripped() && !self.hidden;
+        let tick = if wave_shown || timer_shown && self.live.timer().is_some_and(|t| t.paused) {
             LiveTick::Frames
         } else if timer_shown {
             LiveTick::Seconds

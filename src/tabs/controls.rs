@@ -17,7 +17,7 @@ use super::layout::{sz, Size, HIDDEN, Spec, TabSpec, CELL, GAP, TALL, WIDE};
 use super::{id, CONTROLS};
 
 /// Сколько после перетаскивания слайдера не принимать громкость из снимка (иначе ползунок дёргается).
-const HOLD: Duration = Duration::from_millis(700);
+const HOLD: Duration = Duration::from_millis(250);
 
 // Номера виджетов в `SPEC` (они же биты маски недоступных виджетов).
 const WIFI: usize = 0;

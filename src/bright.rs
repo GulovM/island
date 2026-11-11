@@ -1,25 +1,34 @@
 //! Яркость экрана: встроенная панель ноутбука (IOCTL к `\\.\LCD`) или внешний монитор по DDC/CI.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use windows::Win32::Devices::Display::{
     DestroyPhysicalMonitors, GetMonitorBrightness, GetNumberOfPhysicalMonitorsFromHMONITOR,
     GetPhysicalMonitorsFromHMONITOR, SetMonitorBrightness, PHYSICAL_MONITOR,
 };
-use windows::Win32::Foundation::{CloseHandle, POINT};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, POINT};
 use windows::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTOPRIMARY};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ,
     FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::IO::DeviceIoControl;
-use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::core::w;
 
 const IOCTL_QUERY: u32 = 0x0023_0498;
 const IOCTL_SET: u32 = 0x0023_049C;
 
 static OK: AtomicBool = AtomicBool::new(false);
+
+struct DdcCache {
+    mon: isize,
+    handle: isize,
+    lo: u32,
+    hi: u32,
+}
+
+static DDC_CACHE: Mutex<Option<DdcCache>> = Mutex::new(None);
 
 /// Есть ли у устройства управляемая яркость (проверено при запуске фонового потока).
 pub fn available() -> bool {
@@ -56,8 +65,7 @@ pub fn set(v: f32) {
 }
 
 unsafe fn on_ac() -> bool {
-    let mut st = SYSTEM_POWER_STATUS::default();
-    GetSystemPowerStatus(&mut st).is_ok() && st.ACLineStatus == 1
+    crate::sys::battery_status().is_none_or(|b| b.ac_online)
 }
 
 unsafe fn open_lcd() -> Option<windows::Win32::Foundation::HANDLE> {
@@ -148,16 +156,54 @@ unsafe fn ddc_get() -> Option<f32> {
 }
 
 unsafe fn ddc_set(pct: u8) {
+    let mon = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY).0 as isize;
+    if let Ok(mut guard) = DDC_CACHE.lock() {
+        if let Some(c) = guard.as_ref() {
+            if c.mon == mon && c.hi > c.lo {
+                let val = c.lo + (f32::from(pct) / 100.0 * (c.hi - c.lo) as f32).round() as u32;
+                let handle = HANDLE(c.handle as *mut _);
+                if SetMonitorBrightness(handle, val) != 0 {
+                    return;
+                }
+                let _ = DestroyPhysicalMonitors(&[PHYSICAL_MONITOR {
+                    hPhysicalMonitor: handle,
+                    szPhysicalMonitorDescription: [0; 128],
+                }]);
+                *guard = None;
+            } else {
+                let _ = DestroyPhysicalMonitors(&[PHYSICAL_MONITOR {
+                    hPhysicalMonitor: HANDLE(c.handle as *mut _),
+                    szPhysicalMonitorDescription: [0; 128],
+                }]);
+                *guard = None;
+            }
+        }
+    }
+
     let mons = physical();
-    for m in &mons {
+    let mut cached_idx = None;
+    for (idx, m) in mons.iter().enumerate() {
         let (mut lo, mut cur, mut hi) = (0u32, 0u32, 0u32);
         let handle = m.hPhysicalMonitor;
         if GetMonitorBrightness(handle, &mut lo, &mut cur, &mut hi) != 0 && hi > lo {
             let val = lo + (f32::from(pct) / 100.0 * (hi - lo) as f32).round() as u32;
-            SetMonitorBrightness(handle, val);
+            if SetMonitorBrightness(handle, val) != 0 {
+                if let Ok(mut guard) = DDC_CACHE.lock() {
+                    *guard = Some(DdcCache {
+                        mon,
+                        handle: handle.0 as isize,
+                        lo,
+                        hi,
+                    });
+                    cached_idx = Some(idx);
+                }
+            }
+            break;
         }
     }
-    if !mons.is_empty() {
-        let _ = DestroyPhysicalMonitors(&mons);
+    for (idx, m) in mons.into_iter().enumerate() {
+        if Some(idx) != cached_idx {
+            let _ = DestroyPhysicalMonitors(&[m]);
+        }
     }
 }

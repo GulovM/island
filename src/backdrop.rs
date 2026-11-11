@@ -68,10 +68,18 @@ pub(crate) struct Backdrop {
     shadow: Cell<(f32, f32, f32)>,
 }
 
+/// Доступен ли композитный `HostBackdropBrush` (поддерживается DWM начиная с Windows 11, сборка 22000).
+pub const fn use_host_backdrop(build: u32) -> bool {
+    build >= 22000
+}
+
 impl Backdrop {
     /// Создаёт подложку для окна `hwnd`. Очередь диспетчера — `DQTYPE_THREAD_CURRENT` +
     /// `DQTAT_COM_NONE`: главный поток уже в MTA (`CoInitializeEx`).
     pub(crate) unsafe fn new(hwnd: HWND) -> Result<Self> {
+        if !use_host_backdrop(crate::sys::windows_build_number()) {
+            return Err(E_NOTIMPL.into());
+        }
         let dq = CreateDispatcherQueueController(DispatcherQueueOptions {
             dwSize: std::mem::size_of::<DispatcherQueueOptions>() as u32,
             threadType: DQTYPE_THREAD_CURRENT,
@@ -198,5 +206,21 @@ impl Backdrop {
     /// Включает/выключает видимость подложки (без скрытия самого окна, чтобы не мигало).
     pub(crate) fn set_visible(&self, visible: bool) -> Result<()> {
         self.root.SetIsVisible(visible)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::use_host_backdrop;
+
+    #[test]
+    fn host_backdrop_build_threshold() {
+        assert!(!use_host_backdrop(0));
+        assert!(!use_host_backdrop(19041));
+        assert!(!use_host_backdrop(19045));
+        assert!(!use_host_backdrop(21999));
+        assert!(use_host_backdrop(22000));
+        assert!(use_host_backdrop(22631));
+        assert!(use_host_backdrop(26100));
     }
 }

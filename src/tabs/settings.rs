@@ -46,6 +46,7 @@ const N_ACCENT_PILL: u32 = 26;
 const N_TODO_CLEAN: u32 = 110;
 const N_FREE_LAYOUT: u32 = 111;
 const N_HIDE_SHOT: u32 = 112;
+const N_AUTO_CONTRAST: u32 = 113;
 const N_COLLAPSED: u32 = 115;
 /// Занимает два номера подряд (27–28) — по числу `PALETTE_STYLES`.
 const N_PALETTE_STYLE: u32 = 27;
@@ -65,6 +66,7 @@ const N_NAME: u32 = 120;
 const N_CREATE: u32 = 121;
 const N_CANCEL: u32 = 122;
 const N_SCROLL: u32 = 123;
+const N_NOTES_SCROLL: u32 = 124;
 
 /// Раздел страницы настроек.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -246,6 +248,7 @@ impl Settings {
         self.rows_ready = false;
         self.hsv = theme::rgb_to_hsv(self.current());
         self.transparency_cache = None;
+        crate::update::mark_notes_seen();
     }
 
     /// Состояние «Эффектов прозрачности» Windows с кэшированием до 1 секунды.
@@ -395,6 +398,7 @@ impl Settings {
         self.cfg.material = d.material;
         self.cfg.palette_style = d.palette_style;
         self.cfg.accent_pill = d.accent_pill;
+        self.cfg.auto_contrast = d.auto_contrast;
         self.cfg.ui_scale = DEFAULT_SCALE;
         self.scale_drag = None;
         // Встроенные вкладки включены, собственные выключены: так включённых не больше лимита.
@@ -747,6 +751,16 @@ impl Settings {
         if ui.slider_thin(cv, sid, Rect::new(x + 6.0, y, iw - 12.0, 14.0), &mut frac) {
             self.scale_drag = Some(snap_scale(frac, dpi));
         }
+        y += 24.0;
+
+        // Автоподбор контраста APCA: подтягивает цвета текста и значков, акцент и фон не трогает.
+        cv.text("Автоподбор контраста (APCA)", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut contrast = self.cfg.auto_contrast;
+        if ui.switch(cv, id(SETTINGS, N_AUTO_CONTRAST), Rect::new(rc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut contrast, true) {
+            self.cfg.auto_contrast = contrast;
+            self.changed = true;
+        }
+        cv.text("Текст и значки подстраиваются под цвета темы", Rect::new(x, y + 18.0, iw, 13.0), &f.small, dim());
 
         let reset = Rect::new(x, rc.bottom() - 10.0 - 22.0, iw, 22.0);
         if ui.solid_button(cv, id(SETTINGS, N_RESET), reset, "Сбросить внешний вид", chip_bg(), txt(), 7.0) {
@@ -1009,6 +1023,36 @@ impl Settings {
         }
         y += 28.0;
         self.update_row(ui, cv, x, y, iw);
+        y += 30.0;
+
+        if let Some((ver, notes)) = crate::update::notes_to_show() {
+            let box_h = (rc.bottom() - y - 10.0).max(0.0);
+            if box_h >= 40.0 {
+                let box_r = Rect::new(x, y, iw, box_h);
+                cv.rr(box_r, 7.0, inset());
+                let title = format!("{} {ver}", crate::i18n::pick("Что нового в версии", "What's new in version"));
+                cv.text(&title, Rect::new(x + 8.0, y + 6.0, iw - 16.0, 14.0), &f.small, txt());
+                let view = Rect::new(x + 4.0, y + 23.0, iw - 8.0, (box_h - 27.0).max(0.0));
+                let text_w = (view.w - 14.0).max(40.0);
+                let mut total_h = 0.0f32;
+                let mut heights: Vec<(String, f32)> = Vec::with_capacity(notes.len());
+                for item in &notes {
+                    let line = format!("• {item}");
+                    let rows = ((cv.text_w(&line, &f.small) / text_w).ceil() as usize).max(1);
+                    let h = rows as f32 * 14.0;
+                    heights.push((line, h));
+                    total_h += h + 4.0;
+                }
+                let sid = id(SETTINGS, N_NOTES_SCROLL);
+                let off = ui.scroll_begin(cv, sid, view, total_h);
+                let mut iy = view.y - off;
+                for (line, h) in heights {
+                    cv.text(&line, Rect::new(x + 8.0, iy, text_w, h + 2.0), &f.wrap_l, dim());
+                    iy += h + 4.0;
+                }
+                ui.scroll_end(cv, sid);
+            }
+        }
     }
 }
 
@@ -1153,6 +1197,7 @@ mod tests {
             (N_TODO_CLEAN, 1),
             (N_FREE_LAYOUT, 1),
             (N_HIDE_SHOT, 1),
+            (N_AUTO_CONTRAST, 1),
             (N_COLLAPSED, 2),
             (N_PALETTE_STYLE, PALETTE_STYLES.len() as u32),
             (N_SECTION, SECTIONS.len() as u32),

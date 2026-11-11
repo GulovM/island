@@ -140,10 +140,11 @@ pub fn start(hwnd: HWND) {
                 batch.push(c);
             }
             // Слайдер громкости шлёт десятки значений — исполняем только последнее.
-            let batch_full = batch.iter().any(|c| matches!(c, Cmd::Refresh | Cmd::Wifi(_) | Cmd::Bluetooth(_) | Cmd::Airplane(_)));
-            let only_media = batch.iter().all(|c| matches!(c, Cmd::Media | Cmd::Net));
+            let full = batch.iter().any(|c| matches!(c, Cmd::Refresh | Cmd::Wifi(_) | Cmd::Bluetooth(_) | Cmd::Airplane(_)));
+            let has_fast = batch.iter().any(|c| matches!(c, Cmd::Volume(_) | Cmd::Brightness(_) | Cmd::Mute(_)));
+            let needs_refresh = batch.iter().any(|c| !matches!(c, Cmd::Volume(_) | Cmd::Brightness(_) | Cmd::Mute(_) | Cmd::Net | Cmd::Media));
+            let wants_media = batch.iter().any(|c| matches!(c, Cmd::Media));
             let wants_net = batch.iter().any(|c| matches!(c, Cmd::Net));
-            let only_net = batch.iter().all(|c| matches!(c, Cmd::Net));
             let last_volume = batch.iter().rposition(|c| matches!(c, Cmd::Volume(_)));
             let last_bright = batch.iter().rposition(|c| matches!(c, Cmd::Brightness(_)));
             let last_seek = batch.iter().rposition(|c| matches!(c, Cmd::Seek(_)));
@@ -155,14 +156,14 @@ pub fn start(hwnd: HWND) {
                     cmd => unsafe { run(cmd, &mut radio_access) },
                 }
             }
+            if has_fast {
+                notify();
+            }
             // Радио опрашиваем только по запросу и после переключения: WinRT-вызов дорогой.
-            let full = batch_full;
-            if only_net {
-                // Только сеть: снимок громкости и медиа не трогаем.
-            } else if only_media {
-                unsafe { refresh_media() };
-            } else {
+            if needs_refresh {
                 unsafe { refresh(full) };
+            } else if wants_media {
+                unsafe { refresh_media() };
             }
             if wants_net || full {
                 unsafe { net::refresh_net() };
@@ -171,7 +172,9 @@ pub fn start(hwnd: HWND) {
                 // Загрузка WinRT раздувает рабочий набор; в простое он не нужен.
                 crate::sys::trim_working_set();
             }
-            notify();
+            if needs_refresh || wants_media || wants_net || full {
+                notify();
+            }
         }
     });
     if let Err(e) = spawned {
@@ -199,22 +202,37 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool) {
         Cmd::Bluetooth(on) => set_radio(windows::Devices::Radios::RadioKind::Bluetooth, on, radio_access),
         Cmd::Airplane(on) => set_airplane(on, radio_access),
         Cmd::Volume(v) => {
+            let clamped = v.clamp(0.0, 1.0);
             if let Some(ep) = endpoint() {
-                let _ = ep.SetMasterVolumeLevelScalar(v.clamp(0.0, 1.0), std::ptr::null());
+                let _ = ep.SetMasterVolumeLevelScalar(clamped, std::ptr::null());
+            }
+            if let Ok(mut s) = SNAPSHOT.lock() {
+                let mut snap = s.clone().unwrap_or_default();
+                snap.volume = Some(clamped);
+                snap.rev += 1;
+                *s = Some(snap);
             }
         }
         Cmd::Brightness(v) => {
-            crate::bright::set(v);
+            let clamped = v.clamp(0.0, 1.0);
+            crate::bright::set(clamped);
             // Снимок обновляем сами, иначе после удержания ползунок вернётся к старому значению.
             if let Ok(mut s) = SNAPSHOT.lock() {
-                if let Some(s) = s.as_mut() {
-                    s.brightness = Some(v.clamp(0.0, 1.0));
-                }
+                let mut snap = s.clone().unwrap_or_default();
+                snap.brightness = Some(clamped);
+                snap.rev += 1;
+                *s = Some(snap);
             }
         }
         Cmd::Mute(m) => {
             if let Some(ep) = endpoint() {
                 let _ = ep.SetMute(m, std::ptr::null());
+            }
+            if let Ok(mut s) = SNAPSHOT.lock() {
+                let mut snap = s.clone().unwrap_or_default();
+                snap.muted = m;
+                snap.rev += 1;
+                *s = Some(snap);
             }
         }
         Cmd::PlayPause | Cmd::Next | Cmd::Prev | Cmd::Seek(_) => media_command(cmd),
@@ -313,6 +331,11 @@ unsafe fn refresh(full: bool) {
     snap.media = read_media();
 
     if let Ok(mut s) = SNAPSHOT.lock() {
+        if !full {
+            if let Some(cur_b) = s.as_ref().and_then(|p| p.brightness) {
+                snap.brightness = Some(cur_b);
+            }
+        }
         snap.rev = s.as_ref().map_or(0, |p| p.rev) + 1;
         *s = Some(snap);
     }

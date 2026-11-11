@@ -139,6 +139,9 @@ pub struct Fonts {
     pub wrap_l: IDWriteTextFormat,
     pub icon: IDWriteTextFormat,
     pub icon_big: IDWriteTextFormat,
+    /// Моноширинный шрифт (11 px, полужирный) для полей ввода цифр таймера.
+    pub mono: IDWriteTextFormat,
+    pub mono_c: IDWriteTextFormat,
     /// Добавочный трекинг (letter-spacing) в пикселях по указателю формата (`as_raw() as usize`).
     tracking: RefCell<HashMap<usize, f32>>,
     /// Форматы с табличными цифрами (`tnum`) по указателю.
@@ -322,6 +325,10 @@ impl Fonts {
         let wrap_l = wrap(fmt_var(f, ui, wt::PARAGRAPH, 8.0, false)?)?;
         let icon = fmt(f, icons, reg, 9.0, true)?;
         let icon_big = fmt(f, icons, reg, 12.0, true)?;
+        let mono_family = if font_exists(f, w!("Cascadia Mono")) { w!("Cascadia Mono") } else { w!("Consolas") };
+        let mono_size = 11.0 * crate::theme::text_scale();
+        let mono = fmt(f, mono_family, DWRITE_FONT_WEIGHT_SEMI_BOLD, mono_size, false)?;
+        let mono_c = fmt(f, mono_family, DWRITE_FONT_WEIGHT_SEMI_BOLD, mono_size, true)?;
 
         let mut tracking = HashMap::new();
         let mut reg_track = |fmt: &IDWriteTextFormat, track: f32| {
@@ -371,6 +378,8 @@ impl Fonts {
             wrap_l,
             icon,
             icon_big,
+            mono,
+            mono_c,
             tracking: RefCell::new(tracking),
             tabular,
             display_family: display,

@@ -6,11 +6,15 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
-    for f in ["build.rs", "island.rc", "island.manifest", "assets/island.ico"] {
+    for f in ["build.rs", "island.rc", "island.manifest", "assets/island.ico", "CHANGELOG.md"] {
         println!("cargo:rerun-if-changed={f}");
     }
     println!("cargo:rerun-if-env-changed=PATH");
     println!("cargo:rerun-if-env-changed=ISLAND_REQUIRE_RC");
+    println!("cargo:rerun-if-env-changed=ISLAND_GOOGLE_CLIENT_ID");
+    println!("cargo:rerun-if-env-changed=ISLAND_GOOGLE_CLIENT_SECRET");
+    let changelog_escaped = extract_first_changelog_section();
+    println!("cargo:rustc-env=ISLAND_CURRENT_CHANGELOG={changelog_escaped}");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
@@ -68,4 +72,29 @@ fn find_rc() -> Option<PathBuf> {
     // Каталоги вида 10.0.26100.0: сравниваем числами, не строками.
     versions.sort();
     versions.into_iter().rev().map(|(_, v)| v.join("x64").join("rc.exe")).find(|p| p.is_file())
+}
+
+fn extract_first_changelog_section() -> String {
+    let Ok(md) = std::fs::read_to_string("CHANGELOG.md") else {
+        return String::new();
+    };
+    let mut in_sec = false;
+    let mut lines = Vec::new();
+    for raw in md.lines() {
+        let line = raw.trim_end();
+        if line.starts_with("## [") {
+            if line.starts_with("## [Unreleased]") {
+                continue;
+            }
+            if in_sec {
+                break;
+            }
+            in_sec = true;
+            continue;
+        }
+        if in_sec && !line.trim().is_empty() && !line.starts_with('#') {
+            lines.push(line);
+        }
+    }
+    lines.join(r"\n")
 }

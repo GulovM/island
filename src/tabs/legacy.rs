@@ -39,7 +39,7 @@ fn old_sizes(key: &str) -> Option<(&'static [Size], usize)> {
         "timer" => (&TIMER, 1),
         "todo" => (&TODO, 1),
         "cpu" | "gpu" | "ram" => (&RING, 1),
-        "disk" | "net" | "uptime" => (&INFO, 0),
+        "disk" | "net" | "uptime" | "battery" => (&INFO, 0),
         "apps" => (&APPS, 1),
         "speed" => (&SPEED, 1),
         _ => return None,

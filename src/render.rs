@@ -185,16 +185,14 @@ impl App {
         // чтобы содержимое не «сплющивалось» вместе с высотой острова.
         let live_open = 1.0 - open;
         let centre = self.win_w as f32 / s / 2.0;
-        // Что рисуем в свёрнутом виде: мини-плеер, уведомление или «лицо» (раскладка, время, Wi-Fi).
+        // Что рисуем в свёрнутом виде: уведомление или «лицо» (раскладка, время, Wi-Fi, эквалайзер).
         #[derive(PartialEq)]
         enum Slot {
-            Mini,
             Toast,
             Face,
             Drop,
         }
         for (alpha, slot) in [
-            (self.live.mini_alpha(), Slot::Mini),
             (self.live.toast_alpha(), Slot::Toast),
             (self.face.alpha(), Slot::Face),
             (self.drag_a.value.clamp(0.0, 1.0), Slot::Drop),
@@ -204,15 +202,8 @@ impl App {
                 continue;
             }
             let (fw, fh) = match slot {
-                Slot::Mini => live::MINI,
                 Slot::Toast => live::TOAST,
-                Slot::Face => {
-                    if self.live_form() == live::Form::Mini {
-                        (live::MINI.0.max(self.collapsed().0), live::MINI.1.max(self.collapsed().1))
-                    } else {
-                        self.collapsed()
-                    }
-                }
+                Slot::Face => self.idle_pill_size(),
                 Slot::Drop => DROP_PILL,
             };
             let fw = fw.max(self.collapsed().0);
@@ -225,11 +216,15 @@ impl App {
             let cv = Canvas { g, alpha, accent };
             let r = ui::Rect::new(centre - fw / 2.0, 0.0, fw, fh);
             match slot {
-                Slot::Mini => self.live.draw_mini(ui, &cv, r),
                 Slot::Toast => self.live.draw_toast(&cv, r, cursor),
                 Slot::Face => {
                     let label = self.live.timer().map(|t| t.label());
-                    self.face.draw(&cv, r, label.as_deref().map(|l| (l, self.live.timer_pulse())));
+                    let wave = if self.cfg.live_media && self.live.wave_alpha() > 0.004 {
+                        Some((self.live.wave_alpha(), self.live.wave_phase()))
+                    } else {
+                        None
+                    };
+                    self.face.draw(&cv, r, label.as_deref().map(|l| (l, self.live.timer_pulse())), wave);
                 }
                 Slot::Drop => self.draw_drop_pill(&cv, r),
             }
@@ -451,8 +446,8 @@ impl App {
                 pcv.glyph(ui::icon::EDIT, ui::Rect::new(ex - 7.0, ey - 7.0, 14.0, 14.0), false, col);
             }
 
-            // Точка на шестерёнке: найдено обновление, его можно установить в Настройках.
-            if crate::update::available() && !self.settings_open {
+            // Точка на шестерёнке: найдено обновление или есть непросмотренный список «Что нового».
+            if (crate::update::available() || crate::update::has_unseen_notes()) && !self.settings_open {
                 g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
                 gcv.circle(gx + GEAR_R * 0.75, gy - GEAR_R * 0.75, 2.8, accent);
             }

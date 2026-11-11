@@ -92,6 +92,14 @@ impl App {
         (self.tab_w(id) * self.scale, self.tab_h(id) * self.scale)
     }
 
+    pub(crate) fn idle_pill_size(&self) -> (f32, f32) {
+        let (w, h) = self.collapsed();
+        let timer = !self.expanded && !self.stripped() && !self.hidden && self.live.timer().is_some();
+        let playing = !self.expanded && !self.stripped() && !self.hidden && self.cfg.live_media && self.live.playing();
+        let extra = if timer { face::TIMER_SLOT_W } else { 0.0 } + if playing { face::WAVE_SLOT_W } else { 0.0 };
+        (w + extra, h)
+    }
+
     pub(crate) fn collapsed_target(&self) -> (f32, f32) {
         let collapsed = self.collapsed();
         let (w, h) = if self.stripped() {
@@ -99,10 +107,9 @@ impl App {
             (collapsed.0, STRIP_H)
         } else {
             match self.live_form() {
-                live::Form::Mini => (live::MINI.0.max(collapsed.0), live::MINI.1.max(collapsed.1)),
                 live::Form::Toast => (live::TOAST.0.max(collapsed.0), live::TOAST.1.max(collapsed.1)),
                 live::Form::Drop => (DROP_PILL.0.max(collapsed.0), DROP_PILL.1.max(collapsed.1)),
-                live::Form::Idle => collapsed,
+                live::Form::Idle => self.idle_pill_size(),
             }
         };
         (w * self.scale, h * self.scale)
@@ -589,7 +596,6 @@ impl App {
         if should_poll_lang(self.expanded, self.hidden, self.stripped(), self.cfg.idle_face, self.live.timer().is_some())
             && self.face.poll_lang()
         {
-            self.trigger_peek();
             changed = true;
         }
         if game != self.hidden {

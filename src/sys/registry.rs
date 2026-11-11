@@ -77,3 +77,13 @@ pub fn reg_str(machine: bool, key: &str, name: &str) -> Option<String> {
         Some(String::from_utf16_lossy(&buf[..end])).filter(|s| !s.is_empty())
     }
 }
+
+/// Номер сборки Windows из `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\CurrentBuildNumber`.
+pub fn windows_build_number() -> u32 {
+    static BUILD: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *BUILD.get_or_init(|| {
+        reg_str(true, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "CurrentBuildNumber")
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            .unwrap_or(0)
+    })
+}

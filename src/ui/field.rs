@@ -2,7 +2,7 @@
 
 use windows::core::BOOL;
 use windows::Win32::Graphics::Direct2D::D2D1_ANTIALIAS_MODE_ALIASED;
-use windows::Win32::Graphics::DirectWrite::DWRITE_HIT_TEST_METRICS;
+use windows::Win32::Graphics::DirectWrite::{DWRITE_HIT_TEST_METRICS, DWRITE_TEXT_METRICS};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_SHIFT};
 
 use super::{card, dim, fg, mix, txt, Canvas, Rect, Ui};
@@ -246,14 +246,24 @@ impl Ui {
         let shown: String = if f.secret { "•".repeat(f.chars.len()) } else { f.chars.iter().collect() };
         let text: Vec<u16> = shown.encode_utf16().collect();
         let fonts = &cv.g.fonts;
-        let layout = fonts.factory.CreateTextLayout(&text, &fonts.body, 100000.0, r.h).ok();
+        let fmt = if f.digits { &fonts.mono } else { &fonts.body };
+        let fmt_c = if f.digits { &fonts.mono_c } else { &fonts.body };
+        let layout = fonts.factory.CreateTextLayout(&text, fmt, 100000.0, r.h).ok();
+        let text_w = layout
+            .as_ref()
+            .and_then(|l| {
+                let mut tm = DWRITE_TEXT_METRICS::default();
+                l.GetMetrics(&mut tm).ok().map(|()| tm.widthIncludingTrailingWhitespace)
+            })
+            .unwrap_or(0.0);
+        let pad_x = if f.digits { ((inner.w - text_w) * 0.5).max(0.0) } else { 0.0 };
 
         // Позиция курсора по мышке (нажатие и протяжка).
         if mine && down {
             if let Some(l) = &layout {
                 let (mut trailing, mut inside) = (BOOL(0), BOOL(0));
                 let mut m = DWRITE_HIT_TEST_METRICS::default();
-                let x = mouse_x - inner.x + f.scroll;
+                let x = mouse_x - (inner.x + pad_x) + f.scroll;
                 if l.HitTestPoint(x, r.h / 2.0, &mut trailing, &mut inside, &mut m).is_ok() {
                     let p16 = m.textPosition + if trailing.as_bool() { m.length } else { 0 };
                     f.caret = if f.secret { (p16 as usize).min(f.chars.len()) } else { char_at_utf16(&f.chars, p16) };
@@ -281,7 +291,7 @@ impl Ui {
         if caret_x - f.scroll < 0.0 {
             f.scroll = caret_x;
         }
-        if f.scroll < 0.0 || text.is_empty() {
+        if f.scroll < 0.0 || text.is_empty() || pad_x > 0.0 {
             f.scroll = 0.0;
         }
 
@@ -293,7 +303,7 @@ impl Ui {
         // Текст, выделение и курсор — внутри клипа.
         cv.g.dc.PushAxisAlignedClip(&inner.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
         if text.is_empty() {
-            cv.text(placeholder, inner, &fonts.body, mix(dim(), txt(), 0.25));
+            cv.text(placeholder, inner, fmt_c, mix(dim(), txt(), 0.25));
         } else if let Some(l) = &layout {
             if f.has_sel() {
                 let (lo, hi) = f.range();
@@ -305,17 +315,17 @@ impl Ui {
                     let mut c = cv.accent;
                     c.a = 0.35;
                     cv.rr(
-                        Rect::new(inner.x + x0 - f.scroll, r.cy() - 7.0, (x1 - x0).max(1.0), 14.0),
+                        Rect::new(inner.x + pad_x + x0 - f.scroll, r.cy() - 7.0, (x1 - x0).max(1.0), 14.0),
                         3.0,
                         c,
                     );
                 }
             }
-            let tr = Rect::new(inner.x - f.scroll, r.y, caret_x.max(inner.w) + 200.0, r.h);
-            cv.text(&shown, tr, &fonts.body, txt());
+            let tr = Rect::new(inner.x + pad_x - f.scroll, r.y, caret_x.max(inner.w) + 200.0, r.h);
+            cv.text(&shown, tr, fmt, txt());
         }
         if focused && caret_on {
-            cv.rr(Rect::new(inner.x + caret_x - f.scroll, r.cy() - 6.0, 1.2, 12.0), 0.6, txt());
+            cv.rr(Rect::new(inner.x + pad_x + caret_x - f.scroll, r.cy() - 6.0, 1.2, 12.0), 0.6, txt());
         }
         cv.g.dc.PopAxisAlignedClip();
 
@@ -325,7 +335,7 @@ impl Ui {
         }
 
         if focused {
-            self.ime_pos = Some((origin_x + inner.x + caret_x - f.scroll, r.bottom()));
+            self.ime_pos = Some((origin_x + inner.x + pad_x + caret_x - f.scroll, r.bottom()));
         }
     }
 

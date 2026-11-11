@@ -76,6 +76,10 @@ hidden_tabs = []
 # 1 — в свёрнутом острове без музыки показывать время, раскладку клавиатуры и Wi-Fi
 idle_face = 1
 
+# 1 — подбирать цвет текста и значков по перцептивному контрасту APCA, чтобы они читались
+# на любых цветах темы (акцент и фон не меняются). Меняется и в Настройках.
+auto_contrast = 1
+
 # 1 — выполненные задачи в списке дел убираются сами с наступлением нового дня; 0 — не убираются.
 # Меняется и в Настройках.
 todo_clean_done = 0
@@ -227,6 +231,8 @@ pub struct Config {
     pub hidden_tabs: Vec<String>,
     /// Время, раскладка и Wi-Fi на свёрнутом острове, когда музыка не играет.
     pub idle_face: bool,
+    /// Автоподбор контраста текста и значков по APCA.
+    pub auto_contrast: bool,
     /// Убирать выполненные задачи при смене дня.
     pub todo_clean_done: bool,
     /// Устанавливать найденные обновления без вопросов.
@@ -282,6 +288,7 @@ impl Default for Config {
             language: "auto".to_string(),
             hidden_tabs: Vec::new(),
             idle_face: true,
+            auto_contrast: true,
             todo_clean_done: false,
             auto_update: false,
             hide_on_screenshot: true,
@@ -405,6 +412,7 @@ fn save_updates(cfg: &Config) -> Vec<(&'static str, String)> {
         ("hidden_tabs", fmt_list(&cfg.hidden_tabs)),
         ("custom_tabs", fmt_list(&cfg.custom.iter().map(CustomTab::encode).collect::<Vec<_>>())),
         ("idle_face", (cfg.idle_face as u8).to_string()),
+        ("auto_contrast", (cfg.auto_contrast as u8).to_string()),
         ("todo_clean_done", (cfg.todo_clean_done as u8).to_string()),
         ("auto_update", (cfg.auto_update as u8).to_string()),
         ("free_layout", (cfg.free_layout as u8).to_string()),
@@ -654,6 +662,7 @@ fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
         "hidden_tabs",
         "custom_tabs",
         "idle_face",
+        "auto_contrast",
         "todo_clean_done",
         "auto_update",
         "free_layout",
@@ -715,6 +724,7 @@ pub fn parse(text: &str) -> Config {
             },
             ("", "system_colors", Value::Num(v)) => cfg.system_colors = v != 0.0,
             ("", "idle_face", Value::Num(v)) => cfg.idle_face = v != 0.0,
+            ("", "auto_contrast", Value::Num(v)) => cfg.auto_contrast = v != 0.0,
             ("", "todo_clean_done", Value::Num(v)) => cfg.todo_clean_done = v != 0.0,
             ("", "auto_update", Value::Num(v)) => cfg.auto_update = v != 0.0,
             ("", "free_layout", Value::Num(v)) => cfg.free_layout = v != 0.0,
@@ -902,9 +912,7 @@ mod tests {
         assert_eq!(c.tabs.len(), 7);
         assert_eq!(c.key("weather"), None);
         assert!(c.glass);
-        assert!(!c.accent_pill);
-        assert_eq!(c.palette_style, PaletteStyle::Windows);
-        assert_eq!(c.material, Material::Regular);
+        assert!(c.auto_contrast && Config::default().auto_contrast);
         assert_eq!(
             (Config::default().glass, Config::default().glass_opacity, Config::default().accent_pill, Config::default().palette_style, Config::default().material),
             (c.glass, c.glass_opacity, c.accent_pill, c.palette_style, c.material)

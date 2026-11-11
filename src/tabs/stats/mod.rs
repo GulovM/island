@@ -16,7 +16,7 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2, MIB_IF_TABLE2};
-use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives};
 use windows::Win32::System::Power::{CallNtPowerInformation, ProcessorInformation, PROCESSOR_POWER_INFORMATION};
 use windows::Win32::System::ProcessStatus::{GetPerformanceInfo, PERFORMANCE_INFORMATION};
 use windows::Win32::System::SystemInformation::{GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX};
@@ -44,6 +44,9 @@ mod procs;
 use procs::*;
 
 const GB: f32 = 1024.0 * 1024.0 * 1024.0;
+/// Значение `GetDriveTypeW` для встроенного накопителя (`DRIVE_FIXED`; константа лежит в фиче
+/// `Win32_System_WindowsProgramming`, которую ради неё подключать не стоит).
+const DRIVE_FIXED: u32 = 3;
 
 // Номера виджетов в `SPEC`.
 const CPU: usize = 0;
@@ -54,6 +57,8 @@ const NET: usize = 4;
 const UPTIME: usize = 5;
 const TOP_APPS: usize = 6;
 const SPEEDTEST: usize = 7;
+/// Добавлена после `SPEEDTEST`, чтобы не сдвигать номера виджетов (см. `gallery.rs`).
+const BATTERY: usize = 8;
 
 /// Кольцо: мини (кольцо и название), карточка, широкая карточка с подробностями.
 static RING: [Size; 3] = [sz(2, 1), sz(2, 2), sz(4, 2)];
@@ -85,8 +90,17 @@ pub static SPEC: TabSpec = TabSpec {
         Spec { key: "uptime", title: "Аптайм", sizes: &INFO, size: 0, col: 4, row: 2 },
         Spec { key: "apps", title: "Топ приложений", sizes: &APPS_SIZES, size: 0, col: 6, row: 0 },
         Spec { key: "speed", title: "Скорость сети", sizes: &SPEED_SIZES, size: 1, col: 6, row: 2 },
+        Spec { key: "battery", title: "Батарея", sizes: &INFO, size: 0, col: 10, row: 0 },
     ],
 };
+
+/// Встроенный диск (`DRIVE_FIXED`): буква тома и занятое/полное место в гигабайтах.
+#[derive(Clone, Debug)]
+pub struct DiskSample {
+    pub letter: char,
+    pub used_gb: f32,
+    pub total_gb: f32,
+}
 
 #[derive(Default)]
 struct Sample {
@@ -94,8 +108,7 @@ struct Sample {
     mhz: u32,
     ram_used: f32,
     ram_total: f32,
-    disk_used: f32,
-    disk_total: f32,
+    disks: Vec<DiskSample>,
     procs: u32,
     uptime_s: u64,
     rx_bps: f32,
@@ -130,12 +143,21 @@ pub struct Stats {
     online: Online,
     /// Топ по процессору вместо памяти.
     top_by_cpu: bool,
+    /// Что показывает компактная карточка диска: `0` — все диски, `1..=disks.len()` — один том.
+    disk_view: usize,
+    /// Счётчик тиков `poll`: диски опрашиваются раз в 10 с, чтобы не будить спящие HDD.
+    disk_tick: u8,
+    battery: Option<sys::BatteryStatus>,
+    has_battery: bool,
+    /// Одиночный «всплеск» значка молнии при подключении питания.
+    bolt_spring: Spring,
 }
 
 impl Default for Stats {
     fn default() -> Self {
         let s = || Spring::unit(0.0, 220.0, 26.0);
-        Stats {
+        let battery = sys::battery_status();
+        let mut stats = Stats {
             cur: Sample::default(),
             rings: [s(), s(), s()],
             prev_cpu: None,
@@ -144,7 +166,15 @@ impl Default for Stats {
             heavy: Heavy::default(),
             online: Online::default(),
             top_by_cpu: false,
-        }
+            disk_view: 0,
+            disk_tick: 0,
+            battery,
+            has_battery: battery.is_some(),
+            bolt_spring: Spring::unit(0.0, 260.0, 12.0),
+        };
+        // SAFETY: простые вызовы Win32 без указателей на чужую память.
+        unsafe { stats.sample_disks() };
+        stats
     }
 }
 
@@ -184,6 +214,9 @@ impl Stats {
         if let Err(e) = std::thread::Builder::new().name("island-stats".into()).spawn(move || unsafe { worker(gen) }) {
             crate::log::error(&format!("не удалось запустить поток статистики: {e}"));
         }
+        // SAFETY: простые вызовы Win32 без указателей на чужую память.
+        unsafe { self.sample_disks() };
+        self.disk_tick = 0;
         self.poll();
         self.sync();
         true
@@ -191,6 +224,16 @@ impl Stats {
 
     pub fn hide(&mut self) {
         GEN.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Карточка батареи скрыта, если в системе нет аккумулятора.
+    pub fn unavailable(&self, idx: usize) -> bool {
+        idx == BATTERY && !self.has_battery
+    }
+
+    /// Маска скрытых виджетов для сетки (бит = номер в `SPEC`).
+    fn skip_mask(&self) -> u32 {
+        if self.unavailable(BATTERY) { 1 << BATTERY } else { 0 }
     }
 
     pub fn sync(&mut self) -> bool {
@@ -206,17 +249,21 @@ impl Stats {
         for r in &mut self.rings {
             r.step(dt);
         }
+        self.bolt_spring.step(dt);
     }
 
     pub fn animating(&self) -> bool {
-        self.rings.iter().any(|r| !r.settled())
+        self.rings.iter().any(|r| !r.settled()) || !self.bolt_spring.settled()
     }
 
     pub fn poll(&mut self) -> bool {
         unsafe {
             self.sample_cpu();
             self.sample_memory();
-            self.sample_disk();
+            self.disk_tick = (self.disk_tick + 1) % 10;
+            if self.disk_tick == 0 {
+                self.sample_disks();
+            }
             self.sample_net();
             let mut pi = PERFORMANCE_INFORMATION { cb: size_of::<PERFORMANCE_INFORMATION>() as u32, ..Default::default() };
             if GetPerformanceInfo(&mut pi, pi.cb).is_ok() {
@@ -224,6 +271,14 @@ impl Stats {
             }
             self.cur.uptime_s = GetTickCount64() / 1000;
         }
+        let battery = sys::battery_status();
+        // Питание подключили: молния один раз «подпрыгивает».
+        if battery.is_some_and(|b| b.ac_online) && self.battery.is_some_and(|b| !b.ac_online) {
+            self.bolt_spring.value = 1.0;
+            self.bolt_spring.target = 0.0;
+        }
+        self.has_battery = battery.is_some();
+        self.battery = battery;
         let c = &self.cur;
         let ram = if c.ram_total > 0.0 { c.ram_used / c.ram_total } else { 0.0 };
         for (i, v) in [(0usize, c.cpu), (2, ram)] {
@@ -263,11 +318,27 @@ impl Stats {
         }
     }
 
-    unsafe fn sample_disk(&mut self) {
-        let (mut free, mut total) = (0u64, 0u64);
-        if GetDiskFreeSpaceExW(PCWSTR(crate::sys::system_drive_root().as_ptr()), None, Some(&mut total), Some(&mut free)).is_ok() {
-            self.cur.disk_total = total as f32;
-            self.cur.disk_used = total.saturating_sub(free) as f32;
+    /// Перечисляет встроенные тома (`DRIVE_FIXED`): съёмные, сетевые и оптические не учитываются.
+    unsafe fn sample_disks(&mut self) {
+        let mask = GetLogicalDrives();
+        let mut disks = Vec::new();
+        for i in 0..26u32 {
+            if mask & (1 << i) == 0 {
+                continue;
+            }
+            let letter = (b'A' + i as u8) as char;
+            let root: Vec<u16> = format!("{letter}:\\").encode_utf16().chain(std::iter::once(0)).collect();
+            if GetDriveTypeW(PCWSTR(root.as_ptr())) != DRIVE_FIXED {
+                continue;
+            }
+            let (mut free, mut total) = (0u64, 0u64);
+            if GetDiskFreeSpaceExW(PCWSTR(root.as_ptr()), None, Some(&mut total), Some(&mut free)).is_ok() && total > 0 {
+                disks.push(DiskSample { letter, used_gb: total.saturating_sub(free) as f32 / GB, total_gb: total as f32 / GB });
+            }
+        }
+        self.cur.disks = disks;
+        if self.disk_view > self.cur.disks.len() {
+            self.disk_view = 0;
         }
     }
 
@@ -299,7 +370,8 @@ impl Stats {
     /// Рисует вкладку по сетке. `h` — высота панели (с полосой правки).
     pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
         let area = grid.area(w, h);
-        grid.draw(ui, cv, area, 0, |ui, cv, it| self.paint(ui, cv, it));
+        let skip = self.skip_mask();
+        grid.draw(ui, cv, area, skip, |ui, cv, it| self.paint(ui, cv, it));
     }
 
     /// Рисует виджет `it.idx` на собственной вкладке.
@@ -310,9 +382,11 @@ impl Stats {
     unsafe fn paint(&mut self, ui: &mut Ui, cv: &Canvas, it: &Item) {
         match it.idx {
             CPU | GPU | RAM => self.ring_card(cv, it.rect, it.size, it.idx),
-            DISK | NET | UPTIME => self.info_card(cv, it.rect, it.size, it.idx),
+            DISK => self.disk_card(ui, cv, it.rect, it.size),
+            NET | UPTIME => self.info_card(cv, it.rect, it.size, it.idx),
             TOP_APPS => self.top_apps(ui, cv, it.rect, it.size),
             SPEEDTEST => self.speed_card(ui, cv, it.rect, it.size),
+            BATTERY => self.battery_card(cv, it.rect, it.size),
             _ => {}
         }
     }
@@ -385,8 +459,119 @@ impl Stats {
         }
     }
 
-    /// Диск, сеть и аптайм. Узкая (120×120) — главное значение и одна подробность; широкая
-    /// (248×120) добавляет вторую колонку: свободное место, загрузку и отдачу рядом, число процессов.
+    /// Диск: суммарный объём всех встроенных томов. В узкой карточке (`2×2`) клик по ней
+    /// переключает «все» → «C:» → «D:» …; в широкой (`4×2`) при нескольких томах слева итог,
+    /// справа — список всех томов с полосками.
+    unsafe fn disk_card(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect, size: usize) {
+        let f = &cv.g.fonts;
+        let wide = size > 0;
+        let n = self.cur.disks.len();
+        cv.card(r);
+        if !wide && n > 1 {
+            let (_, clicked) = ui.click_area(id(STATS, 25), r);
+            if clicked {
+                self.disk_view = (self.disk_view + 1) % (n + 1);
+            }
+        }
+        let view = if wide || n < 2 { 0 } else { self.disk_view.min(n) };
+        let disks = &self.cur.disks;
+        let (used, total) = match view {
+            0 => (disks.iter().map(|d| d.used_gb).sum::<f32>(), disks.iter().map(|d| d.total_gb).sum::<f32>()),
+            k => (disks[k - 1].used_gb, disks[k - 1].total_gb),
+        };
+        let one = |d: Option<&DiskSample>| match d {
+            Some(d) => format!("{} {}:", crate::i18n::pick("Диск", "Disk"), d.letter),
+            None => crate::i18n::pick("Диск", "Disk").to_string(),
+        };
+        let title = match (view, n) {
+            (0, 0 | 1) => one(disks.first()),
+            (0, _) => crate::i18n::tr("Диски • все").into_owned(),
+            (k, _) => one(disks.get(k - 1)),
+        };
+        let tint = hue(SysColor::Teal, cv.accent);
+        header(cv, r, icon::FOLDER, &title, tint);
+        let list = wide && n > 1;
+        let iw = r.w - 2.0 * P;
+        let lw = if list { 100.0 } else { iw };
+        let frac = if total > 0.0 { used / total } else { 0.0 };
+        let used_s = format!("{used:.0}");
+        let dy = r.y + 42.0;
+        let uw = cv.digits_w(&used_s, 30.0, 600);
+        cv.digits(&used_s, r.x + P - 1.0, uw + 4.0, dy, 30.0, 600, Align::Leading, txt());
+        let total_s = format!("{} {total:.0} {}", crate::i18n::pick("из", "of"), crate::i18n::pick("ГБ", "GB"));
+        if wide && !list {
+            cv.line(&total_s, &f.small, r.x + P + uw + 4.0, iw - uw - 4.0, dy + 6.0, Align::Leading, dim());
+        } else {
+            cv.line(&total_s, &f.small, r.x + P, lw, dy + 21.0, Align::Leading, dim());
+        }
+        // Внизу: сколько свободно и какая доля занята, над ними полоса.
+        let free = format!("{:.0} {}", (total - used).max(0.0), crate::i18n::pick("ГБ своб.", "GB free"));
+        let foot = r.bottom() - P - 5.0;
+        cv.line(&free, &f.small, r.x + P, lw, foot, Align::Leading, dim());
+        cv.line(&format!("{:.0}%", frac * 100.0), &f.small_b, r.x + P, lw, foot, Align::Trailing, txt());
+        cv.progress(Rect::new(r.x + P, r.bottom() - P - 21.0, lw, 6.0), frac, tint);
+        if list {
+            let x0 = r.x + P + lw + 12.0;
+            let w0 = r.right() - P - x0;
+            let rows = (((r.h - 40.0) / 18.0).floor() as usize).clamp(1, n);
+            for (k, d) in disks.iter().take(rows).enumerate() {
+                let y = r.y + 40.0 + k as f32 * 18.0;
+                let pct = if d.total_gb > 0.0 { d.used_gb / d.total_gb } else { 0.0 };
+                cv.line(&format!("{}:", d.letter), &f.small_b, x0, 18.0, y, Align::Leading, txt());
+                cv.progress(Rect::new(x0 + 20.0, y - 2.5, (w0 - 54.0).max(0.0), 5.0), pct, tint);
+                cv.line(&format!("{:.0}%", pct * 100.0), &f.small, x0, w0, y, Align::Trailing, dim());
+            }
+        }
+    }
+
+    /// Батарея: процент, полоса заряда и молния, которая «подпрыгивает» при подключении питания.
+    unsafe fn battery_card(&self, cv: &Canvas, r: Rect, size: usize) {
+        let f = &cv.g.fonts;
+        let wide = size > 0;
+        let iw = r.w - 2.0 * P;
+        cv.card(r);
+        let Some(b) = self.battery else {
+            header(cv, r, icon::BATTERY, "Батарея", dim());
+            return;
+        };
+        let tint = if !b.ac_online && b.percent <= 20 {
+            crate::ui::status_red()
+        } else if b.saver_on {
+            crate::ui::status_orange()
+        } else {
+            status_green()
+        };
+        header(cv, r, icon::BATTERY, "Батарея", tint);
+        let frac = f32::from(b.percent) / 100.0;
+        let big = b.percent.to_string();
+        let bw = cv.digits_w(&big, 30.0, 600);
+        let dy = r.y + 44.0;
+        cv.digits(&big, r.x + P - 1.0, bw + 4.0, dy, 30.0, 600, Align::Leading, txt());
+        cv.line("%", &f.body, r.x + P + bw + 5.0, 20.0, dy + 4.0, Align::Leading, dim());
+        if b.ac_online {
+            let k = 1.0 + 0.5 * self.bolt_spring.value.max(0.0);
+            let s = 12.0 * k;
+            let cx = r.x + P + bw + 5.0 + 28.0;
+            cv.symbol(icon::BOLT, Rect::new(cx - s / 2.0, dy - s / 2.0, s, s), 11.0 * k, tint);
+        }
+        let status = if b.charging {
+            "Заряжается"
+        } else if b.ac_online {
+            "Питание от сети"
+        } else {
+            "От батареи"
+        };
+        let status = crate::i18n::tr(status);
+        if wide {
+            cv.line(&status, &f.body, r.x + P, iw, dy + 4.0, Align::Trailing, txt());
+        } else {
+            cv.line(&status, &f.small, r.x + P, iw, r.bottom() - P - 5.0, Align::Leading, dim());
+        }
+        cv.progress(Rect::new(r.x + P, r.bottom() - P - if wide { 6.0 } else { 21.0 }, iw, 6.0), frac, tint);
+    }
+
+    /// Сеть и аптайм. Узкая (120×120) — главное значение и одна подробность; широкая (248×120)
+    /// добавляет вторую колонку: загрузку и отдачу рядом, число процессов.
     unsafe fn info_card(&self, cv: &Canvas, r: Rect, size: usize, i: usize) {
         let f = &cv.g.fonts;
         let c = &self.cur;
@@ -394,27 +579,6 @@ impl Stats {
         let iw = r.w - 2.0 * P;
         cv.card(r);
         match i {
-            DISK => {
-                let tint = hue(SysColor::Teal, cv.accent);
-                header(cv, r, icon::FOLDER, "Диск C:", tint);
-                let frac = if c.disk_total > 0.0 { c.disk_used / c.disk_total } else { 0.0 };
-                let used = format!("{:.0}", c.disk_used / GB);
-                let dy = r.y + 42.0;
-                let uw = cv.digits_w(&used, 30.0, 600);
-                cv.digits(&used, r.x + P - 1.0, uw + 4.0, dy, 30.0, 600, Align::Leading, txt());
-                let total = format!("{} {:.0} {}", crate::i18n::pick("из", "of"), c.disk_total / GB, crate::i18n::pick("ГБ", "GB"));
-                if wide {
-                    cv.line(&total, &f.small, r.x + P + uw + 4.0, iw - uw - 4.0, dy + 6.0, Align::Leading, dim());
-                } else {
-                    cv.line(&total, &f.small, r.x + P, iw, dy + 21.0, Align::Leading, dim());
-                }
-                // Внизу: сколько свободно и какая доля занята, над ними полоса.
-                let free = format!("{:.0} {}", (c.disk_total - c.disk_used).max(0.0) / GB, crate::i18n::pick("ГБ своб.", "GB free"));
-                let foot = r.bottom() - P - 5.0;
-                cv.line(&free, &f.small, r.x + P, iw, foot, Align::Leading, dim());
-                cv.line(&format!("{:.0}%", frac * 100.0), &f.small_b, r.x + P, iw, foot, Align::Trailing, txt());
-                cv.progress(Rect::new(r.x + P, r.bottom() - P - 21.0, iw, 6.0), frac, tint);
-            }
             NET => {
                 header(cv, r, icon::WIFI, "Сеть", hue(SysColor::Blue, cv.accent));
                 let down = hue(SysColor::Blue, cv.accent);
@@ -580,13 +744,17 @@ impl Stats {
         c.mhz = 3400;
         c.ram_used = 11.2 * GB;
         c.ram_total = 16.0 * GB;
-        c.disk_used = 312.0 * GB;
-        c.disk_total = 476.0 * GB;
+        c.disks = vec![
+            DiskSample { letter: 'C', used_gb: 312.0, total_gb: 476.0 },
+            DiskSample { letter: 'D', used_gb: 640.0, total_gb: 931.0 },
+        ];
         c.procs = 241;
         c.uptime_s = 3 * 86400 + 4 * 3600 + 17 * 60;
         c.rx_bps = 2.4e6;
         c.tx_bps = 180e3;
         self.cpu_name = "AMD Ryzen 7 5800H".into();
+        self.battery = Some(sys::BatteryStatus { ac_online: false, charging: false, saver_on: false, percent: 78 });
+        self.has_battery = true;
         let gb = f64::from(GB);
         let h = &mut self.heavy;
         h.gpu = Some(0.18);

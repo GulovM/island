@@ -115,11 +115,9 @@ pub struct App {
     pub(crate) pill_sig: (usize, i32, i32),
     /// Направление сдвига при смене вкладки: +1 — новая справа.
     pub(crate) tab_dir: f32,
-    /// Индикатор в свёрнутой форме: мини-плеер и уведомления.
+    /// Индикатор в свёрнутой форме: эквалайзер и уведомления.
     pub(crate) live: live::Live,
-    /// Периодический и мгновенный peek лица во время мини-плеера.
-    pub(crate) peek: peek::Peek,
-    /// Включён ли секундный тик мини-плеера.
+    /// Включён ли секундный/кадровый тик свёрнутого острова.
     pub(crate) live_tick_on: LiveTick,
     /// Режим «полоска над развёрнутыми окнами» (по умолчанию выключен).
     /// Клавиатурный ввод включён: окно временно активно и принимает фокус.
@@ -198,22 +196,28 @@ impl App {
             // Новый путь: Windows.UI.Composition HostBackdropBrush с клипом по контуру тела.
             // DWMWA_USE_HOSTBACKDROPBRUSH (17) + LWA_ALPHA разрешают HostBackdropBrush в окне.
             let _ = SetLayeredWindowAttributes(glass_wnd, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
-            let on = BOOL(1);
-            let _ = windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
-                glass_wnd,
-                windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(17), // DWMWA_USE_HOSTBACKDROPBRUSH
-                &on as *const _ as _,
-                4,
-            );
-            let backdrop = match crate::backdrop::Backdrop::new(glass_wnd) {
-                Ok(b) => {
-                    log::info("стекло: подложка Composition HostBackdropBrush создана");
-                    Some(b)
+            let build = crate::sys::windows_build_number();
+            let backdrop = if crate::backdrop::use_host_backdrop(build) {
+                let on = BOOL(1);
+                let _ = windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+                    glass_wnd,
+                    windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(17), // DWMWA_USE_HOSTBACKDROPBRUSH
+                    &on as *const _ as _,
+                    4,
+                );
+                match crate::backdrop::Backdrop::new(glass_wnd) {
+                    Ok(b) => {
+                        log::info("стекло: подложка Composition HostBackdropBrush создана");
+                        Some(b)
+                    }
+                    Err(e) => {
+                        log::info(&format!("стекло: Composition недоступна ({e}), откат к accent-размытию"));
+                        None
+                    }
                 }
-                Err(e) => {
-                    log::info(&format!("стекло: Composition недоступна ({e}), откат к accent-размытию"));
-                    None
-                }
+            } else {
+                log::info(&format!("стекло: Windows 10 (build {build}), используется accent blur-behind"));
+                None
             };
             // Если новый путь не удался — пробуем старый accent blur-behind.
             let blur_ok = if backdrop.is_some() {
@@ -310,7 +314,6 @@ impl App {
                 pill_sig: (0, 0, 0),
                 tab_dir: 1.0,
                 live: live::Live::new(cfg.live_media),
-                peek: peek::Peek::new(),
                 live_tick_on: LiveTick::Off,
                 kbd: false,
                 prev_fg: HWND(std::ptr::null_mut()),
@@ -320,6 +323,7 @@ impl App {
                 cfg,
             };
             theme::set_glass(app.cfg.glass);
+            theme::set_auto_contrast(app.cfg.auto_contrast);
             app.apply_theme();
             app.apply_monitor(mon, true);
             // Стартовое состояние сразу, без анимации.
@@ -434,6 +438,8 @@ impl App {
         self.cfg.palette_style = new.palette_style;
         self.cfg.accent_pill = new.accent_pill;
         theme::set_glass(new.glass);
+        self.cfg.auto_contrast = new.auto_contrast;
+        theme::set_auto_contrast(new.auto_contrast);
         if (self.cfg.ui_scale - new.ui_scale).abs() > 0.001 {
             self.cfg.ui_scale = new.ui_scale;
             set_ui_scale(new.ui_scale);
@@ -505,6 +511,7 @@ impl App {
         self.tab = self.order.iter().position(|&i| i == current).unwrap_or(0);
         self.cfg = cfg;
         theme::set_glass(self.cfg.glass);
+        theme::set_auto_contrast(self.cfg.auto_contrast);
         set_ui_scale(self.cfg.ui_scale);
         self.refresh_language();
         self.apply_monitor(self.mon, true);
@@ -544,90 +551,11 @@ impl App {
         self.retarget_pill();
         let form = self.live_form();
         self.live.set_form(form);
-        // Часы, раскладка и Wi-Fi — только когда свёрнутому острову больше нечего показывать.
+        // Часы, раскладка, Wi-Fi и эквалайзер — только когда свёрнутому острову больше нечего показывать.
         let idle = form == live::Form::Idle && !self.expanded && !self.stripped() && !self.hidden;
-        self.face.set_visible(idle, self.live.timer().is_some());
-        self.apply_peek_targets();
-    }
-
-    /// Подходит ли текущее состояние острова для peek лица (свёрнут, играет музыка в мини-плеере,
-    /// и лицо включено в настройках либо активен таймер Today).
-    pub(crate) fn can_peek(&self) -> bool {
-        self.live_form() == live::Form::Mini
-            && self.live.playing()
-            && (self.cfg.idle_face || self.live.timer().is_some())
-    }
-
-    /// Выставляет целевые альфы и обновляет данные лица при входе или продолжении peek.
-    fn enter_peek_targets(&mut self) {
-        self.face.refresh_all();
-        self.set_peek_fade(true);
-        self.live.set_mini_target(0.0);
-        self.face.set_alpha_target(1.0);
-    }
-
-    /// Переключает пружины прозрачности лица и мини-плеера между медленным peek и обычным проявлением.
-    fn set_peek_fade(&mut self, slow: bool) {
-        self.face.tune_alpha(if slow { peek::PEEK_FADE_SPRING } else { anim::FADE_SPRING });
-        self.live.tune_mini(if slow { peek::PEEK_FADE_SPRING } else { anim::FADE_SPRING });
-    }
-
-    /// Запускает мгновенный или периодический peek лица на свёрнутом острове.
-    pub(crate) fn trigger_peek(&mut self) {
-        if !self.can_peek() {
-            return;
-        }
-        if !self.peek.is_showing() {
-            self.peek.trigger();
-        }
-        self.enter_peek_targets();
-    }
-
-    /// Применяет целевые альфы активного peek поверх обычного retarget.
-    pub(crate) fn apply_peek_targets(&mut self) {
-        if !self.can_peek() {
-            if self.peek.needs_reset() {
-                self.peek.cancel();
-                self.set_peek_fade(false);
-            }
-            return;
-        }
-        if let Some((mini_target, face_target)) = self.peek.target_alphas() {
-            self.live.set_mini_target(mini_target);
-            self.face.set_alpha_target(face_target);
-        }
-    }
-
-    /// Продвигает состояние peek на шаг времени `dt`.
-    pub(crate) fn step_peek(&mut self, dt: f32) {
-        if !self.can_peek() {
-            if self.peek.needs_reset() {
-                self.peek.cancel();
-                self.set_peek_fade(false);
-                self.retarget();
-            }
-            return;
-        }
-
-        // SAFETY: оконный поток, вызов GetCursorPos безопасен.
-        let paused = unsafe { self.cursor_inside() } || self.ui.holds_pointer();
-        let face_settled = self.face.settled() && self.face.alpha() > 0.95;
-        let mini_settled = self.live.mini_settled() && self.live.mini_alpha() > 0.95;
-
-        match self.peek.step(dt, paused, face_settled, mini_settled) {
-            peek::PeekTransition::Start => {
-                self.enter_peek_targets();
-            }
-            peek::PeekTransition::FadeOut => {
-                self.live.set_mini_target(1.0);
-                self.face.set_alpha_target(0.0);
-            }
-            peek::PeekTransition::Finish => {
-                self.set_peek_fade(false);
-                self.retarget();
-            }
-            peek::PeekTransition::None => {}
-        }
+        let wave_on = idle && self.cfg.live_media && self.live.playing();
+        self.live.set_wave_active(wave_on);
+        self.face.set_visible(idle, self.live.timer().is_some(), wave_on);
     }
 
     /// Наводит каплю на выбранную вкладку; при свёрнутом острове или смене набора вкладок — без анимации.
@@ -655,7 +583,6 @@ impl App {
             || !self.drag_a.settled()
             || self.face.animating()
             || self.live.animating()
-            || self.peek.animating()
             || self.ui.animating()
             || (self.expanded && self.tabs.animating())
     }
@@ -667,7 +594,6 @@ impl App {
         self.tabs.step(dt);
         self.live.step(dt);
         self.face.step(dt);
-        self.step_peek(dt);
         self.glow.step(dt);
         if self.glow.settled() {
             self.glow.snap();
@@ -759,7 +685,6 @@ mod tests {
                 pill_sig: (0, 0, 0),
                 tab_dir: 1.0,
                 live: live::Live::new(cfg.live_media),
-                peek: peek::Peek::new(),
                 live_tick_on: LiveTick::Off,
                 kbd: false,
                 prev_fg: HWND(std::ptr::null_mut()),
@@ -772,12 +697,17 @@ mod tests {
     }
 
     #[test]
-    fn test_can_peek_idle_face_and_timer() {
+    fn test_idle_pill_size_and_wave_visibility() {
         let mut cfg = Config::default();
         cfg.idle_face = false;
         let mut app = App::for_test(cfg);
+        let base_w = app.collapsed().0;
 
-        // Симулируем воспроизведение музыки (Form::Mini && playing == true)
+        app.retarget();
+        assert_eq!(app.idle_pill_size().0, base_w);
+        assert!(!app.face.visible());
+
+        // Симулируем воспроизведение музыки
         let snap = bg::Snapshot {
             wifi: None,
             bluetooth: None,
@@ -804,175 +734,34 @@ mod tests {
             rev: 1,
         };
         app.live.sync_media(&snap);
-        assert_eq!(app.live_form(), live::Form::Mini);
-        assert!(app.live.playing());
+        app.retarget();
 
-        // При idle_face = false и без активного таймера can_peek() возвращает false и опрос раскладки не выполняется
-        assert!(!app.cfg.idle_face);
-        assert!(app.live.timer().is_none());
-        assert!(!app.can_peek(), "при выключенном лице и без таймера peek запрещён");
-        assert!(
-            !crate::window::should_poll_lang(app.expanded, app.hidden, app.stripped(), app.cfg.idle_face, app.live.timer().is_some()),
-            "опрос раскладки заблокирован и не триггерит лишний repaint"
-        );
+        // Свёрнутая капсула расширяется на WAVE_SLOT_W, лицо и волна активны даже при idle_face = false
+        assert_eq!(app.live_form(), live::Form::Idle);
+        assert_eq!(app.idle_pill_size().0, base_w + face::WAVE_SLOT_W);
+        assert!(app.face.visible());
+        while app.live.animating() {
+            app.live.step(0.05);
+        }
+        assert!(app.live.wave_alpha() > 0.99);
 
-        // Если активен таймер Today, can_peek() разрешён даже при idle_face = false
+        // При активном таймере добавляется также TIMER_SLOT_W
         app.live.set_timer(Some(live::TimerView {
             frac: 0.5,
             secs: 60,
             paused: false,
             next_ms: 1000,
         }));
-        assert!(app.can_peek(), "активный таймер разрешает peek лица");
+        app.retarget();
+        assert_eq!(app.idle_pill_size().0, base_w + face::TIMER_SLOT_W + face::WAVE_SLOT_W);
 
-        // Если таймер сброшен, но пользователь включил idle_face = true, can_peek() разрешён
-        app.live.set_timer(None);
-        app.cfg.idle_face = true;
-        assert!(app.can_peek(), "включённое в настройках лицо разрешает peek");
-
-        // Если остров развёрнут, can_peek() запрещён
+        // При разворачивании острова капсула и волна гаснут
         app.expanded = true;
-        assert!(!app.can_peek(), "на развёрнутом острове peek запрещён");
-    }
-
-    #[test]
-    fn test_repeated_trigger_peek_does_not_extend_hold() {
-        let cfg = Config::default();
-        let mut app = App::for_test(cfg);
-
-        let snap = bg::Snapshot {
-            wifi: None,
-            bluetooth: None,
-            airplane: None,
-            volume: None,
-            brightness: None,
-            muted: false,
-            media: Some(bg::Media {
-                title: "Track".into(),
-                artist: "Artist".into(),
-                playing: true,
-                pos: 0.0,
-                dur: 100.0,
-                at: Instant::now(),
-                rate: 1.0,
-                art: None,
-                key: 1,
-                can_seek: true,
-                min_seek: 0.0,
-                max_seek: 100.0,
-            }),
-            ssid: None,
-            audio: None,
-            rev: 1,
-        };
-        app.live.sync_media(&snap);
-        assert!(app.can_peek());
-
-        // Первый триггер: запуск фазы In
-        app.trigger_peek();
-        assert_eq!(app.peek.phase(), peek::PeekPhase::In);
-
-        // Переводим пружины лица в устоявшееся состояние (alpha = 1.0, settled)
-        app.face.set_alpha_target(1.0);
-        while !app.face.settled() {
-            app.face.step(0.05);
-        }
-        app.live.set_mini_target(0.0);
-        while !app.live.mini_settled() {
+        app.retarget();
+        assert!(!app.face.visible());
+        while app.live.animating() {
             app.live.step(0.05);
         }
-
-        // Шаг переводит peek в фазу Hold
-        app.step_peek(0.05);
-        assert_eq!(app.peek.phase(), peek::PeekPhase::Hold);
-
-        // Прошло 0.5 секунды из 1.2 секунд удержания
-        app.step_peek(0.5);
-        assert_eq!(app.peek.phase(), peek::PeekPhase::Hold);
-        let rem_before = app.peek.hold_remaining();
-        assert!(rem_before < peek::PEEK_HOLD_SECS);
-
-        // Повторный вызов trigger_peek (например, быстрая повторная смена раскладки)
-        // не должен перезапускать фазу In и не должен сбрасывать hold_remaining обратно к 1.2
-        app.trigger_peek();
-        assert_eq!(app.peek.phase(), peek::PeekPhase::Hold);
-        assert_eq!(app.peek.hold_remaining(), rem_before);
-
-        // По завершении оставшегося времени (0.75с) peek переходит в FadeOut по расписанию
-        app.step_peek(rem_before + 0.05);
-        assert_eq!(app.peek.phase(), peek::PeekPhase::Out);
-    }
-
-    #[test]
-    fn test_trigger_peek_during_out_restarts_in() {
-        let mut app = App::for_test(Config::default());
-        let snap = bg::Snapshot {
-            wifi: None,
-            bluetooth: None,
-            airplane: None,
-            volume: None,
-            brightness: None,
-            muted: false,
-            media: Some(bg::Media {
-                title: "Track".into(),
-                artist: "Artist".into(),
-                playing: true,
-                pos: 0.0,
-                dur: 100.0,
-                at: Instant::now(),
-                rate: 1.0,
-                art: None,
-                key: 1,
-                can_seek: true,
-                min_seek: 0.0,
-                max_seek: 100.0,
-            }),
-            ssid: None,
-            audio: None,
-            rev: 1,
-        };
-        app.live.sync_media(&snap);
-        assert!(app.can_peek());
-
-        // Первый триггер: запуск фазы In
-        app.trigger_peek();
-        assert_eq!(app.peek.phase(), peek::PeekPhase::In);
-
-        // Переводим пружины лица в устоявшееся состояние (alpha = 1.0, settled)
-        app.face.set_alpha_target(1.0);
-        while !app.face.settled() {
-            app.face.step(0.05);
-        }
-        app.live.set_mini_target(0.0);
-        while !app.live.mini_settled() {
-            app.live.step(0.05);
-        }
-
-        // Шаг переводит peek в фазу Hold
-        app.step_peek(0.05);
-        assert_eq!(app.peek.phase(), peek::PeekPhase::Hold);
-
-        // Проматываем удержание до перехода в Out
-        let rem = app.peek.hold_remaining();
-        app.step_peek(rem + 0.05);
-        assert_eq!(app.peek.phase(), peek::PeekPhase::Out);
-
-        // В фазе Out целевые альфы перевёрнуты (мини-плеер возвращается, лицо гаснет)
-        assert_eq!(app.peek.target_alphas(), Some((1.0, 0.0)));
-
-        // Смена раскладки во время фазы Out перезапускает peek в фазу In
-        app.trigger_peek();
-        assert_eq!(app.peek.phase(), peek::PeekPhase::In);
-        assert_eq!(app.peek.target_alphas(), Some((0.0, 1.0)));
-
-        // Пружины получают согласованные с In цели: лицо проявляется (1.0), мини-плеер скрывается (0.0)
-        while !app.face.settled() {
-            app.face.step(0.05);
-        }
-        while !app.live.mini_settled() {
-            app.live.step(0.05);
-        }
-        assert!((app.face.alpha() - 1.0).abs() < 1e-3);
-        assert!((app.live.mini_alpha() - 0.0).abs() < 1e-3);
+        assert!(app.live.wave_alpha() < 0.01);
     }
 }

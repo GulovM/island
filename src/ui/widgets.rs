@@ -197,9 +197,22 @@ impl Ui {
             }
         }
         cv.glyph(glyph, Rect::new(r.x + 6.0, r.y, 18.0, r.h), false, if v > 0.04 { on_fill } else { txt() });
-        // Проценты лежат на заливке, если она дотянулась до них (у короткого ползунка — раньше).
-        let col = if r.x + (r.w * v).max(r.h) > r.right() - 34.0 { on_fill } else { txt() };
-        cv.text(&format!("{}%", (v * 100.0).round() as i32), Rect::new(r.right() - 52.0, r.y, 42.0, r.h), &cv.g.fonts.body_r, col);
+        let pct = format!("{}%", (v * 100.0).round() as i32);
+        let text_r = Rect::new(r.right() - 52.0, r.y, 42.0, r.h);
+        let fill_right = if v > 0.0 { r.x + (r.w * v).max(r.h) } else { r.x };
+        let split_x = fill_right.clamp(text_r.x, text_r.right());
+        if split_x > text_r.x {
+            let clip_l = Rect::new(text_r.x, text_r.y, split_x - text_r.x, text_r.h);
+            cv.g.dc.PushAxisAlignedClip(&clip_l.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
+            cv.text(&pct, text_r, &cv.g.fonts.body_r, on_fill);
+            cv.g.dc.PopAxisAlignedClip();
+        }
+        if split_x < text_r.right() {
+            let clip_r = Rect::new(split_x, text_r.y, text_r.right() - split_x, text_r.h);
+            cv.g.dc.PushAxisAlignedClip(&clip_r.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
+            cv.text(&pct, text_r, &cv.g.fonts.body_r, txt());
+            cv.g.dc.PopAxisAlignedClip();
+        }
         changed
     }
 
@@ -233,11 +246,25 @@ impl Ui {
                 cv.gradient_stops(fr, rad, &[(0.0, top), (0.6, D2D1_COLOR_F { a: 0.0, ..top })], false);
             }
         }
-        // Значок внизу лежит на заливке почти всегда; проценты сверху — на заливке только у полного ползунка.
+        // Значок внизу лежит на заливке почти всегда; проценты сверху — двухпроходно по границе заливки.
         let glyph_rect = Rect::new(r.x, r.bottom() - r.w + 4.0, r.w, r.w - 8.0);
         cv.glyph(glyph, glyph_rect, false, if v > 0.04 { on_fill } else { txt() });
-        let col = if v > 0.93 { on_fill } else { txt() };
-        cv.text(&format!("{}%", (v * 100.0).round() as i32), Rect::new(r.x, r.y + 6.0, r.w, 14.0), &cv.g.fonts.small_c, col);
+        let pct = format!("{}%", (v * 100.0).round() as i32);
+        let text_r = Rect::new(r.x, r.y + 6.0, r.w, 14.0);
+        let fill_top = if v > 0.0 { r.bottom() - (r.h * v).max(r.w) } else { r.bottom() };
+        let split_y = fill_top.clamp(text_r.y, text_r.bottom());
+        if split_y > text_r.y {
+            let clip_t = Rect::new(text_r.x, text_r.y, text_r.w, split_y - text_r.y);
+            cv.g.dc.PushAxisAlignedClip(&clip_t.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
+            cv.text(&pct, text_r, &cv.g.fonts.small_c, txt());
+            cv.g.dc.PopAxisAlignedClip();
+        }
+        if split_y < text_r.bottom() {
+            let clip_b = Rect::new(text_r.x, split_y, text_r.w, text_r.bottom() - split_y);
+            cv.g.dc.PushAxisAlignedClip(&clip_b.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
+            cv.text(&pct, text_r, &cv.g.fonts.small_c, on_fill);
+            cv.g.dc.PopAxisAlignedClip();
+        }
         changed
     }
 

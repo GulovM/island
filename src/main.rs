@@ -16,7 +16,6 @@ mod ios;
 mod log;
 mod online;
 mod perf;
-mod peek;
 mod sys;
 mod theme;
 mod tabs;
@@ -133,10 +132,9 @@ pub(crate) const PASTE_DELAY_MS: u32 = 160;
 pub(crate) const TOAST_TIMER: usize = 8;
 /// Идентификатор фокуса ввода, когда клавиатура у острова только ради уведомления о таймере (Esc его закрывает).
 pub(crate) const NOTICE_FOCUS: u32 = 0xFFFF_FF00;
-/// Кадры мини-плеера (анимация эквалайзера и прогресс): ~30 в секунду, только пока он виден и
-/// играет музыка. Таймер, а не vsync, — вдвое меньше кадров при той же плавности для 3 столбиков.
+/// Кадры анимации волны эквалайзера и пульсации паузы таймера на свёрнутом острове (~15 в секунду).
 pub(crate) const LIVE_TIMER: usize = 9;
-pub(crate) const LIVE_TICK_MS: u32 = 33;
+pub(crate) const LIVE_TICK_MS: u32 = 66;
 /// Смена минуты для часов на свёрнутом острове: срабатывает раз в минуту и только пока они видны.
 pub(crate) const FACE_TIMER: usize = 10;
 /// Файл в `%APPDATA%\island` с выбором режима полоски: «1» — включён.

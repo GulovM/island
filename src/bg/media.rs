@@ -156,6 +156,80 @@ impl Timeline {
 thread_local! {
     /// Менеджер медиасессий создаётся один раз: его запрос — самая дорогая часть опроса.
     static MEDIA_MGR: RefCell<Option<Mgr>> = const { RefCell::new(None) };
+    /// AUMID последней активно игравшей медиасессии (для сохранения выбора после постановки на паузу).
+    static LAST_PLAYING_AUMID: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Чистая функция выбора индекса медиасессии из списка `(aumid, is_playing, is_current)`.
+/// 1) Если есть играющие — предпочитает играющую и текущую, иначе первую играющую.
+/// 2) Если ни одна не играет — ищет `last_playing_aumid`, иначе `is_current`, иначе первую.
+fn pick_session_index(sessions: &[(&str, bool, bool)], last_playing_aumid: &str) -> Option<usize> {
+    if sessions.is_empty() {
+        return None;
+    }
+    if let Some(idx) = sessions.iter().position(|&(_, playing, current)| playing && current) {
+        return Some(idx);
+    }
+    if let Some(idx) = sessions.iter().position(|&(_, playing, _)| playing) {
+        return Some(idx);
+    }
+    if !last_playing_aumid.is_empty() {
+        if let Some(idx) = sessions.iter().position(|&(aumid, _, _)| aumid == last_playing_aumid) {
+            return Some(idx);
+        }
+    }
+    if let Some(idx) = sessions.iter().position(|&(_, _, current)| current) {
+        return Some(idx);
+    }
+    Some(0)
+}
+
+/// Выбирает целевую медиасессию из всех активных сессий `GetSessions()`.
+fn select_session(mgr: &Mgr) -> Option<GlobalSystemMediaTransportControlsSession> {
+    let cur = mgr.GetCurrentSession().ok();
+    let cur_aumid = cur
+        .as_ref()
+        .and_then(|s| s.SourceAppUserModelId().ok())
+        .map(|h| h.to_string())
+        .unwrap_or_default();
+
+    let list: Vec<GlobalSystemMediaTransportControlsSession> = mgr
+        .GetSessions()
+        .ok()
+        .map(|v| v.into_iter().collect())
+        .unwrap_or_default();
+
+    if list.is_empty() {
+        return cur;
+    }
+
+    let mut meta: Vec<(String, bool, bool)> = Vec::with_capacity(list.len());
+    for s in &list {
+        let aumid = s
+            .SourceAppUserModelId()
+            .ok()
+            .map(|h| h.to_string())
+            .unwrap_or_default();
+        let playing = s
+            .GetPlaybackInfo()
+            .ok()
+            .and_then(|i| i.PlaybackStatus().ok())
+            == Some(Status::Playing);
+        let is_cur = !cur_aumid.is_empty() && aumid == cur_aumid;
+        meta.push((aumid, playing, is_cur));
+    }
+
+    let refs: Vec<(&str, bool, bool)> = meta
+        .iter()
+        .map(|(a, p, c)| (a.as_str(), *p, *c))
+        .collect();
+    let idx = LAST_PLAYING_AUMID.with(|last| pick_session_index(&refs, &last.borrow()))?;
+    if meta[idx].1 && !meta[idx].0.is_empty() {
+        LAST_PLAYING_AUMID.with(|last| {
+            *last.borrow_mut() = meta[idx].0.clone();
+        });
+    }
+    list.into_iter().nth(idx)
 }
 
 /// Менеджер сообщил, что сессии поменялись: подписку на события сессии нужно пересоздать,
@@ -197,56 +271,68 @@ struct SessionWatch {
 }
 
 thread_local! {
-    /// Подписка на события текущей медиасессии: сессия, токены событий и AUMID приложения.
-    static SESSION_WATCH: RefCell<Option<SessionWatch>> = const { RefCell::new(None) };
+    /// Подписки на события всех активных медиасессий.
+    static SESSION_WATCH: RefCell<Vec<SessionWatch>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Подписывается на изменения текущей медиасессии: смена трека, пауза/воспроизведение и перемотка
+/// Подписывается на изменения всех активных медиасессий: смена трека, пауза/воспроизведение и перемотка
 /// будят фоновый поток, поэтому опрашивать медиа по таймеру не нужно.
 unsafe fn watch_media() {
     let Some(mgr) = media_manager() else { return };
-    let cur = mgr.GetCurrentSession().ok();
-    let id = cur
-        .as_ref()
-        .and_then(|s| s.SourceAppUserModelId().ok())
-        .map(|h| h.to_string())
+    let mut sessions: Vec<GlobalSystemMediaTransportControlsSession> = mgr
+        .GetSessions()
+        .ok()
+        .map(|v| v.into_iter().collect())
         .unwrap_or_default();
+    if sessions.is_empty() {
+        if let Ok(cur) = mgr.GetCurrentSession() {
+            sessions.push(cur);
+        }
+    }
+    let ids: Vec<String> = sessions
+        .iter()
+        .map(|s| {
+            s.SourceAppUserModelId()
+                .ok()
+                .map(|h| h.to_string())
+                .unwrap_or_default()
+        })
+        .collect();
     let resub = RESUBSCRIBE.swap(false, Ordering::SeqCst);
     SESSION_WATCH.with(|w| {
         let mut w = w.borrow_mut();
-        match (w.as_ref(), &cur) {
-            (Some(old), Some(_)) if old.aumid == id && !resub => return,
-            (None, None) => return,
-            _ => {}
+        if !resub && w.len() == ids.len() && w.iter().zip(&ids).all(|(old, id)| &old.aumid == id) {
+            return;
         }
-        if let Some(old) = w.take() {
+        for old in w.drain(..) {
             let _ = old.session.RemoveMediaPropertiesChanged(old.prop_token);
             let _ = old.session.RemovePlaybackInfoChanged(old.info_token);
             if let Some(t3) = old.timeline_token {
                 let _ = old.session.RemoveTimelinePropertiesChanged(t3);
             }
         }
-        let Some(s) = cur else { return };
-        let t1 = s.MediaPropertiesChanged(&TypedEventHandler::new(|_, _| {
-            send(Cmd::Media);
-            Ok(())
-        }));
-        let t2 = s.PlaybackInfoChanged(&TypedEventHandler::new(|_, _| {
-            send(Cmd::Media);
-            Ok(())
-        }));
-        let t3 = s.TimelinePropertiesChanged(&TypedEventHandler::new(|_, _| {
-            send(Cmd::Media);
-            Ok(())
-        })).ok();
-        if let (Ok(prop_token), Ok(info_token)) = (t1, t2) {
-            *w = Some(SessionWatch {
-                session: s,
-                prop_token,
-                info_token,
-                timeline_token: t3,
-                aumid: id,
-            });
+        for (s, id) in sessions.into_iter().zip(ids) {
+            let t1 = s.MediaPropertiesChanged(&TypedEventHandler::new(|_, _| {
+                send(Cmd::Media);
+                Ok(())
+            }));
+            let t2 = s.PlaybackInfoChanged(&TypedEventHandler::new(|_, _| {
+                send(Cmd::Media);
+                Ok(())
+            }));
+            let t3 = s.TimelinePropertiesChanged(&TypedEventHandler::new(|_, _| {
+                send(Cmd::Media);
+                Ok(())
+            })).ok();
+            if let (Ok(prop_token), Ok(info_token)) = (t1, t2) {
+                w.push(SessionWatch {
+                    session: s,
+                    prop_token,
+                    info_token,
+                    timeline_token: t3,
+                    aumid: id,
+                });
+            }
         }
     });
 }
@@ -264,29 +350,50 @@ pub(super) unsafe fn refresh_media() {
 
 pub(super) unsafe fn media_command(cmd: Cmd) {
     let Some(mgr) = media_manager() else { return };
-    let Ok(s) = mgr.GetCurrentSession() else { return };
-    // Браузеры (YouTube) часто отвечают `false` на «переключить» и принимают только явные команды;
-    // если сессия не приняла ничего, шлём системную медиа-клавишу — её обрабатывает та же сессия.
+    let Some(s) = select_session(&mgr) else { return };
+    let is_current = mgr
+        .GetCurrentSession()
+        .ok()
+        .and_then(|c| Some(c.SourceAppUserModelId().ok()? == s.SourceAppUserModelId().ok()?))
+        .unwrap_or(false);
     let ok = |r: windows::core::Result<bool>| r.unwrap_or(false);
     match cmd {
         Cmd::PlayPause => {
-            let playing = s.GetPlaybackInfo().ok().and_then(|i| i.PlaybackStatus().ok()) == Some(Status::Playing);
-            let done = if playing {
-                ok(wait(s.TryPauseAsync()))
+            let status_before = s.GetPlaybackInfo().ok().and_then(|i| i.PlaybackStatus().ok());
+            let playing = status_before == Some(Status::Playing);
+            let primary = if playing {
+                wait(s.TryPauseAsync())
             } else {
-                ok(wait(s.TryPlayAsync()))
-            } || ok(wait(s.TryTogglePlayPauseAsync()));
+                wait(s.TryPlayAsync())
+            };
+            log::info(&format!("медиа PlayPause (playing={playing}): {primary:?}"));
+            let mut done = ok(primary);
             if !done {
+                let status_after = s.GetPlaybackInfo().ok().and_then(|i| i.PlaybackStatus().ok());
+                if status_after != status_before {
+                    done = true;
+                } else {
+                    let toggle = wait(s.TryTogglePlayPauseAsync());
+                    log::info(&format!("медиа TryTogglePlayPause: {toggle:?}"));
+                    done = ok(toggle)
+                        || s.GetPlaybackInfo().ok().and_then(|i| i.PlaybackStatus().ok()) != status_before;
+                }
+            }
+            if !done && is_current {
                 media_key(0xB3);
             }
         }
         Cmd::Next => {
-            if !ok(wait(s.TrySkipNextAsync())) {
+            let res = wait(s.TrySkipNextAsync());
+            log::info(&format!("медиа Next: {res:?}"));
+            if !ok(res) && is_current {
                 media_key(0xB0);
             }
         }
         Cmd::Prev => {
-            if !ok(wait(s.TrySkipPreviousAsync())) {
+            let res = wait(s.TrySkipPreviousAsync());
+            log::info(&format!("медиа Prev: {res:?}"));
+            if !ok(res) && is_current {
                 media_key(0xB1);
             }
         }
@@ -335,7 +442,7 @@ static COVER: Mutex<Option<(u64, Arc<Vec<u8>>)>> = Mutex::new(None);
 pub(super) unsafe fn read_media() -> Option<Media> {
     watch_media();
     let mgr = media_manager()?;
-    let s = mgr.GetCurrentSession().ok()?;
+    let s = select_session(&mgr)?;
     let props = wait(s.TryGetMediaPropertiesAsync()).ok()?;
     let title = props.Title().ok()?.to_string();
     let artist = props.Artist().map(|a| a.to_string()).unwrap_or_default();
@@ -511,6 +618,35 @@ mod tests {
         assert_eq!(tl.frac(), 0.25);
         let tl_zero = Timeline { pos: 0.0, dur: 0.0, min_seek: 0.0, max_seek: 0.0, can_seek: false };
         assert_eq!(tl_zero.frac(), 0.0);
+    }
+
+    #[test]
+    fn test_pick_session_index_prefers_playing_over_paused_current() {
+        let sessions = [
+            ("chrome.exe", false, true),
+            ("Spotify.exe", true, false),
+        ];
+        assert_eq!(pick_session_index(&sessions, ""), Some(1));
+    }
+
+    #[test]
+    fn test_pick_session_index_prefers_playing_current_when_multiple_playing() {
+        let sessions = [
+            ("chrome.exe", true, false),
+            ("Spotify.exe", true, true),
+        ];
+        assert_eq!(pick_session_index(&sessions, ""), Some(1));
+    }
+
+    #[test]
+    fn test_pick_session_index_falls_back_to_last_playing_then_current() {
+        let sessions = [
+            ("chrome.exe", false, true),
+            ("Spotify.exe", false, false),
+        ];
+        assert_eq!(pick_session_index(&sessions, "Spotify.exe"), Some(1));
+        assert_eq!(pick_session_index(&sessions, "unknown"), Some(0));
+        assert_eq!(pick_session_index(&[], "Spotify.exe"), None);
     }
 }
 

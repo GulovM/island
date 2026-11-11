@@ -8,13 +8,13 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use windows::core::{w, PCWSTR};
-use windows::Win32::Security::Cryptography::{BCryptHash, BCRYPT_SHA256_ALG_HANDLE};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 use crate::{bg, log, online, sys};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const CURRENT_CHANGELOG: &str = env!("ISLAND_CURRENT_CHANGELOG");
 const API: &str = "https://api.github.com/repos/GulovM/island/releases/latest";
 /// Скачивать можно только отсюда: ссылки из ответа API проверяются по этому префиксу.
 const DOWNLOADS: &str = "https://github.com/GulovM/island/releases/download/";
@@ -27,6 +27,7 @@ pub struct Release {
     pub version: String,
     setup_url: String,
     sums_url: String,
+    pub notes: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,6 +61,87 @@ pub fn busy() -> bool {
 /// Найдено обновление, которое ещё не установлено.
 pub fn available() -> bool {
     matches!(state(), State::Available(_))
+}
+
+/// Извлекает секцию `## [X.Y.Z]` из `CHANGELOG.md` (если `version == None` — первую секцию).
+pub fn extract_changelog_section(md: &str, version: Option<&str>) -> String {
+    let mut in_sec = false;
+    let mut out = Vec::new();
+    for raw in md.lines() {
+        let line = raw.trim_end();
+        if let Some(rest) = line.strip_prefix("## [") {
+            if rest.starts_with("Unreleased]") {
+                continue;
+            }
+            if in_sec {
+                break;
+            }
+            if let Some(ver) = version {
+                if let Some((sec_ver, _)) = rest.split_once(']') {
+                    if sec_ver.trim() == ver.trim_start_matches('v') {
+                        in_sec = true;
+                    }
+                }
+            } else {
+                in_sec = true;
+            }
+            continue;
+        }
+        if in_sec && !line.trim().is_empty() {
+            out.push(line);
+        }
+    }
+    out.join("\n")
+}
+
+/// Разбирает строки списка изменений (с настоящими `\n` или экранированными `\n`),
+/// убирает маркеры `- ` / `* ` и возвращает до 8 пунктов.
+pub fn parse_changelog_notes(raw: &str) -> Vec<String> {
+    let normalized = raw.replace(r"\n", "\n");
+    normalized
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| {
+            l.strip_prefix("- ")
+                .or_else(|| l.strip_prefix("* "))
+                .or_else(|| l.strip_prefix("• "))
+                .unwrap_or(l)
+                .trim()
+                .to_string()
+        })
+        .filter(|l| !l.is_empty())
+        .take(8)
+        .collect()
+}
+
+/// Есть ли непросмотренный список «Что нового» для текущей установленной версии.
+pub fn has_unseen_notes() -> bool {
+    crate::state::last_seen_version() != VERSION && !parse_changelog_notes(CURRENT_CHANGELOG).is_empty()
+}
+
+/// Отмечает список «Что нового» текущей версии как просмотренный.
+pub fn mark_notes_seen() {
+    if crate::state::last_seen_version() != VERSION {
+        crate::state::set_last_seen_version(VERSION);
+    }
+}
+
+/// Возвращает `(версия, пункты)` для блока «Что нового в версии X.Y.Z»:
+/// при наличии доступного обновления с непустыми заметками — заметки новой версии,
+/// иначе — вшитые заметки текущей установленной версии.
+pub fn notes_to_show() -> Option<(String, Vec<String>)> {
+    if let State::Available(r) = state() {
+        if !r.notes.is_empty() {
+            return Some((r.version, r.notes));
+        }
+    }
+    let current = parse_changelog_notes(CURRENT_CHANGELOG);
+    if !current.is_empty() {
+        Some((VERSION.to_string(), current))
+    } else {
+        None
+    }
 }
 
 fn now_secs() -> u64 {
@@ -174,7 +256,13 @@ fn parse_release(json: &str) -> Option<Release> {
         .collect();
     let setup_url = urls.iter().find(|u| u.ends_with("-setup.exe"))?.clone();
     let sums_url = urls.iter().find(|u| u.ends_with("/SHA256SUMS.txt"))?.clone();
-    Some(Release { version, setup_url, sums_url })
+    let notes = online::json_str_multiline(json, "body")
+        .map(|b| {
+            let sec = extract_changelog_section(&b, Some(&version));
+            parse_changelog_notes(if sec.is_empty() { &b } else { &sec })
+        })
+        .unwrap_or_default();
+    Some(Release { version, setup_url, sums_url, notes })
 }
 
 fn parse_ver(s: &str) -> Option<Vec<u32>> {
@@ -253,10 +341,7 @@ fn expected_hash(sums: &str, name: &str) -> Option<String> {
 }
 
 fn sha256_hex(data: &[u8]) -> Option<String> {
-    let mut out = [0u8; 32];
-    // SAFETY: псевдодескриптор SHA-256, буферы живут на время вызова.
-    let st = unsafe { BCryptHash(BCRYPT_SHA256_ALG_HANDLE, None, data, &mut out) };
-    st.is_ok().then(|| out.iter().map(|b| format!("{b:02x}")).collect())
+    sys::sha256(data).map(|out| out.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 #[cfg(test)]
@@ -277,16 +362,27 @@ mod tests {
     #[test]
     fn release_json_is_parsed_and_foreign_links_are_ignored() {
         let json = format!(
-            r#"{{"tag_name":"v0.4.0","assets":[{{"name":"a","browser_download_url":"https://evil.example/island-0.4.0-setup.exe"}},
+            r###"{{"tag_name":"v0.4.0","body":"## [0.4.0]\r\n- Первый пункт\r\n- Второй пункт","assets":[{{"name":"a","browser_download_url":"https://evil.example/island-0.4.0-setup.exe"}},
             {{"name":"island-0.4.0-setup.exe","browser_download_url":"{d}v0.4.0/island-0.4.0-setup.exe"}},
-            {{"name":"SHA256SUMS.txt","browser_download_url":"{d}v0.4.0/SHA256SUMS.txt"}}]}}"#,
+            {{"name":"SHA256SUMS.txt","browser_download_url":"{d}v0.4.0/SHA256SUMS.txt"}}]}}"###,
             d = DOWNLOADS
         );
         let r = parse_release(&json).unwrap();
         assert_eq!(r.version, "0.4.0");
         assert!(r.setup_url.starts_with(DOWNLOADS) && r.setup_url.ends_with("island-0.4.0-setup.exe"));
         assert!(r.sums_url.ends_with("SHA256SUMS.txt"));
+        assert_eq!(r.notes, vec!["Первый пункт".to_string(), "Второй пункт".to_string()]);
         assert!(parse_release(r#"{"tag_name":"v0.4.0","assets":[]}"#).is_none());
+    }
+
+    #[test]
+    fn changelog_extraction_and_notes_parsing() {
+        let md = "# Changelog\n\n## [1.3.0] - 2026-11-11\n\n- Пункт А\n- Пункт Б\n\n## [1.2.0] - 2026-10-01\n\n- Старый пункт\n";
+        assert_eq!(extract_changelog_section(md, None), "- Пункт А\n- Пункт Б");
+        assert_eq!(extract_changelog_section(md, Some("1.2.0")), "- Старый пункт");
+        let parsed = parse_changelog_notes(r"- Пункт 1\n* Пункт 2\n## [1.3.0]");
+        assert_eq!(parsed, vec!["Пункт 1".to_string(), "Пункт 2".to_string()]);
+        assert!(!parse_changelog_notes(CURRENT_CHANGELOG).is_empty());
     }
 
     #[test]

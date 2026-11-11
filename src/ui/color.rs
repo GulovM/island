@@ -137,10 +137,84 @@ fn rel_luminance(c: D2D1_COLOR_F) -> f32 {
     0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
 }
 
+/// Яркость `Y` для APCA: простая степень 2.4 без кусочной линеаризации sRGB.
+fn apca_y(c: [f32; 3]) -> f32 {
+    let p = |v: f32| v.clamp(0.0, 1.0).powf(2.4);
+    0.212_672_9 * p(c[0]) + 0.715_152_2 * p(c[1]) + 0.072_175 * p(c[2])
+}
+
+/// Перцептивный контраст APCA-W3 0.0.98G-4g: `Lc` текста `fg` на фоне `bg` (каналы 0..1).
+/// Положительный для тёмного текста на светлом фоне, отрицательный для светлого на тёмном;
+/// около ±106 у чёрного на белом и белого на чёрном.
+pub fn apca_lc(fg: [f32; 3], bg: [f32; 3]) -> f32 {
+    const NORM_BG: f32 = 0.56;
+    const NORM_TXT: f32 = 0.57;
+    const REV_TXT: f32 = 0.62;
+    const REV_BG: f32 = 0.65;
+    const SCALE_BOW: f32 = 1.14;
+    const SCALE_WOB: f32 = -1.14;
+    const LO_CLIP: f32 = 0.1;
+    const LO_OFFSET: f32 = 0.027;
+    const DELTA_Y_MIN: f32 = 0.0005;
+    const BLK_THRS: f32 = 0.022;
+    const BLK_CLMP: f32 = 1.414;
+    let soft = |y: f32| if y > BLK_THRS { y } else { y + (BLK_THRS - y).powf(BLK_CLMP) };
+    let (yt, yb) = (soft(apca_y(fg)), soft(apca_y(bg)));
+    if (yb - yt).abs() < DELTA_Y_MIN {
+        return 0.0;
+    }
+    let lc = if yb > yt {
+        let s = (yb.powf(NORM_BG) - yt.powf(NORM_TXT)) * SCALE_BOW;
+        if s < LO_CLIP { 0.0 } else { s - LO_OFFSET }
+    } else {
+        let s = (yt.powf(REV_TXT) - yb.powf(REV_BG)) * SCALE_WOB;
+        if s > -LO_CLIP { 0.0 } else { s + LO_OFFSET }
+    };
+    lc * 100.0
+}
+
+const APCA_WHITE: [f32; 3] = [1.0, 1.0, 1.0];
+const APCA_DARK: [f32; 3] = [0.07, 0.07, 0.08];
+
+fn min_lc_over(fg: [f32; 3], bgs: &[[f32; 3]]) -> f32 {
+    bgs.iter().map(|&b| apca_lc(fg, b).abs()).fold(f32::INFINITY, f32::min)
+}
+
+/// Подтягивает светлоту `fg`, пока `|Lc|` на каждом из фонов `bgs` не достигнет `min_lc`: цвет
+/// линейно смешивается с полюсом (белым или тёмным — тем, что контрастнее на этих фонах), минимальная
+/// доля смешивания ищется за 8 шагов двоичного поиска. Если `fg` уже читается, он возвращается как есть.
+pub fn ensure_apca(fg: [f32; 3], bgs: &[[f32; 3]], min_lc: f32) -> [f32; 3] {
+    if bgs.is_empty() || min_lc_over(fg, bgs) >= min_lc {
+        return fg;
+    }
+    let pole = if min_lc_over(APCA_WHITE, bgs) >= min_lc_over(APCA_DARK, bgs) { APCA_WHITE } else { APCA_DARK };
+    let blend = |t: f32| [0, 1, 2].map(|i| fg[i] + (pole[i] - fg[i]) * t);
+    if min_lc_over(pole, bgs) < min_lc {
+        return pole;
+    }
+    let (mut lo, mut hi) = (0.0f32, 1.0f32);
+    for _ in 0..8 {
+        let mid = (lo + hi) / 2.0;
+        if min_lc_over(blend(mid), bgs) >= min_lc {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    blend(hi)
+}
+
 /// Надпись на сплошной заливке `fill`: белая или почти чёрная — что контрастнее. Насыщенным
 /// системным цветам iOS (синий, красный, фиолетовый) достаётся белая, как в iOS; светлым
-/// (жёлтый, мятный, белая заливка ползунка) — тёмная.
+/// (жёлтый, мятный, белая заливка ползунка) — тёмная. При автоподборе контраста выбор делает APCA.
 pub fn on_color(fill: D2D1_COLOR_F) -> D2D1_COLOR_F {
+    if crate::theme::auto_contrast() {
+        let bg = [fill.r, fill.g, fill.b];
+        let dark = rgb(0.11, 0.11, 0.12);
+        let d = apca_lc([dark.r, dark.g, dark.b], bg).abs();
+        let w = apca_lc(APCA_WHITE, bg).abs();
+        return if d > w { dark } else { WHITE };
+    }
     let l = rel_luminance(fill);
     // Порог чуть сдвинут в пользу белого (как в iOS): чёрный только если он заметно контрастнее.
     if (l + 0.05) / 0.05 > 1.35 * (1.05 / (l + 0.05)) {
@@ -213,6 +287,35 @@ pub fn switch_on_color(accent: D2D1_COLOR_F) -> D2D1_COLOR_F {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apca_reference_vectors() {
+        let (black, white) = ([0.0; 3], [1.0; 3]);
+        let bow = apca_lc(black, white);
+        let wob = apca_lc(white, black);
+        assert!((bow - 106.0).abs() < 0.5, "{bow}");
+        assert!((wob + 107.9).abs() < 0.5, "{wob}");
+        assert_eq!(apca_lc(white, white), 0.0);
+    }
+
+    #[test]
+    fn ensure_apca_reaches_thresholds() {
+        // Уже читаемый цвет не меняется.
+        assert_eq!(ensure_apca([1.0; 3], &[[0.05; 3]], 75.0), [1.0; 3]);
+        // Серый на сером подтягивается до порога в обе стороны.
+        for (fg, bg) in [([0.5; 3], [0.45; 3]), ([0.5; 3], [0.85; 3]), ([0.3, 0.4, 0.9], [0.2, 0.3, 0.8])] {
+            for min in [30.0, 60.0, 75.0] {
+                let out = ensure_apca(fg, &[bg], min);
+                assert!(apca_lc(out, bg).abs() >= min - 0.01, "{fg:?}/{bg:?}/{min}: {}", apca_lc(out, bg));
+            }
+        }
+    }
+
+    #[test]
+    fn on_color_picks_readable_pole() {
+        assert!(on_color(rgb(0.95, 0.95, 0.5)).r < 0.2);
+        assert!(on_color(rgb(0.1, 0.2, 0.7)).r > 0.9);
+    }
 
     #[test]
     fn mix_endpoints() {

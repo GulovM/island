@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use windows::core::w;
 use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+use windows::Win32::Security::Cryptography::{BCryptHash, BCRYPT_SHA256_ALG_HANDLE};
+use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::Win32::System::Threading::CreateMutexW;
 
 mod appearance;
@@ -26,8 +28,8 @@ pub use clipboard::{
 };
 pub use energy_saver::{energy_saver, set_energy_saver};
 pub use night_light::{night_light, set_night_light};
-pub use paths::{pictures_dir, system_drive_root, windows_dir};
-pub use registry::reg_str;
+pub use paths::{pictures_dir, windows_dir};
+pub use registry::{reg_str, windows_build_number};
 pub(crate) use uia::{handle_get_object, report_focus};
 pub(in crate::sys) use registry::{read_binary, read_dword};
 pub use seal::{is_sealed, seal, unseal};
@@ -35,6 +37,37 @@ pub use shell::{
     autostart_enabled, foreground_lang, ime_set_position, lang_code, make_icon, monitor_count, open,
     pick_folder, process_running, set_autostart, tray_add, tray_remove, trim_working_set,
 };
+
+/// Состояние аккумулятора системы.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BatteryStatus {
+    pub ac_online: bool,
+    pub charging: bool,
+    pub saver_on: bool,
+    pub percent: u8,
+}
+
+/// Читает состояние батареи через `GetSystemPowerStatus`. `None`, если в системе нет батареи.
+pub fn battery_status() -> Option<BatteryStatus> {
+    let mut s = SYSTEM_POWER_STATUS::default();
+    unsafe { GetSystemPowerStatus(&mut s).ok()? };
+    if (s.BatteryFlag & 128) != 0 || s.BatteryFlag == 255 || s.BatteryLifePercent > 100 {
+        return None;
+    }
+    Some(BatteryStatus {
+        ac_online: s.ACLineStatus == 1,
+        charging: (s.BatteryFlag & 8) != 0,
+        saver_on: (s.SystemStatusFlag & 1) != 0,
+        percent: s.BatteryLifePercent,
+    })
+}
+
+/// Вычисляет SHA-256 через системный CNG (`BCryptHash`).
+pub fn sha256(data: &[u8]) -> Option<[u8; 32]> {
+    let mut out = [0u8; 32];
+    let st = unsafe { BCryptHash(BCRYPT_SHA256_ALG_HANDLE, None, data, &mut out) };
+    st.is_ok().then_some(out)
+}
 
 /// `%APPDATA%\island` — конфиг, лог, позже кэши.
 pub fn data_dir() -> PathBuf {

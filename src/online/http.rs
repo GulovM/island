@@ -6,9 +6,10 @@ use windows::Win32::Networking::WinHttp::*;
 
 use crate::sys;
 
-pub(super) struct Resp {
-    pub(super) status: u32,
-    pub(super) body: Vec<u8>,
+pub(crate) struct Resp {
+    pub status: u16,
+    pub final_url: String,
+    pub body: Vec<u8>,
     pub(super) total: u64,
     pub(super) secs: f64,
 }
@@ -119,7 +120,256 @@ pub(super) unsafe fn http(url: &str, upload: Option<usize>, keep: usize) -> Resu
             body.extend_from_slice(&buf[..(got as usize).min(room)]);
         }
     }
-    Ok(Resp { status, body, total, secs: t0.elapsed().as_secs_f64() })
+    Ok(Resp { status: status as u16, final_url: url.to_string(), body, total, secs: t0.elapsed().as_secs_f64() })
+}
+
+pub(crate) fn resolve_redirect_url(base_url: &str, location: &str) -> Option<String> {
+    let loc = location.trim();
+    if loc.is_empty() {
+        return None;
+    }
+    if loc.starts_with("https://") || loc.starts_with("http://") || loc.starts_with("webcal://") {
+        return Some(loc.to_string());
+    }
+    let (secure, host, port, base_path) = split_url(base_url).ok()?;
+    let scheme = if secure { "https" } else { "http" };
+    let default_port = if secure { 443 } else { 80 };
+    let authority = if port == default_port {
+        host
+    } else {
+        format!("{host}:{port}")
+    };
+    if loc.starts_with('/') {
+        Some(format!("{scheme}://{authority}{loc}"))
+    } else {
+        let dir = match base_path.rfind('/') {
+            Some(i) => &base_path[..=i],
+            None => "/",
+        };
+        Some(format!("{scheme}://{authority}{dir}{loc}"))
+    }
+}
+
+pub(crate) fn is_trusted_auth_redirect(url: &str) -> bool {
+    let Ok((secure, host, _, _)) = split_url(url) else {
+        return false;
+    };
+    let h = host.to_ascii_lowercase();
+    #[cfg(test)]
+    if h == "127.0.0.1" || h == "localhost" {
+        return true;
+    }
+    if !secure {
+        return false;
+    }
+    h == "icloud.com"
+        || h.ends_with(".icloud.com")
+        || h == "googleusercontent.com"
+        || h.ends_with(".googleusercontent.com")
+        || h == "google.com"
+        || h.ends_with(".google.com")
+}
+
+unsafe fn query_location_header(req: *mut c_void) -> Option<String> {
+    let mut byte_len = 0u32;
+    let _ = WinHttpQueryHeaders(
+        req,
+        WINHTTP_QUERY_LOCATION,
+        PCWSTR::null(),
+        None,
+        &mut byte_len,
+        std::ptr::null_mut(),
+    );
+    if byte_len == 0 {
+        return None;
+    }
+    let mut buf = vec![0u16; (byte_len as usize / 2) + 1];
+    WinHttpQueryHeaders(
+        req,
+        WINHTTP_QUERY_LOCATION,
+        PCWSTR::null(),
+        Some(buf.as_mut_ptr() as *mut c_void),
+        &mut byte_len,
+        std::ptr::null_mut(),
+    )
+    .ok()?;
+    let len = (byte_len as usize / 2).min(buf.len());
+    let s = String::from_utf16_lossy(&buf[..len]);
+    Some(s.trim_end_matches('\0').trim().to_string())
+}
+
+/// Произвольный HTTP-запрос (`GET`, `POST`, `PROPFIND`, `REPORT`) с заголовками, телом
+/// и ручной обработкой редиректов (до 5 переходов) с сохранением метода, тела и `Authorization`
+/// на доверенных CalDAV/OAuth доменах.
+pub(crate) unsafe fn request(
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Option<&[u8]>,
+    keep: usize,
+) -> Result<Resp, String> {
+    let session = H(WinHttpOpen(
+        w!("Island/0.1"),
+        WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+        PCWSTR::null(),
+        PCWSTR::null(),
+        0,
+    ));
+    if session.0.is_null() {
+        return Err("WinHttpOpen".into());
+    }
+    let _ = WinHttpSetTimeouts(session.0, 8000, 8000, 20_000, 20_000);
+
+    let mut cur_url = url.to_string();
+    let mut allow_auth = true;
+    let verbw = sys::wz(method);
+    let t0 = Instant::now();
+
+    for _hop in 0..=5 {
+        let (secure, host, port, path) = split_url(&cur_url)?;
+        let hostw = sys::wz(&host);
+        let conn = H(WinHttpConnect(session.0, PCWSTR(hostw.as_ptr()), port, 0));
+        if conn.0.is_null() {
+            return Err(format!("нет соединения с {host}"));
+        }
+        let pathw = sys::wz(&path);
+        let flags = if secure { WINHTTP_FLAG_SECURE } else { WINHTTP_OPEN_REQUEST_FLAGS(0) };
+        let req = H(WinHttpOpenRequest(
+            conn.0,
+            PCWSTR(verbw.as_ptr()),
+            PCWSTR(pathw.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            std::ptr::null(),
+            flags,
+        ));
+        if req.0.is_null() {
+            return Err("WinHttpOpenRequest".into());
+        }
+
+        let disable_flags: u32 = WINHTTP_DISABLE_REDIRECTS;
+        let disable_bytes = std::slice::from_raw_parts(&disable_flags as *const u32 as *const u8, std::mem::size_of::<u32>());
+        let _ = WinHttpSetOption(Some(req.0), WINHTTP_OPTION_DISABLE_FEATURE, Some(disable_bytes));
+
+        for &(k, v) in headers {
+            if !allow_auth && k.eq_ignore_ascii_case("Authorization") {
+                continue;
+            }
+            let line = format!("{k}: {v}\r\n");
+            let linew = sys::wz(&line);
+            let slice = &linew[..linew.len().saturating_sub(1)];
+            WinHttpAddRequestHeaders(req.0, slice, WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE)
+                .map_err(|e| e.to_string())?;
+        }
+
+        let body_bytes = body.unwrap_or(&[]);
+        let body_len = body_bytes.len() as u32;
+        let opt_ptr = if body_bytes.is_empty() {
+            None
+        } else {
+            Some(body_bytes.as_ptr() as *const c_void)
+        };
+        WinHttpSendRequest(req.0, None, opt_ptr, body_len, body_len, 0).map_err(|e| e.to_string())?;
+
+        WinHttpReceiveResponse(req.0, std::ptr::null_mut()).map_err(|e| e.to_string())?;
+        let (mut status, mut len) = (0u32, 4u32);
+        let _ = WinHttpQueryHeaders(
+            req.0,
+            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            PCWSTR::null(),
+            Some(&mut status as *mut u32 as *mut c_void),
+            &mut len,
+            std::ptr::null_mut(),
+        );
+
+        let code = status as u16;
+        if matches!(code, 301 | 302 | 307 | 308) {
+            if let Some(loc) = query_location_header(req.0) {
+                if let Some(next_url) = resolve_redirect_url(&cur_url, &loc) {
+                    allow_auth = allow_auth && is_trusted_auth_redirect(&next_url);
+                    cur_url = next_url;
+                    continue;
+                }
+            }
+        }
+
+        let mut resp_body = Vec::new();
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut total = 0u64;
+        loop {
+            let mut avail = 0u32;
+            WinHttpQueryDataAvailable(req.0, &mut avail).map_err(|e| e.to_string())?;
+            if avail == 0 {
+                break;
+            }
+            let want = (avail as usize).min(buf.len());
+            let mut got = 0u32;
+            WinHttpReadData(req.0, buf.as_mut_ptr() as *mut c_void, want as u32, &mut got)
+                .map_err(|e| e.to_string())?;
+            if got == 0 {
+                break;
+            }
+            total += got as u64;
+            if resp_body.len() < keep {
+                let room = keep - resp_body.len();
+                resp_body.extend_from_slice(&buf[..(got as usize).min(room)]);
+            }
+        }
+        return Ok(Resp {
+            status: code,
+            final_url: cur_url,
+            body: resp_body,
+            total,
+            secs: t0.elapsed().as_secs_f64(),
+        });
+    }
+
+    Err(format!("слишком много перенаправлений для {url}"))
+}
+
+const B64_STD: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const B64_URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+pub(crate) fn base64_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(B64_STD[((triple >> 18) & 0x3F) as usize] as char);
+        out.push(B64_STD[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(B64_STD[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(B64_STD[(triple & 0x3F) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+pub(crate) fn base64url_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(B64_URL[((triple >> 18) & 0x3F) as usize] as char);
+        out.push(B64_URL[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(B64_URL[((triple >> 6) & 0x3F) as usize] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(B64_URL[(triple & 0x3F) as usize] as char);
+        }
+    }
+    out
 }
 
 pub(crate) fn get_text(url: &str) -> Result<String, String> {
@@ -161,24 +411,79 @@ pub(super) fn json_num(text: &str, key: &str) -> Option<f64> {
     rest[..end].parse().ok()
 }
 
-/// Строка по ключу `"key":"…"` (первое вхождение).
-pub(crate) fn json_str(text: &str, key: &str) -> Option<String> {
-    let i = text.find(&format!("\"{key}\":"))? + key.len() + 3;
-    let rest = text[i..].trim_start().strip_prefix('"')?;
+fn read_hex4(it: &mut std::str::Chars<'_>) -> Option<u16> {
+    let mut val = 0u16;
+    for _ in 0..4 {
+        let d = it.next()?.to_digit(16)? as u16;
+        val = (val << 4) | d;
+    }
+    Some(val)
+}
+
+fn json_str_inner(text: &str, key: &str, preserve_newlines: bool) -> Option<String> {
+    let pat = format!("\"{key}\"");
+    let mut search_from = 0;
+    let rest = loop {
+        let pos = text[search_from..].find(&pat)?;
+        let after_key = &text[search_from + pos + pat.len()..].trim_start();
+        if let Some(after_colon) = after_key.strip_prefix(':') {
+            break after_colon.trim_start().strip_prefix('"')?;
+        }
+        search_from += pos + pat.len();
+    };
     let mut out = String::new();
     let mut it = rest.chars();
     while let Some(c) = it.next() {
         match c {
             '"' => return Some(out),
-            '\\' => {
-                if let Some(e) = it.next() {
-                    out.push(if e == 'n' { ' ' } else { e });
+            '\\' => match it.next()? {
+                'n' => out.push(if preserve_newlines { '\n' } else { ' ' }),
+                'r' => {
+                    if !preserve_newlines {
+                        out.push(' ');
+                    }
                 }
-            }
+                't' => out.push(if preserve_newlines { '\t' } else { ' ' }),
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                '/' => out.push('/'),
+                'u' => {
+                    let hi = read_hex4(&mut it)?;
+                    if (0xD800..=0xDBFF).contains(&hi) {
+                        let mut clone = it.clone();
+                        if clone.next() == Some('\\') && clone.next() == Some('u') {
+                            if let Some(lo) = read_hex4(&mut clone) {
+                                if (0xDC00..=0xDFFF).contains(&lo) {
+                                    it = clone;
+                                    let cp = 0x10000 + (((hi as u32 - 0xD800) << 10) | (lo as u32 - 0xDC00));
+                                    if let Some(ch) = char::from_u32(cp) {
+                                        out.push(ch);
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if let Some(ch) = char::from_u32(hi as u32) {
+                        out.push(ch);
+                    }
+                }
+                other => out.push(other),
+            },
             c => out.push(c),
         }
     }
     None
+}
+
+/// Строка по ключу `"key":"…"` (первое вхождение, переводы строк заменяются пробелами).
+pub(crate) fn json_str(text: &str, key: &str) -> Option<String> {
+    json_str_inner(text, key, false)
+}
+
+/// Многострочная строка по ключу `"key":"…"` (сохраняет `\n` и декодирует `\uXXXX`).
+pub(crate) fn json_str_multiline(text: &str, key: &str) -> Option<String> {
+    json_str_inner(text, key, true)
 }
 
 #[cfg(test)]
@@ -196,5 +501,47 @@ mod tests {
         let fc = r#"{"current_units":{"temperature_2m":"°C"},"current":{"temperature_2m":-3.5,"weather_code":71}}"#;
         let cur = &fc[fc.find("\"current\":{").unwrap()..];
         assert_eq!(json_num(cur, "temperature_2m"), Some(-3.5));
+    }
+
+    #[test]
+    fn base64_and_base64url_vectors() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"user:pass"), "dXNlcjpwYXNz");
+        let rfc7636_bytes: [u8; 32] = [
+            116, 24, 223, 180, 151, 153, 224, 37, 79, 250, 96, 125, 216, 173, 187, 186, 22, 212, 37,
+            77, 105, 214, 191, 240, 91, 88, 5, 88, 83, 132, 141, 121,
+        ];
+        assert_eq!(
+            base64url_encode(&rfc7636_bytes),
+            "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        );
+    }
+
+    #[test]
+    fn json_str_multiline_and_unicode() {
+        let j = r###"{"body": "## [1.3.0]\r\n- Пункт 1\n- \u041f\u0443\u043d\u043a\u0442 2 \ud83d\ude80"}"###;
+        assert_eq!(
+            json_str_multiline(j, "body").as_deref(),
+            Some("## [1.3.0]\n- Пункт 1\n- Пункт 2 🚀")
+        );
+    }
+
+    #[test]
+    fn redirect_resolution_and_trust() {
+        assert_eq!(
+            resolve_redirect_url("https://caldav.icloud.com/123/calendars/", "/456/calendars/").as_deref(),
+            Some("https://caldav.icloud.com/456/calendars/")
+        );
+        assert_eq!(
+            resolve_redirect_url("https://caldav.icloud.com:8443/a/b", "c").as_deref(),
+            Some("https://caldav.icloud.com:8443/a/c")
+        );
+        assert!(is_trusted_auth_redirect("https://p42-caldav.icloud.com/123/principal/"));
+        assert!(is_trusted_auth_redirect("https://apidata.googleusercontent.com/caldav/v2/"));
+        assert!(!is_trusted_auth_redirect("http://p42-caldav.icloud.com/123/"));
+        assert!(!is_trusted_auth_redirect("https://evil-icloud.com/123/"));
     }
 }

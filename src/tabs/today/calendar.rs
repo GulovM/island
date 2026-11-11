@@ -580,20 +580,27 @@ impl Today {
 
     fn begin_calendar_edit(&mut self, ui: &mut Ui) {
         let field = id(TODAY, 62);
+        let apple_pw = id(TODAY, 112);
         self.cal_editing = true;
         self.cal_bad = false;
+        online::clear_cal_auth_error();
         ui.set_field_text(field, "");
+        ui.set_secret(apple_pw, true);
         ui.focus = Some(field);
         ui.caret_on = true;
     }
 
-    /// Форма управления ссылками календаря (iCal). Позволяет добавлять новые ссылки и удалять
-    /// существующие. Список ссылок отображается в сокращённом виде без секретных токенов.
+    /// Форма управления источниками календаря: Google OAuth 2.0, Apple iCloud CalDAV и ссылки iCal.
     unsafe fn calendar_form(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect) {
         let f = &cv.g.fonts;
         let field = id(TODAY, 62);
+        let google_btn = id(TODAY, 110);
+        let apple_id_field = id(TODAY, 111);
+        let apple_pw_field = id(TODAY, 112);
+        let apple_btn = id(TODAY, 113);
+        ui.set_secret(apple_pw_field, true);
 
-        // Обработка ввода новой ссылки в поле
+        // Обработка ввода новой ссылки iCal в поле
         if let Some(url) = ui.take_submitted(field) {
             let url = url.trim().to_string();
             if url.is_empty() {
@@ -620,94 +627,153 @@ impl Today {
             }
         }
 
-        // Клик вне карточки или закрытие
+        // Клик вне карточки закрывает форму
         let ptr = ui.pointer();
-        let clicked_outside = ui.pressed && !wk.contains(ptr);
-        if clicked_outside || (!ui.has_focus(field) && !wk.contains(ptr)) {
+        if ui.pressed && !wk.contains(ptr) {
             self.cal_editing = false;
+            ui.blur();
             return;
         }
 
         // Заголовок и кнопка закрытия
         cv.text(
             crate::i18n::pick("Календари (iCal)", "Calendars (iCal)"),
-            Rect::new(wk.x + 9.0, wk.y + 7.0, wk.w - 36.0, 14.0),
+            Rect::new(wk.x + 9.0, wk.y + 6.0, wk.w - 36.0, 14.0),
             &f.body,
             txt(),
         );
-        let close_btn = Rect::new(wk.right() - 24.0, wk.y + 6.0, 16.0, 16.0);
+        let close_btn = Rect::new(wk.right() - 24.0, wk.y + 5.0, 16.0, 16.0);
         if ui.icon_button(cv, id(TODAY, 64), close_btn, icon::CLOSE, false, crate::i18n::pick("Закрыть", "Close")) {
             self.cal_editing = false;
             ui.blur();
             return;
         }
 
-        // Поле ввода для добавления новой ссылки
+        let status = online::cal_account_status();
+        let err_h = if self.cal_bad || status.error.is_some() { 14.0 } else { 0.0 };
+        let total_h = 22.0 + 22.0 + 24.0 + err_h + (self.ics.len() as f32 * 19.0);
+        let view_top = wk.y + 22.0;
+        let view = Rect::new(wk.x + 7.0, view_top, wk.w - 14.0, (wk.bottom() - 4.0 - view_top).max(20.0));
+        let sid = id(TODAY, 65);
+        let off = ui.scroll_begin(cv, sid, view, total_h);
+        let mut y = view.y - off;
+        let row_w = view.w;
+
+        // 1. Строка Google Календаря
+        let btn_w = 76.0;
+        let g_label = if let Some(email) = &status.google_email {
+            format!("Google: {email}")
+        } else if status.google_busy {
+            crate::i18n::pick("Google: вход в браузере…", "Google: browser sign-in…").to_string()
+        } else {
+            crate::i18n::pick("Google Календарь", "Google Calendar").to_string()
+        };
+        cv.text(&g_label, Rect::new(view.x + 2.0, y + 3.0, row_w - btn_w - 6.0, 14.0), &f.small, txt());
+        let g_rect = Rect::new(view.x + row_w - btn_w, y + 1.0, btn_w, 18.0);
+        if status.google_email.is_some() {
+            if ui.solid_button(cv, google_btn, g_rect, "Отключить", crate::ui::chip_bg(), txt(), 5.0) {
+                online::disconnect_google(&self.ics);
+                self.sync();
+            }
+        } else if status.google_busy {
+            let _ = ui.solid_button(cv, google_btn, g_rect, "Ожидание…", crate::ui::chip_bg(), dim(), 5.0);
+        } else if online::oauth::google_available() {
+            if ui.solid_button(cv, google_btn, g_rect, "Подключить", cv.accent, crate::ui::ink(), 5.0) {
+                online::connect_google(self.ics.clone());
+            }
+        } else {
+            let _ = ui.solid_button(cv, google_btn, g_rect, "Нет ключей", crate::ui::chip_bg(), dim(), 5.0);
+        }
+        y += 22.0;
+
+        // 2. Строка Apple iCloud Календаря
+        if let Some(apple_id) = &status.apple_id {
+            let a_label = format!("iCloud: {apple_id}");
+            cv.text(&a_label, Rect::new(view.x + 2.0, y + 3.0, row_w - btn_w - 6.0, 14.0), &f.small, txt());
+            let a_rect = Rect::new(view.x + row_w - btn_w, y + 1.0, btn_w, 18.0);
+            if ui.solid_button(cv, apple_btn, a_rect, "Отключить", crate::ui::chip_bg(), txt(), 5.0) {
+                online::disconnect_apple(&self.ics);
+                self.sync();
+            }
+        } else {
+            let fields_w = (row_w - btn_w - 6.0).max(80.0);
+            let id_w = (fields_w * 0.52).floor();
+            let pw_w = fields_w - id_w - 4.0;
+            ui.text_field_ex(
+                cv,
+                apple_id_field,
+                Rect::new(view.x, y, id_w, 20.0),
+                crate::i18n::pick("Apple ID (iCloud)", "Apple ID (iCloud)"),
+                "",
+                Submit::Keep,
+            );
+            ui.text_field_ex(
+                cv,
+                apple_pw_field,
+                Rect::new(view.x + id_w + 4.0, y, pw_w, 20.0),
+                crate::i18n::pick("Пароль прил.", "App password"),
+                "",
+                Submit::Keep,
+            );
+            let a_id = ui.field_text(apple_id_field);
+            let a_pw = ui.field_text(apple_pw_field);
+            let can_apple = !status.apple_busy && !a_id.trim().is_empty() && !a_pw.trim().is_empty();
+            let (abg, afg) = if can_apple {
+                (cv.accent, crate::ui::ink())
+            } else {
+                (crate::ui::chip_bg(), dim())
+            };
+            let alabel = if status.apple_busy { "Проверка…" } else { "Подключить" };
+            let mut submit_apple = ui.take_submitted(apple_pw_field).is_some() || ui.take_submitted(apple_id_field).is_some();
+            if ui.solid_button(cv, apple_btn, Rect::new(view.x + row_w - btn_w, y + 1.0, btn_w, 18.0), alabel, abg, afg, 5.0) {
+                submit_apple = true;
+            }
+            if submit_apple && can_apple {
+                online::connect_apple(a_id, a_pw, self.ics.clone());
+                ui.set_field_text(apple_pw_field, "");
+            }
+        }
+        y += 22.0;
+
+        // 3. Поле ввода для добавления новой ссылки iCal
         let at_limit = self.ics.len() >= crate::config::MAX_CALENDAR_URLS;
         let placeholder = if at_limit {
             crate::i18n::pick("Лимит: макс. 8 ссылок", "Limit: max 8 links")
         } else {
             crate::i18n::pick("https://… или webcal://…", "https://… or webcal://…")
         };
-        let field_y = if wk.h > 100.0 { wk.y + 25.0 } else { wk.y + 22.0 };
-        let field_h = if wk.h > 100.0 { 24.0 } else { 22.0 };
         ui.text_field_ex(
             cv,
             field,
-            Rect::new(wk.x + 7.0, field_y, wk.w - 14.0, field_h),
+            Rect::new(view.x, y, row_w, 21.0),
             placeholder,
             icon::ADD,
             Submit::Keep,
         );
+        y += 23.0;
 
-        // Сообщение об ошибке
-        let mut list_top = field_y + field_h + 3.0;
+        // 4. Сообщение об ошибке
         if self.cal_bad {
             let msg = crate::i18n::pick(
                 "Нужна ссылка вида https:// или webcal://",
                 "A link like https:// or webcal:// is required",
             );
-            cv.text(msg, Rect::new(wk.x + 9.0, list_top, wk.w - 18.0, 12.0), &f.small, status_pink());
-            list_top += 14.0;
+            cv.text(msg, Rect::new(view.x + 2.0, y, row_w - 4.0, 12.0), &f.small, status_pink());
+            y += 14.0;
+        } else if let Some(err) = &status.error {
+            cv.text(&crate::i18n::tr(err), Rect::new(view.x + 2.0, y, row_w - 4.0, 12.0), &f.small, status_pink());
+            y += 14.0;
         }
 
-        if self.ics.is_empty() {
-            if !self.cal_bad {
-                cv.text(
-                    crate::i18n::pick("Enter — добавить, Esc — закрыть", "Enter — add, Esc — close"),
-                    Rect::new(wk.x + 9.0, list_top, wk.w - 18.0, 12.0),
-                    &f.small,
-                    dim(),
-                );
-                if wk.h > 100.0 {
-                    cv.text(
-                        crate::i18n::pick(
-                            "Google/Яндекс/Outlook: «секретный адрес iCal»",
-                            "Google/Yandex/Outlook: “secret iCal address”",
-                        ),
-                        Rect::new(wk.x + 9.0, list_top + 16.0, wk.w - 18.0, 12.0),
-                        &f.small,
-                        mix(dim(), crate::ui::card(), 0.35),
-                    );
-                }
-            }
-            return;
-        }
-
-        // Список добавленных ссылок в сокращённом виде
-        let view_h = (wk.bottom() - 4.0 - list_top).max(18.0);
-        let view = Rect::new(wk.x + 7.0, list_top, wk.w - 14.0, view_h);
+        // 5. Список добавленных ссылок в сокращённом виде
         const ROW_H: f32 = 19.0;
-        let sid = id(TODAY, 65);
-        let off = ui.scroll_begin(cv, sid, view, self.ics.len() as f32 * ROW_H);
         let mut remove_idx = None;
-
         for (i, url) in self.ics.iter().enumerate() {
-            let ry = view.y + i as f32 * ROW_H - off;
+            let ry = y + i as f32 * ROW_H;
             if ry + ROW_H < view.y || ry > view.bottom() {
                 continue;
             }
-            let row = Rect::new(view.x, ry, view.w, ROW_H - 1.0);
+            let row = Rect::new(view.x, ry, row_w, ROW_H - 1.0);
             let row_id = id(TODAY, 600 + i as u32);
             let hv = ui.hover_of(row_id);
             if hv > 0.01 {

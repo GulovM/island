@@ -68,6 +68,8 @@ pub struct State {
     pub apps_grid: bool,
     /// Вкладка «Приложения»: показан полный список (false — только избранные).
     pub apps_all: bool,
+    /// Последняя версия приложения, для которой пользователь видел раздел «Что нового».
+    pub last_seen_version: String,
     pub timer: TimerState,
     pub weather: WeatherState,
 }
@@ -83,6 +85,7 @@ impl Default for State {
             wallpaper_filter: 0,
             apps_grid: false,
             apps_all: false,
+            last_seen_version: String::new(),
             timer: TimerState::default(),
             weather: WeatherState::default(),
         }
@@ -125,6 +128,10 @@ pub fn serialize(state: &State) -> String {
     out.push_str(&format!("wallpaper_filter = {}\n", state.wallpaper_filter));
     out.push_str(&format!("apps_grid = {}\n", state.apps_grid as u8));
     out.push_str(&format!("apps_all = {}\n", state.apps_all as u8));
+    out.push_str(&format!(
+        "last_seen_version = \"{}\"\n",
+        state.last_seen_version.replace('\\', "\\\\").replace('"', "\\\"")
+    ));
 
     out.push_str("\n[timer]\n");
     out.push_str(&format!("duration = {}\n", state.timer.duration));
@@ -197,6 +204,9 @@ pub fn parse(text: &str) -> State {
             }
             ("", "apps_all") => {
                 state.apps_all = val == "1" || val.eq_ignore_ascii_case("true");
+            }
+            ("", "last_seen_version") => {
+                state.last_seen_version = unquote(val);
             }
             ("timer", "duration") => {
                 if let Ok(d) = val.parse::<u64>() {
@@ -275,7 +285,10 @@ fn read_state_from_disk() -> State {
         }
     }
 
-    State::default()
+    State {
+        last_seen_version: crate::update::VERSION.to_string(),
+        ..State::default()
+    }
 }
 
 /// Атомарно записывает состояние на диск через временный файл и rename.
@@ -384,6 +397,27 @@ pub fn set_timer(timer: TimerState) {
     flush();
 }
 
+/// Возвращает последнюю просмотренную пользователем версию «Что нового».
+pub fn last_seen_version() -> String {
+    if let Ok(mut g) = STORE.lock() {
+        if g.is_none() {
+            let state = read_state_from_disk();
+            *g = Some(StateStore { state, dirty: false });
+        }
+        if let Some(store) = g.as_ref() {
+            return store.state.last_seen_version.clone();
+        }
+    }
+    String::new()
+}
+
+/// Запоминает последнюю просмотренную пользователем версию «Что нового».
+pub fn set_last_seen_version(ver: &str) {
+    update(|s| s.last_seen_version = ver.to_string());
+    #[cfg(not(test))]
+    flush();
+}
+
 /// Запоминает последний прогноз погоды.
 pub fn save_weather(temp: f32, code: i32, city: &str) {
     update(|s| {
@@ -412,6 +446,7 @@ mod tests {
             wallpaper_filter: 2,
             apps_grid: true,
             apps_all: true,
+            last_seen_version: "1.2.0".to_string(),
             timer: TimerState {
                 duration: 600,
                 left: 450,

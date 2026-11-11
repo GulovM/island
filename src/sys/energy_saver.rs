@@ -8,8 +8,7 @@
 use windows::core::GUID;
 use windows::Win32::Foundation::{LocalFree, HLOCAL};
 use windows::Win32::System::Power::{
-    GetSystemPowerStatus, PowerGetActiveScheme, PowerReadDCValueIndex, PowerSetActiveScheme, PowerWriteDCValueIndex,
-    SYSTEM_POWER_STATUS,
+    PowerGetActiveScheme, PowerReadDCValueIndex, PowerSetActiveScheme, PowerWriteDCValueIndex,
 };
 
 use super::data_dir;
@@ -29,13 +28,9 @@ fn ok(code: u32) -> bool {
 /// Режим включён (или взведён: порог 100 % включит его, как только ПК перейдёт на батарею);
 /// `None` — батареи нет (настольный ПК), переключать нечего.
 pub fn energy_saver() -> Option<bool> {
-    let mut s = SYSTEM_POWER_STATUS::default();
-    unsafe { GetSystemPowerStatus(&mut s).ok()? };
-    if s.BatteryFlag == 255 || s.BatteryFlag & 128 != 0 {
-        return None;
-    }
+    let b = super::battery_status()?;
     let armed = unsafe { scheme().and_then(|g| threshold(&g)) } == Some(ALWAYS);
-    Some(s.SystemStatusFlag & 1 != 0 || armed)
+    Some(b.saver_on || armed)
 }
 
 /// Активная схема питания.
