@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kite Island — динамический остров для Windows</title>
+<meta name="description" content="Kite Island — лёгкая панель у верхнего края экрана Windows 10 и 11: музыка, календарь, буфер обмена, приложения и системные переключатели. Бесплатно и с открытым кодом.">
+<meta property="og:title" content="Kite Island — динамический остров для Windows">
+<meta property="og:description" content="Лёгкая панель у верхнего края экрана Windows: раскрывается при наведении и сворачивается, когда не нужна.">
+<meta name="theme-color" content="#2F5BFF">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geologica:wght@400;500;600;800&display=swap&subset=cyrillic" rel="stylesheet">
+<style>
+:root {
+  --cobalt: #2F5BFF;
+  --sky: #7FD6FF;
+  --ink: #141B3D;
+  --paper: #F3F7FF;
+  --night: #0C1433;
+  --bg: var(--paper);
+  --fg: var(--ink);
+  --muted: #4A5378;
+  --line: rgba(20, 27, 61, .12);
+  --link: #1F45E0;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: var(--night);
+    --fg: #EEF2FF;
+    --muted: #A7B1D6;
+    --line: rgba(238, 242, 255, .12);
+    --link: var(--sky);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: var(--night);
+  --fg: #EEF2FF;
+  --muted: #A7B1D6;
+  --line: rgba(238, 242, 255, .12);
+  --link: var(--sky);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Geologica", system-ui, "Segoe UI", sans-serif;
+  font-size: 18px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--link); text-underline-offset: .18em; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 3px solid var(--cobalt); outline-offset: 3px; border-radius: 6px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) :focus-visible { outline-color: var(--sky); } }
+:root[data-theme="dark"] :focus-visible { outline-color: var(--sky); }
+code { font-family: inherit; font-weight: 600; }
+
+.wrap { max-width: 1160px; margin: 0 auto; padding: 0 28px; }
+@media (max-width: 600px) { .wrap { padding: 0 16px; } body { font-size: 17px; } }
+
+/* ---------- Шапка ---------- */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 0; }
+.brand { display: inline-flex; color: var(--fg); }
+.brand svg { height: 34px; width: auto; display: block; overflow: visible; }
+.top nav { display: flex; gap: 22px; align-items: center; font-size: 16px; }
+.top nav a { color: var(--fg); text-decoration: none; }
+.top nav a:hover { color: var(--link); }
+@media (max-width: 860px) { .top nav .opt { display: none; } }
+@media (max-width: 600px) { .brand svg { height: 28px; } }
+
+/* ---------- Первый экран ---------- */
+.hero { padding: 40px 0 72px; }
+.hero h1 {
+  font-weight: 800;
+  font-size: clamp(40px, 6.4vw, 84px);
+  line-height: .98;
+  letter-spacing: -.035em;
+  margin: 0;
+  max-width: 13ch;
+}
+.lede { max-width: 58ch; margin: 28px 0 0; font-size: clamp(18px, 1.6vw, 21px); color: var(--muted); }
+.lede b { color: var(--fg); font-weight: 600; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; margin-top: 34px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: var(--cobalt); color: #fff; text-decoration: none;
+  font-weight: 600; font-size: 18px;
+  padding: 15px 26px; border-radius: 14px;
+  transition: background-color .15s ease, transform .15s ease;
+}
+.btn:hover { background: #2149E8; text-decoration: none; }
+.btn:active { transform: scale(.98); }
+.btn svg { width: 20px; height: 20px; flex: none; }
+.meta { font-size: 15px; color: var(--muted); }
+
+/* ---------- Демо: экран с островом и змеем ---------- */
+.demo { margin: 56px 0 0; }
+.screen {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  border-radius: 22px;
+  overflow: hidden;
+  container-type: inline-size;
+  background:
+    radial-gradient(60% 30% at 18% 62%, rgba(255,255,255,.55), transparent 70%),
+    radial-gradient(40% 18% at 52% 74%, rgba(255,255,255,.45), transparent 70%),
+    radial-gradient(35% 16% at 80% 56%, rgba(255,255,255,.35), transparent 70%),
+    linear-gradient(180deg, #2F5BFF 0%, #4F8DFF 42%, #9ADCFF 82%, #CFF0FF 100%);
+  box-shadow: 0 30px 80px -30px rgba(31, 69, 224, .55);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .screen {
+    background:
+      radial-gradient(60% 30% at 18% 62%, rgba(127,214,255,.18), transparent 70%),
+      radial-gradient(40% 18% at 52% 74%, rgba(127,214,255,.14), transparent 70%),
+      linear-gradient(180deg, #0E1A4A 0%, #1D3AB8 55%, #3F7BEA 90%, #6DB4F2 100%);
+    box-shadow: 0 30px 80px -30px rgba(0, 0, 0, .7);
+  }
+}
+:root[data-theme="dark"] .screen {
+  background:
+    radial-gradient(60% 30% at 18% 62%, rgba(127,214,255,.18), transparent 70%),
+    radial-gradient(40% 18% at 52% 74%, rgba(127,214,255,.14), transparent 70%),
+    linear-gradient(180deg, #0E1A4A 0%, #1D3AB8 55%, #3F7BEA 90%, #6DB4F2 100%);
+}
+.sky-art { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+/* Змей качается вокруг точки крепления нитки — нитка остаётся привязанной. */
+.kite-fly { transform-box: view-box; transform-origin: 790px 262px; animation: sway 7s ease-in-out infinite; }
+@keyframes sway { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(4deg); } }
+.string { fill: none; stroke: rgba(255,255,255,.9); stroke-width: 2.2; stroke-linecap: round; }
+
+.taskbar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 7.2%;
+  background: rgba(240, 246, 255, .72);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  display: flex; align-items: center; justify-content: center; gap: 1.1cqw;
+}
+.taskbar i { width: 2.6cqw; height: 2.6cqw; border-radius: .6cqw; background: rgba(20,27,61,.18); }
+.taskbar i:first-child { background: var(--cobalt); opacity: .85; }
+.tray {
+  position: absolute; right: 2cqw; top: 0; bottom: 0;
+  display: flex; align-items: center; gap: 1.2cqw;
+  font-size: 1.35cqw; color: var(--ink); font-weight: 500;
+}
+.tray svg { width: 1.9cqw; height: 1.9cqw; display: block; }
+
+/* Сам остров */
+.hot { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 76%; height: 14%; }
+.island {
+  position: absolute; top: 1.4cqw; left: 50%; transform: translateX(-50%);
+  width: 33cqw; height: 4.4cqw;
+  border: 0; padding: 0; margin: 0; font: inherit; cursor: pointer;
+  border-radius: 3cqw;
+  background: rgba(12, 18, 46, .78);
+  backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.14) inset, 0 1.2cqw 3cqw -1cqw rgba(8, 14, 40, .5);
+  color: #fff; overflow: hidden; text-align: left;
+  transition: width .55s cubic-bezier(.3, 1.3, .5, 1), height .55s cubic-bezier(.3, 1.3, .5, 1), border-radius .45s ease;
+}
+.island.open { width: 70cqw; height: 34cqw; border-radius: 3.2cqw; }
+.island:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.island .mini {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 2.2cqw; font-size: 1.55cqw; font-weight: 500;
+  transition: opacity .2s ease;
+}
+.island .mini svg { width: 1.9cqw; height: 1.9cqw; }
+.island.open .mini { opacity: 0; }
+.island .full {
+  position: absolute; left: 0; top: 0; width: 70cqw; height: 34cqw; padding: 2.2cqw 2.4cqw;
+  opacity: 0; transition: opacity .25s ease .12s; pointer-events: none;
+}
+.island.open .full { opacity: 1; }
+.tabsrow { display: flex; gap: .6cqw; font-size: 1.35cqw; white-space: nowrap; }
+.tabsrow span { padding: .5cqw 1.3cqw; border-radius: 2cqw; color: rgba(255,255,255,.72); }
+.tabsrow span.on { background: rgba(255,255,255,.16); color: #fff; }
+.tiles { display: grid; grid-template-columns: 1fr 1fr 2fr; grid-template-rows: 1fr 1fr; gap: 1cqw; margin-top: 1.8cqw; height: 22.5cqw; }
+.tile { border-radius: 1.8cqw; background: rgba(255,255,255,.1); padding: 1.3cqw 1.5cqw; font-size: 1.3cqw; display: flex; flex-direction: column; justify-content: space-between; }
+.tile small { display: block; color: rgba(255,255,255,.66); font-size: 1.1cqw; }
+.tile.on { background: var(--cobalt); }
+.tile.player { grid-row: span 2; grid-column: 3; }
+.cover { width: 7cqw; height: 7cqw; border-radius: 1.2cqw; background: conic-gradient(from 210deg, #7FD6FF, #2F5BFF, #141B3D, #7FD6FF); }
+.bar { display: block; height: .7cqw; border-radius: 1cqw; background: rgba(255,255,255,.2); overflow: hidden; }
+.bar b { display: block; height: 100%; width: 42%; background: #fff; border-radius: inherit; }
+.vol { grid-column: span 2; }
+.hint {
+  position: absolute; left: 50%; top: 8.2cqw; transform: translateX(-50%);
+  font-size: 1.5cqw; color: #fff; background: rgba(12,18,46,.38); padding: .5cqw 1.4cqw; border-radius: 2cqw;
+  transition: opacity .2s ease; white-space: nowrap; pointer-events: none;
+}
+.screen.touched .hint { opacity: 0; }
+.hint .t { display: none; }
+@media (hover: none) { .hint .m { display: none; } .hint .t { display: inline; } }
+@media (max-width: 600px) { .screen { border-radius: 14px; } .hint { font-size: 2.6cqw; top: 9cqw; } }
+.demo figcaption { margin-top: 14px; font-size: 15px; color: var(--muted); max-width: 70ch; }
+
+/* ---------- Секции ---------- */
+section { padding: 88px 0; border-top: 1px solid var(--line); }
+h2 { font-weight: 800; font-size: clamp(32px, 4vw, 52px); line-height: 1.04; letter-spacing: -.03em; margin: 0 0 18px; max-width: 18ch; }
+.intro { max-width: 60ch; color: var(--muted); margin: 0; }
+@media (max-width: 600px) { section { padding: 64px 0; } }
+
+/* Название: две половины змея */
+.name { display: grid; grid-template-columns: 1fr 1fr; margin-top: 48px; border-radius: 26px; overflow: hidden; }
+.name > div { padding: 40px 40px 44px; }
+.name .k { background: var(--cobalt); color: #fff; }
+.name .i { background: var(--sky); color: var(--ink); }
+.name h3 { margin: 0 0 14px; font-size: clamp(30px, 3.4vw, 44px); font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+.name h3 span { font-weight: 400; opacity: .8; }
+.name p { margin: 0; max-width: 46ch; }
+.name p + p { margin-top: 12px; }
+@media (max-width: 760px) { .name { grid-template-columns: 1fr; } .name > div { padding: 28px 22px 32px; } }
+.mark-note { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; margin-top: 40px; max-width: 760px; }
+.mark-note svg { width: 92px; height: 92px; }
+.mark-note p { margin: 0; color: var(--muted); }
+@media (max-width: 600px) { .mark-note { grid-template-columns: 1fr; gap: 16px; } }
+
+/* Вкладки — как ряд вкладок острова */
+.tabs { margin-top: 44px; }
+.tablist {
+  display: flex; gap: 6px; padding: 6px; border-radius: 999px; background: var(--ink);
+  width: fit-content; max-width: 100%; overflow-x: auto; scrollbar-width: none;
+}
+.tablist::-webkit-scrollbar { display: none; }
+.tablist button {
+  flex: none; border: 0; background: transparent; color: rgba(255,255,255,.72); font: inherit; font-size: 16px; font-weight: 500;
+  padding: 10px 18px; border-radius: 999px; cursor: pointer; transition: background-color .15s ease, color .15s ease;
+}
+.tablist button:hover { color: #fff; }
+.tablist button[aria-selected="true"] { background: var(--cobalt); color: #fff; }
+.tablist button:focus-visible { outline: 3px solid var(--sky); outline-offset: -3px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tablist { background: #1A2659; } }
+:root[data-theme="dark"] .tablist { background: #1A2659; }
+.tabpanel { margin-top: 30px; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 48px; align-items: start; min-height: 240px; }
+.tabpanel h3 { margin: 0; font-size: clamp(26px, 2.6vw, 34px); font-weight: 800; letter-spacing: -.025em; line-height: 1.1; }
+.tabpanel p { margin: 12px 0 0; color: var(--muted); max-width: 44ch; }
+.tabpanel ul { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.tabpanel li { padding: 14px 0; border-bottom: 1px solid var(--line); }
+@media (max-width: 760px) { .tabpanel { grid-template-columns: 1fr; gap: 20px; } }
+
+/* Лёгкость */
+.light-facts { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 48px; border-top: 2px solid var(--fg); }
+.light-facts div { padding: 22px 24px 0 0; }
+.light-facts strong { display: block; font-size: clamp(34px, 4vw, 54px); font-weight: 800; letter-spacing: -.04em; line-height: 1; }
+.light-facts span { display: block; margin-top: 10px; color: var(--muted); font-size: 16px; max-width: 22ch; }
+@media (max-width: 860px) { .light-facts { grid-template-columns: 1fr 1fr; row-gap: 30px; } }
+
+.more { display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px 48px; margin-top: 64px; }
+.more h3 { margin: 0 0 6px; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+.more p { margin: 0; color: var(--muted); font-size: 16.5px; }
+@media (max-width: 860px) { .more { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .more { grid-template-columns: 1fr; } }
+
+/* Установка — настоящая последовательность, поэтому с номерами */
+.steps { list-style: none; counter-reset: s; margin: 48px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px; }
+.steps li { counter-increment: s; }
+.steps li::before {
+  content: counter(s); display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%;
+  background: var(--cobalt); color: #fff; font-weight: 800; font-size: 20px; margin-bottom: 18px;
+}
+.steps h3 { margin: 0 0 8px; font-size: 22px; font-weight: 600; letter-spacing: -.015em; }
+.steps p { margin: 0; color: var(--muted); font-size: 16.5px; }
+@media (max-width: 760px) { .steps { grid-template-columns: 1fr; gap: 28px; } }
+.req { margin-top: 40px; color: var(--muted); font-size: 16px; }
+
+footer { border-top: 1px solid var(--line); padding: 48px 0 64px; font-size: 15.5px; color: var(--muted); }
+footer .row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 24px; align-items: flex-start; }
+footer p { margin: 0; max-width: 62ch; }
+footer nav { display: flex; flex-wrap: wrap; gap: 10px 22px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kite-fly { animation: none; }
+  .island, .island .mini, .island .full, .btn, .hint { transition: none; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 256 256">
+    <path d="M128 10.2V112.6H25.6Z" fill="#2F5BFF"/>
+    <path d="M128 10.2L230.4 112.6H128Z" fill="#7FD6FF"/>
+    <path d="M25.6 112.6H128V250.9Z" fill="#7FD6FF"/>
+    <path d="M128 112.6H230.4L128 250.9Z" fill="#2F5BFF"/>
+  </symbol>
+</svg>
+
+<header class="wrap top">
+  <a class="brand" href="#" aria-label="Kite Island, в начало страницы">
+    <svg viewBox="0 0 470 128" aria-hidden="true">
+      <use href="#mark" x="0" y="0" width="128" height="128"/>
+      <text x="150" y="94" fill="currentColor" font-family="Geologica, system-ui, sans-serif" font-size="76" letter-spacing="-2"><tspan font-weight="800">kite</tspan><tspan font-weight="400"> island</tspan></text>
+    </svg>
+  </a>
+  <nav aria-label="Разделы">
+    <a class="opt" href="#name">Название</a>
+    <a class="opt" href="#tabs">Вкладки</a>
+    <a class="opt" href="#install">Установка</a>
+    <a href="https://github.com/GulovM/island">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <h1>Всё нужное&nbsp;— у&nbsp;верхнего края экрана.</h1>
+    <p class="lede"><b>Kite Island</b> — динамический остров для Windows 10 и 11. Наведите мышь на верх экрана: тонкая чёлка раскроется в панель с музыкой, календарём, буфером обмена и приложениями. Уберите мышь — свернётся обратно.</p>
+    <div class="actions">
+      <a class="btn" id="dl" href="https://github.com/GulovM/island/releases/latest">
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 16h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Скачать для Windows
+      </a>
+      <span class="meta"><span id="ver">Последняя версия</span>, бесплатно, без рекламы и сбора данных</span>
+    </div>
+
+    <figure class="demo">
+      <div class="screen" id="screen">
+        <svg class="sky-art" viewBox="0 0 1000 625" aria-hidden="true">
+          <path class="string" d="M790 262 C 830 380, 760 470, 931 602"/>
+          <g class="kite-fly">
+            <use href="#mark" x="735" y="150" width="110" height="112"/>
+          </g>
+        </svg>
+
+        <div class="hot" id="hot"></div>
+        <button class="island" id="island" type="button" aria-expanded="false" aria-label="Демонстрация острова: раскрыть или свернуть">
+          <span class="mini" aria-hidden="true">
+            <span>RU</span><span>12:45</span>
+            <svg viewBox="0 0 20 20" fill="none"><path d="M2.5 7.5a11 11 0 0115 0M5 10.5a7.2 7.2 0 0110 0M7.6 13.4a3.4 3.4 0 014.8 0" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="16" r="1.3" fill="#fff"/></svg>
+          </span>
+          <span class="full" aria-hidden="true">
+            <span class="tabsrow"><span class="on">Управление</span><span>Сегодня</span><span>Статистика</span><span>Буфер</span><span>Приложения</span><span>Обои</span><span>Питание</span></span>
+            <span class="tiles">
+              <span class="tile on">Wi-Fi<small>Дом</small></span>
+              <span class="tile">Bluetooth<small>Выкл.</small></span>
+              <span class="tile player"><span class="cover"></span><span>Сейчас играет<small>Ночной полёт</small></span><span class="bar"><b></b></span></span>
+              <span class="tile vol">Громкость<span class="bar"><b style="width:64%"></b></span></span>
+            </span>
+          </span>
+        </button>
+        <span class="hint" aria-hidden="true"><span class="m">Наведите на чёлку</span><span class="t">Нажмите на чёлку</span></span>
+
+        <div class="taskbar" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i>
+          <span class="tray">
+            <svg viewBox="0 0 16 16"><path d="M8 .6V7H1.6Z" fill="#141B3D"/><path d="M8 .6L14.4 7H8Z" fill="#2F5BFF"/><path d="M1.6 7H8v8.7Z" fill="#2F5BFF"/><path d="M8 7h6.4L8 15.7Z" fill="#141B3D"/></svg>
+            <span>12:45</span>
+          </span>
+        </div>
+      </div>
+      <figcaption>Свёрнутый остров показывает раскладку, время и Wi-Fi, а когда играет музыка — мини-плеер. Змей держится за значок в трее.</figcaption>
+    </figure>
+  </div>
+
+  <section id="name">
+    <div class="wrap">
+      <h2>Почему Kite Island</h2>
+      <p class="intro">В названии два слова, и каждое объясняет половину программы.</p>
+      <div class="name">
+        <div class="k">
+          <h3>Kite <span>— воздушный змей</span></h3>
+          <p>Змей лёгкий, держится наверху и не требует внимания, пока летит. Kite Island такой же: в простое почти не тратит процессор, занимает около 2 МБ и всегда остаётся у верхнего края.</p>
+          <p>С землёй змея связывает одна нитка. У программы это значок в трее: через него она настраивается и закрывается.</p>
+        </div>
+        <div class="i">
+          <h3>Island <span>— остров</span></h3>
+          <p>«Динамическим островом» называют живую панель у верхнего края экрана телефона: она показывает музыку и уведомления и раскрывается, когда нужна.</p>
+          <p>Kite Island переносит эту идею на Windows. Тёмный остров сидит по центру сверху и превращается в панель с семью вкладками.</p>
+        </div>
+      </div>
+      <div class="mark-note">
+        <svg aria-hidden="true"><use href="#mark"/></svg>
+        <p>Знак — ромб змея из четырёх клиньев: два кобальтовых и два небесных. В трее небесные клинья берут цвет панели задач, поэтому змея видно и на светлой, и на тёмной панели.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="tabs">
+    <div class="wrap">
+      <h2>Семь вкладок</h2>
+      <p class="intro">Набор и порядок вкладок меняются в настройках, а виджеты на «Управлении», «Сегодня» и «Статистике» можно перетаскивать, прятать и растягивать.</p>
+      <div class="tabs">
+        <div class="tablist" role="tablist" aria-label="Вкладки острова" id="tablist"></div>
+        <div class="tabpanel" role="tabpanel" id="tabpanel" tabindex="0"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="light">
+    <div class="wrap">
+      <h2>Лёгкий, как змей</h2>
+      <p class="intro">Остров написан на Rust и рисуется видеокартой через Direct2D. Внутри нет браузерного движка, поэтому он не мешает играм и работе.</p>
+      <div class="light-facts">
+        <div><strong>≈ 0 %</strong><span>процессора, пока остров свёрнут</span></div>
+        <div><strong>≤ 30 МБ</strong><span>оперативной памяти</span></div>
+        <div><strong>2 МБ</strong><span>занимает программа на диске</span></div>
+        <div><strong>0</strong><span>рекламы, аккаунтов и сбора данных</span></div>
+      </div>
+      <div class="more">
+        <div><h3>Жидкое стекло</h3><p>Раскрытый остров полупрозрачный, с размытием фона и световой кромкой. Пять материалов: от почти прозрачного до плотного.</p></div>
+        <div><h3>Ваши цвета</h3><p>Акцент и фон берутся из Windows или задаются вручную. Есть шесть готовых тем и радиус углов на ползунке.</p></div>
+        <div><h3>Не мешает</h3><p>Над окнами на весь экран остров сжимается в тонкую полоску, а в полноэкранных играх прячется сам.</p></div>
+        <div><h3>Перетаскивание</h3><p>Бросьте файл, ссылку или текст на остров, и они сохранятся в «Быстрый доступ».</p></div>
+        <div><h3>Горячие клавиши</h3><p><code>Ctrl+Alt+Space</code> открывает поиск приложений. Для «Быстрого доступа» сочетание назначается одной кнопкой.</p></div>
+        <div><h3>Русский и английский</h3><p>Язык берётся из Windows и меняется в настройках. Обновления приходят прямо в программу.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>Как начать</h2>
+      <ol class="steps">
+        <li><h3>Скачайте</h3><p>Установщик или portable-архив со <a href="https://github.com/GulovM/island/releases/latest">страницы релизов</a>. Portable не нужно устанавливать: распакуйте и запустите <code>island.exe</code>.</p></li>
+        <li><h3>Запустите</h3><p>Права администратора не нужны. Программа пока без цифровой подписи, поэтому SmartScreen может предупредить: нажмите «Подробнее», затем «Выполнить в любом случае».</p></li>
+        <li><h3>Наведите мышь</h3><p>на середину верхнего края экрана — остров раскроется. Настройки под шестерёнкой справа в ряду вкладок, выход — в меню значка в трее.</p></li>
+      </ol>
+      <p class="req">Нужна 64-битная Windows 10 версии 2004 или новее либо Windows 11.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap row">
+    <p>Kite Island — бесплатный проект с открытым кодом под лицензией MIT. Он вдохновлён приложением Hitodama (Mainak Deb Das, Otism), но написан с нуля и с его авторами не связан.</p>
+    <nav aria-label="Ссылки">
+      <a href="https://github.com/GulovM/island">Исходный код</a>
+      <a href="https://github.com/GulovM/island/releases">Релизы</a>
+      <a href="https://github.com/GulovM/island/blob/main/CHANGELOG.md">Что нового</a>
+      <a href="privacy.html">Конфиденциальность</a>
+      <a href="terms.html">Условия</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // Демо острова: раскрывается от наведения на верхнюю полосу экрана, как в самой программе;
+  // на сенсорных экранах и с клавиатуры — по нажатию.
+  var island = document.getElementById('island');
+  var hot = document.getElementById('hot');
+  var screen = document.getElementById('screen');
+  var timer = null;
+  function setOpen(v) {
+    island.classList.toggle('open', v);
+    island.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (v) screen.classList.add('touched');
+  }
+  if (window.matchMedia('(hover: hover)').matches) {
+    [hot, island].forEach(function (el) {
+      el.addEventListener('mouseenter', function () { clearTimeout(timer); setOpen(true); });
+      el.addEventListener('mouseleave', function () { clearTimeout(timer); timer = setTimeout(function () { setOpen(false); }, 260); });
+    });
+  }
+  island.addEventListener('click', function () { setOpen(!island.classList.contains('open')); });
+
+  // Вкладки острова — по README.
+  var tabs = [
+    ['Управление', 'Переключатели без «Параметров»', 'То, что обычно ищут в трёх разных меню Windows, собрано на одной вкладке.',
+      ['Wi-Fi и Bluetooth', 'Громкость и устройство вывода звука', 'Ночной свет и тёмная тема', 'Плеер для музыки и видео из любого приложения']],
+    ['Сегодня', 'День на одном экране', 'Часы, погода и календарь с вашими событиями.',
+      ['Свои события с повторами и напоминаниями', 'Синхронизация и запись событий в Google Календарь и iCloud', 'Таймер', 'Список задач']],
+    ['Статистика', 'Как дела у компьютера', 'Нагрузка видна сразу, без диспетчера задач.',
+      ['Процессор', 'Видеокарта', 'Память', 'Сеть и замер скорости']],
+    ['Буфер', 'Буфер обмена с памятью', 'История копирования за сутки и постоянный «Быстрый доступ».',
+      ['«Быстрый доступ» на 30 записей: файлы, ссылки, тексты и картинки', 'История буфера чистится сама через сутки', 'Записи зашифрованы и привязаны к вашей учётной записи Windows', 'Записи перетаскиваются наружу — в проводник или мессенджер']],
+    ['Приложения', 'Запуск в два нажатия', 'Поиск по установленным программам и быстрые ссылки.',
+      ['Открывается сочетанием Ctrl+Alt+Space', 'Избранные приложения сверху', 'Свои ссылки на сайты']],
+    ['Обои', 'Смена обоев', 'Картинки из вашей папки ставятся на рабочий стол прямо с острова.',
+      ['Папка с обоями выбирается в настройках']],
+    ['Питание', 'Выключить без меню «Пуск»', 'Кнопки, которые обычно спрятаны глубже всего.',
+      ['Блокировка', 'Сон', 'Перезагрузка', 'Выключение']]
+  ];
+  var list = document.getElementById('tablist');
+  var panel = document.getElementById('tabpanel');
+  var buttons = [];
+  function esc(s) { return s.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+  function select(i, focus) {
+    buttons.forEach(function (b, j) {
+      b.setAttribute('aria-selected', i === j ? 'true' : 'false');
+      b.tabIndex = i === j ? 0 : -1;
+    });
+    var t = tabs[i];
+    panel.setAttribute('aria-labelledby', 'tab-' + i);
+    panel.innerHTML = '<div><h3>' + esc(t[1]) + '</h3><p>' + esc(t[2]) + '</p></div><ul>' +
+      t[3].map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
+    if (focus) buttons[i].focus();
+  }
+  tabs.forEach(function (t, i) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.id = 'tab-' + i; b.textContent = t[0];
+    b.setAttribute('role', 'tab'); b.setAttribute('aria-controls', 'tabpanel');
+    b.addEventListener('click', function () { select(i, false); });
+    b.addEventListener('keydown', function (e) {
+      var n = tabs.length, k = -1;
+      if (e.key === 'ArrowRight') k = (i + 1) % n;
+      else if (e.key === 'ArrowLeft') k = (i - 1 + n) % n;
+      else if (e.key === 'Home') k = 0;
+      else if (e.key === 'End') k = n - 1;
+      if (k >= 0) { e.preventDefault(); select(k, true); }
+    });
+    list.appendChild(b); buttons.push(b);
+  });
+  select(0, false);
+
+  // Версия и прямая ссылка на установщик из последнего релиза; без сети остаётся ссылка на страницу релизов.
+  if (window.fetch) {
+    fetch('https://api.github.com/repos/GulovM/island/releases/latest')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (rel) {
+        if (!rel || !rel.tag_name) return;
+        document.getElementById('ver').textContent = 'Версия ' + String(rel.tag_name).replace(/^v/, '');
+        var setup = (rel.assets || []).filter(function (a) { return /-setup\.exe$/.test(a.name); })[0];
+        if (setup && /^https:\/\/github\.com\//.test(setup.browser_download_url)) document.getElementById('dl').href = setup.browser_download_url;
+      })
+      .catch(function () {});
+  }
+})();
+</script>
+</body>
+</html>
