@@ -4,7 +4,35 @@
 
 ## [Unreleased]
 
+### RU
+
+- Ползунки громкости и яркости плавно доходят до нуля, граница заливки всегда ровная, значок и проценты остаются читаемыми на любом уровне.
+- Автоподбор контраста текста (APCA) всегда включён, переключатель убран из настроек.
+- Пустая колонка справа больше не появляется, когда ряду вкладок не хватает нескольких пикселей.
+- Google Календарь синхронизируется через Google Calendar API; поля Apple ID раскрываются кнопкой «Подключить», а таймер больше не пишет цифры в форму календарей.
+- Перемотка видео в браузере больше не пропадает; при нескольких источниках звука стрелки в шапке плеера переключают карточку между ними.
+- Последний замер скорости сети сохраняется до следующего замера, в том числе после перезапуска.
+- На вкладке «Приложения» при алфавитном указателе нет второй полосы прокрутки.
+- Список «Что нового» показывается на языке интерфейса.
+- Виджет «Батарея» переехал во вкладку «Управление» (лоток виджетов), «Статистика» снова 10 колонок.
+- Курсор в поле добавления задачи больше не уезжает вперёд по мере набора; убран лишний значок «+», кнопка со стрелкой и рамка поля окрашиваются системным акцентом.
+
+### EN
+
+- Volume and brightness sliders now go smoothly down to zero with a flat fill edge, and the icon and percentage stay readable at any level.
+- Automatic text contrast (APCA) is always on; its switch was removed from Settings.
+- No more empty column on the right when the tab row is a few pixels short.
+- Google Calendar syncs through the Google Calendar API; Apple ID fields open with the Connect button, and the timer no longer types digits into the calendar form.
+- Seeking browser video no longer disappears; with several audio sources, arrows in the player header switch the card between them.
+- The last network speed test result is kept until the next test, including across restarts.
+- The Apps tab no longer shows a second scrollbar next to the alphabet index.
+- The "What's new" list follows the interface language.
+- The Battery widget moved to the Controls tab (widget tray); Stats is back to 10 columns.
+- The caret in the add-task field no longer drifts ahead as you type; the redundant "+" icon is gone, and the arrow button and field border follow the system accent.
+
 ## [1.3.0] — 2026-11-11
+
+### RU
 
 - Подключение Google Календаря (OAuth 2.0 PKCE) и Apple iCloud Календаря (CalDAV) напрямую без ручного экспорта `.ics`.
 - Раздел «Что нового» во вкладке «Обновления» с автоматическим показом изменений после обновления.
@@ -12,6 +40,15 @@
 - Автоматический подбор контраста текста по алгоритму APCA при выборе пользовательских цветов оформления.
 - Улучшенное размытие фона (Acrylic HostBackdrop) и плавная анимация сворачивания и разворачивания острова.
 - Оптимизация потребления памяти, исправление обрезки текста при масштабировании DPI и защита от случайного перетаскивания.
+
+### EN
+
+- Connect Google Calendar (OAuth 2.0 PKCE) and Apple iCloud Calendar (CalDAV) directly, without exporting `.ics` by hand.
+- "What's new" section on the Updates tab, shown automatically after an update.
+- Instant response to system keyboard layout changes (RU/EN) and a laptop battery indicator in the pill.
+- Automatic text contrast (APCA) when choosing custom theme colors.
+- Better background blur (Acrylic HostBackdrop) and smooth island collapse and expand animation.
+- Lower memory use, fixed text clipping under DPI scaling and protection against accidental dragging.
 
 ## [1.2.0] — 2026-11-01
 

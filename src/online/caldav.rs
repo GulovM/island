@@ -1,10 +1,9 @@
 //! Клиент протокола CalDAV (RFC 4791 / WebDAV RFC 4918) поверх WinHTTP.
 //! Реализует 3-шаговое обнаружение календарей (`PROPFIND`) и выборку событий за период (`REPORT`)
-//! для Google Calendar и Apple iCloud Calendar без внешних XML-зависимостей.
+//! для Apple iCloud Calendar без внешних XML-зависимостей (Google — через REST API в `calendar.rs`).
 
 use super::http;
 
-pub const GOOGLE_CALDAV_BASE: &str = "https://apidata.googleusercontent.com/caldav/v2/";
 pub const APPLE_CALDAV_BASE: &str = "https://caldav.icloud.com/";
 
 const MAX_CALDAV_BYTES: usize = 2 << 20;

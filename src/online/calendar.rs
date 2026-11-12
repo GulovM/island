@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 
 use crate::{bg, log};
 
-use super::caldav::{self, APPLE_CALDAV_BASE, GOOGLE_CALDAV_BASE};
+use super::caldav::{self, APPLE_CALDAV_BASE};
 use super::datetime::{civil_from_days, days_from_civil, offset_at, weekday, SYSTEM_TZ};
-use super::http::get_text;
+use super::http::{self, get_text};
 use super::oauth::{self, OAuthError};
 use super::{spawn, stale, with, RETRY_AFTER};
 
@@ -261,8 +261,10 @@ pub fn connect_google(ics_urls: Vec<String>) {
     spawn("island-google-oauth", move || {
         let res = (|| -> Result<GoogleAccount, String> {
             let tok = oauth::authorize_google().map_err(|e| e.message())?;
-            let auth = format!("Bearer {}", tok.access_token);
-            let (email_opt, _) = caldav::discover_calendars(GOOGLE_CALDAV_BASE, &auth)?;
+            // Заодно проверяет, что токен открывает Calendar API: адрес основного календаря — email.
+            // Ошибки OAuth уже записаны в журнал в `oauth.rs`; здесь — только ошибки Calendar API.
+            let (email_opt, _) = fetch_google_calendar_list(&tok.access_token)
+                .inspect_err(|e| log::error(&format!("подключение Google Календаря: {e}")))?;
             let email = email_opt.unwrap_or_else(|| "Google".to_string());
             let expires_at = crate::sys::now_secs() + tok.expires_in.saturating_sub(60);
             Ok(GoogleAccount {
@@ -353,6 +355,7 @@ pub fn connect_apple(apple_id: String, app_password: String, ics_urls: Vec<Strin
                 refresh_calendar_age(&ics_urls, Duration::ZERO);
             }
             Ok(_) => {
+                log::error("подключение Apple Календаря: в аккаунте iCloud нет календарей");
                 if let Ok(mut ui) = AUTH_UI.lock() {
                     ui.apple_busy = false;
                     ui.error = Some("В аккаунте iCloud не найдено календарей".into());
@@ -360,6 +363,7 @@ pub fn connect_apple(apple_id: String, app_password: String, ics_urls: Vec<Strin
                 bg::notify();
             }
             Err(e) => {
+                log::error(&format!("подключение Apple Календаря: {e}"));
                 let msg = if e.contains("401") || e.contains("403") {
                     "Неверный Apple ID или пароль приложения iCloud".to_string()
                 } else {
@@ -466,23 +470,191 @@ fn refresh_google_account_token(g: &mut GoogleAccount) -> Result<(), String> {
     }
 }
 
-fn sync_google_caldav(mut g: GoogleAccount) -> Result<String, String> {
+// Google Calendar REST API v3. CalDAV у Google устаревший и требует отдельного включения в
+// консоли проекта, а JSON-интерфейс работает напрямую с токеном области `calendar.readonly`.
+// События переводятся в компактный VCALENDAR, чтобы кэш и разбор остались общими с iCal и iCloud.
+
+const GOOGLE_API: &str = "https://www.googleapis.com/calendar/v3";
+/// Предел ответа: с `fields` событие занимает ~200 байт, 2500 событий — около 0,5 МБ.
+const MAX_GOOGLE_BYTES: usize = 4 << 20;
+
+/// GET к Google Calendar API. Код ответа попадает в текст ошибки: по «401» вызывающий
+/// обновляет токен и повторяет запрос.
+fn google_get(url: &str, token: &str) -> Result<String, String> {
+    let auth = format!("Bearer {token}");
+    let resp = unsafe { http::request("GET", url, &[("Authorization", &auth)], None, MAX_GOOGLE_BYTES)? };
+    let body = String::from_utf8_lossy(&resp.body).into_owned();
+    if resp.status >= 400 {
+        // Google объясняет отказ полем `message` (например, Calendar API не включён в проекте).
+        let reason: String = http::json_str(&body, "message").unwrap_or_default().chars().take(160).collect();
+        return Err(format!("Google Calendar API: HTTP {} {reason}", resp.status).trim_end().to_string());
+    }
+    if resp.total as usize > MAX_GOOGLE_BYTES {
+        return Err(format!("ответ Google Calendar API больше {MAX_GOOGLE_BYTES} байт"));
+    }
+    Ok(body)
+}
+
+/// Календари аккаунта, показываемые в интерфейсе Google: `(id основного календаря, все id)`.
+/// Id основного календаря совпадает с адресом почты аккаунта.
+fn fetch_google_calendar_list(token: &str) -> Result<(Option<String>, Vec<String>), String> {
+    let url = format!(
+        "{GOOGLE_API}/users/me/calendarList?minAccessRole=reader&fields={}",
+        http::urlenc("items(id,primary,selected,deleted)")
+    );
+    Ok(parse_google_calendar_list(&google_get(&url, token)?))
+}
+
+fn parse_google_calendar_list(json: &str) -> (Option<String>, Vec<String>) {
+    let mut primary = None;
+    let mut ids = Vec::new();
+    for item in http::json_array(json, "items") {
+        let Some(id) = http::json_field_str(item, "id") else { continue };
+        let is_primary = http::json_field(item, "primary") == Some("true");
+        // У Google `selected` по умолчанию false: календарь, скрытый в интерфейсе, приходит без поля.
+        let shown = is_primary || http::json_field(item, "selected") == Some("true");
+        if http::json_field(item, "deleted") == Some("true") || !shown {
+            continue;
+        }
+        if is_primary {
+            primary = Some(id.clone());
+        }
+        ids.push(id);
+    }
+    let email = primary.or_else(|| ids.first().cloned());
+    (email, ids)
+}
+
+/// Окно событий как у CalDAV-источников (неделя назад, два месяца вперёд), в RFC 3339.
+fn google_time_window() -> (String, String) {
+    let now_days = (crate::sys::now_secs() / 86_400) as i64;
+    let (y1, m1, d1) = civil_from_days(now_days - 7);
+    let (y2, m2, d2) = civil_from_days(now_days + 60);
+    (format!("{y1:04}-{m1:02}-{d1:02}T00:00:00Z"), format!("{y2:04}-{m2:02}-{d2:02}T23:59:59Z"))
+}
+
+/// `2026-11-12T10:00:00[.sss](Z|±HH:MM)` → `20261112T070000Z` (UTC, как понимает `parse_dt`).
+fn rfc3339_to_ics_utc(s: &str) -> Option<String> {
+    let s = s.trim();
+    let b = s.as_bytes();
+    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || !matches!(b[10], b'T' | b't') || b[13] != b':' || b[16] != b':' {
+        return None;
+    }
+    let num = |a: usize, z: usize| s.get(a..z)?.parse::<i64>().ok();
+    let (y, mo, d) = (num(0, 4)?, num(5, 7)?, num(8, 10)?);
+    let (h, mi, se) = (num(11, 13)?, num(14, 16)?, num(17, 19)?);
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || se > 60 {
+        return None;
+    }
+    let mut rest = &s[19..];
+    if let Some(frac) = rest.strip_prefix('.') {
+        rest = frac.trim_start_matches(|c: char| c.is_ascii_digit());
+    }
+    let off_min = match rest.as_bytes() {
+        [b'Z' | b'z'] => 0,
+        [sign @ (b'+' | b'-'), _, _, b':', _, _] => {
+            let v = rest.get(1..3)?.parse::<i64>().ok()? * 60 + rest.get(4..6)?.parse::<i64>().ok()?;
+            if *sign == b'-' {
+                -v
+            } else {
+                v
+            }
+        }
+        _ => return None,
+    };
+    let t = days_from_civil(y as i32, mo as u32, d as u32) * 86_400 + h * 3600 + mi * 60 + se.min(59) - off_min * 60;
+    let (yy, mm, dd) = civil_from_days(t.div_euclid(86_400));
+    let r = t.rem_euclid(86_400);
+    Some(format!("{yy:04}{mm:02}{dd:02}T{:02}{:02}{:02}Z", r / 3600, r % 3600 / 60, r % 60))
+}
+
+/// Начало или конец события Google: `(значение для DTSTART/DTEND, весь день)`.
+fn google_event_time(obj: &str) -> Option<(String, bool)> {
+    if let Some(date) = http::json_field_str(obj, "date") {
+        let compact: String = date.chars().filter(|c| *c != '-').collect();
+        return (compact.len() == 8 && compact.bytes().all(|c| c.is_ascii_digit())).then_some((compact, true));
+    }
+    rfc3339_to_ics_utc(&http::json_field_str(obj, "dateTime")?).map(|t| (t, false))
+}
+
+/// Текст для свойства iCal: экранирование по RFC 5545 и без управляющих символов, чтобы строка
+/// из чужого ответа не могла начать новое свойство.
+fn ics_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            ';' => out.push_str("\\;"),
+            ',' => out.push_str("\\,"),
+            c if c.is_control() => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Добавляет события из ответа `events.list` блоками `VEVENT`; отменённые и без начала пропускает.
+fn google_events_to_ics(json: &str, out: &mut String) {
+    for item in http::json_array(json, "items") {
+        if http::json_field_str(item, "status").as_deref() == Some("cancelled") {
+            continue;
+        }
+        let Some((start, all_day)) = http::json_obj(item, "start").and_then(google_event_time) else { continue };
+        let end = http::json_obj(item, "end").and_then(google_event_time);
+        let prop = |name: &str, v: &str, date: bool| format!("{name}{}:{v}\r\n", if date { ";VALUE=DATE" } else { "" });
+        out.push_str("BEGIN:VEVENT\r\n");
+        if let Some(id) = http::json_field_str(item, "id") {
+            out.push_str(&format!("UID:{}\r\n", ics_text(&id)));
+        }
+        out.push_str(&format!("SUMMARY:{}\r\n", ics_text(&http::json_field_str(item, "summary").unwrap_or_default())));
+        out.push_str(&prop("DTSTART", &start, all_day));
+        if let Some((end, end_all_day)) = end {
+            out.push_str(&prop("DTEND", &end, end_all_day));
+        }
+        out.push_str("END:VEVENT\r\n");
+    }
+}
+
+fn sync_google_rest(mut g: GoogleAccount) -> Result<String, String> {
     let now = crate::sys::now_secs();
     if g.access_token.is_empty() || now + 60 >= g.expires_at {
         refresh_google_account_token(&mut g)?;
     }
-    let auth = format!("Bearer {}", g.access_token);
-    let cals = match caldav::discover_calendars(GOOGLE_CALDAV_BASE, &auth) {
+    let cals = match fetch_google_calendar_list(&g.access_token) {
         Ok((_, cals)) => cals,
-        Err(e) if e.contains("401") && !g.refresh_token.is_empty() => {
+        Err(e) if e.contains("HTTP 401") && !g.refresh_token.is_empty() => {
             refresh_google_account_token(&mut g)?;
-            let retry_auth = format!("Bearer {}", g.access_token);
-            caldav::discover_calendars(GOOGLE_CALDAV_BASE, &retry_auth)?.1
+            fetch_google_calendar_list(&g.access_token)?.1
         }
         Err(e) => return Err(e),
     };
-    let final_auth = format!("Bearer {}", g.access_token);
-    fetch_all_caldav_events(&cals, &final_auth)
+    let (time_min, time_max) = google_time_window();
+    let mut combined = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n");
+    let mut any_ok = false;
+    let mut last_err = String::new();
+    for cal in &cals {
+        // `orderBy=startTime` с окном от недели назад: при пределе в 2500 событий отрезается
+        // дальний конец окна, а не ближайшие дни.
+        let url = format!(
+            "{GOOGLE_API}/calendars/{}/events?singleEvents=true&orderBy=startTime&maxResults=2500&timeMin={}&timeMax={}&fields={}",
+            http::urlenc(cal),
+            http::urlenc(&time_min),
+            http::urlenc(&time_max),
+            http::urlenc("items(id,status,summary,start,end)"),
+        );
+        match google_get(&url, &g.access_token) {
+            Ok(json) => {
+                any_ok = true;
+                google_events_to_ics(&json, &mut combined);
+            }
+            Err(e) => last_err = e,
+        }
+    }
+    if !any_ok && !cals.is_empty() {
+        return Err(last_err);
+    }
+    combined.push_str("END:VCALENDAR\r\n");
+    Ok(combined)
 }
 
 fn sync_apple_caldav(a: AppleAccount) -> Result<String, String> {
@@ -746,7 +918,7 @@ pub fn refresh_calendar_age(urls: &[String], max_age: Duration) {
             }
             if let Some(g) = acc.google.clone() {
                 let g_key = format!("caldav:google:{}", g.email);
-                handles.push(scope.spawn(move || (g_key, sync_google_caldav(g))));
+                handles.push(scope.spawn(move || (g_key, sync_google_rest(g))));
             }
             if let Some(a) = acc.apple.clone() {
                 let a_key = format!("caldav:apple:{}", a.apple_id);
@@ -1113,6 +1285,54 @@ mod tests {
 
     fn at(y: i32, m: u32, d: u32, h: i64, mi: i64) -> i64 {
         days_from_civil(y, m, d) * 1440 + h * 60 + mi
+    }
+
+    #[test]
+    fn google_rfc3339_to_compact_utc() {
+        assert_eq!(rfc3339_to_ics_utc("2026-11-12T10:00:00+03:00").as_deref(), Some("20261112T070000Z"));
+        assert_eq!(rfc3339_to_ics_utc("2026-11-12T10:00:00Z").as_deref(), Some("20261112T100000Z"));
+        assert_eq!(rfc3339_to_ics_utc("2026-11-12T10:00:00.250-05:30").as_deref(), Some("20261112T153000Z"));
+        // Переход через полночь и границу года.
+        assert_eq!(rfc3339_to_ics_utc("2027-01-01T01:30:00+03:00").as_deref(), Some("20261231T223000Z"));
+        assert_eq!(rfc3339_to_ics_utc("2026-11-12T10:00:00"), None, "без зоны время неоднозначно");
+        assert_eq!(rfc3339_to_ics_utc("2026-13-12T10:00:00Z"), None);
+        assert_eq!(rfc3339_to_ics_utc("мусор"), None);
+    }
+
+    #[test]
+    fn google_calendar_list_picks_shown_and_primary() {
+        let j = r#"{"items":[
+            {"id":"team@group.calendar.google.com","selected":true},
+            {"id":"user@gmail.com","primary":true,"selected":true},
+            {"id":"hidden@group.calendar.google.com"},
+            {"id":"gone@group.calendar.google.com","selected":true,"deleted":true}
+        ]}"#;
+        let (email, ids) = parse_google_calendar_list(j);
+        assert_eq!(email.as_deref(), Some("user@gmail.com"));
+        assert_eq!(ids, ["team@group.calendar.google.com", "user@gmail.com"]);
+        assert_eq!(parse_google_calendar_list(r#"{"items":[]}"#), (None, Vec::new()));
+    }
+
+    #[test]
+    fn google_events_become_parsable_ics() {
+        let j = r#"{"items":[
+            {"id":"ev1","status":"confirmed","summary":"План; бюджет, Q4\nитоги","start":{"dateTime":"2026-11-12T10:00:00+03:00"},"end":{"dateTime":"2026-11-12T11:00:00+03:00"}},
+            {"id":"ev2","status":"cancelled","summary":"Отменено","start":{"date":"2026-11-13"},"end":{"date":"2026-11-14"}},
+            {"id":"ev3","summary":"Отпуск","start":{"date":"2026-11-14"},"end":{"date":"2026-11-16"}},
+            {"id":"ev4","summary":"Без начала"}
+        ]}"#;
+        let mut ics = String::from("BEGIN:VCALENDAR\r\n");
+        google_events_to_ics(j, &mut ics);
+        ics.push_str("END:VCALENDAR\r\n");
+        assert!(ics.contains("UID:ev1\r\n") && ics.contains("DTSTART:20261112T070000Z\r\n"));
+        assert!(ics.contains("DTSTART;VALUE=DATE:20261114\r\n"));
+        let raws = parse_ics(&ics, 180);
+        assert_eq!(raws.len(), 2, "отменённое и событие без начала пропускаются");
+        assert_eq!(raws[0].title, "План; бюджет, Q4 итоги");
+        assert_eq!((raws[0].start, raws[0].end), (at(2026, 11, 12, 10, 0), at(2026, 11, 12, 11, 0)));
+        assert_eq!(raws[0].uid, "ev1");
+        assert!(raws[1].all_day);
+        assert_eq!((raws[1].start, raws[1].end), (at(2026, 11, 14, 0, 0), at(2026, 11, 16, 0, 0)));
     }
 
     #[test]

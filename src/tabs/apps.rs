@@ -467,7 +467,7 @@ impl Apps {
             }
         }
 
-        let off = ui.scroll_begin(cv, sid, view, y);
+        let off = ui.scroll_begin_ex(cv, sid, view, y, bar.is_none());
         let mut fav = None;
         for (ry, head, p, col) in rows {
             let yy = view.y + ry - off;

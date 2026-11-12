@@ -10,7 +10,7 @@ use crate::anim::Spring;
 use crate::bg::{self, Cmd, DevItem, ListKind, Media, Timeline};
 use crate::sys;
 use crate::ios::SysColor;
-use crate::ui::{hue, icon, mix, on_color, slider_fill, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink, txt, WHITE};
+use crate::ui::{hue, icon, mix, on_color, slider_fill, Align, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink, txt, WHITE};
 
 use super::grid::{Grid, Item};
 use super::layout::{sz, Size, HIDDEN, Spec, TabSpec, CELL, GAP, TALL, WIDE};
@@ -30,6 +30,8 @@ const BRIGHTNESS: usize = 6;
 const MEDIA: usize = 7;
 const AIRPLANE: usize = 8;
 const SAVER: usize = 9;
+/// Перенесена со «Статистики»: там широкая карточка раздвигала сетку до 12 колонок.
+const BATTERY: usize = 10;
 
 /// Высота выпадающего списка устройств.
 const LIST_H: f32 = 116.0;
@@ -42,6 +44,8 @@ static SLIDER: [Size; 2] = [sz(WIDE + 2, 1), sz(1, TALL + 2)];
 /// Плеер: высота 2 ячейки (или полоса в один ряд), ширина произвольная — от 3 (4 у полосы) ячеек
 /// до ширины острова. По умолчанию 3×2 (первый размер списка).
 static PLAYER: [Size; 2] = [sz(WIDE + 3, 2), sz(WIDE + 4, 1)];
+/// Батарея: узкая и широкая карточки, как на «Статистике».
+static BATTERY_SIZES: [Size; 2] = [sz(2, 2), sz(4, 2)];
 
 /// Сетка вкладки: до 10 колонок и 6 рядов крупных ячеек (шаг CELL=56, зазор GAP=8; рядов до 5 — под список устройств). По умолчанию в первом
 /// ряду три плитки по 2 ячейки, во втором — две по 3, ниже плеер 3×2 и два ползунка 3×1 рядом с ним.
@@ -64,6 +68,7 @@ pub static SPEC: TabSpec = TabSpec {
         Spec { key: "media", title: "Плеер", sizes: &PLAYER, size: 0, col: 0, row: 2 },
         Spec { key: "airplane", title: "Режим полёта", sizes: &TILE, size: 1, col: 0, row: HIDDEN },
         Spec { key: "saver", title: "Энергосбережение", sizes: &TILE, size: 1, col: 0, row: HIDDEN },
+        Spec { key: "battery", title: "Батарея", sizes: &BATTERY_SIZES, size: 0, col: 0, row: HIDDEN },
     ],
 };
 
@@ -86,6 +91,34 @@ struct Fade(Spring);
 impl Default for Fade {
     fn default() -> Self {
         Fade(Spring::unit(0.0, 420.0, 34.0))
+    }
+}
+
+/// Аккумулятор и «всплеск» молнии при подключении питания.
+struct BatteryState {
+    status: Option<sys::BatteryStatus>,
+    bolt: Spring,
+}
+
+impl Default for BatteryState {
+    fn default() -> Self {
+        // Опрос сразу: без него виджет считался бы недоступным до первого показа вкладки.
+        BatteryState { status: sys::battery_status(), bolt: Spring::unit(0.0, 260.0, 12.0) }
+    }
+}
+
+impl BatteryState {
+    /// Перечитывает состояние питания; `true` — что-то изменилось.
+    fn poll(&mut self) -> bool {
+        let next = sys::battery_status();
+        // Питание подключили: молния один раз «подпрыгивает».
+        if next.is_some_and(|b| b.ac_online) && self.status.is_some_and(|b| !b.ac_online) {
+            self.bolt.value = 1.0;
+            self.bolt.target = 0.0;
+        }
+        let changed = next != self.status;
+        self.status = next;
+        changed
     }
 }
 
@@ -162,6 +195,7 @@ pub struct Controls {
     /// Какой список рисуется (и пока гаснет после закрытия) и насколько он проявлен.
     shown: Option<ListKind>,
     list_t: Fade,
+    battery: BatteryState,
 }
 
 impl Controls {
@@ -189,6 +223,7 @@ impl Controls {
         self.dark = sys::dark_mode();
         self.night = sys::night_light();
         self.saver = sys::energy_saver();
+        self.battery.poll();
         self.seek_hold = None;
         self.last_seek_send = None;
         self.list_t.0.target = 0.0;
@@ -211,10 +246,11 @@ impl Controls {
 
     pub fn step(&mut self, dt: f32) {
         self.list_t.0.step(dt);
+        self.battery.bolt.step(dt);
     }
 
     pub fn animating(&self) -> bool {
-        !self.list_t.0.settled()
+        !self.list_t.0.settled() || !self.battery.bolt.settled()
     }
 
     /// Открывает/закрывает список устройств по стрелке плитки.
@@ -240,6 +276,8 @@ impl Controls {
         let saver = sys::energy_saver();
         let saver_changed = saver != self.saver;
         self.saver = saver;
+        // Заряд и подключение питания: тот же дешёвый вызов GetSystemPowerStatus.
+        let battery_changed = self.battery.poll();
         if let Some(kind) = self.open {
             self.open_ticks += 1;
             if kind != ListKind::Bluetooth || self.open_ticks % 6 == 0 {
@@ -249,7 +287,7 @@ impl Controls {
         // Сообщение о подключении гаснет по времени — перерисовываем, пока оно есть.
         let status = self.open.is_some_and(|k| bg::status(k).is_some());
         // Прогресс трека двигается и между обновлениями снимка.
-        night_changed || saver_changed || status || self.media.as_ref().is_some_and(|m| m.playing)
+        night_changed || saver_changed || battery_changed || status || self.media.as_ref().is_some_and(|m| m.playing)
     }
 
     /// Забирает свежий снимок фонового потока. `true` — что-то изменилось.
@@ -277,6 +315,16 @@ impl Controls {
         let seeking = self.seek_hold.is_some_and(|t| Instant::now() < t);
         self.media = match (s.media, self.media.take()) {
             (Some(mut new), Some(old)) if new.key == old.key => {
+                // Браузер между опросами на миг отдаёт пустой таймлайн: без этого ползунок перемотки
+                // пропадал через секунду после наведения. Пока трек тот же, держим последний известный.
+                if new.dur <= 0.0 && old.dur > 0.0 {
+                    new.dur = old.dur;
+                    new.can_seek = old.can_seek;
+                    new.min_seek = old.min_seek;
+                    new.max_seek = old.max_seek;
+                    new.pos = old.position_now();
+                    new.at = Instant::now();
+                }
                 if seeking || (new.playing && old.playing && new.rate == old.rate && (new.position_now() - old.position_now()).abs() < 2.0) {
                     new.pos = old.pos;
                     new.at = old.at;
@@ -299,7 +347,7 @@ impl Controls {
         let (rows, low) = self.prepare(grid);
         grid.set_overlay_rows(rows);
         let area = grid.area(w, h);
-        let skip = [BRIGHTNESS, SAVER].iter().filter(|&&i| self.unavailable(i)).fold(0u32, |m, &i| m | 1 << i);
+        let skip = [BRIGHTNESS, SAVER, BATTERY].iter().filter(|&&i| self.unavailable(i)).fold(0u32, |m, &i| m | 1 << i);
         // Виджеты под списком гаснут и не принимают нажатий (иначе они перехватят их у строк списка).
         let cover = self.cover(area, low);
         grid.draw(ui, cv, area, skip, |ui, cv, it| self.widget(ui, cv, it, cover));
@@ -377,6 +425,7 @@ impl Controls {
         match idx {
             BRIGHTNESS => !crate::bright::available(),
             SAVER => self.saver.is_none(),
+            BATTERY => self.battery.status.is_none(),
             _ => false,
         }
     }
@@ -497,8 +546,57 @@ impl Controls {
                 let device = self.device();
                 self.media_card(ui, cv, r, it.size, &device);
             }
+            BATTERY => self.battery_card(cv, r, it.size),
             _ => {}
         }
+    }
+
+    /// Батарея: процент, полоса заряда и молния, которая «подпрыгивает» при подключении питания.
+    /// Оформление — как у карточек «Статистики», откуда виджет переехал.
+    unsafe fn battery_card(&self, cv: &Canvas, r: Rect, size: usize) {
+        use super::stats::{header, P};
+        let f = &cv.g.fonts;
+        let wide = size > 0;
+        let iw = r.w - 2.0 * P;
+        cv.card(r);
+        let Some(b) = self.battery.status else {
+            header(cv, r, icon::BATTERY, "Батарея", dim());
+            return;
+        };
+        let tint = if !b.ac_online && b.percent <= 20 {
+            crate::ui::status_red()
+        } else if b.saver_on {
+            crate::ui::status_orange()
+        } else {
+            crate::ui::status_green()
+        };
+        header(cv, r, icon::BATTERY, "Батарея", tint);
+        let frac = f32::from(b.percent) / 100.0;
+        let big = b.percent.to_string();
+        let bw = cv.digits_w(&big, 30.0, 600);
+        let dy = r.y + 44.0;
+        cv.digits(&big, r.x + P - 1.0, bw + 4.0, dy, 30.0, 600, Align::Leading, txt());
+        cv.line("%", &f.body, r.x + P + bw + 5.0, 20.0, dy + 4.0, Align::Leading, dim());
+        if b.ac_online {
+            let k = 1.0 + 0.5 * self.battery.bolt.value.max(0.0);
+            let s = 12.0 * k;
+            let cx = r.x + P + bw + 5.0 + 28.0;
+            cv.symbol(icon::BOLT, Rect::new(cx - s / 2.0, dy - s / 2.0, s, s), 11.0 * k, tint);
+        }
+        let status = if b.charging {
+            "Заряжается"
+        } else if b.ac_online {
+            "Питание от сети"
+        } else {
+            "От батареи"
+        };
+        let status = crate::i18n::tr(status);
+        if wide {
+            cv.line(&status, &f.body, r.x + P, iw, dy + 4.0, Align::Trailing, txt());
+        } else {
+            cv.line(&status, &f.small, r.x + P, iw, r.bottom() - P - 5.0, Align::Leading, dim());
+        }
+        cv.progress(Rect::new(r.x + P, r.bottom() - P - if wide { 6.0 } else { 21.0 }, iw, 6.0), frac, tint);
     }
 
     /// Устройство вывода звука для подписей.
@@ -672,10 +770,31 @@ impl Controls {
         cv.card(r);
         let f = &cv.g.fonts;
         // Содержимое двухрядных карточек скомпоновано под 88 px высоты: лишнее место делится поровну.
-        let dy = if compact { 0.0 } else { ((r.h - 88.0) / 2.0).max(0.0) };
-        if !compact && !narrow {
-            cv.glyph(icon::VOLUME, Rect::new(r.x + 8.0, r.y + dy + 4.0, 12.0, 14.0), false, dim());
-            cv.text(device, Rect::new(r.x + 21.0, r.y + dy + 4.0, 150.0, 14.0), &f.small, dim());
+        let mut dy = if compact { 0.0 } else { ((r.h - 88.0) / 2.0).max(0.0) };
+        if !compact {
+            // Шапка: источник звука («Firefox», «Spotify»), если он известен, иначе устройство вывода,
+            // и стрелки перелистывания, когда источников несколько.
+            let head_y = if narrow { r.y + 4.0 } else { r.y + dy + 4.0 };
+            let sessions = self.media.as_ref().map_or(0, |m| m.session_count);
+            let arrows_w = if sessions > 1 { 40.0 } else { 0.0 };
+            let source = self.media.as_ref().map(|m| m.source_name.as_str()).filter(|s| !s.is_empty()).unwrap_or(device);
+            cv.glyph(icon::VOLUME, Rect::new(r.x + 8.0, head_y, 12.0, 14.0), false, dim());
+            let name_w = (r.w - 29.0 - arrows_w).clamp(20.0, 150.0);
+            cv.text(source, Rect::new(r.x + 21.0, head_y, name_w, 14.0), &f.small, dim());
+            if sessions > 1 {
+                let prev_r = Rect::new(r.right() - 38.0, head_y - 1.0, 16.0, 16.0);
+                let next_r = Rect::new(r.right() - 22.0, head_y - 1.0, 16.0, 16.0);
+                if ui.icon_button(cv, id(CONTROLS, 24), prev_r, icon::LEFT, false, crate::i18n::pick("Предыдущий источник", "Previous source")) {
+                    bg::send(Cmd::PrevSession);
+                }
+                if ui.icon_button(cv, id(CONTROLS, 25), next_r, icon::RIGHT, false, crate::i18n::pick("Следующий источник", "Next source")) {
+                    bg::send(Cmd::NextSession);
+                }
+            }
+            // Узкой карточке раньше шапка не помещалась: опускаем обложку, текст и кнопки под неё.
+            if narrow {
+                dy += 6.0;
+            }
         }
 
         let art = if compact {
@@ -853,6 +972,7 @@ impl Controls {
         self.volume = 0.62;
         self.brightness = 0.8;
         self.audio = Some("Наушники AirPods".into());
+        self.battery.status = Some(sys::BatteryStatus { ac_online: false, charging: false, saver_on: false, percent: 78 });
         self.media = Some(Media {
             title: "Blinding Lights".into(),
             artist: "The Weeknd".into(),
@@ -866,6 +986,8 @@ impl Controls {
             can_seek: true,
             min_seek: 0.0,
             max_seek: 200.0,
+            source_name: "Spotify".into(),
+            session_count: 2,
         });
     }
 

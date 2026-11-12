@@ -40,7 +40,11 @@ pub struct Snapshot {
     /// Яркость экрана, 0..=1; `None`, если устройство её не поддерживает.
     pub brightness: Option<f32>,
     pub muted: bool,
+    /// Сессия карточки плеера: выбранная стрелками, иначе та, что играет.
     pub media: Option<Media>,
+    /// Сессия, которая реально звучит, — для свёрнутого острова. Листание источников в карточке
+    /// её не меняет.
+    pub live_media: Option<Media>,
     /// Сеть Wi-Fi, к которой подключены.
     pub ssid: Option<String>,
     /// Короткое имя устройства вывода звука («Динамики»).
@@ -65,7 +69,7 @@ pub use net::{net_status, NetStatus};
 use audio_policy::audio_set_default;
 use bluetooth::{bluetooth_devices, bt_spawn};
 use devices::{audio_devices, device, device_name, endpoint, store_list};
-use media::{media_command, read_media, refresh_media};
+use media::{media_command, read_media_pair, refresh_media};
 use volume::watch_volume;
 use wifi::{wifi_disconnect, wifi_networks, wifi_spawn, wifi_ssid};
 use winrt::wait;
@@ -103,6 +107,9 @@ pub enum Cmd {
     Prev,
     /// Перемотка трека на позицию в секундах от начала.
     Seek(f32),
+    /// Показать в карточке плеера предыдущий / следующий источник звука (без смены воспроизведения).
+    PrevSession,
+    NextSession,
 }
 
 static SNAPSHOT: Mutex<Option<Snapshot>> = Mutex::new(None);
@@ -142,8 +149,11 @@ pub fn start(hwnd: HWND) {
             // Слайдер громкости шлёт десятки значений — исполняем только последнее.
             let full = batch.iter().any(|c| matches!(c, Cmd::Refresh | Cmd::Wifi(_) | Cmd::Bluetooth(_) | Cmd::Airplane(_)));
             let has_fast = batch.iter().any(|c| matches!(c, Cmd::Volume(_) | Cmd::Brightness(_) | Cmd::Mute(_)));
-            let needs_refresh = batch.iter().any(|c| !matches!(c, Cmd::Volume(_) | Cmd::Brightness(_) | Cmd::Mute(_) | Cmd::Net | Cmd::Media));
-            let wants_media = batch.iter().any(|c| matches!(c, Cmd::Media));
+            // Листание источников меняет только медиа: полный опрос (радио, громкость) не нужен.
+            let needs_refresh = batch.iter().any(|c| {
+                !matches!(c, Cmd::Volume(_) | Cmd::Brightness(_) | Cmd::Mute(_) | Cmd::Net | Cmd::Media | Cmd::PrevSession | Cmd::NextSession)
+            });
+            let wants_media = batch.iter().any(|c| matches!(c, Cmd::Media | Cmd::PrevSession | Cmd::NextSession));
             let wants_net = batch.iter().any(|c| matches!(c, Cmd::Net));
             let last_volume = batch.iter().rposition(|c| matches!(c, Cmd::Volume(_)));
             let last_bright = batch.iter().rposition(|c| matches!(c, Cmd::Brightness(_)));
@@ -236,6 +246,8 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool) {
             }
         }
         Cmd::PlayPause | Cmd::Next | Cmd::Prev | Cmd::Seek(_) => media_command(cmd),
+        Cmd::PrevSession => media::cycle_session(-1),
+        Cmd::NextSession => media::cycle_session(1),
     }
 }
 
@@ -328,7 +340,7 @@ unsafe fn refresh(full: bool) {
         }
     }
     snap.ssid = wifi_ssid();
-    snap.media = read_media();
+    (snap.media, snap.live_media) = read_media_pair();
 
     if let Ok(mut s) = SNAPSHOT.lock() {
         if !full {

@@ -7,13 +7,21 @@ use crate::online;
 use crate::tabs::{id, TODAY};
 use crate::ui::{dim, fg, icon, mix, txt, Align, Canvas, Rect, Submit, Ui};
 
+// ID погоды на вкладке: карточка и поле города.
+const ID_CARD: u32 = 60;
+const ID_CITY: u32 = 61;
+
+/// Занятые погодой ID вкладки для теста непересечения в `mod.rs`.
+#[cfg(test)]
+pub(super) const ID_RANGES: &[(u32, u32)] = &[(ID_CARD, ID_CITY + 1)];
+
 impl Today {
     /// Погода. `size`: 0 — компактная (значок, градусы, описание), 1 — обычная, 2 — широкая в одну
     /// строку. Клик по карточке — поле для города (пусто — определить по IP).
     pub(super) unsafe fn weather_card(&mut self, ui: &mut Ui, cv: &Canvas, wc: Rect, size: usize) {
         let f = &cv.g.fonts;
         cv.card(wc);
-        let field = id(TODAY, 61);
+        let field = id(TODAY, ID_CITY);
         if self.editing {
             if let Some(city) = ui.take_submitted(field) {
                 self.city = city.trim().to_string();
@@ -39,14 +47,14 @@ impl Today {
             }
             return;
         }
-        let (hover, clicked) = ui.click_area(id(TODAY, 60), wc);
+        let (hover, clicked) = ui.click_area(id(TODAY, ID_CARD), wc);
         if clicked {
             self.editing = true;
             ui.set_field_text(field, &self.city);
             ui.focus = Some(field);
             ui.caret_on = true;
         }
-        let hv = ui.hover_of(id(TODAY, 60));
+        let hv = ui.hover_of(id(TODAY, ID_CARD));
         if hover || hv > 0.01 {
             cv.rr(wc, crate::ui::card_radius(), D2D1_COLOR_F { a: 0.04 * hv, ..fg() });
             cv.glyph(icon::EDIT, Rect::new(wc.right() - 18.0, wc.y + 3.0, 14.0, 14.0), false, D2D1_COLOR_F { a: hv, ..dim() });

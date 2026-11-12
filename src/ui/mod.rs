@@ -167,6 +167,21 @@ impl Ui {
         Some(-((m.t - PAUSE) * SPEED).clamp(0.0, dist))
     }
 
+    /// Один круг бегущей строки `id`: текст уходит влево на `period` (ширина текста с зазором) и,
+    /// следующей копией, приходит справа в исходное положение. Медленнее заголовков плиток —
+    /// это подсказка в поле ввода, её читают на ходу. `None` — круг пройден, текст стоит на месте.
+    pub(super) fn marquee_loop_offset(&mut self, id: u32, period: f32) -> Option<f32> {
+        const PAUSE: f32 = 1.0;
+        const SPEED: f32 = 14.0;
+        let m = self.marquees.entry(id).or_insert(Marquee { t: 0.0, total: 0.0, drawn: false });
+        m.drawn = true;
+        m.total = PAUSE + period / SPEED;
+        if m.t >= m.total {
+            return None;
+        }
+        Some(-((m.t - PAUSE) * SPEED).clamp(0.0, period))
+    }
+
     pub fn end_frame(&mut self) {
         // Нажатие мимо текстового поля снимает фокус ввода.
         if self.pressed && !self.focus_claimed {

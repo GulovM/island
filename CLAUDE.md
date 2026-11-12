@@ -2,7 +2,7 @@
 
 ## Проект
 GPU-рисуемый (Direct2D) «остров» для Windows 10/11, чистый Rust, без веб-стека.
-Жёсткие бюджеты (CONTRIBUTING.md): CPU в простое ≈ 0%, RAM ≤ 30 МБ, exe ≤ 2 МБ,
+Жёсткие бюджеты (CONTRIBUTING.md): CPU в простое ≈ 0%, RAM ≤ 30 МБ, exe ≤ 3 МБ,
 минимум зависимостей (сейчас только `windows-rs`). Обзор структуры — docs/PLAN.md.
 
 ## Рабочий процесс: реализация делегируется, Claude всегда проверяет
@@ -106,7 +106,7 @@ jetski: no output produced — a tool required the "command" permission that hea
 Поэтому `-p`/headless-запуск **обязательно** требует `--dangerously-skip-permissions`:
 
 ```bash
-agy -p "<задача> | Acceptance: <конкретный критерий приёмки> | Используй скиллы: <релевантные ecc:*-patterns, если применимо> | Не выходи за бюджеты (CPU простой ≈ 0, RAM ≤ 30 МБ, exe ≤ 2 МБ, зависимостей сверх windows-rs не добавлять)" \
+agy -p "<задача> | Acceptance: <конкретный критерий приёмки> | Используй скиллы: <релевантные ecc:*-patterns, если применимо> | Не выходи за бюджеты (CPU простой ≈ 0, RAM ≤ 30 МБ, exe ≤ 3 МБ, зависимостей сверх windows-rs не добавлять)" \
     --mode accept-edits \
     --dangerously-skip-permissions \
     --add-dir "D:/Desktop/Files/mainnew/island" \

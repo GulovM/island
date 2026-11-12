@@ -131,12 +131,6 @@ pub fn hue(c: crate::ios::SysColor, fallback: D2D1_COLOR_F) -> D2D1_COLOR_F {
     status_color(c, fallback)
 }
 
-/// Относительная яркость по WCAG (с линеаризацией sRGB).
-fn rel_luminance(c: D2D1_COLOR_F) -> f32 {
-    let lin = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
-    0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
-}
-
 /// Яркость `Y` для APCA: простая степень 2.4 без кусочной линеаризации sRGB.
 fn apca_y(c: [f32; 3]) -> f32 {
     let p = |v: f32| v.clamp(0.0, 1.0).powf(2.4);
@@ -206,19 +200,14 @@ pub fn ensure_apca(fg: [f32; 3], bgs: &[[f32; 3]], min_lc: f32) -> [f32; 3] {
 
 /// Надпись на сплошной заливке `fill`: белая или почти чёрная — что контрастнее. Насыщенным
 /// системным цветам iOS (синий, красный, фиолетовый) достаётся белая, как в iOS; светлым
-/// (жёлтый, мятный, белая заливка ползунка) — тёмная. При автоподборе контраста выбор делает APCA.
+/// (жёлтый, мятный, белая заливка ползунка) — тёмная. Выбор делает перцептивный контраст APCA.
 pub fn on_color(fill: D2D1_COLOR_F) -> D2D1_COLOR_F {
-    if crate::theme::auto_contrast() {
-        let bg = [fill.r, fill.g, fill.b];
-        let dark = rgb(0.11, 0.11, 0.12);
-        let d = apca_lc([dark.r, dark.g, dark.b], bg).abs();
-        let w = apca_lc(APCA_WHITE, bg).abs();
-        return if d > w { dark } else { WHITE };
-    }
-    let l = rel_luminance(fill);
-    // Порог чуть сдвинут в пользу белого (как в iOS): чёрный только если он заметно контрастнее.
-    if (l + 0.05) / 0.05 > 1.35 * (1.05 / (l + 0.05)) {
-        rgb(0.11, 0.11, 0.12)
+    let bg = [fill.r, fill.g, fill.b];
+    let dark = rgb(0.11, 0.11, 0.12);
+    let d = apca_lc([dark.r, dark.g, dark.b], bg).abs();
+    let w = apca_lc(APCA_WHITE, bg).abs();
+    if d > w {
+        dark
     } else {
         WHITE
     }

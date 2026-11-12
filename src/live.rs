@@ -200,7 +200,8 @@ impl Live {
         }
         self.rev = snap.rev;
         let old = self.media.take();
-        let mut new = snap.media.clone();
+        // Свёрнутый остров показывает то, что звучит, а не источник, выбранный стрелками в карточке.
+        let mut new = snap.live_media.clone();
         // Позиция трека у приложений приходит неточной: пока трек тот же, остаёмся на своём отсчёте.
         if let (Some(n), Some(o)) = (&mut new, &old) {
             if n.key == o.key && n.playing && o.playing && n.rate == o.rate && (n.position_now() - o.position_now()).abs() < 2.0 {
@@ -402,7 +403,7 @@ mod tests {
     fn media(playing: bool, key: u64, rev: u64) -> Snapshot {
         Snapshot {
             rev,
-            media: Some(Media {
+            live_media: Some(Media {
                 title: "t".into(),
                 artist: "a".into(),
                 playing,
@@ -415,6 +416,8 @@ mod tests {
                 can_seek: true,
                 min_seek: 0.0,
                 max_seek: 100.0,
+                source_name: "Spotify".into(),
+                session_count: 1,
             }),
             ..Default::default()
         }

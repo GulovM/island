@@ -57,8 +57,6 @@ const NET: usize = 4;
 const UPTIME: usize = 5;
 const TOP_APPS: usize = 6;
 const SPEEDTEST: usize = 7;
-/// Добавлена после `SPEEDTEST`, чтобы не сдвигать номера виджетов (см. `gallery.rs`).
-const BATTERY: usize = 8;
 
 /// Кольцо: мини (кольцо и название), карточка, широкая карточка с подробностями.
 static RING: [Size; 3] = [sz(2, 1), sz(2, 2), sz(4, 2)];
@@ -77,7 +75,7 @@ static SPEED_SIZES: [Size; 3] = [sz(2, 2), sz(4, 2), sz(6, 2)];
 /// (sz(2, 1)). При min_rows = 1 высота содержимого 1 * 56 - 8 = 48 px, что достаточно как для
 /// компактного кольца, так и для заглушки «Нет виджетов» с кнопкой «Настроить».
 pub static SPEC: TabSpec = TabSpec {
-    cols: 12,
+    cols: 10,
     rows: 4,
     min_cols: 2,
     min_rows: 1,
@@ -90,7 +88,6 @@ pub static SPEC: TabSpec = TabSpec {
         Spec { key: "uptime", title: "Аптайм", sizes: &INFO, size: 0, col: 4, row: 2 },
         Spec { key: "apps", title: "Топ приложений", sizes: &APPS_SIZES, size: 0, col: 6, row: 0 },
         Spec { key: "speed", title: "Скорость сети", sizes: &SPEED_SIZES, size: 1, col: 6, row: 2 },
-        Spec { key: "battery", title: "Батарея", sizes: &INFO, size: 0, col: 10, row: 0 },
     ],
 };
 
@@ -147,16 +144,11 @@ pub struct Stats {
     disk_view: usize,
     /// Счётчик тиков `poll`: диски опрашиваются раз в 10 с, чтобы не будить спящие HDD.
     disk_tick: u8,
-    battery: Option<sys::BatteryStatus>,
-    has_battery: bool,
-    /// Одиночный «всплеск» значка молнии при подключении питания.
-    bolt_spring: Spring,
 }
 
 impl Default for Stats {
     fn default() -> Self {
         let s = || Spring::unit(0.0, 220.0, 26.0);
-        let battery = sys::battery_status();
         let mut stats = Stats {
             cur: Sample::default(),
             rings: [s(), s(), s()],
@@ -164,13 +156,11 @@ impl Default for Stats {
             prev_net: None,
             cpu_name: String::new(),
             heavy: Heavy::default(),
-            online: Online::default(),
+            // Сохранённый замер скорости виден сразу, до первого опроса вкладки.
+            online: online::snapshot(),
             top_by_cpu: false,
             disk_view: 0,
             disk_tick: 0,
-            battery,
-            has_battery: battery.is_some(),
-            bolt_spring: Spring::unit(0.0, 260.0, 12.0),
         };
         // SAFETY: простые вызовы Win32 без указателей на чужую память.
         unsafe { stats.sample_disks() };
@@ -226,16 +216,6 @@ impl Stats {
         GEN.fetch_add(1, Ordering::SeqCst);
     }
 
-    /// Карточка батареи скрыта, если в системе нет аккумулятора.
-    pub fn unavailable(&self, idx: usize) -> bool {
-        idx == BATTERY && !self.has_battery
-    }
-
-    /// Маска скрытых виджетов для сетки (бит = номер в `SPEC`).
-    fn skip_mask(&self) -> u32 {
-        if self.unavailable(BATTERY) { 1 << BATTERY } else { 0 }
-    }
-
     pub fn sync(&mut self) -> bool {
         if let Some(h) = HEAVY.lock().ok().and_then(|h| h.clone()) {
             self.heavy = h;
@@ -249,11 +229,10 @@ impl Stats {
         for r in &mut self.rings {
             r.step(dt);
         }
-        self.bolt_spring.step(dt);
     }
 
     pub fn animating(&self) -> bool {
-        self.rings.iter().any(|r| !r.settled()) || !self.bolt_spring.settled()
+        self.rings.iter().any(|r| !r.settled())
     }
 
     pub fn poll(&mut self) -> bool {
@@ -271,14 +250,6 @@ impl Stats {
             }
             self.cur.uptime_s = GetTickCount64() / 1000;
         }
-        let battery = sys::battery_status();
-        // Питание подключили: молния один раз «подпрыгивает».
-        if battery.is_some_and(|b| b.ac_online) && self.battery.is_some_and(|b| !b.ac_online) {
-            self.bolt_spring.value = 1.0;
-            self.bolt_spring.target = 0.0;
-        }
-        self.has_battery = battery.is_some();
-        self.battery = battery;
         let c = &self.cur;
         let ram = if c.ram_total > 0.0 { c.ram_used / c.ram_total } else { 0.0 };
         for (i, v) in [(0usize, c.cpu), (2, ram)] {
@@ -370,8 +341,7 @@ impl Stats {
     /// Рисует вкладку по сетке. `h` — высота панели (с полосой правки).
     pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
         let area = grid.area(w, h);
-        let skip = self.skip_mask();
-        grid.draw(ui, cv, area, skip, |ui, cv, it| self.paint(ui, cv, it));
+        grid.draw(ui, cv, area, 0, |ui, cv, it| self.paint(ui, cv, it));
     }
 
     /// Рисует виджет `it.idx` на собственной вкладке.
@@ -386,7 +356,6 @@ impl Stats {
             NET | UPTIME => self.info_card(cv, it.rect, it.size, it.idx),
             TOP_APPS => self.top_apps(ui, cv, it.rect, it.size),
             SPEEDTEST => self.speed_card(ui, cv, it.rect, it.size),
-            BATTERY => self.battery_card(cv, it.rect, it.size),
             _ => {}
         }
     }
@@ -522,52 +491,6 @@ impl Stats {
                 cv.line(&format!("{:.0}%", pct * 100.0), &f.small, x0, w0, y, Align::Trailing, dim());
             }
         }
-    }
-
-    /// Батарея: процент, полоса заряда и молния, которая «подпрыгивает» при подключении питания.
-    unsafe fn battery_card(&self, cv: &Canvas, r: Rect, size: usize) {
-        let f = &cv.g.fonts;
-        let wide = size > 0;
-        let iw = r.w - 2.0 * P;
-        cv.card(r);
-        let Some(b) = self.battery else {
-            header(cv, r, icon::BATTERY, "Батарея", dim());
-            return;
-        };
-        let tint = if !b.ac_online && b.percent <= 20 {
-            crate::ui::status_red()
-        } else if b.saver_on {
-            crate::ui::status_orange()
-        } else {
-            status_green()
-        };
-        header(cv, r, icon::BATTERY, "Батарея", tint);
-        let frac = f32::from(b.percent) / 100.0;
-        let big = b.percent.to_string();
-        let bw = cv.digits_w(&big, 30.0, 600);
-        let dy = r.y + 44.0;
-        cv.digits(&big, r.x + P - 1.0, bw + 4.0, dy, 30.0, 600, Align::Leading, txt());
-        cv.line("%", &f.body, r.x + P + bw + 5.0, 20.0, dy + 4.0, Align::Leading, dim());
-        if b.ac_online {
-            let k = 1.0 + 0.5 * self.bolt_spring.value.max(0.0);
-            let s = 12.0 * k;
-            let cx = r.x + P + bw + 5.0 + 28.0;
-            cv.symbol(icon::BOLT, Rect::new(cx - s / 2.0, dy - s / 2.0, s, s), 11.0 * k, tint);
-        }
-        let status = if b.charging {
-            "Заряжается"
-        } else if b.ac_online {
-            "Питание от сети"
-        } else {
-            "От батареи"
-        };
-        let status = crate::i18n::tr(status);
-        if wide {
-            cv.line(&status, &f.body, r.x + P, iw, dy + 4.0, Align::Trailing, txt());
-        } else {
-            cv.line(&status, &f.small, r.x + P, iw, r.bottom() - P - 5.0, Align::Leading, dim());
-        }
-        cv.progress(Rect::new(r.x + P, r.bottom() - P - if wide { 6.0 } else { 21.0 }, iw, 6.0), frac, tint);
     }
 
     /// Сеть и аптайм. Узкая (120×120) — главное значение и одна подробность; широкая (248×120)
@@ -753,8 +676,6 @@ impl Stats {
         c.rx_bps = 2.4e6;
         c.tx_bps = 180e3;
         self.cpu_name = "AMD Ryzen 7 5800H".into();
-        self.battery = Some(sys::BatteryStatus { ac_online: false, charging: false, saver_on: false, percent: 78 });
-        self.has_battery = true;
         let gb = f64::from(GB);
         let h = &mut self.heavy;
         h.gpu = Some(0.18);
@@ -781,11 +702,11 @@ impl Stats {
     }
 }
 
-/// Внутренний отступ карточек вкладки.
-const P: f32 = 12.0;
+/// Внутренний отступ карточек вкладки (и карточки батареи в «Управлении» — тот же стиль).
+pub(super) const P: f32 = 12.0;
 
 /// Шапка карточки: значок цвета метрики и название прописными (как подписи виджетов iOS).
-unsafe fn header(cv: &Canvas, r: Rect, glyph: &str, title: &str, tint: D2D1_COLOR_F) {
+pub(super) unsafe fn header(cv: &Canvas, r: Rect, glyph: &str, title: &str, tint: D2D1_COLOR_F) {
     let cy = r.y + 17.0;
     cv.symbol(glyph, Rect::new(r.x + P, cy - 6.0, 12.0, 12.0), 11.0, tint);
     let title = crate::i18n::tr(title).to_uppercase();

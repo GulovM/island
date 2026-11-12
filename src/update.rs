@@ -27,7 +27,8 @@ pub struct Release {
     pub version: String,
     setup_url: String,
     sums_url: String,
-    pub notes: Vec<String>,
+    pub notes_ru: Vec<String>,
+    pub notes_en: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,9 +116,38 @@ pub fn parse_changelog_notes(raw: &str) -> Vec<String> {
         .collect()
 }
 
+/// Пункты на одном языке из секции, разделённой на подразделы `### RU` и `### EN`.
+/// Секция без таких подразделов (старые релизы) — одноязычная русская: для английского
+/// интерфейса каждый пункт проходит через словарь `i18n::tr`, непереведённые остаются как есть.
+pub fn parse_changelog_notes_lang(section_md: &str, en: bool) -> Vec<String> {
+    let normalized = section_md.replace(r"\n", "\n");
+    let lang_of = |l: &str| match l.trim().to_ascii_uppercase().as_str() {
+        "### RU" => Some(false),
+        "### EN" => Some(true),
+        _ => None,
+    };
+    if !normalized.lines().any(|l| lang_of(l).is_some()) {
+        let notes = parse_changelog_notes(&normalized);
+        return if en { notes.iter().map(|n| crate::i18n::tr(n).into_owned()).collect() } else { notes };
+    }
+    let mut block = String::new();
+    let mut inside = false;
+    for line in normalized.lines() {
+        if let Some(is_en) = lang_of(line) {
+            inside = is_en == en;
+        } else if line.trim_start().starts_with("## ") {
+            inside = false;
+        } else if inside {
+            block.push_str(line);
+            block.push('\n');
+        }
+    }
+    parse_changelog_notes(&block)
+}
+
 /// Есть ли непросмотренный список «Что нового» для текущей установленной версии.
 pub fn has_unseen_notes() -> bool {
-    crate::state::last_seen_version() != VERSION && !parse_changelog_notes(CURRENT_CHANGELOG).is_empty()
+    crate::state::last_seen_version() != VERSION && !parse_changelog_notes_lang(CURRENT_CHANGELOG, false).is_empty()
 }
 
 /// Отмечает список «Что нового» текущей версии как просмотренный.
@@ -131,12 +161,14 @@ pub fn mark_notes_seen() {
 /// при наличии доступного обновления с непустыми заметками — заметки новой версии,
 /// иначе — вшитые заметки текущей установленной версии.
 pub fn notes_to_show() -> Option<(String, Vec<String>)> {
+    let en = crate::i18n::en();
     if let State::Available(r) = state() {
-        if !r.notes.is_empty() {
-            return Some((r.version, r.notes));
+        let notes = if en { r.notes_en } else { r.notes_ru };
+        if !notes.is_empty() {
+            return Some((r.version, notes));
         }
     }
-    let current = parse_changelog_notes(CURRENT_CHANGELOG);
+    let current = parse_changelog_notes_lang(CURRENT_CHANGELOG, en);
     if !current.is_empty() {
         Some((VERSION.to_string(), current))
     } else {
@@ -256,13 +288,20 @@ fn parse_release(json: &str) -> Option<Release> {
         .collect();
     let setup_url = urls.iter().find(|u| u.ends_with("-setup.exe"))?.clone();
     let sums_url = urls.iter().find(|u| u.ends_with("/SHA256SUMS.txt"))?.clone();
-    let notes = online::json_str_multiline(json, "body")
+    // Тело релиза — секция версии из CHANGELOG.md (CI копирует её без заголовка `## [x.y.z]`).
+    let section = online::json_str_multiline(json, "body")
         .map(|b| {
             let sec = extract_changelog_section(&b, Some(&version));
-            parse_changelog_notes(if sec.is_empty() { &b } else { &sec })
+            if sec.is_empty() {
+                b
+            } else {
+                sec
+            }
         })
         .unwrap_or_default();
-    Some(Release { version, setup_url, sums_url, notes })
+    let notes_ru = parse_changelog_notes_lang(&section, false);
+    let notes_en = parse_changelog_notes_lang(&section, true);
+    Some(Release { version, setup_url, sums_url, notes_ru, notes_en })
 }
 
 fn parse_ver(s: &str) -> Option<Vec<u32>> {
@@ -371,7 +410,7 @@ mod tests {
         assert_eq!(r.version, "0.4.0");
         assert!(r.setup_url.starts_with(DOWNLOADS) && r.setup_url.ends_with("island-0.4.0-setup.exe"));
         assert!(r.sums_url.ends_with("SHA256SUMS.txt"));
-        assert_eq!(r.notes, vec!["Первый пункт".to_string(), "Второй пункт".to_string()]);
+        assert_eq!(r.notes_ru, vec!["Первый пункт".to_string(), "Второй пункт".to_string()]);
         assert!(parse_release(r#"{"tag_name":"v0.4.0","assets":[]}"#).is_none());
     }
 
@@ -382,7 +421,24 @@ mod tests {
         assert_eq!(extract_changelog_section(md, Some("1.2.0")), "- Старый пункт");
         let parsed = parse_changelog_notes(r"- Пункт 1\n* Пункт 2\n## [1.3.0]");
         assert_eq!(parsed, vec!["Пункт 1".to_string(), "Пункт 2".to_string()]);
-        assert!(!parse_changelog_notes(CURRENT_CHANGELOG).is_empty());
+        assert!(!parse_changelog_notes_lang(CURRENT_CHANGELOG, false).is_empty());
+        assert!(!parse_changelog_notes_lang(CURRENT_CHANGELOG, true).is_empty());
+    }
+
+    #[test]
+    fn bilingual_notes_pick_language_block() {
+        // Так тело релиза выглядит после CI: секция без заголовка версии, строки через `\r\n`.
+        let body = "### RU\r\n\r\n- Пункт один\r\n- Пункт два\r\n\r\n### EN\r\n\r\n- Item one\r\n- Item two\r\n";
+        assert_eq!(parse_changelog_notes_lang(body, false), ["Пункт один", "Пункт два"]);
+        assert_eq!(parse_changelog_notes_lang(body, true), ["Item one", "Item two"]);
+        // Вшитый в exe вид: экранированные переводы строк из build.rs.
+        let embedded = r"### EN\n- Only English\n### RU\n- Только русский";
+        assert_eq!(parse_changelog_notes_lang(embedded, true), ["Only English"]);
+        assert_eq!(parse_changelog_notes_lang(embedded, false), ["Только русский"]);
+        // Старый одноязычный релиз: русский текст как есть, подзаголовки разделов не попадают в пункты.
+        let legacy = "### Добавлено\n- Пункт\n### Изменено\n- Другой";
+        assert_eq!(parse_changelog_notes_lang(legacy, false), ["Пункт", "Другой"]);
+        assert_eq!(parse_changelog_notes_lang(legacy, true).len(), 2);
     }
 
     #[test]

@@ -7,6 +7,38 @@ use crate::online::{self, civil_from_days, days_from_civil, weekday, DayEvent, E
 use crate::tabs::{id, TODAY};
 use crate::ui::{dim, fg, icon, inset, mix, status_pink, txt, Canvas, Rect, Submit, Ui};
 
+// Формы подключения аккаунтов. Свой блок, потому что форма рисуется на одной вкладке с таймером
+// и формой события: общий ID заставлял таймер писать минуты в поле Apple ID.
+const CAL_GOOGLE_BTN: u32 = 140;
+const CAL_APPLE_TOGGLE_BTN: u32 = 141;
+const CAL_APPLE_ID_FIELD: u32 = 142;
+const CAL_APPLE_PW_FIELD: u32 = 143;
+const CAL_APPLE_SUBMIT_BTN: u32 = 144;
+const CAL_APPLE_CANCEL_BTN: u32 = 145;
+/// Кнопки удаления и строки ссылок iCal (до `MAX_CALENDAR_URLS` штук).
+const URL_DEL: u32 = 700;
+const URL_ROW: u32 = 720;
+/// Строки событий: список выбранного дня в месяце и карточка недели. Кликабельны первые
+/// `ROW_IDS` строк каждого списка: дальше ID зашли бы в чужой блок.
+const DAY_ROW: u32 = 900;
+const WEEK_ROW: u32 = 1000;
+const ROW_IDS: usize = 100;
+
+/// Занятые карточками календаря ID вкладки (полуинтервалы); непересечение с соседями — тест в `mod.rs`.
+#[cfg(test)]
+pub(super) const ID_RANGES: &[(u32, u32)] = &[
+    (62, 66),
+    (80, 87),
+    (90, 100),
+    (101, 102),
+    (CAL_GOOGLE_BTN, CAL_APPLE_CANCEL_BTN + 1),
+    (URL_DEL, URL_DEL + crate::config::MAX_CALENDAR_URLS as u32),
+    (URL_ROW, URL_ROW + crate::config::MAX_CALENDAR_URLS as u32),
+    (800, 842),
+    (DAY_ROW, DAY_ROW + ROW_IDS as u32),
+    (WEEK_ROW, WEEK_ROW + ROW_IDS as u32),
+];
+
 /// Даты текущей недели с понедельника: (день, месяц).
 fn week_dates(y: i32, m: u32, d: u32) -> [(u32, u32); 7] {
     let today = days_from_civil(y, m, d);
@@ -535,8 +567,8 @@ impl Today {
 
             // Время начала или «весь день»
             // Событие острова: клик по строке открывает правку, при наведении виден карандаш.
-            if let Some(lid) = item.local_id {
-                let rid = id(TODAY, 910 + i as u32);
+            if let Some(lid) = item.local_id.filter(|_| i < ROW_IDS) {
+                let rid = id(TODAY, WEEK_ROW + i as u32);
                 if ui.click_area(rid, row_r).1 {
                     edit_id = Some(lid);
                 }
@@ -580,12 +612,13 @@ impl Today {
 
     fn begin_calendar_edit(&mut self, ui: &mut Ui) {
         let field = id(TODAY, 62);
-        let apple_pw = id(TODAY, 112);
         self.cal_editing = true;
         self.cal_bad = false;
-        online::clear_cal_auth_error();
+        self.apple_form_open = false;
+        // Ошибку входа не сбрасываем: форму открывают заново как раз после возврата из браузера,
+        // и пользователь должен увидеть, почему подключение не удалось.
         ui.set_field_text(field, "");
-        ui.set_secret(apple_pw, true);
+        ui.set_secret(id(TODAY, CAL_APPLE_PW_FIELD), true);
         ui.focus = Some(field);
         ui.caret_on = true;
     }
@@ -594,10 +627,12 @@ impl Today {
     unsafe fn calendar_form(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect) {
         let f = &cv.g.fonts;
         let field = id(TODAY, 62);
-        let google_btn = id(TODAY, 110);
-        let apple_id_field = id(TODAY, 111);
-        let apple_pw_field = id(TODAY, 112);
-        let apple_btn = id(TODAY, 113);
+        let google_btn = id(TODAY, CAL_GOOGLE_BTN);
+        let apple_toggle = id(TODAY, CAL_APPLE_TOGGLE_BTN);
+        let apple_id_field = id(TODAY, CAL_APPLE_ID_FIELD);
+        let apple_pw_field = id(TODAY, CAL_APPLE_PW_FIELD);
+        let apple_submit = id(TODAY, CAL_APPLE_SUBMIT_BTN);
+        let apple_cancel = id(TODAY, CAL_APPLE_CANCEL_BTN);
         ui.set_secret(apple_pw_field, true);
 
         // Обработка ввода новой ссылки iCal в поле
@@ -630,7 +665,11 @@ impl Today {
         // Клик вне карточки закрывает форму
         let ptr = ui.pointer();
         if ui.pressed && !wk.contains(ptr) {
+            // Клик по острову мимо карточки — пользователь закончил с формой, старая ошибка
+            // больше не нужна. Возврат из браузера кликом не считается: тот клик вне окна.
             self.cal_editing = false;
+            self.apple_form_open = false;
+            online::clear_cal_auth_error();
             ui.blur();
             return;
         }
@@ -645,13 +684,19 @@ impl Today {
         let close_btn = Rect::new(wk.right() - 24.0, wk.y + 5.0, 16.0, 16.0);
         if ui.icon_button(cv, id(TODAY, 64), close_btn, icon::CLOSE, false, crate::i18n::pick("Закрыть", "Close")) {
             self.cal_editing = false;
+            self.apple_form_open = false;
+            online::clear_cal_auth_error();
             ui.blur();
             return;
         }
 
         let status = online::cal_account_status();
+        if status.apple_id.is_some() {
+            self.apple_form_open = false;
+        }
         let err_h = if self.cal_bad || status.error.is_some() { 14.0 } else { 0.0 };
-        let total_h = 22.0 + 22.0 + 24.0 + err_h + (self.ics.len() as f32 * 19.0);
+        let apple_h = if self.apple_form_open { 22.0 } else { 0.0 };
+        let total_h = 22.0 + 22.0 + apple_h + 24.0 + err_h + (self.ics.len() as f32 * 19.0);
         let view_top = wk.y + 22.0;
         let view = Rect::new(wk.x + 7.0, view_top, wk.w - 14.0, (wk.bottom() - 4.0 - view_top).max(20.0));
         let sid = id(TODAY, 65);
@@ -686,34 +731,61 @@ impl Today {
         }
         y += 22.0;
 
-        // 2. Строка Apple iCloud Календаря
+        // 2. Строка Apple iCloud Календаря: поля Apple ID и пароля раскрываются только по кнопке,
+        // чтобы не загромождать карточку тем, кто пользуется лишь Google или ссылками iCal.
+        let a_rect = Rect::new(view.x + row_w - btn_w, y + 1.0, btn_w, 18.0);
+        let a_label_r = Rect::new(view.x + 2.0, y + 3.0, row_w - btn_w - 6.0, 14.0);
         if let Some(apple_id) = &status.apple_id {
-            let a_label = format!("iCloud: {apple_id}");
-            cv.text(&a_label, Rect::new(view.x + 2.0, y + 3.0, row_w - btn_w - 6.0, 14.0), &f.small, txt());
-            let a_rect = Rect::new(view.x + row_w - btn_w, y + 1.0, btn_w, 18.0);
-            if ui.solid_button(cv, apple_btn, a_rect, "Отключить", crate::ui::chip_bg(), txt(), 5.0) {
+            cv.text(&format!("iCloud: {apple_id}"), a_label_r, &f.small, txt());
+            if ui.solid_button(cv, apple_toggle, a_rect, "Отключить", crate::ui::chip_bg(), txt(), 5.0) {
                 online::disconnect_apple(&self.ics);
                 self.sync();
             }
+        } else if !self.apple_form_open {
+            cv.text(crate::i18n::pick("Apple Календарь", "Apple Calendar"), a_label_r, &f.small, txt());
+            if ui.solid_button(cv, apple_toggle, a_rect, "Подключить", cv.accent, crate::ui::ink(), 5.0) {
+                self.apple_form_open = true;
+                online::clear_cal_auth_error();
+                ui.focus = Some(apple_id_field);
+                ui.caret_on = true;
+            }
         } else {
+            cv.text(crate::i18n::pick("Apple Календарь", "Apple Calendar"), a_label_r, &f.small, txt());
+            if ui.solid_button(cv, apple_cancel, a_rect, "Отмена", crate::ui::chip_bg(), txt(), 5.0) {
+                self.apple_form_open = false;
+                ui.set_field_text(apple_id_field, "");
+                ui.set_field_text(apple_pw_field, "");
+                ui.blur();
+            }
+            y += 22.0;
             let fields_w = (row_w - btn_w - 6.0).max(80.0);
             let id_w = (fields_w * 0.52).floor();
             let pw_w = fields_w - id_w - 4.0;
-            ui.text_field_ex(
+            // Поля узкие и без значка: подсказка от левого края (без места под значок), а не
+            // влезшая — один раз прокручивается по кругу, чтобы её можно было прочитать целиком.
+            const FIELD_PAD_L: f32 = 8.0;
+            const FIELD_PAD_R: f32 = 6.0;
+            ui.set_hint_marquee(apple_id_field, true);
+            ui.set_hint_marquee(apple_pw_field, true);
+            ui.text_field_at(
                 cv,
                 apple_id_field,
                 Rect::new(view.x, y, id_w, 20.0),
                 crate::i18n::pick("Apple ID (iCloud)", "Apple ID (iCloud)"),
                 "",
                 Submit::Keep,
+                FIELD_PAD_L,
+                FIELD_PAD_R,
             );
-            ui.text_field_ex(
+            ui.text_field_at(
                 cv,
                 apple_pw_field,
                 Rect::new(view.x + id_w + 4.0, y, pw_w, 20.0),
-                crate::i18n::pick("Пароль прил.", "App password"),
+                crate::i18n::pick("Пароль приложения", "App-specific password"),
                 "",
                 Submit::Keep,
+                FIELD_PAD_L,
+                FIELD_PAD_R,
             );
             let a_id = ui.field_text(apple_id_field);
             let a_pw = ui.field_text(apple_pw_field);
@@ -725,7 +797,7 @@ impl Today {
             };
             let alabel = if status.apple_busy { "Проверка…" } else { "Подключить" };
             let mut submit_apple = ui.take_submitted(apple_pw_field).is_some() || ui.take_submitted(apple_id_field).is_some();
-            if ui.solid_button(cv, apple_btn, Rect::new(view.x + row_w - btn_w, y + 1.0, btn_w, 18.0), alabel, abg, afg, 5.0) {
+            if ui.solid_button(cv, apple_submit, Rect::new(view.x + row_w - btn_w, y + 1.0, btn_w, 18.0), alabel, abg, afg, 5.0) {
                 submit_apple = true;
             }
             if submit_apple && can_apple {
@@ -774,7 +846,7 @@ impl Today {
                 continue;
             }
             let row = Rect::new(view.x, ry, row_w, ROW_H - 1.0);
-            let row_id = id(TODAY, 600 + i as u32);
+            let row_id = id(TODAY, URL_ROW + i as u32);
             let hv = ui.hover_of(row_id);
             if hv > 0.01 {
                 cv.rr(row, 3.0, D2D1_COLOR_F { a: 0.04 * hv, ..fg() });
@@ -783,7 +855,7 @@ impl Today {
             let abbrev = abbreviate_url(url);
             cv.text(&abbrev, Rect::new(row.x + 17.0, row.y + 1.0, row.w - 35.0, 13.0), &f.small, txt());
             let del_btn = Rect::new(row.right() - 17.0, row.y + 1.0, 14.0, 14.0);
-            if ui.icon_button(cv, id(TODAY, 700 + i as u32), del_btn, icon::CLOSE, false, crate::i18n::pick("Удалить подписку", "Remove subscription")) {
+            if ui.icon_button(cv, id(TODAY, URL_DEL + i as u32), del_btn, icon::CLOSE, false, crate::i18n::pick("Удалить подписку", "Remove subscription")) {
                 remove_idx = Some(i);
             }
         }
@@ -932,10 +1004,10 @@ impl Today {
                 continue;
             }
             cv.rr(Rect::new(view.x + 3.0, y + 2.5, 2.5, PITCH - 5.0), 1.25, cv.accent);
-            if let Some(lid) = e.local_id {
+            if let Some(lid) = e.local_id.filter(|_| i < ROW_IDS) {
                 // Событие острова: клик по строке открывает правку.
                 let row = Rect::new(view.x, y, view.w, PITCH);
-                let rid = id(TODAY, 900 + i as u32);
+                let rid = id(TODAY, DAY_ROW + i as u32);
                 if ui.click_area(rid, row).1 {
                     edit_id = Some(lid);
                 }

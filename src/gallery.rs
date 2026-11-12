@@ -73,7 +73,7 @@ fn sheets() -> Vec<(&'static str, Vec<Row>)> {
         ("clock", clock),
         ("today", rows(Tab::Today, &[1, 2, 3, 4])),
         ("stats", rows(Tab::Stats, &[0, 1, 2, 3, 4, 5, 6, 7])),
-        ("controls", rows(Tab::Controls, &[0, 1, 2, 3, 4, 5, 6, 7])),
+        ("controls", rows(Tab::Controls, &[0, 1, 2, 3, 4, 5, 6, 7, 10])),
     ]
 }
 

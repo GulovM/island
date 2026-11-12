@@ -30,6 +30,15 @@ use calendar::MonthCache;
 pub use events::Notice;
 use todo::{RowAnim, TodoDrag};
 
+// ID самой вкладки: карточка часов и стрелки смены циферблата.
+const ID_CLOCK: u32 = 70;
+const ID_FACE_PREV: u32 = 71;
+const ID_FACE_NEXT: u32 = 72;
+
+/// Занятые вкладкой ID для теста непересечения.
+#[cfg(test)]
+const ID_RANGES: &[(u32, u32)] = &[(ID_CLOCK, ID_FACE_NEXT + 1)];
+
 /// Число циферблатов часов.
 pub const CLOCK_STYLES: usize = 5;
 /// Через сколько без действий выключается режим выбора циферблата.
@@ -124,6 +133,8 @@ pub struct Today {
     /// Карточка недели в режиме ввода ссылки на календарь; `cal_bad` — введён не адрес.
     cal_editing: bool,
     cal_bad: bool,
+    /// В форме календарей раскрыты поля Apple ID и пароля приложения.
+    apple_form_open: bool,
     online: Online,
     /// События, созданные в острове (`events.txt`); `local_ver` растёт при каждом изменении.
     local: Vec<crate::online::LocalEvent>,
@@ -185,6 +196,7 @@ impl Default for Today {
             ics: Vec::new(),
             cal_editing: false,
             cal_bad: false,
+            apple_form_open: false,
             online: Online::default(),
             local: Vec::new(),
             local_ver: 0,
@@ -418,15 +430,15 @@ impl Today {
             cv.rr(c, crate::ui::card_radius(), D2D1_COLOR_F { a: 0.05, ..cv.accent });
             cv.rr_line(c, crate::ui::card_radius(), cv.accent, 1.5);
             let ay = c.cy() - 10.0;
-            if ui.icon_button(cv, id(TODAY, 71), Rect::new(c.x + 3.0, ay, 20.0, 20.0), icon::LEFT, false, crate::i18n::pick("Предыдущий циферблат", "Previous clock face")) {
+            if ui.icon_button(cv, id(TODAY, ID_FACE_PREV), Rect::new(c.x + 3.0, ay, 20.0, 20.0), icon::LEFT, false, crate::i18n::pick("Предыдущий циферблат", "Previous clock face")) {
                 step = -1;
             }
-            if ui.icon_button(cv, id(TODAY, 72), Rect::new(c.right() - 23.0, ay, 20.0, 20.0), icon::RIGHT, false, crate::i18n::pick("Следующий циферблат", "Next clock face")) {
+            if ui.icon_button(cv, id(TODAY, ID_FACE_NEXT), Rect::new(c.right() - 23.0, ay, 20.0, 20.0), icon::RIGHT, false, crate::i18n::pick("Следующий циферблат", "Next clock face")) {
                 step = 1;
             }
         }
         // Карточка опрашивается после стрелок: нажатие на стрелку не достаётся ей.
-        if ui.click_area(id(TODAY, 70), c).1 {
+        if ui.click_area(id(TODAY, ID_CLOCK), c).1 {
             let double = self.clock_click.is_some_and(|at| at.elapsed() < Duration::from_millis(400));
             self.clock_click = if double { None } else { Some(Instant::now()) };
             if double {
@@ -526,5 +538,31 @@ mod tests {
         assert_eq!(today_overlay_rows(56.0), 1);
         assert_eq!(today_overlay_rows(57.0), 2);
         assert_eq!(today_overlay_rows(0.0), 0);
+    }
+
+    /// Все карточки вкладки делят одно пространство ID: пересечение молча связывает чужие
+    /// поля (так таймер писал минуты в поле Apple ID формы календарей).
+    #[test]
+    fn test_widget_id_ranges_disjoint() {
+        let groups: [(&str, &[(u32, u32)]); 6] = [
+            ("today", ID_RANGES),
+            ("timer", timer::ID_RANGES),
+            ("todo", todo::ID_RANGES),
+            ("weather", weather::ID_RANGES),
+            ("calendar", calendar::ID_RANGES),
+            ("event_form", event_form::ID_RANGES),
+        ];
+        let mut all: Vec<(u32, u32, &str)> = Vec::new();
+        for (name, ranges) in groups {
+            for &(a, b) in ranges {
+                assert!(a < b && b <= 1 << 16, "{name}: пустой или слишком широкий диапазон {a}..{b}");
+                all.push((a, b, name));
+            }
+        }
+        all.sort();
+        for w in all.windows(2) {
+            let ((a0, b0, n0), (a1, b1, n1)) = (w[0], w[1]);
+            assert!(b0 <= a1, "{n0} {a0}..{b0} пересекается с {n1} {a1}..{b1}");
+        }
     }
 }

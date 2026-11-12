@@ -168,6 +168,8 @@ pub(crate) fn is_trusted_auth_redirect(url: &str) -> bool {
         || h.ends_with(".googleusercontent.com")
         || h == "google.com"
         || h.ends_with(".google.com")
+        || h == "googleapis.com"
+        || h.ends_with(".googleapis.com")
 }
 
 unsafe fn query_location_header(req: *mut c_void) -> Option<String> {
@@ -431,6 +433,11 @@ fn json_str_inner(text: &str, key: &str, preserve_newlines: bool) -> Option<Stri
         }
         search_from += pos + pat.len();
     };
+    decode_json_str(rest, preserve_newlines)
+}
+
+/// Тело JSON-строки от символа после открывающей кавычки до закрывающей, с разбором экранирования.
+fn decode_json_str(rest: &str, preserve_newlines: bool) -> Option<String> {
     let mut out = String::new();
     let mut it = rest.chars();
     while let Some(c) = it.next() {
@@ -486,6 +493,119 @@ pub(crate) fn json_str_multiline(text: &str, key: &str) -> Option<String> {
     json_str_inner(text, key, true)
 }
 
+// `json_str` ищет первое вхождение ключа во всём тексте — для массивов однотипных объектов
+// (события Google Calendar с вложенными `start`/`end`) нужен разбор с учётом вложенности.
+
+/// Границы JSON-значения, начинающегося с позиции `i` (после пробелов): строка с экранированием,
+/// объект или массив целиком, число или литерал. Индексы сравниваются только по ASCII-байтам,
+/// поэтому срезы по ним не режут многобайтовые символы.
+fn json_value_span(s: &str, i: usize) -> Option<(usize, usize)> {
+    let b = s.as_bytes();
+    let mut i = i;
+    while i < b.len() && b[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let start = i;
+    match *b.get(i)? {
+        b'"' => {
+            i += 1;
+            while i < b.len() {
+                match b[i] {
+                    b'\\' => i += 2,
+                    b'"' => return Some((start, i + 1)),
+                    _ => i += 1,
+                }
+            }
+            None
+        }
+        b'{' | b'[' => {
+            let mut depth = 0usize;
+            while i < b.len() {
+                match b[i] {
+                    b'"' => {
+                        i = json_value_span(s, i)?.1;
+                        continue;
+                    }
+                    b'{' | b'[' => depth += 1,
+                    b'}' | b']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some((start, i + 1));
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            None
+        }
+        _ => {
+            let end = s[i..].find(|c: char| matches!(c, ',' | '}' | ']') || c.is_whitespace()).map_or(b.len(), |n| i + n);
+            (end > start).then_some((start, end))
+        }
+    }
+}
+
+/// Сырое значение поля `key` верхнего уровня объекта `obj` (`{…}`); вложенные объекты не просматриваются.
+pub(crate) fn json_field<'a>(obj: &'a str, key: &str) -> Option<&'a str> {
+    let b = obj.as_bytes();
+    let mut i = obj.find('{')? + 1;
+    loop {
+        while i < b.len() && (b[i].is_ascii_whitespace() || b[i] == b',') {
+            i += 1;
+        }
+        if *b.get(i)? != b'"' {
+            return None;
+        }
+        let (ks, ke) = json_value_span(obj, i)?;
+        let name = &obj[ks + 1..ke - 1];
+        i = ke;
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if *b.get(i)? != b':' {
+            return None;
+        }
+        let (vs, ve) = json_value_span(obj, i + 1)?;
+        if name == key {
+            return Some(&obj[vs..ve]);
+        }
+        i = ve;
+    }
+}
+
+/// Вложенный объект `{…}` по ключу верхнего уровня.
+pub(crate) fn json_obj<'a>(obj: &'a str, key: &str) -> Option<&'a str> {
+    json_field(obj, key).filter(|v| v.starts_with('{'))
+}
+
+/// Элементы массива по ключу верхнего уровня (сырые срезы); нет поля или не массив — пусто.
+pub(crate) fn json_array<'a>(obj: &'a str, key: &str) -> Vec<&'a str> {
+    let Some(arr) = json_field(obj, key).filter(|v| v.starts_with('[')) else {
+        return Vec::new();
+    };
+    let b = arr.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 1;
+    loop {
+        while i < b.len() && (b[i].is_ascii_whitespace() || b[i] == b',') {
+            i += 1;
+        }
+        if i >= b.len() || b[i] == b']' {
+            break;
+        }
+        let Some((s, e)) = json_value_span(arr, i) else { break };
+        out.push(&arr[s..e]);
+        i = e;
+    }
+    out
+}
+
+/// Строковое поле верхнего уровня (переводы строк заменяются пробелами, как в `json_str`).
+pub(crate) fn json_field_str(obj: &str, key: &str) -> Option<String> {
+    decode_json_str(json_field(obj, key)?.strip_prefix('"')?, false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,6 +650,28 @@ mod tests {
     }
 
     #[test]
+    fn json_nested_fields_and_arrays() {
+        let j = r#"{"kind":"x","items":[
+            {"id":"a1","status":"confirmed","creator":{"id":"nested","summary":"не то"},"summary":"Встреча, \"план\"","start":{"dateTime":"2026-11-12T10:00:00+03:00"},"end":{"dateTime":"2026-11-12T11:30:00+03:00"}},
+            {"id":"b2","status":"cancelled","start":{"date":"2026-11-13"},"end":{"date":"2026-11-14"}},
+            {"id":"c3","summary":"скобка } и [ в строке","start":{"date":"2026-11-15"}}
+        ],"nextPageToken":null}"#;
+        let items = json_array(j, "items");
+        assert_eq!(items.len(), 3);
+        assert_eq!(json_field_str(items[0], "id").as_deref(), Some("a1"));
+        assert_eq!(json_field_str(items[0], "summary").as_deref(), Some("Встреча, \"план\""));
+        let start = json_obj(items[0], "start").unwrap();
+        assert_eq!(json_field_str(start, "dateTime").as_deref(), Some("2026-11-12T10:00:00+03:00"));
+        assert_eq!(json_field_str(items[1], "status").as_deref(), Some("cancelled"));
+        assert_eq!(json_field_str(items[2], "summary").as_deref(), Some("скобка } и [ в строке"));
+        assert!(json_obj(items[2], "end").is_none());
+        assert_eq!(json_field(j, "nextPageToken"), Some("null"));
+        assert!(json_array(j, "kind").is_empty());
+        assert!(json_array("{\"items\":[", "items").is_empty());
+        assert_eq!(json_field("{\"a\":true,\"b\":false}", "b"), Some("false"));
+    }
+
+    #[test]
     fn redirect_resolution_and_trust() {
         assert_eq!(
             resolve_redirect_url("https://caldav.icloud.com/123/calendars/", "/456/calendars/").as_deref(),
@@ -541,6 +683,8 @@ mod tests {
         );
         assert!(is_trusted_auth_redirect("https://p42-caldav.icloud.com/123/principal/"));
         assert!(is_trusted_auth_redirect("https://apidata.googleusercontent.com/caldav/v2/"));
+        assert!(is_trusted_auth_redirect("https://www.googleapis.com/calendar/v3/users/me/calendarList"));
+        assert!(!is_trusted_auth_redirect("https://evilgoogleapis.com/"));
         assert!(!is_trusted_auth_redirect("http://p42-caldav.icloud.com/123/"));
         assert!(!is_trusted_auth_redirect("https://evil-icloud.com/123/"));
     }

@@ -46,7 +46,6 @@ const N_ACCENT_PILL: u32 = 26;
 const N_TODO_CLEAN: u32 = 110;
 const N_FREE_LAYOUT: u32 = 111;
 const N_HIDE_SHOT: u32 = 112;
-const N_AUTO_CONTRAST: u32 = 113;
 const N_COLLAPSED: u32 = 115;
 /// Занимает два номера подряд (27–28) — по числу `PALETTE_STYLES`.
 const N_PALETTE_STYLE: u32 = 27;
@@ -398,7 +397,6 @@ impl Settings {
         self.cfg.material = d.material;
         self.cfg.palette_style = d.palette_style;
         self.cfg.accent_pill = d.accent_pill;
-        self.cfg.auto_contrast = d.auto_contrast;
         self.cfg.ui_scale = DEFAULT_SCALE;
         self.scale_drag = None;
         // Встроенные вкладки включены, собственные выключены: так включённых не больше лимита.
@@ -751,16 +749,6 @@ impl Settings {
         if ui.slider_thin(cv, sid, Rect::new(x + 6.0, y, iw - 12.0, 14.0), &mut frac) {
             self.scale_drag = Some(snap_scale(frac, dpi));
         }
-        y += 24.0;
-
-        // Автоподбор контраста APCA: подтягивает цвета текста и значков, акцент и фон не трогает.
-        cv.text("Автоподбор контраста (APCA)", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
-        let mut contrast = self.cfg.auto_contrast;
-        if ui.switch(cv, id(SETTINGS, N_AUTO_CONTRAST), Rect::new(rc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut contrast, true) {
-            self.cfg.auto_contrast = contrast;
-            self.changed = true;
-        }
-        cv.text("Текст и значки подстраиваются под цвета темы", Rect::new(x, y + 18.0, iw, 13.0), &f.small, dim());
 
         let reset = Rect::new(x, rc.bottom() - 10.0 - 22.0, iw, 22.0);
         if ui.solid_button(cv, id(SETTINGS, N_RESET), reset, "Сбросить внешний вид", chip_bg(), txt(), 7.0) {
@@ -1197,7 +1185,6 @@ mod tests {
             (N_TODO_CLEAN, 1),
             (N_FREE_LAYOUT, 1),
             (N_HIDE_SHOT, 1),
-            (N_AUTO_CONTRAST, 1),
             (N_COLLAPSED, 2),
             (N_PALETTE_STYLE, PALETTE_STYLES.len() as u32),
             (N_SECTION, SECTIONS.len() as u32),

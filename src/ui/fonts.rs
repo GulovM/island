@@ -449,9 +449,18 @@ impl Fonts {
         if map.len() >= LAYOUT_CACHE_MAX {
             map.clear();
         }
+        let layout = self.layout_exact(s, f, w, h)?;
+        map.insert(key, (s.to_string(), layout.clone()));
+        Some(layout)
+    }
+
+    /// Раскладка без кэша и без перевода строки, но с трекингом и табличными цифрами формата.
+    /// Для пользовательского текста: его нельзя подменять переводом, а позиции курсора обязаны
+    /// совпадать с тем, что реально нарисовано (иначе курсор «уезжает» на величину трекинга).
+    pub unsafe fn layout_exact(&self, s: &str, f: &IDWriteTextFormat, w: f32, h: f32) -> Option<IDWriteTextLayout> {
         let tracking = self.tracking_for(f);
         let tabular = self.tabular.borrow().contains(&(f.as_raw() as usize));
-        let layout = crate::sys::with_utf16(s, |wide| -> Result<IDWriteTextLayout> {
+        crate::sys::with_utf16(s, |wide| -> Result<IDWriteTextLayout> {
             let layout = self.factory.CreateTextLayout(wide, f, w, h)?;
             let range = DWRITE_TEXT_RANGE { startPosition: 0, length: wide.len() as u32 };
             apply_tracking(&layout, tracking, range.length);
@@ -461,9 +470,7 @@ impl Fonts {
                 layout.SetTypography(&typo, range)?;
             }
             Ok(layout)
-        }).ok()?;
-        map.insert(key, (s.to_string(), layout.clone()));
-        Some(layout)
+        }).ok()
     }
 
     /// Нужно после пересоздания форматов (смена DPI): ключ содержит адрес формата.
