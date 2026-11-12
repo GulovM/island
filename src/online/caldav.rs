@@ -288,6 +288,27 @@ pub fn discover_calendars(base_url: &str, auth_header: &str) -> Result<(Option<S
     Ok((discovered_email, calendars))
 }
 
+/// Создаёт или заменяет ресурс календаря (`PUT` файла `.ics`). Адрес в текст ошибки не попадает:
+/// в нём идентификатор аккаунта iCloud.
+pub fn put_resource(url: &str, auth_header: &str, ics: &str) -> Result<(), String> {
+    let headers = [("Authorization", auth_header), ("Content-Type", "text/calendar; charset=utf-8")];
+    let resp = unsafe { http::request("PUT", url, &headers, Some(ics.as_bytes()), 16 * 1024)? };
+    if resp.status >= 400 {
+        return Err(format!("HTTP {}", resp.status));
+    }
+    Ok(())
+}
+
+/// Удаляет ресурс календаря; уже удалённый (404, 410) не считается ошибкой.
+pub fn delete_resource(url: &str, auth_header: &str) -> Result<(), String> {
+    let headers = [("Authorization", auth_header)];
+    let resp = unsafe { http::request("DELETE", url, &headers, None, 16 * 1024)? };
+    if resp.status >= 400 && resp.status != 404 && resp.status != 410 {
+        return Err(format!("HTTP {}", resp.status));
+    }
+    Ok(())
+}
+
 /// `getctag` коллекции: меняется при любой правке календаря. `None` — сервер его не отдал.
 pub fn fetch_ctag(cal_url: &str, auth_header: &str) -> Result<Option<String>, String> {
     let body = r#"<D:propfind xmlns:D="DAV:" xmlns:CS="http://calendarserver.org/ns/"><D:prop><CS:getctag/></D:prop></D:propfind>"#;

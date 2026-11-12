@@ -403,7 +403,7 @@ pub fn disconnect_google(ics_urls: &[String]) {
     save_accounts(&acc);
     clear_incremental_state();
     // Связи с событиями отключённого аккаунта больше не нужны; сами события в Google остаются.
-    super::gwrite::forget_all();
+    super::gwrite::forget_google();
     clear_cal_auth_error();
     let keys = active_calendar_keys_for(ics_urls, &acc);
     clean_orphan_caches(&keys);
@@ -486,6 +486,7 @@ pub fn disconnect_apple(ics_urls: &[String]) {
     acc.apple = None;
     save_accounts(&acc);
     clear_incremental_state();
+    super::gwrite::forget_apple();
     clear_cal_auth_error();
     let keys = active_calendar_keys_for(ics_urls, &acc);
     clean_orphan_caches(&keys);
@@ -610,6 +611,23 @@ pub(super) fn google_access_token() -> Result<String, String> {
         refresh_google_account_token(&mut g)?;
     }
     Ok(g.access_token)
+}
+
+/// Подключены ли `(Google, Apple)`: запись событий идёт только в подключённые аккаунты.
+pub(super) fn accounts_connected() -> (bool, bool) {
+    let acc = load_accounts();
+    (acc.google.is_some(), acc.apple.is_some())
+}
+
+/// Заголовок Basic подключённого аккаунта iCloud.
+pub(super) fn apple_auth() -> Option<String> {
+    let a = load_accounts().apple?;
+    Some(caldav::basic_auth_header(&a.apple_id, &a.app_password))
+}
+
+/// Календарь iCloud, в который остров пишет новые события: первый из найденных.
+pub(super) fn apple_first_calendar(auth: &str) -> Result<String, String> {
+    apple_calendars(auth)?.0.into_iter().next().ok_or_else(|| "в аккаунте iCloud нет календарей".to_string())
 }
 
 /// Показывает в настройках ошибку записи событий в Google.
@@ -854,7 +872,7 @@ fn google_event_time(obj: &str) -> Option<(String, bool)> {
 
 /// Текст для свойства iCal: экранирование по RFC 5545 и без управляющих символов, чтобы строка
 /// из чужого ответа не могла начать новое свойство.
-fn ics_text(s: &str) -> String {
+pub(super) fn ics_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {

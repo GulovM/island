@@ -228,11 +228,18 @@ impl Today {
             self.remove_event(form.id);
             keep = false;
         }
-        // Переключатель «в Google» есть, только пока подключён аккаунт: без него писать некуда.
+        // Переключатель записи есть, только пока подключён аккаунт: без него писать некуда.
         // Отдельная строка над кнопками, как «Весь день»: в ряду с «Сохранить» не хватало ширины.
-        if online::cal_account_status().google_email.is_some() {
+        let accounts = online::cal_account_status();
+        let (has_google, has_apple) = (accounts.google_email.is_some(), accounts.apple_id.is_some());
+        if has_google || has_apple {
             let sy = by - 26.0;
-            cv.line(pick("Записать в Google", "Add to Google"), &f.small, r.right() - 9.0 - 34.0 - 6.0 - 140.0, 140.0, sy + 9.0, Align::Trailing, dim());
+            let label = match (has_google, has_apple) {
+                (true, true) => pick("Записать в календари", "Add to calendars"),
+                (true, false) => pick("Записать в Google", "Add to Google"),
+                _ => pick("Записать в iCloud", "Add to iCloud"),
+            };
+            cv.line(label, &f.small, r.right() - 9.0 - 34.0 - 6.0 - 140.0, 140.0, sy + 9.0, Align::Trailing, dim());
             let mut on = form.sync;
             ui.switch(cv, id(TODAY, SYNC), Rect::new(r.right() - 9.0 - 34.0, sy + 1.0, 34.0, 16.0), &mut on, true);
             form.sync = on;
