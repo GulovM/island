@@ -57,6 +57,97 @@ static AUTH_UI: Mutex<AuthUiState> = Mutex::new(AuthUiState {
     error: None,
 });
 
+/// Предотвращает спам в системный журнал при периодической синхронизации раз в 5 минут,
+/// сохраняя текст последней отправленной сводки и текст последней ошибки.
+#[derive(Default)]
+struct GoogleSyncLogState {
+    last_summary: String,
+    last_error: String,
+}
+
+static GOOGLE_SYNC_LOG: Mutex<GoogleSyncLogState> = Mutex::new(GoogleSyncLogState {
+    last_summary: String::new(),
+    last_error: String::new(),
+});
+
+/// Сбрасывает сохранённое состояние сводки и последней ошибки при смене или повторном
+/// подключении аккаунта, чтобы в журнал гарантированно попали как первая сводка, так и любые новые сбои.
+fn reset_google_sync_log() {
+    if let Ok(mut guard) = GOOGLE_SYNC_LOG.lock() {
+        guard.last_summary.clear();
+        guard.last_error.clear();
+    }
+}
+
+/// Выводит сводку в журнал только при изменении данных или окна дат, чтобы не засорять
+/// лог одинаковыми записями каждые 5 минут.
+fn log_google_sync_summary(summary: &str) {
+    let should_log = {
+        let mut guard = GOOGLE_SYNC_LOG.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.last_summary != summary {
+            guard.last_summary = summary.to_string();
+            true
+        } else {
+            false
+        }
+    };
+    if should_log {
+        log::info(summary);
+    }
+}
+
+/// Исключает дублирование одинаковых ошибок в цикле периодического опроса,
+/// но не пропускает появление новой ошибки на конкретном календаре.
+fn log_google_sync_error(err_msg: &str) {
+    let should_log = {
+        let mut guard = GOOGLE_SYNC_LOG.lock().unwrap_or_else(|e| e.into_inner());
+        if !guard.last_error.lines().any(|l| l == err_msg) {
+            if !guard.last_error.is_empty() {
+                guard.last_error.push('\n');
+            }
+            guard.last_error.push_str(err_msg);
+            true
+        } else {
+            false
+        }
+    };
+    if should_log {
+        log::error(err_msg);
+    }
+}
+
+/// Обновляет набор активных ошибок по итогам цикла синхронизации: если все календари ответили
+/// успешно, состояние очищается для своевременной фиксации будущих возможных сбоев.
+fn update_google_sync_errors(cycle_errors: &[String]) {
+    if let Ok(mut guard) = GOOGLE_SYNC_LOG.lock() {
+        guard.last_error = cycle_errors.join("\n");
+    }
+}
+
+/// Очищает текст ошибки от персональных данных, URL, идентификаторов календаря и токенов,
+/// но сохраняет сообщение об ошибке Google API (до 120 символов) для диагностики в журнале.
+fn sanitize_google_error(e: &str) -> String {
+    if let Some(rest) = e.strip_prefix("Google Calendar API: HTTP ") {
+        let (status, reason) = match rest.trim_start().split_once(' ') {
+            Some((code, msg)) => (code.trim(), msg.trim()),
+            None => (rest.trim(), ""),
+        };
+        if !status.is_empty() {
+            if reason.is_empty() || reason.contains('@') || reason.contains("Bearer") || reason.contains("calendars/") {
+                return format!("Google Calendar API: HTTP {status}");
+            }
+            let trimmed_reason: String = reason.chars().take(120).collect();
+            return format!("Google Calendar API: HTTP {status} {trimmed_reason}");
+        }
+    }
+    if e.contains('@') || e.contains("Bearer") || e.contains("calendars/") {
+        "Google Calendar API: сетевая ошибка".to_string()
+    } else {
+        let short: String = e.chars().take(80).collect();
+        short
+    }
+}
+
 fn serialize_accounts(acc: &CalendarAccounts) -> String {
     let mut out = String::from("# Island CalDAV accounts\n");
     if let Some(g) = &acc.google {
@@ -249,6 +340,9 @@ fn set_cal_auth_error(msg: impl Into<String>) {
 
 /// Запускает подключение Google Календаря в фоновом потоке.
 pub fn connect_google(ics_urls: Vec<String>) {
+    // Очищаем историю сводки, чтобы после подключения аккаунта
+    // первая фоновая синхронизация обязательно записала результат в журнал.
+    reset_google_sync_log();
     {
         let mut ui = AUTH_UI.lock().unwrap_or_else(|e| e.into_inner());
         if ui.google_busy {
@@ -263,8 +357,8 @@ pub fn connect_google(ics_urls: Vec<String>) {
             let tok = oauth::authorize_google().map_err(|e| e.message())?;
             // Заодно проверяет, что токен открывает Calendar API: адрес основного календаря — email.
             // Ошибки OAuth уже записаны в журнал в `oauth.rs`; здесь — только ошибки Calendar API.
-            let (email_opt, _) = fetch_google_calendar_list(&tok.access_token)
-                .inspect_err(|e| log::error(&format!("подключение Google Календаря: {e}")))?;
+            let (email_opt, _, _) = fetch_google_calendar_list(&tok.access_token)
+                .inspect_err(|e| log::error(&format!("подключение Google Календаря: {}", sanitize_google_error(e))))?;
             let email = email_opt.unwrap_or_else(|| "Google".to_string());
             let expires_at = crate::sys::now_secs() + tok.expires_in.saturating_sub(60);
             Ok(GoogleAccount {
@@ -280,6 +374,7 @@ pub fn connect_google(ics_urls: Vec<String>) {
                 let mut acc = load_accounts();
                 acc.google = Some(g_acc);
                 save_accounts(&acc);
+                reset_google_sync_log();
                 if let Ok(mut ui) = AUTH_UI.lock() {
                     ui.google_busy = false;
                     ui.error = None;
@@ -495,9 +590,17 @@ fn google_get(url: &str, token: &str) -> Result<String, String> {
     Ok(body)
 }
 
-/// Календари аккаунта, показываемые в интерфейсе Google: `(id основного календаря, все id)`.
+/// Счётчики календарей для сводки синхронизации без логирования идентификаторов и адресов почты.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct CalendarListStats {
+    total: usize,
+    taken: usize,
+    skipped: usize,
+}
+
+/// Календари аккаунта, показываемые в интерфейсе Google: `(id основного календаря, все id, счётчики)`.
 /// Id основного календаря совпадает с адресом почты аккаунта.
-fn fetch_google_calendar_list(token: &str) -> Result<(Option<String>, Vec<String>), String> {
+fn fetch_google_calendar_list(token: &str) -> Result<(Option<String>, Vec<String>, CalendarListStats), String> {
     let url = format!(
         "{GOOGLE_API}/users/me/calendarList?minAccessRole=reader&fields={}",
         http::urlenc("items(id,primary,selected,deleted)")
@@ -505,24 +608,31 @@ fn fetch_google_calendar_list(token: &str) -> Result<(Option<String>, Vec<String
     Ok(parse_google_calendar_list(&google_get(&url, token)?))
 }
 
-fn parse_google_calendar_list(json: &str) -> (Option<String>, Vec<String>) {
+fn parse_google_calendar_list(json: &str) -> (Option<String>, Vec<String>, CalendarListStats) {
     let mut primary = None;
     let mut ids = Vec::new();
+    let mut stats = CalendarListStats::default();
     for item in http::json_array(json, "items") {
-        let Some(id) = http::json_field_str(item, "id") else { continue };
+        stats.total += 1;
+        let Some(id) = http::json_field_str(item, "id") else {
+            stats.skipped += 1;
+            continue;
+        };
         let is_primary = http::json_field(item, "primary") == Some("true");
         // У Google `selected` по умолчанию false: календарь, скрытый в интерфейсе, приходит без поля.
         let shown = is_primary || http::json_field(item, "selected") == Some("true");
         if http::json_field(item, "deleted") == Some("true") || !shown {
+            stats.skipped += 1;
             continue;
         }
+        stats.taken += 1;
         if is_primary {
             primary = Some(id.clone());
         }
         ids.push(id);
     }
     let email = primary.or_else(|| ids.first().cloned());
-    (email, ids)
+    (email, ids, stats)
 }
 
 /// Окно событий как у CalDAV-источников (неделя назад, два месяца вперёд), в RFC 3339.
@@ -593,13 +703,27 @@ fn ics_text(s: &str) -> String {
     out
 }
 
+/// Счётчики событий из events.list для проверки фильтрации без раскрытия содержимого календаря.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct GoogleEventStats {
+    items: usize,
+    added: usize,
+    skipped: usize,
+}
+
 /// Добавляет события из ответа `events.list` блоками `VEVENT`; отменённые и без начала пропускает.
-fn google_events_to_ics(json: &str, out: &mut String) {
+fn google_events_to_ics(json: &str, out: &mut String) -> GoogleEventStats {
+    let mut stats = GoogleEventStats::default();
     for item in http::json_array(json, "items") {
+        stats.items += 1;
         if http::json_field_str(item, "status").as_deref() == Some("cancelled") {
+            stats.skipped += 1;
             continue;
         }
-        let Some((start, all_day)) = http::json_obj(item, "start").and_then(google_event_time) else { continue };
+        let Some((start, all_day)) = http::json_obj(item, "start").and_then(google_event_time) else {
+            stats.skipped += 1;
+            continue;
+        };
         let end = http::json_obj(item, "end").and_then(google_event_time);
         let prop = |name: &str, v: &str, date: bool| format!("{name}{}:{v}\r\n", if date { ";VALUE=DATE" } else { "" });
         out.push_str("BEGIN:VEVENT\r\n");
@@ -612,7 +736,9 @@ fn google_events_to_ics(json: &str, out: &mut String) {
             out.push_str(&prop("DTEND", &end, end_all_day));
         }
         out.push_str("END:VEVENT\r\n");
+        stats.added += 1;
     }
+    stats
 }
 
 fn sync_google_rest(mut g: GoogleAccount) -> Result<String, String> {
@@ -620,11 +746,12 @@ fn sync_google_rest(mut g: GoogleAccount) -> Result<String, String> {
     if g.access_token.is_empty() || now + 60 >= g.expires_at {
         refresh_google_account_token(&mut g)?;
     }
-    let cals = match fetch_google_calendar_list(&g.access_token) {
-        Ok((_, cals)) => cals,
+    let (cals, list_stats) = match fetch_google_calendar_list(&g.access_token) {
+        Ok((_, cals, stats)) => (cals, stats),
         Err(e) if e.contains("HTTP 401") && !g.refresh_token.is_empty() => {
             refresh_google_account_token(&mut g)?;
-            fetch_google_calendar_list(&g.access_token)?.1
+            let (_, cals, stats) = fetch_google_calendar_list(&g.access_token)?;
+            (cals, stats)
         }
         Err(e) => return Err(e),
     };
@@ -632,7 +759,12 @@ fn sync_google_rest(mut g: GoogleAccount) -> Result<String, String> {
     let mut combined = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n");
     let mut any_ok = false;
     let mut last_err = String::new();
-    for cal in &cals {
+    let mut cal_summaries = Vec::with_capacity(cals.len());
+    let mut total_skipped_events = 0usize;
+    let mut cycle_errors = Vec::new();
+
+    for (idx, cal) in cals.iter().enumerate() {
+        let cal_num = idx + 1;
         // `orderBy=startTime` с окном от недели назад: при пределе в 2500 событий отрезается
         // дальний конец окна, а не ближайшие дни.
         let url = format!(
@@ -645,11 +777,32 @@ fn sync_google_rest(mut g: GoogleAccount) -> Result<String, String> {
         match google_get(&url, &g.access_token) {
             Ok(json) => {
                 any_ok = true;
-                google_events_to_ics(&json, &mut combined);
+                let stats = google_events_to_ics(&json, &mut combined);
+                cal_summaries.push(format!("календарь {cal_num}: items {}, VEVENT {}", stats.items, stats.added));
+                total_skipped_events += stats.skipped;
             }
-            Err(e) => last_err = e,
+            Err(e) => {
+                // Исключаем вывод персональных данных из тела ответа или токена, логируя только код статуса.
+                let sanitized = sanitize_google_error(&e);
+                let err_msg = format!("Google Календарь {cal_num}: {sanitized}");
+                log_google_sync_error(&err_msg);
+                cycle_errors.push(err_msg);
+                cal_summaries.push(format!("календарь {cal_num}: ошибка"));
+                last_err = e;
+            }
         }
     }
+    update_google_sync_errors(&cycle_errors);
+
+    let summary = format!(
+        "Google Календарь: окно {time_min}..{time_max}, календарей: {} (всего {}, пропущено {}), [{}], сумма пропущенных событий: {total_skipped_events}",
+        list_stats.taken,
+        list_stats.total,
+        list_stats.skipped,
+        cal_summaries.join(", ")
+    );
+    log_google_sync_summary(&summary);
+
     if !any_ok && !cals.is_empty() {
         return Err(last_err);
     }
@@ -1307,10 +1460,13 @@ mod tests {
             {"id":"hidden@group.calendar.google.com"},
             {"id":"gone@group.calendar.google.com","selected":true,"deleted":true}
         ]}"#;
-        let (email, ids) = parse_google_calendar_list(j);
+        let (email, ids, stats) = parse_google_calendar_list(j);
         assert_eq!(email.as_deref(), Some("user@gmail.com"));
         assert_eq!(ids, ["team@group.calendar.google.com", "user@gmail.com"]);
-        assert_eq!(parse_google_calendar_list(r#"{"items":[]}"#), (None, Vec::new()));
+        assert_eq!(stats.total, 4);
+        assert_eq!(stats.taken, 2);
+        assert_eq!(stats.skipped, 2);
+        assert_eq!(parse_google_calendar_list(r#"{"items":[]}"#), (None, Vec::new(), CalendarListStats::default()));
     }
 
     #[test]
@@ -1322,8 +1478,11 @@ mod tests {
             {"id":"ev4","summary":"Без начала"}
         ]}"#;
         let mut ics = String::from("BEGIN:VCALENDAR\r\n");
-        google_events_to_ics(j, &mut ics);
+        let stats = google_events_to_ics(j, &mut ics);
         ics.push_str("END:VCALENDAR\r\n");
+        assert_eq!(stats.items, 4);
+        assert_eq!(stats.added, 2);
+        assert_eq!(stats.skipped, 2);
         assert!(ics.contains("UID:ev1\r\n") && ics.contains("DTSTART:20261112T070000Z\r\n"));
         assert!(ics.contains("DTSTART;VALUE=DATE:20261114\r\n"));
         let raws = parse_ics(&ics, 180);
@@ -1333,6 +1492,47 @@ mod tests {
         assert_eq!(raws[0].uid, "ev1");
         assert!(raws[1].all_day);
         assert_eq!((raws[1].start, raws[1].end), (at(2026, 11, 14, 0, 0), at(2026, 11, 16, 0, 0)));
+    }
+
+    #[test]
+    fn google_events_skipped_and_added_counters() {
+        // Проверяем изолированно без сети подсчёт пропущенных событий разных видов:
+        // статус cancelled со временем начала, cancelled без времени начала, и отсутствие поля start.
+        let j = r#"{"items":[
+            {"id":"e1","status":"confirmed","start":{"dateTime":"2026-11-12T10:00:00Z"}},
+            {"id":"e2","status":"cancelled","start":{"dateTime":"2026-11-12T11:00:00Z"}},
+            {"id":"e3","status":"cancelled"},
+            {"id":"e4","summary":"Без времени начала"},
+            {"id":"e5","start":{"date":"2026-11-13"}}
+        ]}"#;
+        let mut out = String::new();
+        let stats = google_events_to_ics(j, &mut out);
+        assert_eq!(stats.items, 5);
+        assert_eq!(stats.added, 2);
+        assert_eq!(stats.skipped, 3);
+    }
+
+    #[test]
+    fn sanitize_google_error_removes_personal_and_response_body_data() {
+        // Убеждаемся, что полезное сообщение об ошибке сохраняется, а персональные email,
+        // токены и фрагменты URL удаляются, чтобы они не попали в файл журнала.
+        let err_clean_msg = "Google Calendar API: HTTP 403 Calendar API has not been used";
+        assert_eq!(
+            sanitize_google_error(err_clean_msg),
+            "Google Calendar API: HTTP 403 Calendar API has not been used"
+        );
+
+        let err_with_email = "Google Calendar API: HTTP 404 Not Found: sensitive-id@gmail.com";
+        assert_eq!(sanitize_google_error(err_with_email), "Google Calendar API: HTTP 404");
+
+        let err_with_token = "network failure with Bearer secret_access_token";
+        assert_eq!(sanitize_google_error(err_with_token), "Google Calendar API: сетевая ошибка");
+
+        let err_with_url = "нет соединения с https://www.googleapis.com/calendar/v3/calendars/test%40gmail.com/events";
+        assert_eq!(sanitize_google_error(err_with_url), "Google Calendar API: сетевая ошибка");
+
+        let err_clean = "нет соединения с www.googleapis.com";
+        assert_eq!(sanitize_google_error(err_clean), "нет соединения с www.googleapis.com");
     }
 
     #[test]
