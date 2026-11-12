@@ -11,6 +11,7 @@ use crate::log;
 pub mod caldav;
 mod calendar;
 mod datetime;
+mod gwrite;
 mod http;
 mod local;
 pub mod oauth;
@@ -22,7 +23,8 @@ pub use calendar::{
     disconnect_google, events_by_day, init_cached_calendar, next_of, refresh_calendar,
     refresh_calendar_age, DayEvent, Event, RawEvent,
 };
-pub use local::{due_reminders, merge_local, Due, DueKind, LocalEvent, Repeat, MAX_LOCAL, MISSED_WINDOW, REMIND_CHOICES};
+pub use gwrite::{flush_async as flush_google_push, local_sync_enabled, set_local_snapshot, set_synced, synced_gids};
+pub use local::{due_reminders, merge_local_synced, Due, DueKind, LocalEvent, Repeat, MAX_LOCAL, MISSED_WINDOW, REMIND_CHOICES};
 pub use datetime::{civil_from_days, days_from_civil, now_local_minutes, utc_offset_minutes, weekday};
 pub(crate) use http::{get_bytes, get_text, json_str, json_str_multiline};
 pub use speedtest::{init_cached_speed, run_speedtest, Speed};

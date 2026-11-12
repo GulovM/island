@@ -8,6 +8,10 @@ pub const APPLE_CALDAV_BASE: &str = "https://caldav.icloud.com/";
 
 const MAX_CALDAV_BYTES: usize = 2 << 20;
 
+/// Текст ошибки, когда ответ сервера не поместился в `MAX_CALDAV_BYTES`: обрезанный XML разобрался
+/// бы в неполный календарь без единой ошибки, поэтому вызывающий делит окно и запрашивает куски.
+pub const RESPONSE_TOO_LARGE: &str = "ответ CalDAV больше лимита размера";
+
 /// Разрешает относительный `<D:href>` относительно `final_url` ответа (с учётом редиректов на шард iCloud).
 pub fn resolve_href(final_url: &str, href: &str) -> String {
     http::resolve_redirect_url(final_url, href).unwrap_or_else(|| href.trim().to_string())
@@ -217,6 +221,9 @@ fn caldav_request(method: &str, url: &str, auth_header: &str, depth: &str, xml_b
     if resp.status >= 400 {
         return Err(format!("HTTP {} для {url}", resp.status));
     }
+    if resp.total as usize > MAX_CALDAV_BYTES {
+        return Err(RESPONSE_TOO_LARGE.to_string());
+    }
     Ok((resp.final_url, String::from_utf8_lossy(&resp.body).into_owned()))
 }
 
@@ -279,6 +286,34 @@ pub fn discover_calendars(base_url: &str, auth_header: &str) -> Result<(Option<S
     }
 
     Ok((discovered_email, calendars))
+}
+
+/// Создаёт или заменяет ресурс календаря (`PUT` файла `.ics`). Адрес в текст ошибки не попадает:
+/// в нём идентификатор аккаунта iCloud.
+pub fn put_resource(url: &str, auth_header: &str, ics: &str) -> Result<(), String> {
+    let headers = [("Authorization", auth_header), ("Content-Type", "text/calendar; charset=utf-8")];
+    let resp = unsafe { http::request("PUT", url, &headers, Some(ics.as_bytes()), 16 * 1024)? };
+    if resp.status >= 400 {
+        return Err(format!("HTTP {}", resp.status));
+    }
+    Ok(())
+}
+
+/// Удаляет ресурс календаря; уже удалённый (404, 410) не считается ошибкой.
+pub fn delete_resource(url: &str, auth_header: &str) -> Result<(), String> {
+    let headers = [("Authorization", auth_header)];
+    let resp = unsafe { http::request("DELETE", url, &headers, None, 16 * 1024)? };
+    if resp.status >= 400 && resp.status != 404 && resp.status != 410 {
+        return Err(format!("HTTP {}", resp.status));
+    }
+    Ok(())
+}
+
+/// `getctag` коллекции: меняется при любой правке календаря. `None` — сервер его не отдал.
+pub fn fetch_ctag(cal_url: &str, auth_header: &str) -> Result<Option<String>, String> {
+    let body = r#"<D:propfind xmlns:D="DAV:" xmlns:CS="http://calendarserver.org/ns/"><D:prop><CS:getctag/></D:prop></D:propfind>"#;
+    let (_, xml) = caldav_request("PROPFIND", cal_url, auth_header, "0", body)?;
+    Ok(extract_first_tag_text(&xml, "getctag"))
 }
 
 /// Запрашивает события календаря `cal_url` за интервал `[start_utc, end_utc]` (в формате `YYYYMMDDTHHMMSSZ`)

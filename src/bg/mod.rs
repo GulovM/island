@@ -110,6 +110,8 @@ pub enum Cmd {
     /// Показать в карточке плеера предыдущий / следующий источник звука (без смены воспроизведения).
     PrevSession,
     NextSession,
+    /// Вернуть карточку плеера к сессии, которая реально играет (снять выбор стрелками).
+    ResetSession,
 }
 
 static SNAPSHOT: Mutex<Option<Snapshot>> = Mutex::new(None);
@@ -117,6 +119,14 @@ static TX: OnceLock<Sender<Cmd>> = OnceLock::new();
 
 pub fn snapshot() -> Snapshot {
     SNAPSHOT.lock().ok().and_then(|s| s.clone()).unwrap_or_default()
+}
+
+/// Возвращает карточку плеера к играющей сессии, если её переключали стрелками. Без выбора
+/// ничего не отправляет: вызывается на каждую смену вкладки.
+pub fn reset_card_session() {
+    if media::pin_set() {
+        send(Cmd::ResetSession);
+    }
 }
 
 pub fn send(cmd: Cmd) {
@@ -151,9 +161,9 @@ pub fn start(hwnd: HWND) {
             let has_fast = batch.iter().any(|c| matches!(c, Cmd::Volume(_) | Cmd::Brightness(_) | Cmd::Mute(_)));
             // Листание источников меняет только медиа: полный опрос (радио, громкость) не нужен.
             let needs_refresh = batch.iter().any(|c| {
-                !matches!(c, Cmd::Volume(_) | Cmd::Brightness(_) | Cmd::Mute(_) | Cmd::Net | Cmd::Media | Cmd::PrevSession | Cmd::NextSession)
+                !matches!(c, Cmd::Volume(_) | Cmd::Brightness(_) | Cmd::Mute(_) | Cmd::Net | Cmd::Media | Cmd::PrevSession | Cmd::NextSession | Cmd::ResetSession)
             });
-            let wants_media = batch.iter().any(|c| matches!(c, Cmd::Media | Cmd::PrevSession | Cmd::NextSession));
+            let wants_media = batch.iter().any(|c| matches!(c, Cmd::Media | Cmd::PrevSession | Cmd::NextSession | Cmd::ResetSession));
             let wants_net = batch.iter().any(|c| matches!(c, Cmd::Net));
             let last_volume = batch.iter().rposition(|c| matches!(c, Cmd::Volume(_)));
             let last_bright = batch.iter().rposition(|c| matches!(c, Cmd::Brightness(_)));
@@ -248,6 +258,7 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool) {
         Cmd::PlayPause | Cmd::Next | Cmd::Prev | Cmd::Seek(_) => media_command(cmd),
         Cmd::PrevSession => media::cycle_session(-1),
         Cmd::NextSession => media::cycle_session(1),
+        Cmd::ResetSession => media::reset_pin(),
     }
 }
 

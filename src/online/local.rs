@@ -108,7 +108,7 @@ impl LocalEvent {
         Some(Self { id, title, start, end, all_day, repeat, days, remind })
     }
 
-    fn rrule(&self) -> Option<String> {
+    pub(super) fn rrule(&self) -> Option<String> {
         Some(match self.repeat {
             Repeat::None => return None,
             Repeat::Daily => "FREQ=DAILY".to_string(),
@@ -139,8 +139,18 @@ impl LocalEvent {
 }
 
 /// События из календарей по ссылкам и созданные в острове — одним списком.
+#[cfg(test)]
 pub fn merge_local(remote: &[RawEvent], local: &[LocalEvent]) -> Vec<RawEvent> {
-    merge_raw_events([remote.to_vec(), local.iter().map(LocalEvent::to_raw).collect()])
+    merge_local_synced(remote, local, &[])
+}
+
+/// То же, но события, которые остров сам записал в Google (`synced` — их id), берутся только из
+/// острова: вернувшаяся из календаря копия (у повторов — каждое вхождение `<id>_<время>`) иначе
+/// показывалась бы дважды.
+pub fn merge_local_synced(remote: &[RawEvent], local: &[LocalEvent], synced: &[String]) -> Vec<RawEvent> {
+    let is_copy = |uid: &str| synced.iter().any(|g| uid == g || uid.strip_prefix(g.as_str()).is_some_and(|r| r.starts_with('_')));
+    let remote: Vec<RawEvent> = remote.iter().filter(|e| !is_copy(&e.uid)).cloned().collect();
+    merge_raw_events([remote, local.iter().map(LocalEvent::to_raw).collect()])
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -292,5 +302,24 @@ mod tests {
         let merged = merge_local(&[], &[e]);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].uid, "island-local-3");
+    }
+
+    #[test]
+    fn synced_copies_from_google_are_hidden() {
+        let raw = |uid: &str| RawEvent {
+            start: at(2026, 10, 25, 9, 0),
+            end: 0,
+            all_day: false,
+            title: uid.into(),
+            rrule: None,
+            exdates: Vec::new(),
+            uid: uid.into(),
+        };
+        // Своя копия и вхождения повтора (`<id>_<время>`) скрываются, чужое событие остаётся.
+        let remote = [raw("isl1a3"), raw("isl1a3_20261025T090000Z"), raw("isl1a30"), raw("other")];
+        let merged = merge_local_synced(&remote, &[ev(3, at(2026, 10, 25, 9, 0))], &["isl1a3".to_string()]);
+        let mut uids: Vec<&str> = merged.iter().map(|e| e.uid.as_str()).collect();
+        uids.sort_unstable();
+        assert_eq!(uids, ["isl1a30", "island-local-3", "other"]);
     }
 }

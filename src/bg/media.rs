@@ -211,24 +211,78 @@ fn active_sessions(mgr: &Mgr) -> Vec<Active> {
     let cur_aumid = cur.as_ref().map(aumid_of).unwrap_or_default();
     let mut list: Vec<GlobalSystemMediaTransportControlsSession> =
         mgr.GetSessions().ok().map(|v| v.into_iter().collect()).unwrap_or_default();
+    let used_current = list.is_empty() && cur.is_some();
     if list.is_empty() {
         list.extend(cur);
     }
     let mut out: Vec<Active> = Vec::with_capacity(list.len());
+    // Сессии, отброшенные молча, не отличить от «браузер не публикует SMTC» — для журнала
+    // запоминаем и их, и причину (только AUMID и статус, без названий треков).
+    let mut diag: Vec<String> = Vec::with_capacity(list.len());
+    let total = list.len();
     for session in list {
-        let Ok(props) = wait(session.TryGetMediaPropertiesAsync()) else { continue };
+        let aumid = aumid_of(&session);
+        let status = session.GetPlaybackInfo().ok().and_then(|i| i.PlaybackStatus().ok());
+        let Ok(props) = wait(session.TryGetMediaPropertiesAsync()) else {
+            diag.push(diag_entry(&aumid, status_label(status), "ошибка чтения свойств"));
+            continue;
+        };
         let title = props.Title().map(|t| t.to_string()).unwrap_or_default();
         let artist = props.Artist().map(|a| a.to_string()).unwrap_or_default();
         if title.is_empty() && artist.is_empty() {
+            diag.push(diag_entry(&aumid, status_label(status), "пустые метаданные, отброшена"));
             continue;
         }
-        let aumid = aumid_of(&session);
-        let playing = session.GetPlaybackInfo().ok().and_then(|i| i.PlaybackStatus().ok()) == Some(Status::Playing);
+        diag.push(diag_entry(&aumid, status_label(status), "ok"));
+        let playing = status == Some(Status::Playing);
         let ordinal = out.iter().filter(|a| a.aumid == aumid).count();
         let current = !cur_aumid.is_empty() && aumid == cur_aumid;
         out.push(Active { session, props, title, artist, aumid, ordinal, playing, current });
     }
+    let summary = media_summary(total, used_current, &diag, &cur_aumid);
+    let changed = LAST_MEDIA_SUMMARY.with(|last| summary_changed(&mut last.borrow_mut(), &summary));
+    if changed {
+        log::info(&summary);
+    }
     out
+}
+
+thread_local! {
+    /// Последняя записанная сводка сессий: пишем в журнал только изменения, чтобы смена трека
+    /// (будит поток часто) не засоряла лог одинаковыми строками.
+    static LAST_MEDIA_SUMMARY: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+fn status_label(s: Option<Status>) -> &'static str {
+    match s {
+        Some(x) if x == Status::Playing => "playing",
+        Some(x) if x == Status::Paused => "paused",
+        Some(x) if x == Status::Stopped => "stopped",
+        Some(_) => "other",
+        None => "статус неизвестен",
+    }
+}
+
+fn diag_entry(aumid: &str, status: &str, verdict: &str) -> String {
+    let id = if aumid.is_empty() { "(пусто)" } else { aumid };
+    format!("{id}: {status}, {verdict}")
+}
+
+/// `used_current` — список `GetSessions()` был пуст и взята только `GetCurrentSession()`.
+fn media_summary(total: usize, used_current: bool, entries: &[String], cur_aumid: &str) -> String {
+    let source = if used_current { ", список пуст — взята текущая" } else { "" };
+    let cur = if cur_aumid.is_empty() { "нет" } else { cur_aumid };
+    format!("Медиа: сессий {total}{source}, [{}], текущая: {cur}", entries.join("; "))
+}
+
+/// `true` и запоминает сводку, если она отличается от прошлой.
+fn summary_changed(last: &mut String, new: &str) -> bool {
+    if last == new {
+        return false;
+    }
+    last.clear();
+    last.push_str(new);
+    true
 }
 
 /// Сессия, которая реально звучит, — её показывает свёрнутый остров.
@@ -256,6 +310,20 @@ thread_local! {
     /// Сессия карточки из последнего чтения: команды плеера идут в неё без повторного
     /// чтения метаданных всех сессий (при перетаскивании перемотка шлётся каждые 100 мс).
     static CARD_SESSION: RefCell<Option<GlobalSystemMediaTransportControlsSession>> = const { RefCell::new(None) };
+}
+
+/// Есть ли выбор стрелками. Флаг читает поток интерфейса, поэтому он атомарный, а не `thread_local`:
+/// сбрасывать выбор на каждую смену вкладки без этой проверки значило бы будить фоновый поток зря.
+static PIN_SET: AtomicBool = AtomicBool::new(false);
+
+pub(super) fn pin_set() -> bool {
+    PIN_SET.load(Ordering::Relaxed)
+}
+
+/// Снимает выбор стрелками: карточка возвращается к сессии, которая реально играет.
+pub(super) fn reset_pin() {
+    PIN_SET.store(false, Ordering::Relaxed);
+    PINNED.with(|p| *p.borrow_mut() = None);
 }
 
 /// Индекс закреплённой сессии среди `(aumid, ordinal, track)` активных; `None`, если её уже нет.
@@ -312,6 +380,7 @@ pub(super) fn cycle_session(delta: isize) {
     let next = &active[cycle_index(cur, active.len(), delta)];
     let pin = Pin { aumid: next.aumid.clone(), ordinal: next.ordinal, track: track_key(&next.title, &next.artist) };
     PINNED.with(|p| *p.borrow_mut() = Some(pin));
+    PIN_SET.store(true, Ordering::Relaxed);
     CARD_SESSION.with(|c| *c.borrow_mut() = Some(next.session.clone()));
 }
 
@@ -441,6 +510,9 @@ unsafe fn watch_media() {
         if !resub && w.len() == ids.len() && w.iter().zip(&ids).all(|(old, id)| &old.aumid == id) {
             return;
         }
+        // Пишется только при смене набора (ранний выход выше): видно, подписались ли мы на
+        // сессию браузера, когда она появилась.
+        log::info(&format!("Медиа: подписки пересозданы, сессий {}", sessions.len()));
         for old in w.drain(..) {
             let _ = old.session.RemoveMediaPropertiesChanged(old.prop_token);
             let _ = old.session.RemovePlaybackInfoChanged(old.info_token);
@@ -727,6 +799,33 @@ unsafe fn read_cover(props: &GlobalSystemMediaTransportControlsSessionMediaPrope
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reset_pin_clears_selection_and_flag() {
+        PINNED.with(|p| *p.borrow_mut() = Some(Pin { aumid: "a".into(), ordinal: 0, track: "t".into() }));
+        PIN_SET.store(true, Ordering::Relaxed);
+        reset_pin();
+        assert!(!pin_set());
+        assert!(PINNED.with(|p| p.borrow().is_none()));
+    }
+
+    #[test]
+    fn media_summary_format_and_dedup() {
+        let entries = vec![
+            diag_entry("Yandex.Browser", "playing", "ok"),
+            diag_entry("", "paused", "пустые метаданные, отброшена"),
+        ];
+        let s = media_summary(2, false, &entries, "Yandex.Browser");
+        assert_eq!(
+            s,
+            "Медиа: сессий 2, [Yandex.Browser: playing, ok; (пусто): paused, пустые метаданные, отброшена], текущая: Yandex.Browser"
+        );
+        assert!(media_summary(1, true, &[], "").contains("список пуст — взята текущая"));
+        let mut last = String::new();
+        assert!(summary_changed(&mut last, &s));
+        assert!(!summary_changed(&mut last, &s));
+        assert!(summary_changed(&mut last, "другая"));
+    }
 
     #[test]
     fn test_pinned_index_tracks_aumid_and_ordinal() {
