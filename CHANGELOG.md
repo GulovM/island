@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### RU
+
+- События острова можно записывать в Google Календарь и iCloud: в форме события появился переключатель «Записать в …». Правка и удаление события, а также выключение переключателя обновляют и календарь. **Чтобы запись в Google заработала, переподключите аккаунт Google в настройках календаря: нужны новые права доступа.**
+- Календари загружают события за текущий и следующий год (раньше — неделя назад и два месяца вперёд), с постраничной загрузкой, чтобы длинные списки не обрезались молча.
+- Синхронизация календарей стала инкрементальной: Google отдаёт только изменения, iCloud не скачивает события заново, пока календарь не менялся. Раз в сутки выполняется полная перезагрузка.
+- Карточка плеера возвращается к играющему источнику при смене вкладки и сворачивании острова, если её переключали стрелками.
+- В журнал `island.log` пишутся сводки по календарям Google и медиасессиям, чтобы проще искать причины, почему события или плеер не видны.
+- Яндекс Браузер показывается в плеере, если в его настройках включено «Показывать системный плеер при нажатии клавиш для управления медиа».
+
+### EN
+
+- Island events can be written to Google Calendar and iCloud: the event form has a new "Add to …" switch. Editing or deleting the event, or turning the switch off, updates the calendar too. **To make writing to Google work, reconnect your Google account in the calendar settings: new access permissions are required.**
+- Calendars now load events for the current and next year (previously a week back and two months ahead), with paging so long lists are no longer cut off silently.
+- Calendar sync is now incremental: Google returns only changes, and iCloud skips downloading while the calendar is unchanged. A full reload runs once a day.
+- The player card returns to the source that is actually playing when you switch tabs or collapse the island, if it was switched with the arrows.
+- `island.log` now records summaries for Google calendars and media sessions to make it easier to find out why events or the player are missing.
+- Yandex Browser shows up in the player when "Show system player when media keys are pressed" is enabled in its settings.
+
 ## [1.3.1] — 2026-11-12
 
 ### RU
