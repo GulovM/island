@@ -19,15 +19,5 @@ desktop.ini
 /screenshots-local/
 
 # Локальные файлы
-/docs/REFACTORING.md
-/docs/GLASS_REDESIGN.md
-/docs/designs/
-/comprehension_report.md
-/concepts_brief.md
-/critic_report.md
-/design_draft.md
-/goldfish_review_report.md
-/implementation_readiness_report.md
-/intermediate_zoom_out_report.md
-/zoom_out_report.md
+/docs/
 .claude
