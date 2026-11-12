@@ -288,6 +288,13 @@ pub fn discover_calendars(base_url: &str, auth_header: &str) -> Result<(Option<S
     Ok((discovered_email, calendars))
 }
 
+/// `getctag` коллекции: меняется при любой правке календаря. `None` — сервер его не отдал.
+pub fn fetch_ctag(cal_url: &str, auth_header: &str) -> Result<Option<String>, String> {
+    let body = r#"<D:propfind xmlns:D="DAV:" xmlns:CS="http://calendarserver.org/ns/"><D:prop><CS:getctag/></D:prop></D:propfind>"#;
+    let (_, xml) = caldav_request("PROPFIND", cal_url, auth_header, "0", body)?;
+    Ok(extract_first_tag_text(&xml, "getctag"))
+}
+
 /// Запрашивает события календаря `cal_url` за интервал `[start_utc, end_utc]` (в формате `YYYYMMDDTHHMMSSZ`)
 /// с раскрытием повторений на стороне сервера (`<C:expand>`) и возвращает объединённый текст `VCALENDAR`.
 pub fn fetch_calendar_events(
