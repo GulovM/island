@@ -21,13 +21,13 @@ use windows::Win32::UI::Input::Ime::{
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
 use windows::Win32::UI::Shell::{
     FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName, ShellExecuteW, Shell_NotifyIconW,
-    FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
-    SIGDN_FILESYSPATH,
+    FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+    NOTIFYICONDATAW, SIGDN_FILESYSPATH,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateIcon, CreateWindowExW, DestroyWindow, GetForegroundWindow, GetGUIThreadInfo, GetSystemMetrics,
-    GetWindowThreadProcessId, GUITHREADINFO, HICON, SM_CMONITORS, SW_SHOWNORMAL, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-    WS_POPUP,
+    GetWindowThreadProcessId, GUITHREADINFO, HICON, SM_CMONITORS, SM_CXSMICON, SW_SHOWNORMAL, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 
 use super::wz;
@@ -74,7 +74,7 @@ pub fn tray_add(hwnd: HWND, icon: HICON, callback_msg: u32) -> bool {
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = callback_msg;
     nid.hIcon = icon;
-    for (d, s) in nid.szTip.iter_mut().zip("Island".encode_utf16()) {
+    for (d, s) in nid.szTip.iter_mut().zip("Kite Island".encode_utf16()) {
         *d = s;
     }
     unsafe { Shell_NotifyIconW(NIM_ADD, &nid).as_bool() }
@@ -87,32 +87,80 @@ pub fn tray_remove(hwnd: HWND) {
     }
 }
 
-/// Иконка трея, нарисованная кодом: «чёлка» акцентного цвета. Файл иконки появится на этапе 6.
-pub fn make_icon(hinst: HINSTANCE, accent: [f32; 3]) -> Option<HICON> {
-    const N: usize = 32;
-    let (x0, x1, y0, y1, r) = (3.0f32, 29.0f32, 5.0f32, 21.0f32, 7.0f32);
-    let mut xor = vec![0u8; N * N * 4];
-    for y in 0..N {
-        for x in 0..N {
-            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            if fx < x0 || fx > x1 || fy < y0 || fy > y1 {
+pub fn tray_set_icon(hwnd: HWND, icon: HICON) -> bool {
+    let mut nid = tray_data(hwnd);
+    nid.uFlags = NIF_ICON;
+    nid.hIcon = icon;
+    unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid).as_bool() }
+}
+
+/// Фирменный кобальт Kite (#2F5BFF): два клина змея в трее всегда этого цвета, независимо от
+/// акцента острова, — значок в трее остаётся узнаваемым знаком, а не перекрашивается вместе с темой.
+const KITE_COBALT: [f32; 3] = [0x2F as f32 / 255.0, 0x5B as f32 / 255.0, 0xFF as f32 / 255.0];
+
+/// Значок трея — знак логотипа Kite: ромб воздушного змея из четырёх клиньев (см. assets/brand).
+/// Рисуется кодом, а не берётся из .ico: два клина — фирменный кобальт, а два других — цвет,
+/// контрастный панели задач, и он меняется на лету вместе с темой Windows.
+pub fn make_icon(hinst: HINSTANCE, light_taskbar: bool) -> Option<HICON> {
+    // Оболочка показывает значок в размере SM_CXSMICON; рисуем ровно его, чтобы Windows не
+    // масштабировала картинку и не размывала крестовину змея.
+    let n = unsafe { GetSystemMetrics(SM_CXSMICON) }.clamp(16, 64) as usize;
+    let xor = tray_pixels(n, KITE_COBALT, light_taskbar);
+    // Маска AND не нужна (прозрачность в альфе), но её строки выровнены по WORD.
+    let and = vec![0u8; n.div_ceil(16) * 2 * n];
+    // SAFETY: буферы живут до конца вызова и имеют размеры, которых CreateIcon ждёт для n×n, 32 бит.
+    unsafe { CreateIcon(Some(hinst), n as i32, n as i32, 1, 32, and.as_ptr(), xor.as_ptr()).ok() }
+}
+
+/// Пиксели значка трея n×n: BGRA, альфа не премультиплицирована (так ждёт CreateIcon).
+/// Геометрия — доли n, та же, что у знака в assets/brand/mark.svg.
+fn tray_pixels(n: usize, brand: [f32; 3], light_taskbar: bool) -> Vec<u8> {
+    const SS: usize = 4;
+    let nf = n as f32;
+    // Крестовина — по границам пикселей: клинья разного цвета стыкуются без полутонового шва.
+    let cx = (nf / 2.0).round();
+    let cy = (0.44 * nf).round();
+    // Ромб чуть уже квадрата и вытянут книзу — так он читается как змей, а не как «алмаз».
+    let (top, bot, hw) = (0.04 * nf, 0.98 * nf, 0.40 * nf);
+    let fg = if light_taskbar { [0x1A as f32 / 255.0; 3] } else { [1.0; 3] };
+
+    let mut out = vec![0u8; n * n * 4];
+    for py in 0..n {
+        for px in 0..n {
+            let (mut a_fg, mut a_brand) = (0.0f32, 0.0f32);
+            for sy in 0..SS {
+                for sxi in 0..SS {
+                    let x = px as f32 + (sxi as f32 + 0.5) / SS as f32;
+                    let y = py as f32 + (sy as f32 + 0.5) / SS as f32;
+                    let dx = (x - cx).abs() / hw;
+                    let dy = if y < cy { (cy - y) / (cy - top) } else { (y - cy) / (bot - cy) };
+                    if dx + dy > 1.0 {
+                        continue;
+                    }
+                    // Верх-лево и низ-право — цвет панели, остальные два — кобальт.
+                    if (x < cx) == (y < cy) {
+                        a_fg += 1.0;
+                    } else {
+                        a_brand += 1.0;
+                    }
+                }
+            }
+            let k = (SS * SS) as f32;
+            let (a_fg, a_brand) = (a_fg / k, a_brand / k);
+            let a = a_fg + a_brand;
+            if a <= 0.0 {
                 continue;
             }
-            // Скруглены только нижние углы.
-            let cx = fx.clamp(x0 + r, x1 - r);
-            let cy = fy.min(y1 - r);
-            if (fx - cx).powi(2) + (fy - cy).powi(2) > r * r {
-                continue;
+            let i = (py * n + px) * 4;
+            for c in 0..3 {
+                // BGRA: канал 0 — синий.
+                let v = (fg[2 - c] * a_fg + brand[2 - c] * a_brand) / a;
+                out[i + c] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
             }
-            let i = (y * N + x) * 4;
-            xor[i] = (accent[2] * 255.0) as u8;
-            xor[i + 1] = (accent[1] * 255.0) as u8;
-            xor[i + 2] = (accent[0] * 255.0) as u8;
-            xor[i + 3] = 255;
+            out[i + 3] = (a.min(1.0) * 255.0).round() as u8;
         }
     }
-    let and = [0u8; N * N / 8];
-    unsafe { CreateIcon(Some(hinst), N as i32, N as i32, 1, 32, and.as_ptr(), xor.as_ptr()).ok() }
+    out
 }
 
 // ---------- Память ----------
@@ -283,6 +331,36 @@ pub fn pick_folder(initial: Option<&str>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    fn px(buf: &[u8], n: usize, x: usize, y: usize) -> [u8; 4] {
+        let i = (y * n + x) * 4;
+        [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]
+    }
+
+    #[test]
+    fn tray_icon_shapes_and_colors() {
+        for n in [16usize, 20, 24, 32] {
+            let nf = n as f32;
+            let (cx, cy) = ((nf / 2.0).round() as usize, (0.44 * nf).round() as usize);
+            let dark = tray_pixels(n, KITE_COBALT, false);
+            let light = tray_pixels(n, KITE_COBALT, true);
+            assert_eq!(dark.len(), n * n * 4);
+            for (x, y) in [(0, 0), (n - 1, 0), (0, n - 1), (n - 1, n - 1)] {
+                assert_eq!(px(&dark, n, x, y)[3], 0, "угол прозрачный, n={n}");
+            }
+            // Клинья у крестовины: верх-лево и низ-право — цвет панели, остальные — кобальт (BGRA).
+            let cobalt = [0xFF, 0x5B, 0x2F, 255];
+            assert_eq!(px(&dark, n, cx - 2, cy - 2), [255, 255, 255, 255], "n={n}");
+            assert_eq!(px(&dark, n, cx + 1, cy + 2), [255, 255, 255, 255], "n={n}");
+            assert_eq!(px(&light, n, cx - 2, cy - 2), [0x1A, 0x1A, 0x1A, 255], "n={n}");
+            assert_eq!(px(&dark, n, cx + 1, cy - 2), cobalt, "n={n}");
+            assert_eq!(px(&dark, n, cx - 2, cy + 2), cobalt, "n={n}");
+            // Шов крестовины по границе пикселей: соседние пиксели чистые, без смеси цветов.
+            assert_eq!(px(&dark, n, cx - 1, cy - 1), [255, 255, 255, 255], "n={n}");
+            assert_eq!(px(&dark, n, cx, cy - 1), cobalt, "n={n}");
+        }
+    }
 
     #[test]
     fn test_foreground_lang_does_not_panic() {

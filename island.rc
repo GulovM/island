@@ -6,7 +6,8 @@
 #define ISLAND_VER "0.0.0"
 #endif
 
-// Иконка exe (Проводник, диспетчер задач). Значок в трее рисуется кодом (sys::make_icon).
+// Иконка exe (Проводник, диспетчер задач). Значок в трее рисуется кодом (sys::make_icon) тем же
+// знаком, но в цветах акцента и панели задач. Исходники логотипа — assets/brand.
 1 ICON "assets/island.ico"
 
 // Манифест: Windows 10/11, Per-Monitor V2, длинные пути, UTF-8.
@@ -25,11 +26,11 @@ BEGIN
     BEGIN
         BLOCK "041904b0"
         BEGIN
-            VALUE "FileDescription", "Island — динамический остров для Windows 10/11"
+            VALUE "FileDescription", "Kite Island — динамический остров для Windows 10/11"
             VALUE "FileVersion", ISLAND_VER
             VALUE "InternalName", "island"
             VALUE "OriginalFilename", "island.exe"
-            VALUE "ProductName", "Island"
+            VALUE "ProductName", "Kite Island"
             VALUE "ProductVersion", ISLAND_VER
         END
     END

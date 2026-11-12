@@ -191,7 +191,7 @@ pub fn wait_for_oauth_callback(
                             send_html_response(&mut stream, "Ошибка проверки state", "Попробуйте подключить календарь ещё раз.");
                             return Err(OAuthError::StateMismatch);
                         }
-                        send_html_response(&mut stream, "Авторизация успешна", "Окно браузера можно закрыть и вернуться в Island.");
+                        send_html_response(&mut stream, "Авторизация успешна", "Окно браузера можно закрыть и вернуться в Kite Island.");
                         return Ok(code);
                     }
                 }

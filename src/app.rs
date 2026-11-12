@@ -24,6 +24,10 @@ pub struct App {
     pub(crate) hwnd: HWND,
     pub(crate) hinst: HINSTANCE,
     pub(crate) icon: Option<HICON>,
+    /// `icon` создан make_icon и его надо уничтожить при замене; иконки из LoadIconW разделяемые.
+    pub(crate) icon_owned: bool,
+    /// Светлость панели задач, под которую нарисован `icon`.
+    pub(crate) tray_key: Option<bool>,
     pub(crate) cfg: Config,
     pub(crate) scale: f32,
     pub(crate) mon: HMONITOR,
@@ -160,7 +164,7 @@ impl App {
             let hwnd = CreateWindowExW(
                 WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 class,
-                w!("Island"),
+                w!("Kite Island"),
                 WS_POPUP,
                 0,
                 0,
@@ -250,13 +254,13 @@ impl App {
                 0
             };
 
-            let icon = sys::make_icon(hinst, cfg.accent)
-                .or_else(|| LoadIconW(None, IDI_APPLICATION).ok());
-
             let mut app = App {
                 hwnd,
                 hinst,
-                icon,
+                // Рисуется в refresh_tray_icon под текущую тему панели задач.
+                icon: None,
+                icon_owned: false,
+                tray_key: None,
                 scale,
                 mon,
                 win_x: 0,
@@ -324,6 +328,7 @@ impl App {
             };
             theme::set_glass(app.cfg.glass);
             app.apply_theme();
+            app.refresh_tray_icon();
             app.apply_monitor(mon, true);
             // Стартовое состояние сразу, без анимации.
             app.refresh_environment();
@@ -381,7 +386,38 @@ impl App {
         let t = sys::transparency_enabled();
         let flipped = std::mem::replace(&mut self.transparency, t) != t;
         let theme_changed = self.cfg.system_colors && self.apply_theme();
+        self.refresh_tray_icon();
         theme_changed || flipped
+    }
+
+    /// Перерисовывает значок трея, если сменилась тема панели задач.
+    pub(crate) fn refresh_tray_icon(&mut self) {
+        let light = sys::taskbar_light();
+        if self.tray_key == Some(light) {
+            return;
+        }
+        let Some(new) = sys::make_icon(self.hinst, light) else {
+            if self.icon.is_none() {
+                // Запасной путь — значок самого exe (ICON 1 в island.rc), он хотя бы узнаваем.
+                // SAFETY: id ресурса передаётся как MAKEINTRESOURCE, указатель не разыменовывается.
+                self.icon = unsafe { LoadIconW(Some(self.hinst), PCWSTR(1 as _)) }
+                    .or_else(|_| unsafe { LoadIconW(None, IDI_APPLICATION) })
+                    .ok();
+            }
+            return;
+        };
+        self.tray_key = Some(light);
+        // До add_tray значка в трее ещё нет и NIM_MODIFY ничего не сделает — это нормально.
+        sys::tray_set_icon(self.hwnd, new);
+        if let Some(old) = self.icon.replace(new) {
+            if self.icon_owned {
+                // SAFETY: старый значок создан нами в make_icon, и оболочка уже получила новый.
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::DestroyIcon(old);
+                }
+            }
+        }
+        self.icon_owned = true;
     }
 
     /// Номер вкладки (номер вкладки, `tabs`), выбранной в ряду.
@@ -632,6 +668,8 @@ mod tests {
                 hwnd: HWND(std::ptr::null_mut()),
                 hinst: HINSTANCE(std::ptr::null_mut()),
                 icon: None,
+                icon_owned: false,
+                tray_key: None,
                 scale: 1.0,
                 mon: HMONITOR(std::ptr::null_mut()),
                 win_x: 0,

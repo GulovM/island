@@ -6,6 +6,7 @@
 
 ### RU
 
+- Island теперь называется Kite Island и получил новый знак — воздушного змея. Обновлены иконка программы, логотип и значок в трее: он перерисовывается под размер значков Windows, контрастирует со светлой и тёмной панелью задач и сразу меняет цвет при смене темы. Папка установки и настройки остались прежними.
 - События острова можно записывать в Google Календарь и iCloud: в форме события появился переключатель «Записать в …». Правка и удаление события, а также выключение переключателя обновляют и календарь. **Чтобы запись в Google заработала, переподключите аккаунт Google в настройках календаря: нужны новые права доступа.**
 - Календари загружают события за текущий и следующий год (раньше — неделя назад и два месяца вперёд), с постраничной загрузкой, чтобы длинные списки не обрезались молча.
 - Синхронизация календарей стала инкрементальной: Google отдаёт только изменения, iCloud не скачивает события заново, пока календарь не менялся. Раз в сутки выполняется полная перезагрузка.
@@ -15,6 +16,7 @@
 
 ### EN
 
+- Island is now called Kite Island and has a new kite logo. The app icon, logo and tray icon are updated: the tray icon is drawn at the Windows icon size, stays legible on light and dark taskbars and recolours right away when the theme changes. The install folder and settings are unchanged.
 - Island events can be written to Google Calendar and iCloud: the event form has a new "Add to …" switch. Editing or deleting the event, or turning the switch off, updates the calendar too. **To make writing to Google work, reconnect your Google account in the calendar settings: new access permissions are required.**
 - Calendars now load events for the current and next year (previously a week back and two months ahead), with paging so long lists are no longer cut off silently.
 - Calendar sync is now incremental: Google returns only changes, and iCloud skips downloading while the calendar is unchanged. A full reload runs once a day.

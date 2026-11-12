@@ -30,6 +30,12 @@ pub fn light_mode() -> bool {
         == Some(1)
 }
 
+/// Панель задач светлая. Она следует «режиму Windows» (SystemUsesLightTheme), а не режиму
+/// приложений: их можно выставить по-разному, а значок трея должен контрастировать именно с панелью.
+pub fn taskbar_light() -> bool {
+    read_dword(PERSONALIZE, w!("SystemUsesLightTheme")) == Some(1)
+}
+
 /// В Windows включены «Эффекты прозрачности» (без значения в реестре — включены).
 pub fn transparency_enabled() -> bool {
     read_dword(PERSONALIZE, w!("EnableTransparency")) != Some(0)
