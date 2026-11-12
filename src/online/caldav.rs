@@ -8,6 +8,10 @@ pub const APPLE_CALDAV_BASE: &str = "https://caldav.icloud.com/";
 
 const MAX_CALDAV_BYTES: usize = 2 << 20;
 
+/// Текст ошибки, когда ответ сервера не поместился в `MAX_CALDAV_BYTES`: обрезанный XML разобрался
+/// бы в неполный календарь без единой ошибки, поэтому вызывающий делит окно и запрашивает куски.
+pub const RESPONSE_TOO_LARGE: &str = "ответ CalDAV больше лимита размера";
+
 /// Разрешает относительный `<D:href>` относительно `final_url` ответа (с учётом редиректов на шард iCloud).
 pub fn resolve_href(final_url: &str, href: &str) -> String {
     http::resolve_redirect_url(final_url, href).unwrap_or_else(|| href.trim().to_string())
@@ -216,6 +220,9 @@ fn caldav_request(method: &str, url: &str, auth_header: &str, depth: &str, xml_b
     }
     if resp.status >= 400 {
         return Err(format!("HTTP {} для {url}", resp.status));
+    }
+    if resp.total as usize > MAX_CALDAV_BYTES {
+        return Err(RESPONSE_TOO_LARGE.to_string());
     }
     Ok((resp.final_url, String::from_utf8_lossy(&resp.body).into_owned()))
 }

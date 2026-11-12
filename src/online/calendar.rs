@@ -498,23 +498,54 @@ pub fn disconnect_apple(ics_urls: &[String]) {
     }
 }
 
-fn caldav_time_window() -> (String, String) {
-    let now_days = (crate::sys::now_secs() / 86_400) as i64;
-    let (y1, m1, d1) = civil_from_days(now_days - 7);
-    let (y2, m2, d2) = civil_from_days(now_days + 60);
-    (
-        format!("{y1:04}{m1:02}{d1:02}T000000Z"),
-        format!("{y2:04}{m2:02}{d2:02}T235959Z"),
-    )
+/// Окно синхронизации для Google и iCloud, в днях от 1970-01-01: с 1 января текущего года по
+/// 31 декабря следующего. Граница прыгает раз в год, а не уезжает каждый день, как скользящее окно.
+fn sync_window_days() -> (i64, i64) {
+    window_days_at(crate::sys::now_secs())
+}
+
+fn window_days_at(now_secs: u64) -> (i64, i64) {
+    let (y, _, _) = civil_from_days((now_secs / 86_400) as i64);
+    (days_from_civil(y, 1, 1), days_from_civil(y + 1, 12, 31))
+}
+
+/// Метка границы окна для CalDAV: `YYYYMMDDTHHMMSSZ`; конец включает весь последний день.
+fn caldav_stamp(day: i64, end: bool) -> String {
+    let (y, m, d) = civil_from_days(day);
+    format!("{y:04}{m:02}{d:02}T{}Z", if end { "235959" } else { "000000" })
+}
+
+/// Метка границы окна для Google (RFC 3339).
+fn google_stamp(day: i64, end: bool) -> String {
+    let (y, m, d) = civil_from_days(day);
+    format!("{y:04}-{m:02}-{d:02}T{}Z", if end { "23:59:59" } else { "00:00:00" })
+}
+
+/// Сколько раз можно делить окно пополам, если ответ CalDAV не помещается в лимит
+/// (при глубине 3 минимальный кусок — около трёх месяцев).
+const CALDAV_SPLIT_DEPTH: u32 = 3;
+
+/// События календаря за дни `d0..=d1`; слишком большой ответ запрашивается двумя половинами.
+/// Событие на границе половин придёт дважды — дубли убирает `merge_raw_events` по UID и началу.
+fn fetch_caldav_range(cal_url: &str, auth: &str, d0: i64, d1: i64, depth: u32) -> Result<String, String> {
+    match caldav::fetch_calendar_events(cal_url, auth, &caldav_stamp(d0, false), &caldav_stamp(d1, true)) {
+        Err(e) if e == caldav::RESPONSE_TOO_LARGE && depth > 0 && d1 > d0 => {
+            let mid = d0 + (d1 - d0) / 2;
+            let first = fetch_caldav_range(cal_url, auth, d0, mid, depth - 1)?;
+            let second = fetch_caldav_range(cal_url, auth, mid + 1, d1, depth - 1)?;
+            Ok(first + &second)
+        }
+        other => other,
+    }
 }
 
 fn fetch_all_caldav_events(cals: &[String], auth_header: &str) -> Result<String, String> {
-    let (start_utc, end_utc) = caldav_time_window();
+    let (d0, d1) = sync_window_days();
     let mut combined = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n");
     let mut any_ok = false;
     let mut last_err = String::new();
     for cal_url in cals {
-        match caldav::fetch_calendar_events(cal_url, auth_header, &start_utc, &end_utc) {
+        match fetch_caldav_range(cal_url, auth_header, d0, d1, CALDAV_SPLIT_DEPTH) {
             Ok(ics) => {
                 any_ok = true;
                 for line in ics.lines() {
@@ -635,12 +666,68 @@ fn parse_google_calendar_list(json: &str) -> (Option<String>, Vec<String>, Calen
     (email, ids, stats)
 }
 
-/// Окно событий как у CalDAV-источников (неделя назад, два месяца вперёд), в RFC 3339.
-fn google_time_window() -> (String, String) {
-    let now_days = (crate::sys::now_secs() / 86_400) as i64;
-    let (y1, m1, d1) = civil_from_days(now_days - 7);
-    let (y2, m2, d2) = civil_from_days(now_days + 60);
-    (format!("{y1:04}-{m1:02}-{d1:02}T00:00:00Z"), format!("{y2:04}-{m2:02}-{d2:02}T23:59:59Z"))
+/// Страниц `events.list` на один календарь не больше: ограничивает память при огромном источнике.
+const MAX_GOOGLE_PAGES: usize = 8;
+
+/// Итог загрузки событий одного календаря Google.
+struct GoogleCalFetch {
+    stats: GoogleEventStats,
+    pages: usize,
+    /// Упёрлись в `MAX_GOOGLE_PAGES`: дальние события не загружены.
+    truncated: bool,
+}
+
+/// Все страницы `events.list` календаря `cal` за окно `time_min..time_max`. При ошибке посреди
+/// загрузки события уже прочитанных страниц из `out` убираются: неполный календарь хуже ошибки,
+/// потому что его кэш заменил бы целый.
+fn fetch_google_calendar_events(
+    cal: &str,
+    token: &str,
+    time_min: &str,
+    time_max: &str,
+    out: &mut String,
+) -> Result<GoogleCalFetch, String> {
+    let base = out.len();
+    let res = fetch_google_pages(cal, token, time_min, time_max, out);
+    if res.is_err() {
+        out.truncate(base);
+    }
+    res
+}
+
+fn fetch_google_pages(
+    cal: &str,
+    token: &str,
+    time_min: &str,
+    time_max: &str,
+    out: &mut String,
+) -> Result<GoogleCalFetch, String> {
+    let mut total = GoogleEventStats::default();
+    let mut page_token: Option<String> = None;
+    for page in 1..=MAX_GOOGLE_PAGES {
+        // `orderBy=startTime`: при обрыве по пределу страниц отрезается дальний конец окна, а не ближайшие дни.
+        let mut url = format!(
+            "{GOOGLE_API}/calendars/{}/events?singleEvents=true&orderBy=startTime&maxResults=2500&timeMin={}&timeMax={}&fields={}",
+            http::urlenc(cal),
+            http::urlenc(time_min),
+            http::urlenc(time_max),
+            http::urlenc("nextPageToken,items(id,status,summary,start,end)"),
+        );
+        if let Some(t) = &page_token {
+            url.push_str("&pageToken=");
+            url.push_str(&http::urlenc(t));
+        }
+        let json = google_get(&url, token)?;
+        let s = google_events_to_ics(&json, out);
+        total.items += s.items;
+        total.added += s.added;
+        total.skipped += s.skipped;
+        page_token = http::json_field_str(&json, "nextPageToken").filter(|t| !t.is_empty());
+        if page_token.is_none() {
+            return Ok(GoogleCalFetch { stats: total, pages: page, truncated: false });
+        }
+    }
+    Ok(GoogleCalFetch { stats: total, pages: MAX_GOOGLE_PAGES, truncated: true })
 }
 
 /// `2026-11-12T10:00:00[.sss](Z|±HH:MM)` → `20261112T070000Z` (UTC, как понимает `parse_dt`).
@@ -755,7 +842,8 @@ fn sync_google_rest(mut g: GoogleAccount) -> Result<String, String> {
         }
         Err(e) => return Err(e),
     };
-    let (time_min, time_max) = google_time_window();
+    let (d0, d1) = sync_window_days();
+    let (time_min, time_max) = (google_stamp(d0, false), google_stamp(d1, true));
     let mut combined = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n");
     let mut any_ok = false;
     let mut last_err = String::new();
@@ -765,21 +853,20 @@ fn sync_google_rest(mut g: GoogleAccount) -> Result<String, String> {
 
     for (idx, cal) in cals.iter().enumerate() {
         let cal_num = idx + 1;
-        // `orderBy=startTime` с окном от недели назад: при пределе в 2500 событий отрезается
-        // дальний конец окна, а не ближайшие дни.
-        let url = format!(
-            "{GOOGLE_API}/calendars/{}/events?singleEvents=true&orderBy=startTime&maxResults=2500&timeMin={}&timeMax={}&fields={}",
-            http::urlenc(cal),
-            http::urlenc(&time_min),
-            http::urlenc(&time_max),
-            http::urlenc("items(id,status,summary,start,end)"),
-        );
-        match google_get(&url, &g.access_token) {
-            Ok(json) => {
+        match fetch_google_calendar_events(cal, &g.access_token, &time_min, &time_max, &mut combined) {
+            Ok(fetch) => {
                 any_ok = true;
-                let stats = google_events_to_ics(&json, &mut combined);
-                cal_summaries.push(format!("календарь {cal_num}: items {}, VEVENT {}", stats.items, stats.added));
+                let stats = fetch.stats;
+                let pages = if fetch.pages > 1 { format!(", страниц {}", fetch.pages) } else { String::new() };
+                let cut = if fetch.truncated { ", УСЕЧЕНО" } else { "" };
+                cal_summaries.push(format!("календарь {cal_num}: items {}, VEVENT {}{pages}{cut}", stats.items, stats.added));
                 total_skipped_events += stats.skipped;
+                if fetch.truncated {
+                    // Событий больше предела страниц: дальний конец окна не загружен.
+                    let msg = format!("Google Календарь {cal_num}: достигнут предел страниц ({MAX_GOOGLE_PAGES}), данные неполные");
+                    log_google_sync_error(&msg);
+                    cycle_errors.push(msg);
+                }
             }
             Err(e) => {
                 // Исключаем вывод персональных данных из тела ответа или токена, логируя только код статуса.
@@ -1492,6 +1579,21 @@ mod tests {
         assert_eq!(raws[0].uid, "ev1");
         assert!(raws[1].all_day);
         assert_eq!((raws[1].start, raws[1].end), (at(2026, 11, 14, 0, 0), at(2026, 11, 16, 0, 0)));
+    }
+
+    #[test]
+    fn sync_window_covers_this_and_next_year() {
+        let now = (days_from_civil(2026, 11, 12) * 86_400) as u64;
+        let (d0, d1) = window_days_at(now);
+        assert_eq!(caldav_stamp(d0, false), "20260101T000000Z");
+        assert_eq!(caldav_stamp(d1, true), "20271231T235959Z");
+        assert_eq!(google_stamp(d0, false), "2026-01-01T00:00:00Z");
+        assert_eq!(google_stamp(d1, true), "2027-12-31T23:59:59Z");
+        // Окно не зависит от дня внутри года: граница прыгает только 1 января.
+        let (e0, e1) = window_days_at((days_from_civil(2026, 1, 1) * 86_400) as u64);
+        assert_eq!((e0, e1), (d0, d1));
+        let (n0, _) = window_days_at((days_from_civil(2027, 1, 1) * 86_400) as u64);
+        assert_eq!(caldav_stamp(n0, false), "20270101T000000Z");
     }
 
     #[test]
