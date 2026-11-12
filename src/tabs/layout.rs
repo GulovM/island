@@ -1081,6 +1081,9 @@ impl Layout {
                 Some((a, b)) => (a, SizeTok::parse(b)),
                 None => (rest, None),
             };
+            // Батарея переехала со «Статистики» в «Управление»: собственные вкладки, сохранённые
+            // раньше, держат старый ключ.
+            let key = if key == "stats.battery" { "controls.battery" } else { key };
             let Some(idx) = spec.specs.iter().position(|s| s.key == key) else { continue };
             if out.iter().any(|e| e.idx == idx) {
                 continue;
@@ -1689,6 +1692,15 @@ mod tests {
                 check(win, &SPEC, skip, &base, 0, &res);
             }
         }
+    }
+
+    #[test]
+    fn moved_battery_key_maps_to_controls() {
+        let spec = crate::tabs::custom::catalog().spec;
+        let lay = Layout::parse(spec, &format!("{VERSION} stats.battery:2x2@0,0"));
+        let idx = spec.specs.iter().position(|s| s.key == "controls.battery").expect("батарея в каталоге");
+        assert!(lay.entries.iter().any(|e| e.idx == idx && !e.hidden), "виджет остаётся на вкладке");
+        assert!(!spec.specs.iter().any(|s| s.key == "stats.battery"));
     }
 
     #[test]

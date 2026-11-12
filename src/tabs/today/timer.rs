@@ -10,6 +10,24 @@ use crate::ui::{chip_bg, dim, icon, mix, txt, Align, Canvas, Rect, Submit, Ui};
 
 const PRESETS: [u32; 5] = [1, 5, 10, 15, 20];
 
+// ID таймера на вкладке: пресеты, звук, циферблат, пуск/сброс и поля часов/минут/секунд.
+const ID_PRESET: u32 = 0;
+const ID_SOUND: u32 = 21;
+const ID_DIGITS: u32 = 39;
+const ID_RUN: u32 = 40;
+const ID_RESET: u32 = 41;
+const ID_FIELDS: u32 = 110;
+
+/// Занятые таймером ID вкладки (полуинтервалы) для теста непересечения в `mod.rs`.
+#[cfg(test)]
+pub(super) const ID_RANGES: &[(u32, u32)] = &[
+    (ID_PRESET, ID_PRESET + PRESETS.len() as u32),
+    (ID_SOUND, ID_SOUND + 1),
+    (ID_DIGITS, ID_DIGITS + 1),
+    (ID_RUN, ID_RESET + 1),
+    (ID_FIELDS, ID_FIELDS + 3),
+];
+
 /// Время таймера: «03:25» или «1:02:05».
 fn clock_label(secs: u64) -> String {
     if secs >= 3600 {
@@ -176,7 +194,7 @@ impl Today {
         self.ring.target = frac.clamp(0.0, 1.0);
         let (cx, cy) = (tm.x + ox + cx_off, tm.y + 46.0);
         // Поля времени (ч, мин, с): ввод цифр, Enter или уход из поля применяет.
-        let tf = [id(TODAY, 110), id(TODAY, 111), id(TODAY, 112)];
+        let tf = [id(TODAY, ID_FIELDS), id(TODAY, ID_FIELDS + 1), id(TODAY, ID_FIELDS + 2)];
         let focused = (0..3).find(|&k| ui.has_focus(tf[k]));
         let entered = (0..3).any(|k| ui.take_submitted(tf[k]).is_some());
         for &t in &tf {
@@ -214,7 +232,7 @@ impl Today {
             } else {
                 crate::i18n::pick("Включить звук сигнала", "Unmute alarm sound")
             };
-            if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(rx - 9.0, cy - 9.0, 18.0, 18.0), icon::RINGER, self.sound, tint, sound_tip) {
+            if ui.icon_button_tinted(cv, id(TODAY, ID_SOUND), Rect::new(rx - 9.0, cy - 9.0, 18.0, 18.0), icon::RINGER, self.sound, tint, sound_tip) {
                 self.sound = !self.sound;
                 self.save_timer();
             }
@@ -228,7 +246,7 @@ impl Today {
                 let of = format!("{} {}", crate::i18n::pick("из", "of"), of_label);
                 cv.line(&of, &f.small, tx, 90.0, cy + 13.0, Align::Leading, dim());
                 let digits_r = Rect::new(tx - 2.0, tm.y + 4.0, 86.0, tm.h - 8.0);
-                if ui.click_area(id(TODAY, 39), digits_r).1 {
+                if ui.click_area(id(TODAY, ID_DIGITS), digits_r).1 {
                     self.toggle_run();
                     ui.set_field_text(tf[1], &format!("{:02}", self.minutes));
                     ui.select_all(tf[1]);
@@ -269,10 +287,10 @@ impl Today {
             let reset_x = tm.right() - P - 14.0;
             let run_x = reset_x - 34.0;
             let run_icon = if self.deadline.is_some() { icon::PAUSE } else { icon::PLAY_SOLID };
-            if round_button(ui, cv, id(TODAY, 40), run_x, cy, 14.0, run_icon, tint, crate::ui::WHITE) {
+            if round_button(ui, cv, id(TODAY, ID_RUN), run_x, cy, 14.0, run_icon, tint, crate::ui::WHITE) {
                 self.toggle_run();
             }
-            if round_button(ui, cv, id(TODAY, 41), reset_x, cy, 14.0, icon::RESTART, chip_bg(), txt()) {
+            if round_button(ui, cv, id(TODAY, ID_RESET), reset_x, cy, 14.0, icon::RESTART, chip_bg(), txt()) {
                 self.left = self.total;
                 self.deadline = None;
                 self.save_timer();
@@ -289,7 +307,7 @@ impl Today {
         } else {
             crate::i18n::pick("Включить звук сигнала", "Unmute alarm sound")
         };
-        if ui.icon_button_tinted(cv, id(TODAY, 21), Rect::new(cx - 9.0, tm.y + 77.0, 18.0, 18.0), icon::RINGER, self.sound, tint, sound_tip) {
+        if ui.icon_button_tinted(cv, id(TODAY, ID_SOUND), Rect::new(cx - 9.0, tm.y + 77.0, 18.0, 18.0), icon::RINGER, self.sound, tint, sound_tip) {
             self.sound = !self.sound;
             self.save_timer();
         }
@@ -312,17 +330,17 @@ impl Today {
         // Пресеты.
         for (i, m) in PRESETS.iter().enumerate() {
             let r = Rect::new(bx + i as f32 * p_step, tm.y + 42.0, p_step - 4.0, 18.0);
-            if ui.chip_ex(cv, id(TODAY, i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, Some(tint)) {
+            if ui.chip_ex(cv, id(TODAY, ID_PRESET + i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, Some(tint)) {
                 self.set_preset(i);
             }
         }
 
         // Старт / пауза и сброс.
         let start = if self.deadline.is_some() { "Пауза" } else { "Старт" };
-        if ui.solid_button(cv, id(TODAY, 40), Rect::new(bx, tm.y + 68.0, btn_w, 26.0), start, tint, crate::ui::WHITE, 6.0) {
+        if ui.solid_button(cv, id(TODAY, ID_RUN), Rect::new(bx, tm.y + 68.0, btn_w, 26.0), start, tint, crate::ui::WHITE, 6.0) {
             self.toggle_run();
         }
-        if ui.solid_button(cv, id(TODAY, 41), Rect::new(bx + btn_w + 6.0, tm.y + 68.0, btn_w, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
+        if ui.solid_button(cv, id(TODAY, ID_RESET), Rect::new(bx + btn_w + 6.0, tm.y + 68.0, btn_w, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
             self.left = self.total;
             self.deadline = None;
             self.save_timer();

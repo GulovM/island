@@ -92,7 +92,8 @@ fn extract_first_changelog_section() -> String {
             in_sec = true;
             continue;
         }
-        if in_sec && !line.trim().is_empty() && !line.starts_with('#') {
+        // Подзаголовки `### RU` / `### EN` сохраняются: по ним `update.rs` выбирает язык.
+        if in_sec && !line.trim().is_empty() && !line.starts_with("## ") {
             lines.push(line);
         }
     }

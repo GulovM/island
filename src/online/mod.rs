@@ -25,7 +25,7 @@ pub use calendar::{
 pub use local::{due_reminders, merge_local, Due, DueKind, LocalEvent, Repeat, MAX_LOCAL, MISSED_WINDOW, REMIND_CHOICES};
 pub use datetime::{civil_from_days, days_from_civil, now_local_minutes, utc_offset_minutes, weekday};
 pub(crate) use http::{get_bytes, get_text, json_str, json_str_multiline};
-pub use speedtest::{run_speedtest, Speed};
+pub use speedtest::{init_cached_speed, run_speedtest, Speed};
 pub use weather::{init_cached_weather, refresh_weather, weather_text, Weather};
 
 /// После ошибки повторяем раньше, чем через полный срок.

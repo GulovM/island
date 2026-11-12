@@ -9,6 +9,27 @@ use crate::ui::{chip_bg, dim, fg, icon, inset, mix, status_green, track, txt, Ca
 
 const MAX_TODO: usize = 100;
 
+// ID задач на вкладке: поле ввода и кнопки, прокрутка и по `MAX_TODO` на строки, удаление и правку.
+const ID_FIELD: u32 = 30;
+const ID_ADD: u32 = 31;
+const ID_CANCEL: u32 = 32;
+const ID_SORT: u32 = 33;
+const ID_CLEAR: u32 = 34;
+const ID_LIST: u32 = 100;
+const ID_ROW: u32 = 200;
+const ID_DEL: u32 = 400;
+const ID_EDIT: u32 = 600;
+
+/// Занятые задачами ID вкладки (полуинтервалы) для теста непересечения в `mod.rs`.
+#[cfg(test)]
+pub(super) const ID_RANGES: &[(u32, u32)] = &[
+    (ID_FIELD, ID_CLEAR + 1),
+    (ID_LIST, ID_LIST + 1),
+    (ID_ROW, ID_ROW + MAX_TODO as u32),
+    (ID_DEL, ID_DEL + MAX_TODO as u32),
+    (ID_EDIT, ID_EDIT + MAX_TODO as u32),
+];
+
 const TODO_FILE: &str = "todo.txt";
 
 /// Сортировка списка задач. «Вручную» порядок не трогает (новые добавляются сверху).
@@ -269,7 +290,7 @@ impl Today {
         let sort_label = self.todo_sort.label();
         let sort_w = cv.chip_w(sort_label);
         let sort_r = Rect::new(bx - 9.0 - 6.0 - sort_w, by - 8.5, sort_w, 17.0);
-        if ui.chip(cv, id(TODAY, 33), sort_r, sort_label, self.todo_sort != Sort::Manual) {
+        if ui.chip(cv, id(TODAY, ID_SORT), sort_r, sort_label, self.todo_sort != Sort::Manual) {
             self.todo_sort = self.todo_sort.next();
             self.resort();
             self.save();
@@ -277,12 +298,12 @@ impl Today {
         // Ручная очистка: чип левее сортировки, виден, пока есть выполненные и хватает места рядом с заголовком.
         let clear_w = cv.chip_w("Убрать выполненные");
         let clear_r = Rect::new(sort_r.x - 6.0 - clear_w, by - 8.5, clear_w, 17.0);
-        if done > 0 && clear_r.x >= card.x + 12.0 + 64.0 && ui.chip(cv, id(TODAY, 34), clear_r, "Убрать выполненные", false) {
+        if done > 0 && clear_r.x >= card.x + 12.0 + 64.0 && ui.chip(cv, id(TODAY, ID_CLEAR), clear_r, "Убрать выполненные", false) {
             self.clear_done();
         }
 
         // Поле «добавить» внизу и золотая кнопка со стрелкой.
-        let fid = id(TODAY, 30);
+        let fid = id(TODAY, ID_FIELD);
         let field = Rect::new(card.x + 10.0, card.bottom() - pad - field_h, card.w - 20.0, field_h);
         let editing = self.edit.is_some_and(|i| i < self.todo.len());
         if !editing {
@@ -293,19 +314,19 @@ impl Today {
         // поля регистрируются раньше него, а рисуются после.
         let add = Rect::new(field.right() - 22.0, field.cy() - 8.0, 16.0, 16.0);
         let cancel = Rect::new(add.x - 19.0, add.y, 16.0, 16.0);
-        let (_, add_clicked) = ui.click_area(id(TODAY, 31), add);
-        let cancel_clicked = editing && ui.click_area(id(TODAY, 32), cancel).1;
+        let (_, add_clicked) = ui.click_area(id(TODAY, ID_ADD), add);
+        let cancel_clicked = editing && ui.click_area(id(TODAY, ID_CANCEL), cancel).1;
         // Справа поверх поля лежат кнопки: текст до них не доходит.
         ui.text_field_pad(cv, fid, field, hint, glyph, Submit::Clear, if editing { 45.0 } else { 28.0 });
         // Задачи — синие, как Напоминания iOS (в стиле Windows — акцент).
         let rem = crate::ui::hue(crate::ios::SysColor::Blue, cv.accent);
         cv.rr_line(field, 8.0, if editing { rem } else { track() }, 1.0);
-        let hv = ui.hover_of(id(TODAY, 31));
+        let hv = ui.hover_of(id(TODAY, ID_ADD));
         cv.rr(add, 4.0, mix(rem, fg(), 0.12 * hv));
         cv.glyph(if editing { icon::CHECK } else { icon::FORWARD }, add, false, crate::ui::on_color(rem));
         if editing {
             // Отмена правки: поле очищается, задача остаётся прежней.
-            let hv = ui.hover_of(id(TODAY, 32));
+            let hv = ui.hover_of(id(TODAY, ID_CANCEL));
             cv.rr(cancel, 8.0, D2D1_COLOR_F { a: 0.10 * hv, ..fg() });
             cv.glyph(icon::CLOSE, cancel, false, mix(dim(), txt(), hv));
         }
@@ -365,7 +386,7 @@ impl Today {
                 a.placed = true;
             }
         }
-        let sid = id(TODAY, 100);
+        let sid = id(TODAY, ID_LIST);
         let off = ui.scroll_begin(cv, sid, view, total);
 
         // Перетаскивание строк мышью: 1:1 следование за курсором и плавный сдвиг
@@ -373,7 +394,7 @@ impl Today {
         let mut dropped = None;
         if let Some(mut d) = self.todo_drag.take() {
             if d.idx < self.todo.len() && self.todo_sort == Sort::Manual {
-                let drag_id = id(TODAY, 200 + d.idx as u32);
+                let drag_id = id(TODAY, ID_ROW + d.idx as u32);
                 let ptr = ui.pointer();
                 if ui.is_dragging(drag_id) {
                     if !d.live && (ptr.0 - d.press_pos.0).hypot(ptr.1 - d.press_pos.1) > 4.0 {
@@ -466,10 +487,10 @@ impl Today {
                 continue;
             }
             let r = Rect::new(view.x, y, view.w - 4.0, rh);
-            let rid = id(TODAY, 200 + i as u32);
+            let rid = id(TODAY, ID_ROW + i as u32);
             // Кнопки справа («изменить», «удалить») видны при наведении; при активном перетаскивании
             // скрываются, чтобы не мешать жесту.
-            let (eid, did) = (id(TODAY, 600 + i as u32), id(TODAY, 400 + i as u32));
+            let (eid, did) = (id(TODAY, ID_EDIT + i as u32), id(TODAY, ID_DEL + i as u32));
             let del = Rect::new(r.right() - 21.0, r.y + row / 2.0 - 9.0, 18.0, 18.0);
             let edit = Rect::new(del.x - 20.0, del.y, 18.0, 18.0);
             let show = live_drag_idx.is_none() && (ui.hover_of(rid) > 0.3 || ui.hover_of(did) > 0.3 || ui.hover_of(eid) > 0.3);

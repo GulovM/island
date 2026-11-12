@@ -4,24 +4,12 @@
 //! Палитра хранится в потоке интерфейса; виджеты читают её функциями из `ui` (`card()`, `txt()`…).
 
 use std::cell::Cell;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use crate::ios;
 
 pub type Rgb = [f32; 3];
-
-/// Автоподбор контраста APCA для текста и значков (ключ `auto_contrast`).
-static AUTO_CONTRAST: AtomicBool = AtomicBool::new(true);
-
-pub fn set_auto_contrast(on: bool) {
-    AUTO_CONTRAST.store(on, Ordering::Relaxed);
-}
-
-pub fn auto_contrast() -> bool {
-    AUTO_CONTRAST.load(Ordering::Relaxed)
-}
 
 /// Стиль цветовой палитры интерфейса острова.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -221,17 +209,16 @@ pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
         p.pill = ios::fill_primary(dark);
     }
 
-    // Автоподбор контраста APCA: подтягиваем только цвета текста и значков, акцент и фон не трогаем.
-    if auto_contrast() {
-        let rgb3 = |c: D2D1_COLOR_F| [c.r, c.g, c.b];
-        let fix = |c: D2D1_COLOR_F, on: Rgb, min_lc: f32| {
-            let [r, g, b] = crate::ui::ensure_apca(rgb3(c), &[on], min_lc);
-            D2D1_COLOR_F { r, g, b, a: c.a }
-        };
-        p.text = fix(p.text, bg, 75.0);
-        p.dim = fix(p.dim, bg, 60.0);
-        p.ink = fix(p.ink, accent, 60.0);
-    }
+    // Контраст APCA: подтягиваем только цвета текста и значков, акцент и фон не трогаем.
+    // Всегда включён: с выключенным пользовательские цвета темы давали нечитаемый текст.
+    let rgb3 = |c: D2D1_COLOR_F| [c.r, c.g, c.b];
+    let fix = |c: D2D1_COLOR_F, on: Rgb, min_lc: f32| {
+        let [r, g, b] = crate::ui::ensure_apca(rgb3(c), &[on], min_lc);
+        D2D1_COLOR_F { r, g, b, a: c.a }
+    };
+    p.text = fix(p.text, bg, 75.0);
+    p.dim = fix(p.dim, bg, 60.0);
+    p.ink = fix(p.ink, accent, 60.0);
 
     p
 }

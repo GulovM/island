@@ -20,13 +20,26 @@ pub struct Speed {
     pub failed: bool,
 }
 
+/// Последний замер из `state.txt`. Без срока давности: значения меняет только новый замер.
+pub fn init_cached_speed(down: f32, up: f32, place: String, at: u64) {
+    if at == 0 || (down <= 0.0 && up <= 0.0) {
+        return;
+    }
+    with(|s| {
+        if s.snap.speed.at == 0 && !s.snap.speed.running {
+            s.snap.speed = Speed { down, up, place, at, running: false, failed: false };
+        }
+    });
+}
+
 pub fn run_speedtest() {
     let go = with(|s| {
         if s.snap.speed.running {
             return false;
         }
-        s.snap.speed.running = true;
-        s.snap.speed.failed = false;
+        // Виджет сразу забывает старые цифры, чтобы не выдавать их за текущие; в `state.txt` они
+        // остаются до успешного замера — сбой без сети не стирает последний хороший результат.
+        s.snap.speed = Speed { running: true, ..Speed::default() };
         true
     });
     if !go {
@@ -40,7 +53,7 @@ pub fn run_speedtest() {
             .unwrap_or_default();
         let down = measure(None);
         let up = measure(Some(UP_BYTES));
-        with(|s| {
+        let saved = with(|s| {
             let sp = &mut s.snap.speed;
             sp.running = false;
             match (down, up) {
@@ -49,13 +62,19 @@ pub fn run_speedtest() {
                     sp.up = u;
                     sp.place = place;
                     sp.at = sys::now_secs();
+                    Some(sp.clone())
                 }
                 (d, u) => {
                     log::error(&format!("замер скорости: {:?} / {:?}", d.err(), u.err()));
                     sp.failed = true;
+                    None
                 }
             }
         });
+        // Запись на диск — вне блокировки снимка, чтобы не держать её на время файлового ввода-вывода.
+        if let Some(sp) = saved {
+            crate::state::save_speed(sp.down, sp.up, &sp.place, sp.at);
+        }
         bg::notify();
     });
 }

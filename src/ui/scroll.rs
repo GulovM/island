@@ -19,6 +19,9 @@ pub(super) struct Scroll {
     pub(super) hot: bool,
     /// Расстояние от верха бегунка до курсора в момент захвата.
     pub(super) grab: f32,
+    /// Полоса рисуется и ловит мышь. Выключают, когда рядом свой указатель прокрутки
+    /// (алфавитный столбик в «Приложениях») — два скроллбара спорят за клики у края.
+    pub(super) show_bar: bool,
 }
 
 /// Ширина зоны захвата полосы прокрутки у правого края области.
@@ -32,6 +35,15 @@ impl Ui {
     /// Начинает область прокрутки; возвращает смещение содержимого (пиксели вниз).
     /// Элементы рисуются с `y - offset`; `scroll_end` закрывает область.
     pub unsafe fn scroll_begin(&mut self, cv: &Canvas, id: u32, view: Rect, content_h: f32) -> f32 {
+        self.scroll_begin_ex(cv, id, view, content_h, true)
+    }
+
+    /// Как `scroll_begin`; при `show_bar == false` полоса не рисуется и правый край области
+    /// не перехватывает нажатия — прокрутка остаётся только колесом и внешними `scroll_jump`.
+    pub unsafe fn scroll_begin_ex(&mut self, cv: &Canvas, id: u32, view: Rect, content_h: f32, show_bar: bool) -> f32 {
+        if !show_bar && self.drag == Some(id) {
+            self.drag = None;
+        }
         let hov = self.interactive && view.contains(self.mouse);
         let wheel = self.wheel;
         let s = self.scrolls.entry(id).or_insert_with(|| Scroll {
@@ -43,7 +55,9 @@ impl Ui {
             vis: Spring::unit(0.0, 300.0, 30.0),
             hot: false,
             grab: 0.0,
+            show_bar,
         });
+        s.show_bar = show_bar;
         s.max = (content_h - view.h).max(0.0);
         s.content = content_h;
         s.view = view;
@@ -54,7 +68,7 @@ impl Ui {
         let (interactive, mouse, pressed, down) = (self.interactive, self.mouse, self.pressed, self.down);
         let mut dragging = self.drag == Some(id) && down;
         s.hot = dragging;
-        if s.max > 0.0 {
+        if show_bar && s.max > 0.0 {
             let th = (view.h * view.h / content_h).max(24.0).min(view.h);
             let track = (view.h - th).max(1.0);
             let zone = Rect::new(view.right() - SCROLLBAR_GRAB_W, view.y, SCROLLBAR_GRAB_W, view.h);
@@ -89,7 +103,7 @@ impl Ui {
         cv.g.dc.PopAxisAlignedClip();
         self.clip = None;
         let Some(s) = self.scrolls.get(&id) else { return };
-        if s.max <= 0.0 || s.vis.value < 0.01 {
+        if !s.show_bar || s.max <= 0.0 || s.vis.value < 0.01 {
             return;
         }
         let th = (s.view.h * s.view.h / s.content).max(24.0).min(s.view.h);

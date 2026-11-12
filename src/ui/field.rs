@@ -18,6 +18,8 @@ pub(super) struct Field {
     secret: bool,
     /// Только цифры (не больше 5 знаков): поля времени.
     digits: bool,
+    /// Подсказка, не влезшая в поле, один раз прокручивается по кругу (узкие поля с длинной подсказкой).
+    hint_marquee: bool,
 }
 
 /// Что делает Enter в текстовом поле.
@@ -154,6 +156,11 @@ impl Ui {
         self.fields.entry(id).or_default().secret = on;
     }
 
+    /// Подсказка поля, если не влезает, один раз медленно прокручивается по кругу и встаёт на место.
+    pub fn set_hint_marquee(&mut self, id: u32, on: bool) {
+        self.fields.entry(id).or_default().hint_marquee = on;
+    }
+
     /// Выделяет весь текст поля (ввод заменит его).
     pub fn select_all(&mut self, id: u32) {
         let f = self.fields.entry(id).or_default();
@@ -241,6 +248,22 @@ impl Ui {
         let focused = self.focus == Some(id);
         let caret_on = self.caret_on;
 
+        // Бегущая подсказка: сдвиг считаем до заимствования поля (таймер прокрутки живёт в `self`).
+        const HINT_GAP: f32 = 24.0;
+        let hint = self.fields.get(&id).filter(|f| f.hint_marquee && f.chars.is_empty()).map(|f| f.digits);
+        let hint_off = match hint {
+            Some(digits) => {
+                let fmt = if digits { &cv.g.fonts.mono_c } else { &cv.g.fonts.body };
+                let hint_w = cv.text_w(placeholder, fmt);
+                if hint_w > inner.w {
+                    self.marquee_loop_offset(id ^ 0x2000_0000, hint_w + HINT_GAP).map(|dx| (dx, hint_w))
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+
         let f = self.fields.entry(id).or_default();
         // Точка «•» — одна единица UTF-16, поэтому позиции курсора совпадают с символами.
         let shown: String = if f.secret { "•".repeat(f.chars.len()) } else { f.chars.iter().collect() };
@@ -303,7 +326,16 @@ impl Ui {
         // Текст, выделение и курсор — внутри клипа.
         cv.g.dc.PushAxisAlignedClip(&inner.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
         if text.is_empty() {
-            cv.text(placeholder, inner, fmt_c, mix(dim(), txt(), 0.25));
+            let hint_c = mix(dim(), txt(), 0.25);
+            match hint_off {
+                // Не влезшая подсказка: две копии с зазором, сдвиг на период — ровно один круг.
+                Some((dx, hint_w)) => {
+                    let w = hint_w + 4.0;
+                    cv.text(placeholder, Rect::new(inner.x + dx, r.y, w, r.h), fmt_c, hint_c);
+                    cv.text(placeholder, Rect::new(inner.x + dx + hint_w + HINT_GAP, r.y, w, r.h), fmt_c, hint_c);
+                }
+                None => cv.text(placeholder, inner, fmt_c, hint_c),
+            }
         } else if let Some(l) = &layout {
             if f.has_sel() {
                 let (lo, hi) = f.range();

@@ -19,6 +19,10 @@ const DAY_NEXT: u32 = 137;
 /// Кнопки дней недели: 130..=136.
 const WEEKDAY: u32 = 130;
 
+/// Все ID формы события одним блоком.
+#[cfg(test)]
+pub(super) const ID_RANGES: &[(u32, u32)] = &[(TITLE, DAY_NEXT + 1)];
+
 /// Что не так с введёнными данными.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Problem {

@@ -50,6 +50,17 @@ pub struct WeatherState {
     pub time: u64,
 }
 
+/// Последний замер скорости сети: хранится без срока давности, до следующего замера.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SpeedState {
+    /// Мбит/с.
+    pub down: f32,
+    pub up: f32,
+    pub place: String,
+    /// Unix-секунды замера; 0 — замера нет.
+    pub time: u64,
+}
+
 /// Полное сохраняемое состояние компонентов острова.
 #[derive(Clone, Debug, PartialEq)]
 pub struct State {
@@ -72,6 +83,7 @@ pub struct State {
     pub last_seen_version: String,
     pub timer: TimerState,
     pub weather: WeatherState,
+    pub speed: SpeedState,
 }
 
 impl Default for State {
@@ -88,6 +100,7 @@ impl Default for State {
             last_seen_version: String::new(),
             timer: TimerState::default(),
             weather: WeatherState::default(),
+            speed: SpeedState::default(),
         }
     }
 }
@@ -149,6 +162,12 @@ pub fn serialize(state: &State) -> String {
     out.push_str(&format!("code = {}\n", state.weather.code));
     out.push_str(&format!("city = \"{}\"\n", state.weather.city.replace('\\', "\\\\").replace('"', "\\\"")));
     out.push_str(&format!("time = {}\n", state.weather.time));
+
+    out.push_str("\n[speed]\n");
+    out.push_str(&format!("down = {:.2}\n", state.speed.down));
+    out.push_str(&format!("up = {:.2}\n", state.speed.up));
+    out.push_str(&format!("place = \"{}\"\n", state.speed.place.replace('\\', "\\\\").replace('"', "\\\"")));
+    out.push_str(&format!("time = {}\n", state.speed.time));
 
     out
 }
@@ -249,6 +268,25 @@ pub fn parse(text: &str) -> State {
             ("weather", "time") => {
                 if let Ok(t) = val.parse::<u64>() {
                     state.weather.time = t;
+                }
+            }
+            ("speed", "down" | "up") => {
+                if let Ok(v) = val.parse::<f32>() {
+                    if v.is_finite() && v >= 0.0 {
+                        if key == "down" {
+                            state.speed.down = v;
+                        } else {
+                            state.speed.up = v;
+                        }
+                    }
+                }
+            }
+            ("speed", "place") => {
+                state.speed.place = unquote(val);
+            }
+            ("speed", "time") => {
+                if let Ok(t) = val.parse::<u64>() {
+                    state.speed.time = t;
                 }
             }
             _ => {
@@ -431,6 +469,12 @@ pub fn save_weather(temp: f32, code: i32, city: &str) {
     flush();
 }
 
+/// Запоминает последний успешный замер скорости сети.
+pub fn save_speed(down: f32, up: f32, place: &str, time: u64) {
+    update(|s| s.speed = SpeedState { down, up, place: place.to_string(), time });
+    flush();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,6 +503,12 @@ mod tests {
                 code: 1,
                 city: "Санкт-Петербург".to_string(),
                 time: 1718000000,
+            },
+            speed: SpeedState {
+                down: 94.6,
+                up: 41.25,
+                place: "FRA".to_string(),
+                time: 1718000300,
             },
         };
 

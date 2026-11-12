@@ -210,6 +210,7 @@ fn run() -> Result<()> {
     {
         online::init_cached_weather(state.weather.temp, state.weather.code, state.weather.city.clone());
     }
+    online::init_cached_speed(state.speed.down, state.speed.up, state.speed.place.clone(), state.speed.time);
     online::init_cached_calendar(&cfg.calendar_ics);
     // OLE (перетаскивание) требует STA: поток инициализируется до создания окон и очереди композиции.
     let ole = dnd::init();

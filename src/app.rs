@@ -323,7 +323,6 @@ impl App {
                 cfg,
             };
             theme::set_glass(app.cfg.glass);
-            theme::set_auto_contrast(app.cfg.auto_contrast);
             app.apply_theme();
             app.apply_monitor(mon, true);
             // Стартовое состояние сразу, без анимации.
@@ -438,8 +437,6 @@ impl App {
         self.cfg.palette_style = new.palette_style;
         self.cfg.accent_pill = new.accent_pill;
         theme::set_glass(new.glass);
-        self.cfg.auto_contrast = new.auto_contrast;
-        theme::set_auto_contrast(new.auto_contrast);
         if (self.cfg.ui_scale - new.ui_scale).abs() > 0.001 {
             self.cfg.ui_scale = new.ui_scale;
             set_ui_scale(new.ui_scale);
@@ -511,7 +508,6 @@ impl App {
         self.tab = self.order.iter().position(|&i| i == current).unwrap_or(0);
         self.cfg = cfg;
         theme::set_glass(self.cfg.glass);
-        theme::set_auto_contrast(self.cfg.auto_contrast);
         set_ui_scale(self.cfg.ui_scale);
         self.refresh_language();
         self.apply_monitor(self.mon, true);
@@ -530,11 +526,14 @@ impl App {
 
     // ---------- События, анимация, отрисовка ----------
 
-    /// Минимальная ширина сетки виджетов в ячейках, достаточная для размещения ряда вкладок.
+    /// Минимальная ширина сетки виджетов в ячейках: столько целых колонок, сколько помещается
+    /// под рядом вкладок. Округление вниз, а не вверх: ширину панели и так дотягивает до ряда
+    /// вкладок `tab_w`, а сетка в ней центрируется. С округлением вверх ряд, которому не хватало
+    /// нескольких пикселей, добавлял сетке целую пустую колонку справа.
     pub(crate) fn min_grid_cols(&self) -> u8 {
         ((self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT - 2.0 * tabs::PAD + tabs::layout::GAP)
             / tabs::layout::CELL)
-            .ceil()
+            .floor()
             .max(1.0) as u8
     }
 
@@ -708,6 +707,22 @@ mod tests {
         assert!(!app.face.visible());
 
         // Симулируем воспроизведение музыки
+        let track = bg::Media {
+            title: "Track".into(),
+            artist: "Artist".into(),
+            playing: true,
+            pos: 0.0,
+            dur: 100.0,
+            at: Instant::now(),
+            rate: 1.0,
+            art: None,
+            key: 1,
+            can_seek: true,
+            min_seek: 0.0,
+            max_seek: 100.0,
+            source_name: "Spotify".into(),
+            session_count: 1,
+        };
         let snap = bg::Snapshot {
             wifi: None,
             bluetooth: None,
@@ -715,20 +730,8 @@ mod tests {
             volume: None,
             brightness: None,
             muted: false,
-            media: Some(bg::Media {
-                title: "Track".into(),
-                artist: "Artist".into(),
-                playing: true,
-                pos: 0.0,
-                dur: 100.0,
-                at: Instant::now(),
-                rate: 1.0,
-                art: None,
-                key: 1,
-                can_seek: true,
-                min_seek: 0.0,
-                max_seek: 100.0,
-            }),
+            media: Some(track.clone()),
+            live_media: Some(track),
             ssid: None,
             audio: None,
             rev: 1,

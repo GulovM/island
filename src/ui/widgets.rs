@@ -1,9 +1,40 @@
 //! Примитивы интерфейса: кнопки, плитки, слайдеры, переключатели, чипы, палитры.
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
-use windows::Win32::Graphics::Direct2D::D2D1_ANTIALIAS_MODE_ALIASED;
+use windows::Win32::Graphics::Direct2D::{D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE};
 
 use super::{card, chip_bg, dim, fg, icon, ink, mix, selection, track, txt, Canvas, Rect, Ui};
+
+/// Рисует элемент `item` дважды, разрезая его вертикальной линией `split_x`: левую часть цветом
+/// `left`, правую — `right`. Так подпись остаётся контрастной, когда граница заливки идёт по ней.
+unsafe fn split_h(cv: &Canvas, item: Rect, split_x: f32, left: D2D1_COLOR_F, right: D2D1_COLOR_F, draw: impl Fn(D2D1_COLOR_F)) {
+    let x = split_x.clamp(item.x, item.right());
+    if x > item.x {
+        cv.g.dc.PushAxisAlignedClip(&Rect::new(item.x, item.y, x - item.x, item.h).d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
+        draw(left);
+        cv.g.dc.PopAxisAlignedClip();
+    }
+    if x < item.right() {
+        cv.g.dc.PushAxisAlignedClip(&Rect::new(x, item.y, item.right() - x, item.h).d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
+        draw(right);
+        cv.g.dc.PopAxisAlignedClip();
+    }
+}
+
+/// То же по горизонтальной линии `split_y`: верх цветом `top`, низ — `bottom`.
+unsafe fn split_v(cv: &Canvas, item: Rect, split_y: f32, top: D2D1_COLOR_F, bottom: D2D1_COLOR_F, draw: impl Fn(D2D1_COLOR_F)) {
+    let y = split_y.clamp(item.y, item.bottom());
+    if y > item.y {
+        cv.g.dc.PushAxisAlignedClip(&Rect::new(item.x, item.y, item.w, y - item.y).d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
+        draw(top);
+        cv.g.dc.PopAxisAlignedClip();
+    }
+    if y < item.bottom() {
+        cv.g.dc.PushAxisAlignedClip(&Rect::new(item.x, y, item.w, item.bottom() - y).d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
+        draw(bottom);
+        cv.g.dc.PopAxisAlignedClip();
+    }
+}
 
 /// Плитка не шире этого рисуется без текста (только значок); к `NARROW_TILE + TILE_FADE` текст
 /// проявляется целиком.
@@ -187,32 +218,28 @@ impl Ui {
         cv.rr(r, r.h / 2.0, mix(card(), fg(), 0.04 * hv));
         cv.hairline(r, r.h / 2.0);
         let on_fill = super::color::on_color(fill);
-        if v > 0.0 {
-            let fr = Rect::new(r.x, r.y, (r.w * v).max(r.h), r.h);
-            cv.rr(fr, r.h / 2.0, fill);
+        let fill_w = r.w * v;
+        if fill_w > 0.0 {
+            // Заливка — форма самой дорожки, обрезанная прямым клипом: граница заливки всегда
+            // плоская, а у концов дорожки повторяет её скругление. Капсула своей длины давала
+            // круглый движущийся край, и на малых значениях форма заливки менялась.
+            cv.g.dc.PushAxisAlignedClip(&Rect::new(r.x, r.y, fill_w, r.h).d2d(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            cv.rr(r, r.h / 2.0, fill);
             if crate::theme::glass() {
                 // Мягкий блик сверху заполненной части.
                 let top = D2D1_COLOR_F { a: 0.10, ..crate::theme::get().rim_hi };
-                cv.gradient_stops(fr, r.h / 2.0, &[(0.0, top), (0.6, D2D1_COLOR_F { a: 0.0, ..top })], false);
+                cv.gradient_stops(r, r.h / 2.0, &[(0.0, top), (0.6, D2D1_COLOR_F { a: 0.0, ..top })], false);
             }
+            cv.g.dc.PopAxisAlignedClip();
         }
-        cv.glyph(glyph, Rect::new(r.x + 6.0, r.y, 18.0, r.h), false, if v > 0.04 { on_fill } else { txt() });
+        // Значок и процент делятся границей заливки: порог по значению давал белый значок
+        // на ещё белой заливке на малых процентах.
+        let fill_right = r.x + fill_w;
+        let glyph_r = Rect::new(r.x + 6.0, r.y, 18.0, r.h);
+        split_h(cv, glyph_r, fill_right, on_fill, txt(), |c| cv.glyph(glyph, glyph_r, false, c));
         let pct = format!("{}%", (v * 100.0).round() as i32);
         let text_r = Rect::new(r.right() - 52.0, r.y, 42.0, r.h);
-        let fill_right = if v > 0.0 { r.x + (r.w * v).max(r.h) } else { r.x };
-        let split_x = fill_right.clamp(text_r.x, text_r.right());
-        if split_x > text_r.x {
-            let clip_l = Rect::new(text_r.x, text_r.y, split_x - text_r.x, text_r.h);
-            cv.g.dc.PushAxisAlignedClip(&clip_l.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
-            cv.text(&pct, text_r, &cv.g.fonts.body_r, on_fill);
-            cv.g.dc.PopAxisAlignedClip();
-        }
-        if split_x < text_r.right() {
-            let clip_r = Rect::new(split_x, text_r.y, text_r.right() - split_x, text_r.h);
-            cv.g.dc.PushAxisAlignedClip(&clip_r.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
-            cv.text(&pct, text_r, &cv.g.fonts.body_r, txt());
-            cv.g.dc.PopAxisAlignedClip();
-        }
+        split_h(cv, text_r, fill_right, on_fill, txt(), |c| cv.text(&pct, text_r, &cv.g.fonts.body_r, c));
         changed
     }
 
@@ -237,34 +264,27 @@ impl Ui {
         cv.rr(r, rad, mix(card(), fg(), 0.04 * hv));
         cv.hairline(r, rad);
         let on_fill = super::color::on_color(fill);
-        if v > 0.0 {
-            let fh = (r.h * v).max(r.w);
-            let fr = Rect::new(r.x, r.bottom() - fh, r.w, fh);
-            cv.rr(fr, rad, fill);
+        let fh = r.h * v;
+        if fh > 0.0 {
+            // Как в `slider_bar`: форма дорожки под прямым клипом, верхняя граница заливки плоская.
+            cv.g.dc.PushAxisAlignedClip(&Rect::new(r.x, r.bottom() - fh, r.w, fh).d2d(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            cv.rr(r, rad, fill);
             if crate::theme::glass() {
+                // Блик начинается у верхней границы заливки и гаснет на 60% её высоты.
                 let top = D2D1_COLOR_F { a: 0.10, ..crate::theme::get().rim_hi };
-                cv.gradient_stops(fr, rad, &[(0.0, top), (0.6, D2D1_COLOR_F { a: 0.0, ..top })], false);
+                let t0 = 1.0 - v;
+                cv.gradient_stops(r, rad, &[(t0, top), (t0 + 0.6 * v, D2D1_COLOR_F { a: 0.0, ..top })], false);
             }
+            cv.g.dc.PopAxisAlignedClip();
         }
-        // Значок внизу лежит на заливке почти всегда; проценты сверху — двухпроходно по границе заливки.
+        // Значок внизу и проценты сверху — двухпроходно по границе заливки: на малых значениях
+        // граница проходит прямо по значку.
+        let fill_top = r.bottom() - fh;
         let glyph_rect = Rect::new(r.x, r.bottom() - r.w + 4.0, r.w, r.w - 8.0);
-        cv.glyph(glyph, glyph_rect, false, if v > 0.04 { on_fill } else { txt() });
+        split_v(cv, glyph_rect, fill_top, txt(), on_fill, |c| cv.glyph(glyph, glyph_rect, false, c));
         let pct = format!("{}%", (v * 100.0).round() as i32);
         let text_r = Rect::new(r.x, r.y + 6.0, r.w, 14.0);
-        let fill_top = if v > 0.0 { r.bottom() - (r.h * v).max(r.w) } else { r.bottom() };
-        let split_y = fill_top.clamp(text_r.y, text_r.bottom());
-        if split_y > text_r.y {
-            let clip_t = Rect::new(text_r.x, text_r.y, text_r.w, split_y - text_r.y);
-            cv.g.dc.PushAxisAlignedClip(&clip_t.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
-            cv.text(&pct, text_r, &cv.g.fonts.small_c, txt());
-            cv.g.dc.PopAxisAlignedClip();
-        }
-        if split_y < text_r.bottom() {
-            let clip_b = Rect::new(text_r.x, split_y, text_r.w, text_r.bottom() - split_y);
-            cv.g.dc.PushAxisAlignedClip(&clip_b.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
-            cv.text(&pct, text_r, &cv.g.fonts.small_c, on_fill);
-            cv.g.dc.PopAxisAlignedClip();
-        }
+        split_v(cv, text_r, fill_top, txt(), on_fill, |c| cv.text(&pct, text_r, &cv.g.fonts.small_c, c));
         changed
     }
 

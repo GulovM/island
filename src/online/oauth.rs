@@ -19,7 +19,7 @@ pub const GOOGLE_CLIENT_SECRET: Option<&str> = option_env!("ISLAND_GOOGLE_CLIENT
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const GOOGLE_CALDAV_SCOPE: &str = "https://www.googleapis.com/auth/calendar.readonly";
+const GOOGLE_CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar.readonly";
 
 static REFRESH_LOCK: Mutex<()> = Mutex::new(());
 
@@ -273,8 +273,18 @@ pub fn refresh_token_with_url(
     parse_token_response(resp.status, &resp.body)
 }
 
+/// Пишет причину сбоя OAuth в `island.log`: в интерфейсе видна только последняя ошибка, и
+/// без журнала не понять, на каком шаге оборвался вход. Токены и секреты в сообщения не попадают.
+fn log_oauth_error(stage: &str, e: &OAuthError) {
+    crate::log::error(&format!("Google OAuth ({stage}): {}", e.message()));
+}
+
 /// Запускает полный цикл авторизации Google OAuth 2.0 PKCE через системный браузер.
 pub fn authorize_google() -> Result<TokenResponse, OAuthError> {
+    authorize_google_inner().inspect_err(|e| log_oauth_error("вход", e))
+}
+
+fn authorize_google_inner() -> Result<TokenResponse, OAuthError> {
     let (client_id, client_secret) = google_credentials()?;
     let verifier = generate_code_verifier()?;
     let challenge = pkce_s256_challenge(&verifier).ok_or_else(|| OAuthError::Http("SHA-256 недоступен".into()))?;
@@ -292,7 +302,7 @@ pub fn authorize_google() -> Result<TokenResponse, OAuthError> {
         "{GOOGLE_AUTH_URL}?client_id={}&redirect_uri={}&response_type=code&scope={}&code_challenge={}&code_challenge_method=S256&state={}&access_type=offline&prompt=consent",
         http::urlenc(client_id),
         http::urlenc(&redirect_uri),
-        http::urlenc(GOOGLE_CALDAV_SCOPE),
+        http::urlenc(GOOGLE_CALENDAR_SCOPE),
         http::urlenc(&challenge),
         http::urlenc(&state),
     );
@@ -309,8 +319,9 @@ pub fn authorize_google() -> Result<TokenResponse, OAuthError> {
 
 /// Обновляет `access_token` Google по сохранённому `refresh_token`.
 pub fn refresh_google_token(refresh_token: &str) -> Result<TokenResponse, OAuthError> {
-    let (client_id, client_secret) = google_credentials()?;
+    let (client_id, client_secret) = google_credentials().inspect_err(|e| log_oauth_error("обновление токена", e))?;
     refresh_token_with_url(GOOGLE_TOKEN_URL, client_id, client_secret, refresh_token)
+        .inspect_err(|e| log_oauth_error("обновление токена", e))
 }
 
 #[cfg(test)]

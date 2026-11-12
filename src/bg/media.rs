@@ -45,6 +45,10 @@ pub struct Media {
     /// Допустимые границы перемотки в секундах от начала трека.
     pub min_seek: f32,
     pub max_seek: f32,
+    /// Имя приложения-источника для шапки плеера («Firefox», «Spotify»); пусто — неизвестно.
+    pub source_name: String,
+    /// Сколько активных источников звука: стрелки выбора видны при `session_count > 1`.
+    pub session_count: usize,
 }
 
 impl Media {
@@ -184,52 +188,185 @@ fn pick_session_index(sessions: &[(&str, bool, bool)], last_playing_aumid: &str)
     Some(0)
 }
 
-/// Выбирает целевую медиасессию из всех активных сессий `GetSessions()`.
-fn select_session(mgr: &Mgr) -> Option<GlobalSystemMediaTransportControlsSession> {
+/// Сессия, которую есть смысл показывать (есть название или исполнитель), с прочитанными свойствами.
+struct Active {
+    session: GlobalSystemMediaTransportControlsSession,
+    props: GlobalSystemMediaTransportControlsSessionMediaProperties,
+    title: String,
+    artist: String,
+    aumid: String,
+    /// Номер среди сессий с тем же AUMID: у браузера их бывает несколько (по одной на вкладку),
+    /// и выбор только по AUMID не дал бы перейти со второй на первую.
+    ordinal: usize,
+    playing: bool,
+    current: bool,
+}
+
+/// Все сессии `GetSessions()` с метаданными, в порядке менеджера.
+fn active_sessions(mgr: &Mgr) -> Vec<Active> {
     let cur = mgr.GetCurrentSession().ok();
-    let cur_aumid = cur
-        .as_ref()
-        .and_then(|s| s.SourceAppUserModelId().ok())
-        .map(|h| h.to_string())
-        .unwrap_or_default();
-
-    let list: Vec<GlobalSystemMediaTransportControlsSession> = mgr
-        .GetSessions()
-        .ok()
-        .map(|v| v.into_iter().collect())
-        .unwrap_or_default();
-
+    let aumid_of = |s: &GlobalSystemMediaTransportControlsSession| {
+        s.SourceAppUserModelId().ok().map(|h| h.to_string()).unwrap_or_default()
+    };
+    let cur_aumid = cur.as_ref().map(aumid_of).unwrap_or_default();
+    let mut list: Vec<GlobalSystemMediaTransportControlsSession> =
+        mgr.GetSessions().ok().map(|v| v.into_iter().collect()).unwrap_or_default();
     if list.is_empty() {
-        return cur;
+        list.extend(cur);
     }
-
-    let mut meta: Vec<(String, bool, bool)> = Vec::with_capacity(list.len());
-    for s in &list {
-        let aumid = s
-            .SourceAppUserModelId()
-            .ok()
-            .map(|h| h.to_string())
-            .unwrap_or_default();
-        let playing = s
-            .GetPlaybackInfo()
-            .ok()
-            .and_then(|i| i.PlaybackStatus().ok())
-            == Some(Status::Playing);
-        let is_cur = !cur_aumid.is_empty() && aumid == cur_aumid;
-        meta.push((aumid, playing, is_cur));
+    let mut out: Vec<Active> = Vec::with_capacity(list.len());
+    for session in list {
+        let Ok(props) = wait(session.TryGetMediaPropertiesAsync()) else { continue };
+        let title = props.Title().map(|t| t.to_string()).unwrap_or_default();
+        let artist = props.Artist().map(|a| a.to_string()).unwrap_or_default();
+        if title.is_empty() && artist.is_empty() {
+            continue;
+        }
+        let aumid = aumid_of(&session);
+        let playing = session.GetPlaybackInfo().ok().and_then(|i| i.PlaybackStatus().ok()) == Some(Status::Playing);
+        let ordinal = out.iter().filter(|a| a.aumid == aumid).count();
+        let current = !cur_aumid.is_empty() && aumid == cur_aumid;
+        out.push(Active { session, props, title, artist, aumid, ordinal, playing, current });
     }
+    out
+}
 
-    let refs: Vec<(&str, bool, bool)> = meta
-        .iter()
-        .map(|(a, p, c)| (a.as_str(), *p, *c))
-        .collect();
+/// Сессия, которая реально звучит, — её показывает свёрнутый остров.
+fn live_index(active: &[Active]) -> Option<usize> {
+    let refs: Vec<(&str, bool, bool)> = active.iter().map(|a| (a.aumid.as_str(), a.playing, a.current)).collect();
     let idx = LAST_PLAYING_AUMID.with(|last| pick_session_index(&refs, &last.borrow()))?;
-    if meta[idx].1 && !meta[idx].0.is_empty() {
-        LAST_PLAYING_AUMID.with(|last| {
-            *last.borrow_mut() = meta[idx].0.clone();
-        });
+    if active[idx].playing && !active[idx].aumid.is_empty() {
+        LAST_PLAYING_AUMID.with(|last| *last.borrow_mut() = active[idx].aumid.clone());
     }
-    list.into_iter().nth(idx)
+    Some(idx)
+}
+
+/// Сессия, выбранная стрелками в карточке плеера.
+struct Pin {
+    aumid: String,
+    /// Номер среди одноимённых и трек на момент выбора. Порядок вкладок браузера в `GetSessions()`
+    /// не гарантирован, поэтому сначала ищем по треку, а номер — запасной признак (трек сменился).
+    ordinal: usize,
+    track: String,
+}
+
+thread_local! {
+    /// Весь SMTC живёт в фоновом потоке, поэтому хватает thread_local, как и у `LAST_PLAYING_AUMID`.
+    static PINNED: RefCell<Option<Pin>> = const { RefCell::new(None) };
+    /// Сессия карточки из последнего чтения: команды плеера идут в неё без повторного
+    /// чтения метаданных всех сессий (при перетаскивании перемотка шлётся каждые 100 мс).
+    static CARD_SESSION: RefCell<Option<GlobalSystemMediaTransportControlsSession>> = const { RefCell::new(None) };
+}
+
+/// Индекс закреплённой сессии среди `(aumid, ordinal, track)` активных; `None`, если её уже нет.
+fn pinned_index(ids: &[(&str, usize, &str)], pin: &Pin) -> Option<usize> {
+    ids.iter()
+        .position(|&(a, _, t)| a == pin.aumid && t == pin.track)
+        .or_else(|| ids.iter().position(|&(a, o, _)| a == pin.aumid && o == pin.ordinal))
+}
+
+/// Ключ трека для закрепления: название и исполнитель.
+fn track_key(title: &str, artist: &str) -> String {
+    format!("{title}\u{1f}{artist}")
+}
+
+/// Сдвиг выбора на `delta` по кругу из `n` сессий.
+fn cycle_index(cur: usize, n: usize, delta: isize) -> usize {
+    if n == 0 {
+        return 0;
+    }
+    (cur as isize + delta).rem_euclid(n as isize) as usize
+}
+
+/// Сессия карточки плеера: выбранная стрелками, пока жива; закрытое приложение снимает выбор,
+/// и карточка возвращается к живой сессии.
+fn card_index(active: &[Active], live: Option<usize>) -> Option<usize> {
+    PINNED.with(|p| {
+        let mut p = p.borrow_mut();
+        if let Some(pin) = p.as_mut() {
+            let tracks: Vec<String> = active.iter().map(|a| track_key(&a.title, &a.artist)).collect();
+            let ids: Vec<(&str, usize, &str)> =
+                active.iter().zip(&tracks).map(|(a, t)| (a.aumid.as_str(), a.ordinal, t.as_str())).collect();
+            if let Some(i) = pinned_index(&ids, pin) {
+                // Запоминаем, где сессия сейчас: следующий трек или переставленные вкладки найдутся.
+                pin.ordinal = active[i].ordinal;
+                pin.track = tracks[i].clone();
+                return Some(i);
+            }
+            *p = None;
+        }
+        live
+    })
+}
+
+/// Перелистывает карточку плеера на соседнюю активную сессию. Воспроизведение не трогает:
+/// свёрнутый остров продолжает показывать то, что реально играет.
+pub(super) fn cycle_session(delta: isize) {
+    let Some(mgr) = media_manager() else { return };
+    let active = active_sessions(&mgr);
+    if active.len() < 2 {
+        return;
+    }
+    let live = live_index(&active);
+    let Some(cur) = card_index(&active, live) else { return };
+    let next = &active[cycle_index(cur, active.len(), delta)];
+    let pin = Pin { aumid: next.aumid.clone(), ordinal: next.ordinal, track: track_key(&next.title, &next.artist) };
+    PINNED.with(|p| *p.borrow_mut() = Some(pin));
+    CARD_SESSION.with(|c| *c.borrow_mut() = Some(next.session.clone()));
+}
+
+/// Браузеры то снимают флаг перемотки, то отдают пустой таймлайн, хотя перемотку принимают.
+fn is_browser(aumid: &str) -> bool {
+    let low = aumid.to_ascii_lowercase();
+    !low.contains("yandex.music")
+        && ["chrome", "msedge", "firefox", "308046b0af4a39cb", "opera", "brave", "yandex"].iter().any(|k| low.contains(k))
+}
+
+/// Человекочитаемое имя приложения по AUMID: известные плееры и браузеры по подстроке,
+/// иначе — имя exe или пакета без расширения.
+fn source_name(aumid: &str) -> String {
+    let low = aumid.to_ascii_lowercase();
+    const KNOWN: &[(&str, &str)] = &[
+        ("yandex.music", "Yandex Music"),
+        ("yandexmusic", "Yandex Music"),
+        ("firefox", "Firefox"),
+        // Firefox регистрирует сессию под хэшем каталога установки, а не под именем.
+        ("308046b0af4a39cb", "Firefox"),
+        ("msedge", "Edge"),
+        ("chrome", "Chrome"),
+        ("opera", "Opera"),
+        ("brave", "Brave"),
+        ("yandex", "Yandex"),
+        ("spotify", "Spotify"),
+        ("telegram", "Telegram"),
+        ("vlc", "VLC"),
+        ("aimp", "AIMP"),
+        ("applemusic", "Apple Music"),
+        ("itunes", "iTunes"),
+        ("zunemusic", "Media Player"),
+        ("zunevideo", "Movies & TV"),
+    ];
+    if let Some((_, name)) = KNOWN.iter().find(|(k, _)| low.contains(k)) {
+        if *name == "Yandex Music" {
+            return crate::i18n::pick("Яндекс Музыка", "Yandex Music").to_string();
+        }
+        return (*name).to_string();
+    }
+    // `C:\…\foo.exe`, `Vendor.App_hash!App` → «foo», «App».
+    let base = aumid.rsplit(['\\', '/']).next().unwrap_or(aumid);
+    let base = base.split('!').next().unwrap_or(base);
+    let base = base.strip_suffix(".exe").or_else(|| base.strip_suffix(".EXE")).unwrap_or(base);
+    let base = base.split('_').next().unwrap_or(base);
+    let base = base.rsplit('.').next().unwrap_or(base);
+    // Хэш вместо имени ничего не скажет пользователю: пусть шапка покажет устройство вывода.
+    if base.len() >= 12 && base.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return String::new();
+    }
+    let mut c = base.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
 }
 
 /// Менеджер сообщил, что сессии поменялись: подписку на события сессии нужно пересоздать,
@@ -339,18 +476,24 @@ unsafe fn watch_media() {
 
 /// Обновляет в снимке только медиа (события сессии), остальное оставляя как есть.
 pub(super) unsafe fn refresh_media() {
-    let media = read_media();
+    let (media, live_media) = read_media_pair();
     if let Ok(mut s) = SNAPSHOT.lock() {
         let mut snap = s.clone().unwrap_or_default();
         snap.media = media;
+        snap.live_media = live_media;
         snap.rev += 1;
         *s = Some(snap);
     }
 }
 
+/// Команды плеера идут в сессию карточки — ту, что пользователь видит и выбрал стрелками.
 pub(super) unsafe fn media_command(cmd: Cmd) {
     let Some(mgr) = media_manager() else { return };
-    let Some(s) = select_session(&mgr) else { return };
+    // Сессия карточки из последнего снимка: снимок обновляется по каждому событию SMTC, а
+    // перечитывать метаданные всех сессий на каждую команду дорого. Без метаданных у всех сессий
+    // (плеер после «стоп») команда идёт текущей системной, чтобы пустая карточка могла её разбудить.
+    let s = CARD_SESSION.with(|c| c.borrow().clone()).or_else(|| mgr.GetCurrentSession().ok());
+    let Some(s) = s else { return };
     let is_current = mgr
         .GetCurrentSession()
         .ok()
@@ -411,11 +554,11 @@ unsafe fn media_key(vk: u8) {
     keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
 }
 
-/// Перематывает трек текущей сессии на позицию в секундах от начала, если поддерживается.
+/// Перематывает трек сессии на позицию в секундах от начала.
+/// Флаг `IsPlaybackPositionEnabled` не проверяем: браузеры часто сбрасывают его и обнуляют
+/// таймлайн между опросами, хотя перемотку принимают; неподдерживаемый запрос плеер просто отклонит.
 unsafe fn seek_session(s: &GlobalSystemMediaTransportControlsSession, target_secs: f32) -> Option<()> {
-    let info = s.GetPlaybackInfo().ok()?;
-    let ctrls = info.Controls().ok()?;
-    if !ctrls.IsPlaybackPositionEnabled().unwrap_or(false) {
+    if !target_secs.is_finite() {
         return None;
     }
     let tl = s.GetTimelineProperties().ok()?;
@@ -423,32 +566,43 @@ unsafe fn seek_session(s: &GlobalSystemMediaTransportControlsSession, target_sec
     let start = tl.StartTime().map(secs).unwrap_or(0.0);
     let end = tl.EndTime().map(secs).unwrap_or(0.0);
     let dur = (end - start).max(0.0) as f32;
-    if dur <= 0.0 {
-        return None;
-    }
-    let min_s = tl.MinSeekTime().map(secs).unwrap_or(start) - start;
-    let max_s = tl.MaxSeekTime().map(secs).unwrap_or(end) - start;
-    let (min_seek, max_seek) = seek_bounds(dur, min_s as f32, max_s as f32);
-    let clamped = target_secs.clamp(min_seek, max_seek);
+    let clamped = if dur > 0.0 {
+        let min_s = tl.MinSeekTime().map(secs).unwrap_or(start) - start;
+        let max_s = tl.MaxSeekTime().map(secs).unwrap_or(end) - start;
+        let (min_seek, max_seek) = seek_bounds(dur, min_s as f32, max_s as f32);
+        target_secs.clamp(min_seek, max_seek)
+    } else {
+        // Таймлайн сейчас пуст — позиция взята из последнего непустого, который видел интерфейс.
+        target_secs.max(0.0)
+    };
     let abs_pos = start + clamped as f64;
     let hns = (abs_pos * 1e7).round() as i64;
     let _ = wait(s.TryChangePlaybackPositionAsync(hns));
     Some(())
 }
 
-/// Обложка последнего трека: повторно не декодируем, пока трек тот же.
-static COVER: Mutex<Option<(u64, Arc<Vec<u8>>)>> = Mutex::new(None);
+/// Обложки последних треков: повторно не декодируем, пока трек тот же. Несколько записей,
+/// потому что карточка и свёрнутый остров могут показывать разные сессии одновременно.
+static COVER: Mutex<Vec<(u64, Arc<Vec<u8>>)>> = Mutex::new(Vec::new());
+const COVER_CACHE: usize = 8;
 
-pub(super) unsafe fn read_media() -> Option<Media> {
+/// `(сессия карточки плеера, сессия, которая реально играет)`; часто это одна и та же.
+pub(super) unsafe fn read_media_pair() -> (Option<Media>, Option<Media>) {
     watch_media();
-    let mgr = media_manager()?;
-    let s = select_session(&mgr)?;
-    let props = wait(s.TryGetMediaPropertiesAsync()).ok()?;
-    let title = props.Title().ok()?.to_string();
-    let artist = props.Artist().map(|a| a.to_string()).unwrap_or_default();
-    if title.is_empty() && artist.is_empty() {
-        return None;
-    }
+    let Some(mgr) = media_manager() else { return (None, None) };
+    let active = active_sessions(&mgr);
+    let live = live_index(&active);
+    let card = card_index(&active, live);
+    CARD_SESSION.with(|c| *c.borrow_mut() = card.map(|i| active[i].session.clone()));
+    let n = active.len();
+    let card_media = card.map(|i| build_media(&active[i], n));
+    let live_media = if live == card { card_media.clone() } else { live.map(|i| build_media(&active[i], n)) };
+    (card_media, live_media)
+}
+
+unsafe fn build_media(a: &Active, session_count: usize) -> Media {
+    let (s, props) = (&a.session, &a.props);
+    let (title, artist) = (a.title.clone(), a.artist.clone());
     let playback_info = s.GetPlaybackInfo().ok();
     let playing = playback_info
         .as_ref()
@@ -499,20 +653,24 @@ pub(super) unsafe fn read_media() -> Option<Media> {
     if dur > 0.0 {
         pos = pos.min(dur);
     }
-    let can_seek = can_seek_ctrl && dur > 0.0;
+    // Флагу плеера верим, кроме браузеров: у них известная длительность — достаточный признак.
+    let can_seek = can_seek_ctrl || (dur > 0.0 && is_browser(&a.aumid));
 
     let mut h = DefaultHasher::new();
-    (&title, &artist).hash(&mut h);
+    (&a.aumid, &title, &artist).hash(&mut h);
     let key = h.finish();
-    let cached = COVER.lock().ok().and_then(|c| c.as_ref().filter(|(k, _)| *k == key).map(|(_, a)| a.clone()));
+    let cached = COVER.lock().ok().and_then(|c| c.iter().find(|(k, _)| *k == key).map(|(_, px)| px.clone()));
     let art = cached.or_else(|| {
-        let px = Arc::new(read_cover(&props)?);
+        let px = Arc::new(read_cover(props)?);
         if let Ok(mut c) = COVER.lock() {
-            *c = Some((key, px.clone()));
+            if c.len() >= COVER_CACHE {
+                c.remove(0);
+            }
+            c.push((key, px.clone()));
         }
         Some(px)
     });
-    Some(Media {
+    Media {
         title,
         artist,
         playing,
@@ -525,7 +683,9 @@ pub(super) unsafe fn read_media() -> Option<Media> {
         can_seek,
         min_seek,
         max_seek,
-    })
+        source_name: source_name(&a.aumid),
+        session_count,
+    }
 }
 
 /// Обложка из миниатюры медиасессии → квадрат `ART`×`ART` (обрезка по центру).
@@ -567,6 +727,42 @@ unsafe fn read_cover(props: &GlobalSystemMediaTransportControlsSessionMediaPrope
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_pinned_index_tracks_aumid_and_ordinal() {
+        let pin = |a: &str, o: usize, t: &str| Pin { aumid: a.into(), ordinal: o, track: t.into() };
+        let ids = [("Chrome", 0, "A"), ("Spotify.exe", 0, "S"), ("Chrome", 1, "B")];
+        assert_eq!(pinned_index(&ids, &pin("Chrome", 1, "B")), Some(2));
+        assert_eq!(pinned_index(&ids, &pin("Spotify.exe", 0, "S")), Some(1));
+        // Вкладки переставились: трек «B» теперь первый — выбор идёт за треком, а не за номером.
+        let swapped = [("Chrome", 0, "B"), ("Spotify.exe", 0, "S"), ("Chrome", 1, "A")];
+        assert_eq!(pinned_index(&swapped, &pin("Chrome", 1, "B")), Some(0));
+        // Трек сменился — остаётся номер среди одноимённых.
+        assert_eq!(pinned_index(&ids, &pin("Chrome", 1, "старый")), Some(2));
+        // Вторая вкладка браузера закрылась — выбора больше нет, карточка вернётся к живой сессии.
+        assert_eq!(pinned_index(&ids[..2], &pin("Chrome", 1, "старый")), None);
+    }
+
+    #[test]
+    fn test_cycle_index_wraps_both_ways() {
+        assert_eq!(cycle_index(0, 3, -1), 2);
+        assert_eq!(cycle_index(2, 3, 1), 0);
+        assert_eq!(cycle_index(1, 3, 1), 2);
+        assert_eq!(cycle_index(0, 0, 1), 0);
+    }
+
+    #[test]
+    fn test_source_name_from_aumid() {
+        assert_eq!(source_name("Chrome"), "Chrome");
+        assert_eq!(source_name("308046B0AF4A39CB"), "Firefox");
+        assert_eq!(source_name("MSEdge"), "Edge");
+        assert_eq!(source_name("Spotify.exe"), "Spotify");
+        assert_eq!(source_name("Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"), "Media Player");
+        assert_eq!(source_name(r"C:\Program Files\Foo\foobar2000.exe"), "Foobar2000");
+        assert_eq!(source_name("Vendor.CoolPlayer_abc123!App"), "CoolPlayer");
+        assert_eq!(source_name("6F193CCC56814779"), "", "неизвестный хэш не показываем");
+        assert_eq!(source_name(""), "");
+    }
 
     #[test]
     fn test_seek_bounds_normal() {
