@@ -127,7 +127,7 @@ fn update_google_sync_errors(cycle_errors: &[String]) {
 
 /// Очищает текст ошибки от персональных данных, URL, идентификаторов календаря и токенов,
 /// но сохраняет сообщение об ошибке Google API (до 120 символов) для диагностики в журнале.
-fn sanitize_google_error(e: &str) -> String {
+pub(super) fn sanitize_google_error(e: &str) -> String {
     if let Some(rest) = e.strip_prefix("Google Calendar API: HTTP ") {
         let (status, reason) = match rest.trim_start().split_once(' ') {
             Some((code, msg)) => (code.trim(), msg.trim()),
@@ -402,6 +402,8 @@ pub fn disconnect_google(ics_urls: &[String]) {
     acc.google = None;
     save_accounts(&acc);
     clear_incremental_state();
+    // Связи с событиями отключённого аккаунта больше не нужны; сами события в Google остаются.
+    super::gwrite::forget_all();
     clear_cal_auth_error();
     let keys = active_calendar_keys_for(ics_urls, &acc);
     clean_orphan_caches(&keys);
@@ -599,6 +601,20 @@ fn refresh_google_account_token(g: &mut GoogleAccount) -> Result<(), String> {
         }
         Err(e) => Err(e.message()),
     }
+}
+
+/// Действующий токен доступа Google для записи событий (обновляется при необходимости).
+pub(super) fn google_access_token() -> Result<String, String> {
+    let mut g = load_accounts().google.ok_or_else(|| "Google Календарь не подключён".to_string())?;
+    if g.access_token.is_empty() || crate::sys::now_secs() + 60 >= g.expires_at {
+        refresh_google_account_token(&mut g)?;
+    }
+    Ok(g.access_token)
+}
+
+/// Показывает в настройках ошибку записи событий в Google.
+pub(super) fn report_google_write_error(msg: &str) {
+    set_cal_auth_error(msg);
 }
 
 // Google Calendar REST API v3. CalDAV у Google устаревший и требует отдельного включения в
@@ -1344,6 +1360,8 @@ pub fn refresh_calendar_age(urls: &[String], max_age: Duration) {
         return;
     }
     spawn("island-calendar", move || {
+        // Повтор неотправленных событий острова: сети могло не быть при сохранении.
+        super::gwrite::flush_async();
         let mut fetched: Vec<(String, Result<String, String>)> = Vec::with_capacity(active_keys.len());
         std::thread::scope(|scope| {
             let mut handles = Vec::with_capacity(active_keys.len());

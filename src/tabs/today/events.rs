@@ -34,6 +34,7 @@ fn notice_of(due: &[Due]) -> Option<Notice> {
 impl Today {
     pub fn load_events(&mut self) {
         self.local = read_lines(EVENTS_FILE).iter().filter_map(|l| LocalEvent::from_line(l)).collect();
+        online::set_local_snapshot(&self.local);
         self.local_ver += 1;
         let now = online::now_local_minutes();
         self.seen_min = read_lines(SEEN_FILE).first().and_then(|l| l.trim().parse().ok()).unwrap_or(now);
@@ -42,6 +43,7 @@ impl Today {
     fn save_events(&mut self) {
         let lines: Vec<String> = self.local.iter().map(LocalEvent::to_line).collect();
         write_lines(EVENTS_FILE, &lines);
+        online::set_local_snapshot(&self.local);
         self.local_ver += 1;
         self.sync();
     }
@@ -52,24 +54,36 @@ impl Today {
     }
 
     /// Добавляет событие или заменяет существующее с тем же `id` (0 — новое). `false` — достигнут предел.
-    pub(super) fn save_event(&mut self, mut ev: LocalEvent) -> bool {
-        match self.local.iter().position(|e| e.id == ev.id) {
-            Some(i) if ev.id != 0 => self.local[i] = ev,
+    /// `sync` — записать событие в Google Календарь (снятая отметка удалит его оттуда).
+    pub(super) fn save_event(&mut self, mut ev: LocalEvent, sync: bool) -> bool {
+        let id = match self.local.iter().position(|e| e.id == ev.id) {
+            Some(i) if ev.id != 0 => {
+                let id = ev.id;
+                self.local[i] = ev;
+                id
+            }
             _ => {
                 if self.local.len() >= online::MAX_LOCAL {
                     return false;
                 }
                 ev.id = self.next_event_id();
+                let id = ev.id;
                 self.local.push(ev);
+                id
             }
-        }
+        };
+        // Снимок событий обновляется в `save_events`, поэтому отправка идёт уже с новыми данными.
         self.save_events();
+        online::set_synced(id, sync);
+        online::flush_google_push();
         true
     }
 
     pub(super) fn remove_event(&mut self, id: u64) {
         self.local.retain(|e| e.id != id);
         self.save_events();
+        online::set_synced(id, false);
+        online::flush_google_push();
     }
 
     /// Календарь по ссылкам и события острова одним списком; пересобирается только при смене любого из них.
@@ -78,7 +92,7 @@ impl Today {
         let list = match &self.merged {
             Some((k, list)) if *k == key => list.clone(),
             _ => {
-                let list = Arc::new(online::merge_local(&self.online.cal, &self.local));
+                let list = Arc::new(online::merge_local_synced(&self.online.cal, &self.local, &online::synced_gids()));
                 self.merged = Some((key, list.clone()));
                 list
             }

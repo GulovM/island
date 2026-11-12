@@ -19,7 +19,10 @@ pub const GOOGLE_CLIENT_SECRET: Option<&str> = option_env!("ISLAND_GOOGLE_CLIENT
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const GOOGLE_CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar.readonly";
+/// `calendar.readonly` читает список календарей и события, `calendar.events` разрешает остров
+/// записывать события, созданные в нём (только по отметке в форме события).
+const GOOGLE_CALENDAR_SCOPE: &str =
+    "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events";
 
 static REFRESH_LOCK: Mutex<()> = Mutex::new(());
 

@@ -16,12 +16,13 @@ const DELETE: u32 = 127;
 const CLOSE: u32 = 128;
 const DAY_PREV: u32 = 129;
 const DAY_NEXT: u32 = 137;
+const SYNC: u32 = 138;
 /// Кнопки дней недели: 130..=136.
 const WEEKDAY: u32 = 130;
 
 /// Все ID формы события одним блоком.
 #[cfg(test)]
-pub(super) const ID_RANGES: &[(u32, u32)] = &[(TITLE, DAY_NEXT + 1)];
+pub(super) const ID_RANGES: &[(u32, u32)] = &[(TITLE, SYNC + 1)];
 
 /// Что не так с введёнными данными.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,12 +45,14 @@ pub(super) struct EventForm {
     pub days: u8,
     /// Индекс в `REMIND_CHOICES`.
     pub remind: usize,
+    /// Записать событие в Google Календарь.
+    pub sync: bool,
     pub problem: Option<Problem>,
 }
 
 impl EventForm {
     pub fn new(day: i64) -> Self {
-        Self { id: 0, day, all_day: false, repeat: Repeat::None, days: 0, remind: 0, problem: None }
+        Self { id: 0, day, all_day: false, repeat: Repeat::None, days: 0, remind: 0, sync: false, problem: None }
     }
 }
 
@@ -94,6 +97,7 @@ impl Today {
             repeat: e.repeat,
             days: e.days,
             remind: REMIND_CHOICES.iter().position(|&m| m == e.remind).unwrap_or(0),
+            sync: online::local_sync_enabled(e.id),
             problem: None,
         });
         ui.set_field_text(id(TODAY, TITLE), &e.title);
@@ -224,6 +228,14 @@ impl Today {
             self.remove_event(form.id);
             keep = false;
         }
+        // Отметка «в Google» есть, только пока подключён аккаунт: без него писать некуда.
+        if online::cal_account_status().google_email.is_some() {
+            let sx = x + 90.0;
+            let sw = (w - 90.0 - 106.0).max(64.0);
+            if ui.chip(cv, id(TODAY, SYNC), Rect::new(sx, by, sw, 24.0), pick("В Google", "To Google"), form.sync) {
+                form.sync = !form.sync;
+            }
+        }
         if ui.chip(cv, id(TODAY, SAVE), Rect::new(r.right() - 9.0 - 100.0, by, 100.0, 24.0), pick("Сохранить", "Save"), true) {
             save = true;
         }
@@ -231,7 +243,7 @@ impl Today {
         if keep && save {
             match Self::read_event(ui, &form) {
                 Ok(ev) => {
-                    if self.save_event(ev) {
+                    if self.save_event(ev, form.sync) {
                         keep = false;
                     } else {
                         form.problem = Some(Problem::Limit);
