@@ -228,13 +228,14 @@ impl Today {
             self.remove_event(form.id);
             keep = false;
         }
-        // Отметка «в Google» есть, только пока подключён аккаунт: без него писать некуда.
+        // Переключатель «в Google» есть, только пока подключён аккаунт: без него писать некуда.
+        // Отдельная строка над кнопками, как «Весь день»: в ряду с «Сохранить» не хватало ширины.
         if online::cal_account_status().google_email.is_some() {
-            let sx = x + 90.0;
-            let sw = (w - 90.0 - 106.0).max(64.0);
-            if ui.chip(cv, id(TODAY, SYNC), Rect::new(sx, by, sw, 24.0), pick("В Google", "To Google"), form.sync) {
-                form.sync = !form.sync;
-            }
+            let sy = by - 26.0;
+            cv.line(pick("Записать в Google", "Add to Google"), &f.small, r.right() - 9.0 - 34.0 - 6.0 - 140.0, 140.0, sy + 9.0, Align::Trailing, dim());
+            let mut on = form.sync;
+            ui.switch(cv, id(TODAY, SYNC), Rect::new(r.right() - 9.0 - 34.0, sy + 1.0, 34.0, 16.0), &mut on, true);
+            form.sync = on;
         }
         if ui.chip(cv, id(TODAY, SAVE), Rect::new(r.right() - 9.0 - 100.0, by, 100.0, 24.0), pick("Сохранить", "Save"), true) {
             save = true;
