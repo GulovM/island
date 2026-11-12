@@ -223,6 +223,8 @@ impl App {
         if !expanded {
             crate::state::flush();
             self.trim_pending = true;
+            // После сворачивания карточка снова показывает то, что реально играет.
+            crate::bg::reset_card_session();
             self.ui.blur();
             self.sync_focus();
             self.ui.down = false;

@@ -13,6 +13,8 @@ impl App {
         self.hold_leave();
         self.ui.blur();
         self.ui.reset_marquees();
+        // Источник, выбранный стрелками в плеере, на другой вкладке не удерживается.
+        bg::reset_card_session();
         if let Some(&id) = self.order.get(i) {
             crate::state::set_last_tab(&self.cfg.tab_key(id));
         }
