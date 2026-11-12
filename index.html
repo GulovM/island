@@ -101,7 +101,10 @@ code { font-family: inherit; font-weight: 600; }
 .btn svg { width: 20px; height: 20px; flex: none; }
 .meta { font-size: 15px; color: var(--muted); }
 
-/* ---------- Демо: экран с островом и змеем ---------- */
+/* ---------- Демо: экран с островом и змеем ----------
+   Внутри .screen 1em = одна логическая точка острова (экран 1100 точек в ширину), поэтому
+   размеры перенесены из программы как есть: свёрнутый 180×24, раскрытый 581×267, «ушки» 8,
+   нижние углы 14 (в свёрнутом ×0,72). Текстовым узлам — свой font-size в em, коробкам — нет. */
 .demo { margin: 56px 0 0; }
 .screen {
   position: relative;
@@ -109,6 +112,7 @@ code { font-family: inherit; font-weight: 600; }
   border-radius: 22px;
   overflow: hidden;
   container-type: inline-size;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   background:
     radial-gradient(60% 30% at 18% 62%, rgba(255,255,255,.55), transparent 70%),
     radial-gradient(40% 18% at 52% 74%, rgba(255,255,255,.45), transparent 70%),
@@ -116,6 +120,7 @@ code { font-family: inherit; font-weight: 600; }
     linear-gradient(180deg, #2F5BFF 0%, #4F8DFF 42%, #9ADCFF 82%, #CFF0FF 100%);
   box-shadow: 0 30px 80px -30px rgba(31, 69, 224, .55);
 }
+@supports (width: 1cqw) { .screen { font-size: calc(100cqw / 1100); } }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .screen {
     background:
@@ -137,69 +142,164 @@ code { font-family: inherit; font-weight: 600; }
 @keyframes sway { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(4deg); } }
 .string { fill: none; stroke: rgba(255,255,255,.9); stroke-width: 2.2; stroke-linecap: round; }
 
+/* Панель задач Windows 11: 48 точек, значки по центру, трей справа. */
 .taskbar {
-  position: absolute; left: 0; right: 0; bottom: 0; height: 7.2%;
-  background: rgba(240, 246, 255, .72);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  display: flex; align-items: center; justify-content: center; gap: 1.1cqw;
+  position: absolute; left: 0; right: 0; bottom: 0; height: 48em;
+  background: rgba(243, 246, 252, .8);
+  backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow: 0 -1px 0 rgba(255,255,255,.5);
+  display: flex; align-items: center; justify-content: center; gap: 6em;
 }
-.taskbar i { width: 2.6cqw; height: 2.6cqw; border-radius: .6cqw; background: rgba(20,27,61,.18); }
-.taskbar i:first-child { background: var(--cobalt); opacity: .85; }
-.tray {
-  position: absolute; right: 2cqw; top: 0; bottom: 0;
-  display: flex; align-items: center; gap: 1.2cqw;
-  font-size: 1.35cqw; color: var(--ink); font-weight: 500;
+.taskbar i { width: 26em; height: 26em; border-radius: 6em; background: rgba(20,27,61,.16); }
+.taskbar i.win { background: linear-gradient(135deg, #2F7BFF, #1B4FD6); }
+.tray { position: absolute; right: 12em; top: 0; bottom: 0; display: flex; align-items: center; gap: 12em; color: #1A1A1A; }
+.tray svg { width: 16em; height: 16em; display: block; }
+.tray .clock { font-size: 12em; line-height: 1.35; text-align: right; }
+.tray .fg { fill: #1A1A1A; }
+/* Тёмная тема Windows: тёмная панель задач и белые клинья змея в трее — как рисует программа. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .taskbar { background: rgba(28, 30, 38, .82); box-shadow: 0 -1px 0 rgba(255,255,255,.08); }
+  :root:not([data-theme="light"]) .taskbar i:not(.win) { background: rgba(255,255,255,.16); }
+  :root:not([data-theme="light"]) .tray { color: #fff; }
+  :root:not([data-theme="light"]) .tray .fg { fill: #fff; }
 }
-.tray svg { width: 1.9cqw; height: 1.9cqw; display: block; }
+:root[data-theme="dark"] .taskbar { background: rgba(28, 30, 38, .82); box-shadow: 0 -1px 0 rgba(255,255,255,.08); }
+:root[data-theme="dark"] .taskbar i:not(.win) { background: rgba(255,255,255,.16); }
+:root[data-theme="dark"] .tray { color: #fff; }
+:root[data-theme="dark"] .tray .fg { fill: #fff; }
 
 /* Сам остров */
-.hot { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 76%; height: 14%; }
+.hot { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 640em; height: 60em; }
 .island {
-  position: absolute; top: 1.4cqw; left: 50%; transform: translateX(-50%);
-  width: 33cqw; height: 4.4cqw;
-  border: 0; padding: 0; margin: 0; font: inherit; cursor: pointer;
-  border-radius: 3cqw;
-  background: rgba(12, 18, 46, .78);
-  backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
-  box-shadow: 0 0 0 1px rgba(255,255,255,.14) inset, 0 1.2cqw 3cqw -1cqw rgba(8, 14, 40, .5);
-  color: #fff; overflow: hidden; text-align: left;
-  transition: width .55s cubic-bezier(.3, 1.3, .5, 1), height .55s cubic-bezier(.3, 1.3, .5, 1), border-radius .45s ease;
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 180em; height: 24em;
+  border: 0; padding: 0; margin: 0; font: inherit; color: #fff; cursor: pointer; text-align: left;
+  border-radius: 0 0 10em 10em;
+  background: #0D0D0D;
+  transition:
+    width .5s cubic-bezier(.32, 1.18, .5, 1), height .5s cubic-bezier(.32, 1.18, .5, 1),
+    border-radius .4s ease, background-color .3s ease, box-shadow .3s ease;
 }
-.island.open { width: 70cqw; height: 34cqw; border-radius: 3.2cqw; }
-.island:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+/* «Ушки»: вогнутые скругления, которыми остров врастает в верхний край экрана. */
+.island::before, .island::after {
+  content: ""; position: absolute; top: 0; width: 8em; height: 8em; background: inherit;
+  backdrop-filter: inherit; -webkit-backdrop-filter: inherit;
+}
+.island::before { left: -8em; -webkit-mask: radial-gradient(circle at 0 100%, transparent 7.6em, #000 8em); mask: radial-gradient(circle at 0 100%, transparent 7.6em, #000 8em); }
+.island::after { right: -8em; -webkit-mask: radial-gradient(circle at 100% 100%, transparent 7.6em, #000 8em); mask: radial-gradient(circle at 100% 100%, transparent 7.6em, #000 8em); }
+.island.open {
+  width: 581em; height: 267em; border-radius: 0 0 14em 14em;
+  background: rgba(14, 18, 26, .58);
+  backdrop-filter: blur(22px) saturate(1.5); -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.16), 0 14em 40em rgba(4, 12, 40, .35);
+}
+.island:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 .island .mini {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between;
-  padding: 0 2.2cqw; font-size: 1.55cqw; font-weight: 500;
-  transition: opacity .2s ease;
+  padding: 0 12em; transition: opacity .15s ease;
 }
-.island .mini svg { width: 1.9cqw; height: 1.9cqw; }
+.island .mini b { font-size: 11.5em; font-weight: 600; }
+.island .mini svg { width: 13em; height: 13em; }
 .island.open .mini { opacity: 0; }
 .island .full {
-  position: absolute; left: 0; top: 0; width: 70cqw; height: 34cqw; padding: 2.2cqw 2.4cqw;
-  opacity: 0; transition: opacity .25s ease .12s; pointer-events: none;
+  position: absolute; left: 0; top: 0; width: 581em; height: 267em;
+  opacity: 0; transition: opacity .25s ease .16s; pointer-events: none; overflow: hidden;
+  border-radius: 0 0 14em 14em;
 }
 .island.open .full { opacity: 1; }
-.tabsrow { display: flex; gap: .6cqw; font-size: 1.35cqw; white-space: nowrap; }
-.tabsrow span { padding: .5cqw 1.3cqw; border-radius: 2cqw; color: rgba(255,255,255,.72); }
-.tabsrow span.on { background: rgba(255,255,255,.16); color: #fff; }
-.tiles { display: grid; grid-template-columns: 1fr 1fr 2fr; grid-template-rows: 1fr 1fr; gap: 1cqw; margin-top: 1.8cqw; height: 22.5cqw; }
-.tile { border-radius: 1.8cqw; background: rgba(255,255,255,.1); padding: 1.3cqw 1.5cqw; font-size: 1.3cqw; display: flex; flex-direction: column; justify-content: space-between; }
-.tile small { display: block; color: rgba(255,255,255,.66); font-size: 1.1cqw; }
-.tile.on { background: var(--cobalt); }
-.tile.player { grid-row: span 2; grid-column: 3; }
-.cover { width: 7cqw; height: 7cqw; border-radius: 1.2cqw; background: conic-gradient(from 210deg, #7FD6FF, #2F5BFF, #141B3D, #7FD6FF); }
-.bar { display: block; height: .7cqw; border-radius: 1cqw; background: rgba(255,255,255,.2); overflow: hidden; }
-.bar b { display: block; height: 100%; width: 42%; background: #fff; border-radius: inherit; }
-.vol { grid-column: span 2; }
+
+/* Ряд вкладок: 17 точек высотой, 9 от верха; выбранная — полупрозрачная капля с кромкой. */
+.it-tabs { position: absolute; top: 9em; left: 0; right: 0; height: 17em; display: flex; justify-content: center; align-items: center; gap: 2em; }
+.it-tabs > span { height: 17em; padding: 0 9em; border-radius: 9em; display: flex; align-items: center; color: rgba(255,255,255,.72); }
+.it-tabs i { font-style: normal; font-size: 9.3em; font-weight: 500; white-space: nowrap; }
+.it-tabs > span.on { background: rgba(255,255,255,.14); box-shadow: inset 0 0 0 1px rgba(255,255,255,.28); color: #fff; }
+.it-tools { position: absolute; top: 11em; right: 12em; display: flex; gap: 14em; }
+.it-tools svg { width: 12em; height: 12em; display: block; }
+
+.it-grid {
+  position: absolute; left: 14em; top: 38em;
+  display: grid; grid-template-columns: 102em 215em 215em; grid-template-rows: 103em 102em; gap: 10em 9.5em;
+}
+.card {
+  position: relative; border-radius: 12em; overflow: hidden;
+  background: linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.05));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.16);
+}
+.t { display: block; line-height: 1.2; white-space: nowrap; }
+.dim { color: rgba(255,255,255,.55); }
+
+.c-clock { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.c-clock .big { font-size: 38em; font-weight: 700; letter-spacing: -.02em; margin-top: .3em; }
+.c-clock .colon { color: rgba(255,255,255,.35); }
+.c-clock .mm { color: var(--acc); }
+.c-clock .small { font-size: 7.4em; font-weight: 600; letter-spacing: .02em; margin-top: 1.9em; color: rgba(255,255,255,.7); }
+
+.c-cal { padding: 13em 12em 0; }
+.c-cal .head { display: flex; align-items: center; gap: 12em; }
+.c-cal .head .t { font-size: 8.4em; }
+.c-cal .head .range { margin-left: auto; }
+.c-cal .week { display: grid; grid-template-columns: repeat(7, 1fr); margin-top: 9em; text-align: center; }
+.c-cal .wd { font-size: 7.4em; color: rgba(255,255,255,.6); }
+.c-cal .wd.off { color: rgba(255,255,255,.38); }
+.c-cal .day { height: 22em; display: flex; align-items: center; justify-content: center; margin-top: 3em; }
+.c-cal .day .t { font-size: 9.6em; font-weight: 500; }
+.c-cal .day.today { width: 22em; margin-left: auto; margin-right: auto; border-radius: 50%; background: var(--acc); }
+.c-cal .ev { margin-top: 8em; height: 37em; border-radius: 7em; background: rgba(255,255,255,.06); display: flex; flex-direction: column; justify-content: center; padding-left: 16em; position: relative; }
+.c-cal .ev::before { content: ""; position: absolute; left: 7em; top: 7em; bottom: 7em; width: 2.5em; border-radius: 2em; background: var(--acc); }
+.c-cal .ev .title { font-size: 8em; font-weight: 600; }
+.c-cal .ev .sub { font-size: 7.6em; margin-top: .3em; }
+
+.c-tasks { padding: 15em 12em; }
+.c-tasks .head { display: flex; align-items: center; gap: 6em; }
+.c-tasks .h { font-size: 9em; font-weight: 600; margin-right: auto; }
+.c-tasks .pill { height: 16em; padding: 0 8em; border-radius: 9em; box-shadow: inset 0 0 0 1px rgba(255,255,255,.3); display: flex; align-items: center; }
+.c-tasks .pill .t { font-size: 7.4em; color: rgba(255,255,255,.75); }
+.c-tasks .cnt { width: 18em; height: 18em; border-radius: 50%; background: rgba(255,255,255,.1); display: flex; align-items: center; justify-content: center; }
+.c-tasks .cnt .t { font-size: 6.6em; font-weight: 600; }
+.c-tasks .list { font-size: 8em; line-height: 2.1; margin-top: 1.2em; color: rgba(255,255,255,.85); }
+.c-tasks .list .done { color: rgba(255,255,255,.45); text-decoration: line-through; }
+.c-tasks .add { position: absolute; left: 10em; right: 10em; bottom: 9em; height: 27em; border-radius: 8em; background: rgba(255,255,255,.05); box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); display: flex; align-items: center; padding: 0 5em 0 10em; }
+.c-tasks .add .t { font-size: 8.4em; color: rgba(255,255,255,.6); margin-right: auto; }
+.c-tasks .go { width: 17em; height: 17em; border-radius: 4em; background: rgba(76, 125, 255, .38); display: flex; align-items: center; justify-content: center; }
+.c-tasks .go svg { width: 10em; height: 10em; }
+
+.c-weather { padding: 13em 12em; display: flex; flex-direction: column; }
+.c-weather .city { font-size: 8.8em; font-weight: 600; }
+.c-weather .temp { font-size: 29em; font-weight: 300; margin-top: .1em; letter-spacing: -.02em; }
+.c-weather .cond { margin-top: auto; display: flex; align-items: center; gap: 4em; }
+.c-weather .cond svg { width: 9em; height: 9em; }
+.c-weather .cond .t { font-size: 7.4em; font-weight: 600; }
+
+.c-timer { display: flex; align-items: center; padding: 0 9em 0 12em; gap: 10em; }
+.c-timer .ring { position: relative; width: 54em; height: 54em; border-radius: 50%; box-shadow: inset 0 0 0 3.4em var(--orange); display: flex; align-items: center; justify-content: center; flex: none; }
+.c-timer .ring .t { font-size: 10.4em; font-weight: 700; }
+.c-timer .bell { position: absolute; bottom: -15em; left: 50%; transform: translateX(-50%); width: 8em; height: 8em; }
+.c-timer .ctl { flex: 1; display: flex; flex-direction: column; gap: 7em; }
+.c-timer .hms { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4em; }
+.c-timer .hms > span { height: 23em; border-radius: 8em; background: rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; gap: 4em; }
+.c-timer .n { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 11em; font-weight: 700; }
+.c-timer .u { font-style: normal; font-size: 6.4em; color: rgba(255,255,255,.55); }
+.c-timer .chips { display: flex; gap: 3.6em; }
+.c-timer .chips > span { height: 15em; padding: 0 4.4em; border-radius: 8em; background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); display: flex; align-items: center; }
+.c-timer .chips > span.on { background: var(--orange); box-shadow: none; }
+.c-timer .chips .t { font-size: 6.8em; font-weight: 600; }
+.c-timer .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 5em; }
+.c-timer .btns > span { height: 26em; border-radius: 13em; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.14); }
+.c-timer .btns > span.go { background: var(--orange); }
+.c-timer .btns .t { font-size: 8em; font-weight: 600; }
+
+.island { --acc: #4C7DFF; --orange: #FF9230; }
+
 .hint {
-  position: absolute; left: 50%; top: 8.2cqw; transform: translateX(-50%);
-  font-size: 1.5cqw; color: #fff; background: rgba(12,18,46,.38); padding: .5cqw 1.4cqw; border-radius: 2cqw;
+  position: absolute; left: 50%; top: 40em; transform: translateX(-50%);
+  color: #fff; background: rgba(12,18,46,.38); padding: 4em 11em; border-radius: 20em;
   transition: opacity .2s ease; white-space: nowrap; pointer-events: none;
 }
+.hint span { font-size: 12em; }
 .screen.touched .hint { opacity: 0; }
-.hint .t { display: none; }
-@media (hover: none) { .hint .m { display: none; } .hint .t { display: inline; } }
-@media (max-width: 600px) { .screen { border-radius: 14px; } .hint { font-size: 2.6cqw; top: 9cqw; } }
+.hint .tch { display: none; }
+@media (hover: none) { .hint .ms { display: none; } .hint .tch { display: inline; } }
+@media (max-width: 600px) { .screen { border-radius: 14px; } .hint span { font-size: 22em; } .hint { top: 34em; } }
 .demo figcaption { margin-top: 14px; font-size: 15px; color: var(--muted); max-width: 70ch; }
 
 /* ---------- Секции ---------- */
@@ -322,7 +422,7 @@ footer nav { display: flex; flex-wrap: wrap; gap: 10px 22px; }
     <figure class="demo">
       <div class="screen" id="screen">
         <svg class="sky-art" viewBox="0 0 1000 625" aria-hidden="true">
-          <path class="string" d="M790 262 C 830 380, 760 470, 931 602"/>
+          <path class="string" d="M790 262 C 830 380, 760 470, 958 610"/>
           <g class="kite-fly">
             <use href="#mark" x="735" y="150" width="110" height="112"/>
           </g>
@@ -331,30 +431,61 @@ footer nav { display: flex; flex-wrap: wrap; gap: 10px 22px; }
         <div class="hot" id="hot"></div>
         <button class="island" id="island" type="button" aria-expanded="false" aria-label="Демонстрация острова: раскрыть или свернуть">
           <span class="mini" aria-hidden="true">
-            <span>RU</span><span>12:45</span>
-            <svg viewBox="0 0 20 20" fill="none"><path d="M2.5 7.5a11 11 0 0115 0M5 10.5a7.2 7.2 0 0110 0M7.6 13.4a3.4 3.4 0 014.8 0" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="16" r="1.3" fill="#fff"/></svg>
+            <b>RU</b><b>12:45</b>
+            <svg viewBox="0 0 20 20" fill="none"><path d="M2.5 7.5a11 11 0 0115 0M5 10.5a7.2 7.2 0 0110 0M7.6 13.4a3.4 3.4 0 014.8 0" stroke="#fff" stroke-width="1.9" stroke-linecap="round"/><circle cx="10" cy="16" r="1.4" fill="#fff"/></svg>
           </span>
           <span class="full" aria-hidden="true">
-            <span class="tabsrow"><span class="on">Управление</span><span>Сегодня</span><span>Статистика</span><span>Буфер</span><span>Приложения</span><span>Обои</span><span>Питание</span></span>
-            <span class="tiles">
-              <span class="tile on">Wi-Fi<small>Дом</small></span>
-              <span class="tile">Bluetooth<small>Выкл.</small></span>
-              <span class="tile player"><span class="cover"></span><span>Сейчас играет<small>Ночной полёт</small></span><span class="bar"><b></b></span></span>
-              <span class="tile vol">Громкость<span class="bar"><b style="width:64%"></b></span></span>
+            <span class="it-tabs"><span><i>Управление</i></span><span><i>Статистика</i></span><span class="on"><i>Сегодня</i></span><span><i>Буфер</i></span><span><i>Приложения</i></span><span><i>Обои</i></span><span><i>Питание</i></span></span>
+            <span class="it-tools">
+              <svg viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L5 14H2v-3z" stroke="rgba(255,255,255,.8)" stroke-width="1.4" stroke-linejoin="round"/></svg>
+              <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.4" stroke="rgba(255,255,255,.8)" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="rgba(255,255,255,.8)" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </span>
+            <span class="it-grid">
+              <span class="card c-clock"><span class="t big">22<span class="colon">:</span><span class="mm">47</span></span><span class="t small">ЧТ, 12 НОЯ</span></span>
+              <span class="card c-cal">
+                <span class="head"><span class="t">Эта неделя ⌄</span><span class="t">+</span><span class="t dim">ICS</span><span class="t dim range">9 ноя – 15 ноя</span></span>
+                <span class="week">
+                  <span><span class="t wd">Пн</span><span class="day"><span class="t">9</span></span></span>
+                  <span><span class="t wd">Вт</span><span class="day"><span class="t">10</span></span></span>
+                  <span><span class="t wd">Ср</span><span class="day"><span class="t">11</span></span></span>
+                  <span><span class="t wd">Чт</span><span class="day today"><span class="t">12</span></span></span>
+                  <span><span class="t wd">Пт</span><span class="day"><span class="t">13</span></span></span>
+                  <span><span class="t wd off">Сб</span><span class="day"><span class="t">14</span></span></span>
+                  <span><span class="t wd off">Вс</span><span class="day"><span class="t">15</span></span></span>
+                </span>
+                <span class="ev"><span class="t title">Запустить змея</span><span class="t sub dim">Сегодня, 17:00</span></span>
+              </span>
+              <span class="card c-tasks" style="grid-row: span 2">
+                <span class="head"><span class="t h">Задачи</span><span class="pill"><span class="t">Вручную</span></span><span class="cnt"><span class="t">1/3</span></span></span>
+                <span class="t list"><span class="done">Скачать Kite Island</span><br>Навести мышь на верх экрана<br>Выбрать цвет в настройках</span>
+                <span class="add"><span class="t">Добавить задачу…</span><span class="go"><svg viewBox="0 0 10 10" fill="none"><path d="M2 5h6M5.5 2.5L8 5 5.5 7.5" stroke="#fff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></span>
+              </span>
+              <span class="card c-weather">
+                <span class="t city">Душанбе</span><span class="t temp">8°C</span>
+                <span class="cond"><svg viewBox="0 0 12 12"><path fill="rgba(255,255,255,.85)" d="M3.5 10a2.5 2.5 0 01-.3-5A3.5 3.5 0 019.8 5.6 2.2 2.2 0 019.5 10z"/></svg><span class="t">Пасмурно</span></span>
+              </span>
+              <span class="card c-timer">
+                <span class="ring"><span class="t">05:00</span><svg class="bell" viewBox="0 0 10 10"><path fill="#FF9230" d="M5 1a3 3 0 00-3 3v2L1 7.5h8L8 6V4a3 3 0 00-3-3zM4 8.5a1 1 0 002 0z"/></svg></span>
+                <span class="ctl">
+                  <span class="hms"><span><b class="n">0</b><i class="u">ч</i></span><span><b class="n">05</b><i class="u">м</i></span><span><b class="n">00</b><i class="u">с</i></span></span>
+                  <span class="chips"><span><span class="t">1м</span></span><span class="on"><span class="t">5м</span></span><span><span class="t">10м</span></span><span><span class="t">15м</span></span><span><span class="t">20м</span></span></span>
+                  <span class="btns"><span class="go"><span class="t">Старт</span></span><span><span class="t">Сброс</span></span></span>
+                </span>
+              </span>
             </span>
           </span>
         </button>
-        <span class="hint" aria-hidden="true"><span class="m">Наведите на чёлку</span><span class="t">Нажмите на чёлку</span></span>
+        <span class="hint" aria-hidden="true"><span class="ms">Наведите на остров</span><span class="tch">Нажмите на остров</span></span>
 
         <div class="taskbar" aria-hidden="true">
-          <i></i><i></i><i></i><i></i><i></i>
+          <i class="win"></i><i></i><i></i><i></i><i></i><i></i>
           <span class="tray">
-            <svg viewBox="0 0 16 16"><path d="M8 .6V7H1.6Z" fill="#141B3D"/><path d="M8 .6L14.4 7H8Z" fill="#2F5BFF"/><path d="M1.6 7H8v8.7Z" fill="#2F5BFF"/><path d="M8 7h6.4L8 15.7Z" fill="#141B3D"/></svg>
-            <span>12:45</span>
+            <svg viewBox="0 0 16 16"><path class="fg" d="M8 .6V7H1.6Z"/><path d="M8 .6L14.4 7H8Z" fill="#2F5BFF"/><path d="M1.6 7H8v8.7Z" fill="#2F5BFF"/><path class="fg" d="M8 7h6.4L8 15.7Z"/></svg>
+            <span class="clock">12:45<br>12.11.2026</span>
           </span>
         </div>
       </div>
-      <figcaption>Свёрнутый остров показывает раскладку, время и Wi-Fi, а когда играет музыка — мини-плеер. Змей держится за значок в трее.</figcaption>
+      <figcaption>Свёрнутый остров показывает раскладку, время и Wi-Fi, а когда играет музыка — мини-плеер. Раскрытый на снимке — вкладка «Сегодня», как в программе. Змей держится за значок в трее.</figcaption>
     </figure>
   </div>
 
