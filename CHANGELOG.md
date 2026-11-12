@@ -15,6 +15,7 @@
 - На вкладке «Приложения» при алфавитном указателе нет второй полосы прокрутки.
 - Список «Что нового» показывается на языке интерфейса.
 - Виджет «Батарея» переехал во вкладку «Управление» (лоток виджетов), «Статистика» снова 10 колонок.
+- Курсор в поле добавления задачи больше не уезжает вперёд по мере набора; убран лишний значок «+», кнопка со стрелкой и рамка поля окрашиваются системным акцентом.
 
 ### EN
 
@@ -27,6 +28,7 @@
 - The Apps tab no longer shows a second scrollbar next to the alphabet index.
 - The "What's new" list follows the interface language.
 - The Battery widget moved to the Controls tab (widget tray); Stats is back to 10 columns.
+- The caret in the add-task field no longer drifts ahead as you type; the redundant "+" icon is gone, and the arrow button and field border follow the system accent.
 
 ## [1.3.0] — 2026-11-11
 

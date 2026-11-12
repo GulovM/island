@@ -309,26 +309,31 @@ impl Today {
         if !editing {
             self.edit = None;
         }
-        let (hint, glyph) = if editing { ("Изменить задачу…", icon::EDIT) } else { ("Добавить задачу…", icon::ADD) };
+        // Значок слева только у правки: в обычном режиме «+» ничего не добавляет к кнопке со стрелкой.
+        let (hint, glyph, left) = if editing { ("Изменить задачу…", icon::EDIT, 30.0) } else { ("Добавить задачу…", "", 10.0) };
         // Нажатие достаётся первой зарегистрированной области под курсором, поэтому кнопки поверх
         // поля регистрируются раньше него, а рисуются после.
-        let add = Rect::new(field.right() - 22.0, field.cy() - 8.0, 16.0, 16.0);
-        let cancel = Rect::new(add.x - 19.0, add.y, 16.0, 16.0);
+        let bs = field_h - 8.0;
+        let add = Rect::new(field.right() - 4.0 - bs, field.cy() - bs / 2.0, bs, bs);
+        let cancel = Rect::new(add.x - 3.0 - bs, add.y, bs, bs);
         let (_, add_clicked) = ui.click_area(id(TODAY, ID_ADD), add);
         let cancel_clicked = editing && ui.click_area(id(TODAY, ID_CANCEL), cancel).1;
         // Справа поверх поля лежат кнопки: текст до них не доходит.
-        ui.text_field_pad(cv, fid, field, hint, glyph, Submit::Clear, if editing { 45.0 } else { 28.0 });
-        // Задачи — синие, как Напоминания iOS (в стиле Windows — акцент).
-        let rem = crate::ui::hue(crate::ios::SysColor::Blue, cv.accent);
-        cv.rr_line(field, 8.0, if editing { rem } else { track() }, 1.0);
+        let right = if editing { 2.0 * bs + 13.0 } else { bs + 10.0 };
+        ui.text_field_at(cv, fid, field, hint, glyph, Submit::Clear, left, right);
+        // Рамка и кнопка берут системный акцент: рамка плавно окрашивается при фокусе.
+        let focus = ui.on_of(fid);
+        cv.rr_line(field, 8.0, mix(track(), cv.accent, if editing { 1.0 } else { focus }), 1.0);
+        // Кнопка — мягкая заливка акцентом, при наведении заливается полностью.
         let hv = ui.hover_of(id(TODAY, ID_ADD));
-        cv.rr(add, 4.0, mix(rem, fg(), 0.12 * hv));
-        cv.glyph(if editing { icon::CHECK } else { icon::FORWARD }, add, false, crate::ui::on_color(rem));
+        cv.rr(add, 7.0, D2D1_COLOR_F { a: 0.16 + 0.84 * hv, ..cv.accent });
+        let arrow = if editing { icon::CHECK } else { icon::FORWARD };
+        cv.glyph(arrow, add.inset(2.0), false, mix(cv.accent, crate::ui::on_color(cv.accent), hv));
         if editing {
             // Отмена правки: поле очищается, задача остаётся прежней.
             let hv = ui.hover_of(id(TODAY, ID_CANCEL));
-            cv.rr(cancel, 8.0, D2D1_COLOR_F { a: 0.10 * hv, ..fg() });
-            cv.glyph(icon::CLOSE, cancel, false, mix(dim(), txt(), hv));
+            cv.rr(cancel, 7.0, D2D1_COLOR_F { a: 0.10 * hv, ..fg() });
+            cv.glyph(icon::CLOSE, cancel.inset(2.0), false, mix(dim(), txt(), hv));
         }
         if cancel_clicked {
             let _ = ui.submit_field(fid);

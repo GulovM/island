@@ -271,7 +271,8 @@ impl Ui {
         let fonts = &cv.g.fonts;
         let fmt = if f.digits { &fonts.mono } else { &fonts.body };
         let fmt_c = if f.digits { &fonts.mono_c } else { &fonts.body };
-        let layout = fonts.factory.CreateTextLayout(&text, fmt, 100000.0, r.h).ok();
+        // Меряем так же, как рисуем (с трекингом формата), иначе курсор уходит вперёд с длиной текста.
+        let layout = fonts.layout_exact(&shown, fmt, 100000.0, r.h);
         let text_w = layout
             .as_ref()
             .and_then(|l| {

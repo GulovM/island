@@ -425,6 +425,11 @@ impl Ui {
         self.widget(id).hover.value
     }
 
+    /// Плавное состояние «включено» виджета `id` (для поля ввода — фокус), 0..1.
+    pub fn on_of(&mut self, id: u32) -> f32 {
+        self.widget(id).on.value
+    }
+
     /// Подсказка к кнопке `id` в прямоугольнике `r`: появляется, пока на ней курсор. Рисуется
     /// позже и поверх всего через [`Ui::paint_tip`].
     pub fn tip(&mut self, id: u32, r: Rect, text: &str) {
