@@ -4,7 +4,7 @@
   #define AppVersion "1.0.0"
 #endif
 
-#define AppName "Island"
+#define AppName "Kite Island"
 #define AppExe "island.exe"
 
 [Setup]
@@ -14,7 +14,9 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher=GulovM
-DefaultDirName={autopf}\{#AppName}
+; Папка установки — прежняя «Island»: имя продукта сменилось, а путь из README и у уже
+; установленных копий остаётся тем же.
+DefaultDirName={autopf}\Island
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 ; Установка для текущего пользователя, права администратора не нужны.
@@ -43,17 +45,24 @@ Name: "autostart"; Description: "{cm:AutoStart}"; GroupDescription: "{cm:Additio
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [CustomMessages]
-russian.AutoStart=Запускать Island при входе в Windows
+russian.AutoStart=Запускать Kite Island при входе в Windows
 russian.AdditionalOptions=Дополнительно:
-russian.RemoveData=Удалить настройки и кэш Island (%APPDATA%\island)?
-english.AutoStart=Start Island when I sign in to Windows
+russian.RemoveData=Удалить настройки и кэш Kite Island (%APPDATA%\island)?
+english.AutoStart=Start Kite Island when I sign in to Windows
 english.AdditionalOptions=Options:
-english.RemoveData=Also delete Island settings and cache (%APPDATA%\island)?
+english.RemoveData=Also delete Kite Island settings and cache (%APPDATA%\island)?
 
 [Files]
 Source: "..\target\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+
+[InstallDelete]
+; Ярлыки версий, когда программа называлась просто Island: без этого после обновления
+; в «Пуске» и на рабочем столе остались бы старые ярлыки рядом с новыми.
+Type: files; Name: "{autoprograms}\Island\*.lnk"
+Type: dirifempty; Name: "{autoprograms}\Island"
+Type: files; Name: "{autodesktop}\Island.lnk"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"

@@ -1,4 +1,6 @@
-# Island
+<img src="assets/brand/logo-light.svg" alt="Kite Island" height="64">
+
+# Kite Island
 
 Динамический остров для Windows 10 и 11: тёмная «чёлка» по центру верхнего края экрана. Раскрывается при
 наведении мыши и превращается в панель с семью вкладками. Рисуется на GPU (Direct2D поверх

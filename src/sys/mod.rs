@@ -20,7 +20,7 @@ mod uia;
 
 pub use appearance::{
     animations_enabled, current_wallpaper, dark_mode, light_mode, set_dark_mode, set_wallpaper, system_colors,
-    text_scale_factor, transparency_enabled, ColorRetry, is_theme_setting_str,
+    taskbar_light, text_scale_factor, transparency_enabled, ColorRetry, is_theme_setting_str,
 };
 pub use clipboard::{
     clipboard_excluded, clipboard_has_image, clipboard_has_text, clipboard_image, clipboard_owned_by,
@@ -35,7 +35,7 @@ pub(in crate::sys) use registry::{read_binary, read_dword};
 pub use seal::{is_sealed, seal, unseal};
 pub use shell::{
     autostart_enabled, foreground_lang, ime_set_position, lang_code, make_icon, monitor_count, open,
-    pick_folder, process_running, set_autostart, tray_add, tray_remove, trim_working_set,
+    pick_folder, process_running, set_autostart, tray_add, tray_remove, tray_set_icon, trim_working_set,
 };
 
 /// Состояние аккумулятора системы.
