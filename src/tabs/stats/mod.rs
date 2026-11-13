@@ -25,7 +25,11 @@ use windows::Win32::System::Threading::GetSystemTimes;
 use crate::anim::Spring;
 use crate::online::{self, Online};
 use crate::ios::SysColor;
-use crate::ui::{chip_bg, dim, hue, icon, ink, mix, status_bar_green, status_green, status_violet, track, txt, Align, Canvas, Rect, Ui};
+use crate::ui::{
+    chip_bg, dim, fg, hairline, hue, icon, ink, mix, readable, status_bar_green, status_blue,
+    status_cyan, status_orange, status_pink, status_red, status_teal,
+    status_violet, track, txt, Align, Canvas, Corner, History, Rect, Ui, ram_segments, speed_scale,
+};
 use crate::{icons, sys};
 
 use super::grid::{Grid, Item};
@@ -64,8 +68,8 @@ static RING: [Size; 3] = [sz(2, 1), sz(2, 2), sz(4, 2)];
 static INFO: [Size; 2] = [sz(2, 2), sz(4, 2)];
 /// Топ приложений: три строки, пять строк, пять строк на всю ширину.
 static APPS_SIZES: [Size; 3] = [sz(4, 2), sz(4, 4), sz(6, 4)];
-/// Замер скорости: компактный (кнопка «▶» в строке с числами) и обычный.
-static SPEED_SIZES: [Size; 3] = [sz(2, 2), sz(4, 2), sz(6, 2)];
+/// Замер скорости: компактный (2×2) и обычный со спидометром (4×2).
+static SPEED_SIZES: [Size; 2] = [sz(2, 2), sz(4, 2)];
 
 /// Сетка вкладки: 10 колонок и 4 ряда крупных ячеек (шаг CELL=56, зазор GAP=8). По умолчанию кольца
 /// и карточки занимают по 2×2, топ приложений и замер скорости — по 4×2.
@@ -144,6 +148,16 @@ pub struct Stats {
     disk_view: usize,
     /// Счётчик тиков `poll`: диски опрашиваются раз в 10 с, чтобы не будить спящие HDD.
     disk_tick: u8,
+    /// История нагрузки CPU (0..1) за последние 60 с.
+    hist_cpu: History<60>,
+    /// История нагрузки GPU (0..1) за последние 60 с.
+    hist_gpu: History<60>,
+    /// История скорости загрузки (байт/с) за последние 60 с.
+    hist_rx: History<60>,
+    /// История скорости отдачи (байт/с) за последние 60 с.
+    hist_tx: History<60>,
+    /// Накопленный трафик за сеанс (rx + tx) в байтах.
+    session_bytes: u64,
 }
 
 impl Default for Stats {
@@ -161,6 +175,11 @@ impl Default for Stats {
             top_by_cpu: false,
             disk_view: 0,
             disk_tick: 0,
+            hist_cpu: History::new(),
+            hist_gpu: History::new(),
+            hist_rx: History::new(),
+            hist_tx: History::new(),
+            session_bytes: 0,
         };
         // SAFETY: простые вызовы Win32 без указателей на чужую память.
         unsafe { stats.sample_disks() };
@@ -197,6 +216,7 @@ impl Stats {
         // Первая выборка «с нуля»: нагрузка и скорость считаются между двумя опросами.
         self.prev_cpu = None;
         self.prev_net = None;
+        self.session_bytes = 0;
         if self.cpu_name.is_empty() {
             self.cpu_name = cpu_name();
         }
@@ -255,6 +275,10 @@ impl Stats {
         for (i, v) in [(0usize, c.cpu), (2, ram)] {
             aim(&mut self.rings[i], v);
         }
+        self.hist_cpu.push(self.cur.cpu);
+        self.hist_gpu.push(self.heavy.gpu.unwrap_or(0.0));
+        self.hist_rx.push(self.cur.rx_bps);
+        self.hist_tx.push(self.cur.tx_bps);
         true
     }
 
@@ -332,8 +356,11 @@ impl Stats {
         let now = Instant::now();
         if let Some((t, prx, ptx)) = self.prev_net {
             let dt = (now - t).as_secs_f32().max(0.05);
-            self.cur.rx_bps = rx.saturating_sub(prx) as f32 / dt;
-            self.cur.tx_bps = tx.saturating_sub(ptx) as f32 / dt;
+            let d_rx = rx.saturating_sub(prx);
+            let d_tx = tx.saturating_sub(ptx);
+            self.cur.rx_bps = d_rx as f32 / dt;
+            self.cur.tx_bps = d_tx as f32 / dt;
+            self.session_bytes += d_rx + d_tx;
         }
         self.prev_net = Some((now, rx, tx));
     }
@@ -359,83 +386,165 @@ impl Stats {
             _ => {}
         }
     }
+}
 
-    /// Кольцо загрузки в трёх видах (`size` — индекс в `RING`): мини (кольцо и название), обычная
-    /// карточка и широкая (крупное кольцо, справа название, подробности и плашки).
+fn clean_cpu_title(raw: &str) -> &str {
+    let s = raw.strip_prefix("AMD ").or_else(|| raw.strip_prefix("Intel ")).unwrap_or(raw);
+    s.trim()
+}
+
+fn clean_gpu_title(raw: &str) -> String {
+    let s = short_gpu(raw);
+    let s = s.strip_prefix("NVIDIA GeForce ").or_else(|| s.strip_prefix("NVIDIA ")).unwrap_or(&s);
+    let s = s.strip_suffix(" GPU").unwrap_or(s);
+    s.to_string()
+}
+
+/// Крупная открытая дуга с числом процентов, знаком «%» и названием внутри (карточки 2×2 и 4×2).
+unsafe fn big_dial(cv: &Canvas, cx: f32, cy: f32, v: f32, col: D2D1_COLOR_F, pct_num: &str, name: &str) {
+    let f = &cv.g.fonts;
+    cv.arc_gauge(cx, cy, 34.0, 5.5, v, col);
+
+    let dw = cv.digits_w(pct_num, 28.0, 600);
+    let pct_w = cv.text_w("%", &f.small);
+    let num_x = cx - (dw + 2.0 + pct_w) / 2.0;
+    cv.digits(pct_num, num_x, dw + 2.0, cy - 4.0, 28.0, 600, Align::Leading, txt());
+    cv.line("%", &f.small, num_x + dw + 2.0, pct_w + 4.0, cy - 12.0, Align::Leading, dim());
+    cv.line(name, &f.small_c, cx - 30.0, 60.0, cy + 13.0, Align::Center, dim());
+}
+
+impl Stats {
+    /// Кольцо загрузки в трёх видах (`size` — индекс в `RING`):
+    /// 2×1: мини (дуга слева, подпись и крупное число справа);
+    /// 2×2: крупная дуга по центру, число и название внутри, подробность внизу;
+    /// 4×2: слева дуга как в 2×2, справа колонка с названием, спарклайном/шкалой и подробностями.
     unsafe fn ring_card(&self, cv: &Canvas, r: Rect, size: usize, i: usize) {
         let f = &cv.g.fonts;
         let c = &self.cur;
         let h = &self.heavy;
-        let gb = |v: f32| format!("{:.1}", v / GB);
-        let (name, sub, chips, col): (&str, String, Vec<String>, D2D1_COLOR_F) = match i {
-            CPU => {
-                let mut chips = Vec::new();
-                if c.mhz > 0 {
-                    chips.push(format!("{:.1} {}", c.mhz as f32 / 1000.0, crate::i18n::pick("ГГц", "GHz")));
-                }
-                chips.push(format!("{} {}", c.procs, crate::i18n::pick("проц.", "cores")));
-                ("CPU", self.cpu_name.clone(), chips, crate::ui::hue(crate::ios::SysColor::Blue, cv.accent))
-            }
-            GPU => {
-                let chips = if h.vram_total > 0.0 {
-                    vec![format!("{:.1} / {:.1} {}", h.vram_used / GB as f64, h.vram_total / GB as f64, crate::i18n::pick("ГБ", "GB"))]
-                } else {
-                    Vec::new()
-                };
-                ("GPU", if h.gpu_name.is_empty() { "—".to_string() } else { short_gpu(&h.gpu_name) }, chips, status_violet())
-            }
-            _ => (
-                "RAM",
-                format!("{} / {} {}", gb(c.ram_used), gb(c.ram_total), crate::i18n::pick("ГБ", "GB")),
-                vec![format!("{} {}", gb((c.ram_total - c.ram_used).max(0.0)), crate::i18n::pick("ГБ своб.", "GB free"))],
-                status_green(),
-            ),
+        let (name, glow_col, col) = match i {
+            CPU => ("CPU", status_blue(), readable(status_blue(), 45.0)),
+            GPU => ("GPU", status_violet(), readable(status_violet(), 45.0)),
+            _ => ("RAM", status_orange(), readable(status_orange(), 45.0)),
         };
         cv.card(r);
+        cv.glow(r, 14.0, glow_col, Corner::TopRight);
+
         let v = self.rings[i].value;
-        let pct = format!("{}%", (v * 100.0).round() as i32);
-        match size {
-            0 => {
-                let (rad, cx, cy) = (19.0, r.x + 12.0 + 19.0, r.cy());
-                cv.ring(cx, cy, rad, 4.0, v, col);
-                cv.text(&pct, Rect::new(cx - 19.0, cy - 7.0, 38.0, 14.0), &f.small_c, txt());
-                let tx = cx + rad + 9.0;
-                let tw = (r.right() - tx - 8.0).max(0.0);
-                // Название и короткая подробность: частота, видеопамять, занятая память.
-                let brief = if i == RAM { sub.clone() } else { chips.first().cloned().unwrap_or_default() };
-                cv.line(name, &f.body, tx, tw, cy - 6.0, Align::Leading, txt());
-                cv.line(&brief, &f.small, tx, tw, cy + 7.0, Align::Leading, dim());
+        let pct_num = format!("{:.0}", (v * 100.0).round());
+
+        let sub = match i {
+            CPU => {
+                if c.mhz > 0 {
+                    format!("{:.1} {}", c.mhz as f32 / 1000.0, crate::i18n::pick("ГГц", "GHz"))
+                } else {
+                    "—".to_string()
+                }
             }
-            1 => {
-                let (rx, ry) = (r.cx(), r.y + 29.0);
-                cv.ring(rx, ry, 21.0, 4.5, v, col);
-                cv.text(&pct, Rect::new(rx - 20.0, ry - 8.0, 40.0, 16.0), &f.small_c, txt());
-                cv.text(name, Rect::new(r.x, r.y + 55.0, r.w, 14.0), &f.body_c, txt());
-                cv.text(&sub, Rect::new(r.x + 6.0, r.y + 70.0, r.w - 12.0, 12.0), &f.small_c, dim());
-                chips_row(cv, r.cx(), r.y + 84.0, &chips);
+            GPU => {
+                // «занято / всего», как в диспетчере задач (у встроенной графики «всего» — общая память).
+                let used = h.vram_used / GB as f64;
+                if h.vram_total > 0.0 {
+                    format!("{used:.1} / {:.1} {}", h.vram_total / GB as f64, crate::i18n::pick("ГБ", "GB"))
+                } else {
+                    format!("{} {used:.1} {}", crate::i18n::pick("VRAM", "VRAM"), crate::i18n::pick("ГБ", "GB"))
+                }
             }
             _ => {
-                let (rad, cx, cy) = (38.0, r.x + 16.0 + 38.0, r.cy());
-                cv.ring(cx, cy, rad, 6.0, v, col);
-                cv.text(&pct, Rect::new(cx - 30.0, cy - 9.0, 60.0, 18.0), &f.num_c, txt());
-                let tx = cx + rad + 18.0;
-                let tw = (r.right() - tx - 10.0).max(0.0);
-                let top = cy - 30.0;
-                cv.text(name, Rect::new(tx, top, tw, 18.0), &f.title, txt());
-                cv.text(&sub, Rect::new(tx, top + 22.0, tw, 14.0), &f.small, dim());
-                chips_from(cv, tx, top + 44.0, &chips);
+                format!("{:.1} / {:.0} {}", c.ram_used / GB, c.ram_total / GB, crate::i18n::pick("ГБ", "GB"))
+            }
+        };
+
+        match size {
+            0 => {
+                // 2x1 (104x48)
+                let cx = r.x + 22.0;
+                let cy = r.cy();
+                cv.arc_gauge(cx, cy, 15.0, 4.0, v, col);
+
+                let tx = r.x + 46.0;
+                let tw = (r.right() - tx - 8.0).max(0.0);
+                cv.line(name, &f.caps, tx, tw, r.y + 16.0, Align::Leading, dim());
+
+                let dw = cv.digits_w(&pct_num, 20.0, 600);
+                cv.digits(&pct_num, tx, dw + 2.0, r.y + 34.0, 20.0, 600, Align::Leading, txt());
+                let rem_w = (tw - dw - 2.0).max(0.0);
+                cv.line("%", &f.small, tx + dw + 2.0, rem_w, r.y + 35.0, Align::Leading, dim());
+            }
+            1 => {
+                // 2x2 (104x104)
+                big_dial(cv, r.cx(), r.y + 46.0, v, col, &pct_num, name);
+
+                cv.line(&sub, &f.small, r.x + 4.0, r.w - 8.0, r.y + 90.0, Align::Center, dim());
+            }
+            _ => {
+                // 4x2 (216x104)
+                big_dial(cv, r.x + 52.0, r.y + 46.0, v, col, &pct_num, name);
+
+                cv.line(&sub, &f.small, r.x + 4.0, 96.0, r.y + 90.0, Align::Center, dim());
+
+                let x0 = r.x + 124.0;
+                let col_w = (r.right() - P - x0).max(10.0);
+
+                match i {
+                    CPU => {
+                        let title = cv.wrap_clip(clean_cpu_title(&self.cpu_name), &f.small_b, col_w, 1);
+                        cv.line(&title, &f.small_b, x0, col_w, r.y + 20.0, Align::Leading, txt());
+
+                        let spark_r = Rect::new(x0, r.y + 34.0, col_w, 28.0);
+                        cv.spark(spark_r, self.hist_cpu.iter(), (0.0, 1.0), col, true);
+                        cv.stroke_line((spark_r.x, spark_r.bottom()), (spark_r.right(), spark_r.bottom()), 1.0, hairline());
+
+                        let note = format!("{:.1} {} · {} {}", c.mhz as f32 / 1000.0, crate::i18n::pick("ГГц", "GHz"), c.procs, crate::i18n::pick("проц.", "cores"));
+                        cv.line(&note, &f.small, x0, col_w, r.y + 80.0, Align::Leading, dim());
+                    }
+                    GPU => {
+                        let raw_name = if h.gpu_name.is_empty() { "GPU" } else { &h.gpu_name };
+                        let clean = clean_gpu_title(raw_name);
+                        let title = cv.wrap_clip(&clean, &f.small_b, col_w, 1);
+                        cv.line(&title, &f.small_b, x0, col_w, r.y + 20.0, Align::Leading, txt());
+
+                        let spark_r = Rect::new(x0, r.y + 34.0, col_w, 28.0);
+                        cv.spark(spark_r, self.hist_gpu.iter(), (0.0, 1.0), col, true);
+                        cv.stroke_line((spark_r.x, spark_r.bottom()), (spark_r.right(), spark_r.bottom()), 1.0, hairline());
+
+                        let tot_gb = h.vram_total / GB as f64;
+                        let tot_s = if tot_gb.fract() == 0.0 { format!("{:.0}", tot_gb) } else { format!("{:.1}", tot_gb) };
+                        let note = format!("{} {:.1} / {} {}", crate::i18n::pick("VRAM", "VRAM"), h.vram_used / GB as f64, tot_s, crate::i18n::pick("ГБ", "GB"));
+                        cv.line(&note, &f.small, x0, col_w, r.y + 80.0, Align::Leading, dim());
+                    }
+                    _ => {
+                        cv.line(crate::i18n::pick("Память", "Memory"), &f.small_b, x0, col_w, r.y + 20.0, Align::Leading, txt());
+
+                        let used_s = format!("{:.1}", c.ram_used / GB);
+                        let udw = cv.digits_w(&used_s, 22.0, 600);
+                        cv.digits(&used_s, x0, udw + 2.0, r.y + 44.0, 22.0, 600, Align::Leading, txt());
+                        let tot_line = format!(" / {:.0} {}", c.ram_total / GB, crate::i18n::pick("ГБ", "GB"));
+                        let rem_w = (col_w - udw - 2.0).max(0.0);
+                        cv.line(&tot_line, &f.small, x0 + udw + 2.0, rem_w, r.y + 44.0, Align::Leading, dim());
+
+                        let (count, filled, step) = ram_segments(c.ram_total / GB, c.ram_used / GB);
+                        let seg_r = Rect::new(x0, r.y + 58.0, col_w, 14.0);
+                        cv.segments(seg_r, count, filled, col);
+
+                        let step_s = if step.fract() == 0.0 { format!("{:.0}", step) } else { format!("{:.1}", step) };
+                        let note = format!("{} = {} {}", crate::i18n::pick("1 деление", "1 bar"), step_s, crate::i18n::pick("ГБ", "GB"));
+                        cv.line(&note, &f.small, x0, col_w, r.y + 82.0, Align::Leading, dim());
+                    }
+                }
             }
         }
     }
 
     /// Диск: суммарный объём всех встроенных томов. В узкой карточке (`2×2`) клик по ней
-    /// переключает «все» → «C:» → «D:» …; в широкой (`4×2`) при нескольких томах слева итог,
-    /// справа — список всех томов с полосками.
+    /// переключает «все» → «C:» → «D:» …; в широкой (`4×2`) показываются накопители списком.
     unsafe fn disk_card(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect, size: usize) {
         let f = &cv.g.fonts;
         let wide = size > 0;
         let n = self.cur.disks.len();
         cv.card(r);
+        cv.glow(r, 14.0, status_teal(), Corner::TopRight);
+
         if !wide && n > 1 {
             let (_, clicked) = ui.click_area(id(STATS, 25), r);
             if clicked {
@@ -449,96 +558,198 @@ impl Stats {
             k => (disks[k - 1].used_gb, disks[k - 1].total_gb),
         };
         let one = |d: Option<&DiskSample>| match d {
-            Some(d) => format!("{} {}:", crate::i18n::pick("Диск", "Disk"), d.letter),
-            None => crate::i18n::pick("Диск", "Disk").to_string(),
+            Some(d) => format!("{} {}:", crate::i18n::pick("ДИСК", "DISK"), d.letter),
+            None => crate::i18n::pick("ДИСК", "DISK").to_string(),
         };
         let title = match (view, n) {
             (0, 0 | 1) => one(disks.first()),
-            (0, _) => crate::i18n::tr("Диски • все").into_owned(),
+            (0, _) => crate::i18n::pick("ДИСКИ • ВСЕ", "DISKS • ALL").to_string(),
             (k, _) => one(disks.get(k - 1)),
         };
-        let tint = hue(SysColor::Teal, cv.accent);
-        header(cv, r, icon::FOLDER, &title, tint);
-        let list = wide && n > 1;
-        let iw = r.w - 2.0 * P;
-        let lw = if list { 100.0 } else { iw };
+
         let frac = if total > 0.0 { used / total } else { 0.0 };
-        let used_s = format!("{used:.0}");
-        let dy = r.y + 42.0;
-        let uw = cv.digits_w(&used_s, 30.0, 600);
-        cv.digits(&used_s, r.x + P - 1.0, uw + 4.0, dy, 30.0, 600, Align::Leading, txt());
-        let total_s = format!("{} {total:.0} {}", crate::i18n::pick("из", "of"), crate::i18n::pick("ГБ", "GB"));
-        if wide && !list {
-            cv.line(&total_s, &f.small, r.x + P + uw + 4.0, iw - uw - 4.0, dy + 6.0, Align::Leading, dim());
+        let bar_col = if frac >= 0.88 { readable(status_red(), 45.0) } else { readable(status_teal(), 45.0) };
+
+        if !wide {
+            // 2x2
+            cv.line(&title, &f.caps, r.x + P, r.w - 2.0 * P, r.y + 17.0, Align::Leading, dim());
+
+            let free_gb = (total - used).max(0.0);
+            let free_s = format!("{:.0}", free_gb);
+            let fw = cv.digits_w(&free_s, 30.0, 600);
+            cv.digits(&free_s, r.x + P, fw + 4.0, r.y + 44.0, 30.0, 600, Align::Leading, txt());
+            let rem_w = (r.w - 2.0 * P - fw - 2.0).max(0.0);
+            cv.line(crate::i18n::pick(" ГБ", " GB"), &f.small, r.x + P + fw + 2.0, rem_w, r.y + 44.0, Align::Leading, txt());
+
+            let sub_s = format!("{} {:.0}", crate::i18n::pick("свободно из", "free of"), total);
+            cv.line(&sub_s, &f.small, r.x + P, r.w - 2.0 * P, r.y + 65.0, Align::Leading, dim());
+
+            cv.progress(Rect::new(r.x + P, r.bottom() - P - 7.0, r.w - 2.0 * P, 7.0), frac, bar_col);
         } else {
-            cv.line(&total_s, &f.small, r.x + P, lw, dy + 21.0, Align::Leading, dim());
-        }
-        // Внизу: сколько свободно и какая доля занята, над ними полоса.
-        let free = format!("{:.0} {}", (total - used).max(0.0), crate::i18n::pick("ГБ своб.", "GB free"));
-        let foot = r.bottom() - P - 5.0;
-        cv.line(&free, &f.small, r.x + P, lw, foot, Align::Leading, dim());
-        cv.line(&format!("{:.0}%", frac * 100.0), &f.small_b, r.x + P, lw, foot, Align::Trailing, txt());
-        cv.progress(Rect::new(r.x + P, r.bottom() - P - 21.0, lw, 6.0), frac, tint);
-        if list {
-            let x0 = r.x + P + lw + 12.0;
-            let w0 = r.right() - P - x0;
-            let rows = (((r.h - 40.0) / 18.0).floor() as usize).clamp(1, n);
+            // 4x2
+            cv.line(crate::i18n::pick("НАКОПИТЕЛИ", "STORAGE"), &f.caps, r.x + P, r.w - 2.0 * P, r.y + 17.0, Align::Leading, dim());
+            // До 4 строк (при 4 шаг плотнее); остальные накопители не теряются молча: в шапке «+N».
+            let rows = disks.len().min(4);
+            let hidden = disks.len() - rows;
+            let head = if hidden > 0 {
+                format!("{} · +{hidden}", crate::i18n::pick("свободно", "free"))
+            } else {
+                crate::i18n::pick("свободно", "free").to_string()
+            };
+            cv.line(&head, &f.small, r.x + P, r.w - 2.0 * P, r.y + 17.0, Align::Trailing, dim());
+
+            let (top, step) = if rows > 3 { (34.0, 16.0) } else { (38.0, 22.0) };
             for (k, d) in disks.iter().take(rows).enumerate() {
-                let y = r.y + 40.0 + k as f32 * 18.0;
-                let pct = if d.total_gb > 0.0 { d.used_gb / d.total_gb } else { 0.0 };
-                cv.line(&format!("{}:", d.letter), &f.small_b, x0, 18.0, y, Align::Leading, txt());
-                cv.progress(Rect::new(x0 + 20.0, y - 2.5, (w0 - 54.0).max(0.0), 5.0), pct, tint);
-                cv.line(&format!("{:.0}%", pct * 100.0), &f.small, x0, w0, y, Align::Trailing, dim());
+                let y = r.y + top + k as f32 * step;
+                let d_frac = if d.total_gb > 0.0 { d.used_gb / d.total_gb } else { 0.0 };
+                let d_col = if d_frac >= 0.88 { readable(status_red(), 45.0) } else { readable(status_teal(), 45.0) };
+
+                let let_s = format!("{}:", d.letter);
+                cv.line(&let_s, &f.small_b, r.x + P, 22.0, y + 2.0, Align::Leading, txt());
+
+                let free = (d.total_gb - d.used_gb).max(0.0);
+                let val_s = format!("{:.0} / {:.0} {}", free, d.total_gb, crate::i18n::pick("ГБ", "GB"));
+                let vw = cv.text_w(&val_s, &f.small);
+                cv.line(&val_s, &f.small, r.right() - P - vw, vw + 2.0, y + 2.0, Align::Leading, txt());
+
+                let bx = r.x + P + 24.0;
+                let bw = (r.right() - P - vw - 8.0 - bx).max(10.0);
+                cv.progress(Rect::new(bx, y - 1.0, bw, 6.0), d_frac, d_col);
             }
         }
     }
 
-    /// Сеть и аптайм. Узкая (120×120) — главное значение и одна подробность; широкая (248×120)
-    /// добавляет вторую колонку: загрузку и отдачу рядом, число процессов.
+    /// Сеть и аптайм. Узкая (2×2) — главное значение и спарклайн/капсулы;
+    /// широкая (4×2) — слева главное значение, справа зеркальный график / недельная шкала.
     unsafe fn info_card(&self, cv: &Canvas, r: Rect, size: usize, i: usize) {
         let f = &cv.g.fonts;
         let c = &self.cur;
         let wide = size > 0;
-        let iw = r.w - 2.0 * P;
         cv.card(r);
         match i {
             NET => {
-                header(cv, r, icon::WIFI, "Сеть", hue(SysColor::Blue, cv.accent));
-                let down = hue(SysColor::Blue, cv.accent);
-                let up = hue(SysColor::Green, cv.accent);
-                let (rx, tx) = (fmt_rate(c.rx_bps), fmt_rate(c.tx_bps));
-                if wide {
-                    // Две колонки: подпись со стрелкой цвета направления, под ней значение.
-                    for (k, (arrow, label, value, col)) in [("↓ ", "Загрузка", &rx, down), ("↑ ", "Отдача", &tx, up)].into_iter().enumerate() {
-                        let x = r.x + P + k as f32 * iw / 2.0;
-                        let aw = cv.line(arrow, &f.small_b, x, 12.0, r.y + 35.0, Align::Leading, col);
-                        cv.line(label, &f.small, x + aw, iw / 2.0 - aw, r.y + 35.0, Align::Leading, dim());
-                        cv.line(value, &f.title, x, iw / 2.0 - 6.0, r.y + 53.0, Align::Leading, txt());
-                    }
+                cv.glow(r, 14.0, status_cyan(), Corner::TopRight);
+                cv.line(crate::i18n::pick("СЕТЬ", "NETWORK"), &f.caps, r.x + P, r.w - 2.0 * P, r.y + 17.0, Align::Leading, dim());
+
+                let down_col = readable(status_cyan(), 45.0);
+                let up_col = readable(status_pink(), 45.0);
+                let (rx_num, rx_unit) = fmt_rate_parts(c.rx_bps);
+                let (tx_num, tx_unit) = fmt_rate_parts(c.tx_bps);
+
+                // Строка загрузки (вниз)
+                cv.arrow(r.x + P + 4.0, r.y + 36.0, 9.0, false, down_col);
+                let aw = 12.0;
+                let nw = cv.digits_w(&rx_num, 20.0, 600);
+                cv.digits(&rx_num, r.x + P + aw, nw + 2.0, r.y + 36.0, 20.0, 600, Align::Leading, txt());
+                let rem_rx = (100.0 - aw - nw - 2.0).max(0.0);
+                cv.line(rx_unit, &f.small, r.x + P + aw + nw + 2.0, rem_rx, r.y + 36.0, Align::Leading, dim());
+
+                // Строка отдачи (вверх)
+                cv.arrow(r.x + P + 4.0, r.y + 54.0, 9.0, true, up_col);
+                let aw_u = 12.0;
+                let nw_u = cv.digits_w(&tx_num, 16.0, 600);
+                cv.digits(&tx_num, r.x + P + aw_u, nw_u + 2.0, r.y + 54.0, 16.0, 600, Align::Leading, txt());
+                let rem_tx = (100.0 - aw_u - nw_u - 2.0).max(0.0);
+                cv.line(tx_unit, &f.small, r.x + P + aw_u + nw_u + 2.0, rem_tx, r.y + 54.0, Align::Leading, dim());
+
+                if !wide {
+                    // 2x2: спарклайн загрузки внизу карточки
+                    let sp_r = Rect::new(r.x + 14.0, r.bottom() - 10.0 - 28.0, r.w - 28.0, 28.0);
+                    let max_rx = self.hist_rx.iter().fold(1024.0f32, |m, v| m.max(v));
+                    cv.spark(sp_r, self.hist_rx.iter(), (0.0, max_rx), down_col, true);
                 } else {
-                    // Два блока друг под другом: подпись со стрелкой и крупное значение под ней.
-                    for (k, (arrow, label, value, col)) in [("↓ ", "Загрузка", &rx, down), ("↑ ", "Отдача", &tx, up)].into_iter().enumerate() {
-                        let top = r.y + 30.0 + k as f32 * 34.0;
-                        let aw = cv.line(arrow, &f.small_b, r.x + P, 12.0, top + 5.0, Align::Leading, col);
-                        cv.line(label, &f.small, r.x + P + aw, iw - aw, top + 5.0, Align::Leading, dim());
-                        cv.line(value, &f.title, r.x + P, iw, top + 21.0, Align::Leading, txt());
-                    }
+                    // 4x2: слева «Всего за сеанс», справа зеркальный график
+                    let sess_s = format!("{}: {}", crate::i18n::pick("Всего за сеанс", "Session total"), fmt_bytes(self.session_bytes as f64));
+                    cv.line(&sess_s, &f.small, r.x + P, 100.0, r.y + 86.0, Align::Leading, dim());
+
+                    let gx = r.x + 114.0;
+                    let gw = (r.right() - 12.0 - gx).max(10.0);
+                    let gy = r.y + 14.0;
+                    let gh = 66.0;
+                    let mid_y = gy + gh / 2.0;
+
+                    let max_rx = self.hist_rx.iter().fold(1024.0f32, |m, v| m.max(v));
+                    let max_tx = self.hist_tx.iter().fold(1024.0f32, |m, v| m.max(v));
+                    cv.stroke_line((gx, mid_y), (gx + gw, mid_y), 1.0, hairline());
+
+                    let r_rx = Rect::new(gx, gy, gw, gh / 2.0);
+                    cv.spark(r_rx, self.hist_rx.iter(), (0.0, max_rx), down_col, true);
+
+                    let r_tx = Rect::new(gx, mid_y, gw, gh / 2.0);
+                    cv.spark(r_tx, self.hist_tx.iter(), (max_tx, 0.0), up_col, true);
+
+                    cv.line(crate::i18n::pick("60 с", "60 s"), &f.small, gx, gw, r.y + 88.0, Align::Trailing, dim());
                 }
             }
             _ => {
-                header(cv, r, icon::POWER, "В работе", hue(SysColor::Indigo, cv.accent));
-                // Старшая единица крупно, остаток под ней, внизу — когда включили.
-                let (big, unit, rest) = uptime_parts(c.uptime_s);
-                let big = big.to_string();
-                let bw = cv.digits_w(&big, 34.0, 600);
-                cv.digits(&big, r.x + P - 1.0, bw + 4.0, r.y + 44.0, 30.0, 600, Align::Leading, txt());
-                cv.line(unit, &f.body, r.x + P + bw + 5.0, iw - bw - 5.0, r.y + 48.0, Align::Leading, dim());
-                cv.line(&rest, &f.body, r.x + P, iw, r.y + 67.0, Align::Leading, txt());
+                // UPTIME
+                cv.glow(r, 14.0, cv.accent, Corner::TopRight);
+                cv.line(crate::i18n::pick("АПТАЙМ", "UPTIME"), &f.caps, r.x + P, r.w - 2.0 * P, r.y + 17.0, Align::Leading, dim());
+
+                let days = c.uptime_s / 86400;
+                let hours = (c.uptime_s % 86400) / 3600;
+                let mins = (c.uptime_s % 3600) / 60;
+                let (d_s, d_unit, h_s, h_unit) = if days > 0 {
+                    (days.to_string(), crate::i18n::pick("д ", "d "), hours.to_string(), crate::i18n::pick("ч", "h"))
+                } else {
+                    (hours.to_string(), crate::i18n::pick("ч ", "h "), mins.to_string(), crate::i18n::pick("м", "m"))
+                };
+                let w1 = cv.digits_w(&d_s, 28.0, 600);
+                let u1 = cv.text_w(d_unit, &f.small_b);
+                let w2 = cv.digits_w(&h_s, 28.0, 600);
+                let mut cur_x = r.x + P;
+                cv.digits(&d_s, cur_x, w1 + 2.0, r.y + 44.0, 28.0, 600, Align::Leading, txt());
+                cur_x += w1 + 2.0;
+                cv.line(d_unit, &f.small_b, cur_x, u1 + 4.0, r.y + 44.0, Align::Leading, dim());
+                cur_x += u1 + 4.0;
+                cv.digits(&h_s, cur_x, w2 + 2.0, r.y + 44.0, 28.0, 600, Align::Leading, txt());
+                cur_x += w2 + 2.0;
+                cv.line(h_unit, &f.small_b, cur_x, 20.0, r.y + 44.0, Align::Leading, dim());
+
                 let since = fmt_since(online::now_local_minutes(), c.uptime_s);
-                cv.line(&since, &f.small, r.x + P, iw, r.bottom() - P - 5.0, Align::Leading, dim());
-                if wide {
-                    cv.digits(&c.procs.to_string(), r.x + P, iw, r.y + 44.0, 30.0, 600, Align::Trailing, txt());
-                    cv.line(crate::i18n::pick("процессов", "processes"), &f.small, r.x + P, iw, r.y + 67.0, Align::Trailing, dim());
+                cv.line(&since, &f.small, r.x + P, 100.0, r.y + 65.0, Align::Leading, dim());
+
+                let (fractions, today_idx) = uptime_week(online::now_local_minutes(), c.uptime_s);
+
+                if !wide {
+                    // 2x2: 7 капсул
+                    let cw = (r.w - 2.0 * P - 6.0 * 3.0) / 7.0;
+                    let cy_cap = r.bottom() - P - 6.0;
+                    for (k, frac) in fractions.iter().enumerate() {
+                        let cap_x = r.x + P + k as f32 * (cw + 3.0);
+                        let cap_r = Rect::new(cap_x, cy_cap, cw, 6.0);
+                        cv.rr(cap_r, 3.0, track());
+                        if *frac > 0.0 {
+                            cv.rr(Rect::new(cap_x, cy_cap, (cw * frac).max(3.0), 6.0), 3.0, cv.accent);
+                        }
+                    }
+                } else {
+                    // 4x2: число процессов слева, 7 столбиков справа
+                    let procs_s = format!("{} {}", c.procs, crate::i18n::pick("процессов", "processes"));
+                    cv.line(&procs_s, &f.small_b, r.x + P, 100.0, r.y + 86.0, Align::Leading, txt());
+
+                    let x0 = r.x + 124.0;
+                    let w0 = (r.right() - P - x0).max(10.0);
+                    let bar_w = 8.0f32;
+                    let gap = (w0 - 7.0 * bar_w) / 6.0;
+                    let bar_h = 56.0f32;
+                    let top_y = r.y + 18.0;
+
+                    let weekdays = crate::i18n::weekdays();
+                    for (k, &frac) in fractions.iter().enumerate() {
+                        let bx = x0 + k as f32 * (bar_w + gap);
+                        let bg_r = Rect::new(bx, top_y, bar_w, bar_h);
+                        cv.rr(bg_r, 4.0, track());
+                        if frac > 0.0 {
+                            let fh = (bar_h * frac).max(bar_w);
+                            let fill_r = Rect::new(bx, top_y + bar_h - fh, bar_w, fh);
+                            cv.rr(fill_r, 4.0, cv.accent);
+                        }
+                        let day_char = weekdays.get(k).and_then(|s| s.chars().next()).unwrap_or(' ');
+                        let day_str = day_char.to_string();
+                        let day_col = if k == today_idx { txt() } else { dim() };
+                        cv.line(&day_str, &f.small_c, bx - 2.0, bar_w + 4.0, top_y + bar_h + 12.0, Align::Center, day_col);
+                    }
                 }
             }
         }
@@ -597,61 +808,106 @@ impl Stats {
         }
     }
 
-    /// Замер скорости. `size` — индекс в `SPEED_SIZES`: в узкой карточке (120×120) загрузка крупно,
-    /// отдача строкой под ней и круглая кнопка в шапке; в широких — обе скорости рядом и
-    /// кнопка-капсула справа.
+    /// Замер скорости. `size` — индекс в `SPEED_SIZES`: 2×2, 4×2.
     unsafe fn speed_card(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect, size: usize) {
         let f = &cv.g.fonts;
         cv.card(r);
+        cv.glow(r, 14.0, status_bar_green(), Corner::BottomRight);
+
         let sp = &self.online.speed;
-        header(cv, r, icon::BOLT, if size == 0 { "Скорость" } else { "Скорость сети" }, hue(SysColor::Cyan, cv.accent));
-        let iw = r.w - 2.0 * P;
-        let num = |v: f32| if sp.at > 0 { format!("{:.0}", v) } else { "—".into() };
-        let (d, u) = (num(sp.down), num(sp.up));
+        let salate = readable(status_bar_green(), 45.0);
+        let d_str = if sp.at > 0 { format!("{:.0}", sp.down) } else { "—".into() };
+        let u_str = if sp.at > 0 { format!("{:.0}", sp.up) } else { "—".into() };
         let unit = crate::i18n::pick("Мбит/с", "Mbps");
-        let vy = r.y + 44.0;
-        let (bg, fg) = if sp.running { (chip_bg(), dim()) } else { (cv.accent, ink()) };
+
+        let btn_bg = if sp.running { chip_bg() } else { status_bar_green() };
+        let btn_fg = if sp.running { dim() } else { ink() };
+        let glyph_icon = if sp.running { icon::REFRESH } else { icon::PLAY_SOLID };
         let go;
-        if size == 0 {
-            let dw = cv.digits_w(&d, 30.0, 600);
-            cv.digits(&d, r.x + P - 1.0, dw + 4.0, vy + 6.0, 30.0, 600, Align::Leading, txt());
-            cv.line(&format!("{unit} ↓"), &f.small, r.x + P + dw + 4.0, iw - dw - 4.0, vy + 9.0, Align::Leading, dim());
-            cv.line(&format!("{u} {unit} ↑"), &f.body, r.x + P, iw, r.y + 86.0, Align::Leading, txt());
-            let btn = Rect::new(r.right() - P - 18.0, r.y + 8.0, 18.0, 18.0);
-            let (_, clicked) = ui.click_area(id(STATS, 11), btn);
-            let hv = ui.hover_of(id(STATS, 11));
-            cv.circle(btn.cx(), btn.cy(), 9.0, mix(bg, crate::ui::fg(), 0.08 * hv));
-            cv.glyph(if sp.running { icon::REFRESH } else { icon::PLAY_SOLID }, btn, false, fg);
-            go = clicked;
-        } else {
-            let info = if sp.running {
-                crate::i18n::pick("идёт замер…", "testing…").to_string()
-            } else if sp.at > 0 {
-                let when = ago(sys::now_secs(), sp.at);
-                if sp.place.is_empty() { when } else { format!("{when} • {}", sp.place) }
-            } else {
-                crate::i18n::pick("ещё не замеряли", "not measured yet").to_string()
-            };
-            let label = match (sp.running, sp.failed, size) {
-                (true, _, _) => crate::i18n::pick("Замер…", "Testing…"),
-                (_, true, _) => crate::i18n::pick("Повторить", "Retry"),
-                (_, _, 1) => crate::i18n::pick("Замерить", "Test"),
-                _ => crate::i18n::pick("Замерить скорость", "Run speed test"),
-            };
-            let bw = cv.text_w(label, &f.small_c) + 26.0;
-            // Нижняя строка: кнопка справа, слева — когда и где был последний замер.
-            let btn = Rect::new(r.right() - P - bw, r.bottom() - P - 22.0, bw, 22.0);
-            go = ui.solid_button(cv, id(STATS, 11), btn, label, bg, fg, 11.0);
-            cv.line(&info, &f.small, r.x + P, (btn.x - r.x - P - 8.0).max(0.0), btn.cy(), Align::Leading, dim());
-            // Загрузка и отдача: крупное число, под ним единица со стрелкой цвета направления.
-            let col_w = iw / 2.0;
-            for (k, (v, arrow, col)) in [(&d, "↓", hue(SysColor::Blue, cv.accent)), (&u, "↑", hue(SysColor::Green, cv.accent))].into_iter().enumerate() {
-                let x = r.x + P + k as f32 * col_w;
-                cv.digits(v, x - 1.0, col_w - 6.0, r.y + 40.0, 30.0, 600, Align::Leading, txt());
-                let aw = cv.line(&format!("{arrow} "), &f.small_b, x, 12.0, r.y + 58.0, Align::Leading, col);
-                cv.line(unit, &f.small, x + aw, col_w - aw - 6.0, r.y + 58.0, Align::Leading, dim());
+
+        match size {
+            0 => {
+                // 2x2
+                cv.line(crate::i18n::pick("СКОРОСТЬ", "SPEED"), &f.caps, r.x + P, r.w - 2.0 * P - 24.0, r.y + 17.0, Align::Leading, dim());
+
+                let btn = Rect::new(r.right() - P - 18.0, r.y + 8.0, 18.0, 18.0);
+                let (_, clicked) = ui.click_area(id(STATS, 11), btn);
+                let hv = ui.hover_of(id(STATS, 11));
+                cv.circle(btn.cx(), btn.cy(), 9.0, mix(btn_bg, fg(), 0.08 * hv));
+                cv.glyph(glyph_icon, btn, false, btn_fg);
+                go = clicked;
+
+                cv.arrow(r.x + P + 4.0, r.y + 44.0, 9.0, false, salate);
+                let aw = 12.0;
+                let dw = cv.digits_w(&d_str, 30.0, 600);
+                cv.digits(&d_str, r.x + P + aw, dw + 4.0, r.y + 44.0, 30.0, 600, Align::Leading, txt());
+                if sp.failed && !sp.running {
+                    // Замер не удался: вместо единицы подсказка «Повторить» (кнопка «▶» справа вверху).
+                    cv.line(crate::i18n::pick("Повторить", "Retry"), &f.small_b, r.x + P, r.w - 2.0 * P, r.y + 65.0, Align::Leading, readable(status_red(), 45.0));
+                } else {
+                    cv.line(unit, &f.small, r.x + P, r.w - 2.0 * P, r.y + 65.0, Align::Leading, dim());
+                }
+
+                let up_y = r.bottom() - P - 4.0;
+                cv.arrow(r.x + P + 4.0, up_y, 9.0, true, txt());
+                let up_text = format!("{} {}", u_str, unit);
+                cv.line(&up_text, &f.small_b, r.x + P + 12.0, r.w - 2.0 * P - 12.0, up_y, Align::Leading, txt());
+            }
+            _ => {
+                // 4x2 по макету Figma: слева крупный полукруглый спидометр (диаметр 88, толщина 7), справа колонка
+                // «СКОРОСТЬ» + кнопка, загрузка и отдача числами 15 px, внизу — когда и где был замер.
+                let (cx, cy, rad, th) = (r.x + 57.0, r.y + 77.0, 40.5, 7.0);
+                let scale = speed_scale(sp.down);
+                let frac = if sp.at > 0 && scale > 0.0 { sp.down / scale } else { 0.0 };
+                cv.stroke_arc(cx, cy, rad, -90.0, 90.0, th, track());
+                if frac >= 0.005 {
+                    cv.stroke_arc(cx, cy, rad, -90.0, -90.0 + 180.0 * frac.clamp(0.0, 1.0), th, salate);
+                }
+                // Число внутри дуги (в макете 24 px); длинное число уменьшает кегль.
+                let max_w = 2.0 * (rad - th) - 6.0;
+                let mut font_sz = 24.0;
+                while font_sz > 14.0 && cv.digits_w(&d_str, font_sz, 600) > max_w {
+                    font_sz -= 2.0;
+                }
+                let dw = cv.digits_w(&d_str, font_sz, 600);
+                cv.digits(&d_str, cx - dw / 2.0, dw + 2.0, r.y + 63.0, font_sz, 600, Align::Leading, txt());
+                cv.line(unit, &f.small, cx - 25.0, 50.0, r.y + 81.0, Align::Center, dim());
+
+                let x0 = r.x + 119.0;
+                cv.line(crate::i18n::pick("СКОРОСТЬ", "SPEED"), &f.caps, x0, r.right() - P - 24.0 - x0, r.y + 17.0, Align::Leading, dim());
+
+                let btn = Rect::new(r.x + 181.0, r.y + 9.0, 22.0, 22.0);
+                let (_, clicked) = ui.click_area(id(STATS, 11), btn);
+                let hv = ui.hover_of(id(STATS, 11));
+                cv.circle(btn.cx(), btn.cy(), 11.0, mix(btn_bg, fg(), 0.08 * hv));
+                cv.glyph(glyph_icon, btn.inset(5.5), false, btn_fg);
+                go = clicked;
+
+                cv.arrow(x0 + 5.5, r.y + 44.5, 10.0, false, salate);
+                let dw_down = cv.digits_w(&d_str, 15.0, 600);
+                cv.digits(&d_str, x0 + 14.0, dw_down + 2.0, r.y + 44.0, 15.0, 600, Align::Leading, txt());
+
+                cv.arrow(x0 + 5.5, r.y + 64.5, 10.0, true, txt());
+                let uw = cv.digits_w(&u_str, 15.0, 600);
+                cv.digits(&u_str, x0 + 14.0, uw + 2.0, r.y + 64.0, 15.0, 600, Align::Leading, txt());
+
+                let failed = sp.failed && !sp.running;
+                let info = if sp.running {
+                    crate::i18n::pick("идёт замер…", "testing…").to_string()
+                } else if failed {
+                    // Замер не удался: подсказка вместо времени последнего замера (кнопка «▶» справа вверху).
+                    crate::i18n::pick("Повторить", "Retry").to_string()
+                } else if sp.at > 0 {
+                    let when = ago(sys::now_secs(), sp.at);
+                    if sp.place.is_empty() { when } else { format!("{when} • {}", sp.place) }
+                } else {
+                    crate::i18n::pick("ещё не замеряли", "not measured yet").to_string()
+                };
+                let info_col = if failed { readable(status_red(), 45.0) } else { dim() };
+                cv.line(&info, &f.small, x0, r.right() - P - x0, r.y + 86.0, Align::Leading, info_col);
             }
         }
+
         if go && !sp.running {
             online::run_speedtest();
         }
@@ -665,17 +921,20 @@ impl Stats {
         let c = &mut self.cur;
         c.cpu = 0.34;
         c.mhz = 3400;
-        c.ram_used = 11.2 * GB;
+        c.ram_used = 10.9 * GB;
         c.ram_total = 16.0 * GB;
         c.disks = vec![
             DiskSample { letter: 'C', used_gb: 312.0, total_gb: 476.0 },
-            DiskSample { letter: 'D', used_gb: 640.0, total_gb: 931.0 },
+            DiskSample { letter: 'D', used_gb: 379.0, total_gb: 931.0 },
+            DiskSample { letter: 'E', used_gb: 210.0, total_gb: 238.0 },
         ];
-        c.procs = 241;
-        c.uptime_s = 3 * 86400 + 4 * 3600 + 17 * 60;
-        c.rx_bps = 2.4e6;
-        c.tx_bps = 180e3;
+        c.procs = 312;
+        c.uptime_s = 3 * 86400 + 14 * 3600;
+        c.rx_bps = 12.4 * 1024.0 * 1024.0;
+        c.tx_bps = 1.1 * 1024.0 * 1024.0;
+        self.session_bytes = (2.3 * 1024.0 * 1024.0 * 1024.0) as u64;
         self.cpu_name = "AMD Ryzen 7 5800H".into();
+        self.disk_view = 1;
         let gb = f64::from(GB);
         let h = &mut self.heavy;
         h.gpu = Some(0.18);
@@ -689,11 +948,38 @@ impl Stats {
             ("Проводник".into(), 0.31 * gb),
             ("Spotify".into(), 0.24 * gb),
         ];
-        for (ring, v) in self.rings.iter_mut().zip([0.34, 0.18, 0.70]) {
+        for (ring, v) in self.rings.iter_mut().zip([0.34, 0.18, 10.9 / 16.0]) {
             ring.target = v;
             ring.value = v;
         }
-        self.online.speed = online::Speed { down: 94.6, up: 41.2, place: "FRA".into(), at: sys::now_secs() - 300, running: false, failed: false };
+        self.online.speed = online::Speed {
+            down: 487.0,
+            up: 92.0,
+            place: "Москва".into(),
+            at: sys::now_secs() - 300,
+            running: false,
+            failed: false,
+        };
+
+        // Заполнение истории детерминированными гладкими кривыми:
+        self.hist_cpu = History::new();
+        self.hist_gpu = History::new();
+        self.hist_rx = History::new();
+        self.hist_tx = History::new();
+        for i in 0..60 {
+            let t = i as f32 / 59.0;
+            let cpu_v = 0.34 + 0.15 * (t * std::f32::consts::TAU * 2.0).sin() + 0.05 * (t * std::f32::consts::TAU * 4.5).cos() + 0.02 * (t * std::f32::consts::TAU * 8.0).sin();
+            self.hist_cpu.push(cpu_v.clamp(0.05, 0.90));
+
+            let gpu_v = 0.18 + 0.09 * (t * std::f32::consts::TAU * 1.5 + 1.0).sin() + 0.03 * (t * std::f32::consts::TAU * 4.0).cos();
+            self.hist_gpu.push(gpu_v.clamp(0.02, 0.90));
+
+            let rx_v = (12.4e6 * (0.7 + 0.3 * (t * std::f32::consts::TAU * 1.8).sin() + 0.1 * (t * std::f32::consts::TAU * 4.5).cos())).max(0.0);
+            self.hist_rx.push(rx_v);
+
+            let tx_v = (1.1e6 * (0.7 + 0.3 * (t * std::f32::consts::TAU * 2.2 + 0.5).sin() + 0.1 * (t * std::f32::consts::TAU * 4.0).cos())).max(0.0);
+            self.hist_tx.push(tx_v);
+        }
     }
 
     /// Один виджет вне сетки: номер в `SPEC`, индекс размера и прямоугольник.
@@ -711,27 +997,5 @@ pub(super) unsafe fn header(cv: &Canvas, r: Rect, glyph: &str, title: &str, tint
     cv.symbol(glyph, Rect::new(r.x + P, cy - 6.0, 12.0, 12.0), 11.0, tint);
     let title = crate::i18n::tr(title).to_uppercase();
     cv.line(&title, &cv.g.fonts.caps, r.x + P + 16.0, r.w - 2.0 * P - 16.0, cy, Align::Leading, dim());
-}
-
-/// Ширина ряда плашек.
-unsafe fn chips_width(cv: &Canvas, labels: &[String]) -> f32 {
-    labels.iter().map(|l| cv.text_w(l, &cv.g.fonts.small_c) + 12.0).sum::<f32>() + 5.0 * labels.len().saturating_sub(1) as f32
-}
-
-/// Ряд маленьких плашек по центру (частота, «N ГБ своб.»).
-unsafe fn chips_row(cv: &Canvas, cx: f32, y: f32, labels: &[String]) {
-    chips_from(cv, cx - chips_width(cv, labels) / 2.0, y, labels);
-}
-
-/// Ряд плашек от левого края `x`.
-unsafe fn chips_from(cv: &Canvas, x: f32, y: f32, labels: &[String]) {
-    let mut x = x;
-    for l in labels {
-        let w = cv.text_w(l, &cv.g.fonts.small_c) + 12.0;
-        let r = Rect::new(x, y, w, 15.0);
-        cv.rr(r, 6.0, chip_bg());
-        cv.text(l, r, &cv.g.fonts.small_c, txt());
-        x += w + 5.0;
-    }
 }
 

@@ -120,7 +120,7 @@ quick_hotkey = ""
 # Пусто — город определяется по IP. Меняется и прямо в острове: клик по карточке погоды.
 weather_city = ""
 
-# Циферблат часов на вкладке Today, 0–4 (переключается стрелками на карточке часов).
+# Циферблат часов на вкладке Today, 0–5 (переключается стрелками на карточке часов).
 clock_style = 0
 
 # Календарь: «секретный адрес в формате iCal» из настроек Google Calendar (или любой .ics).
@@ -757,7 +757,7 @@ pub fn parse(text: &str) -> Config {
                 }
             }
             ("", "weather_city", Value::Str(s)) => cfg.weather_city = s,
-            ("", "clock_style", Value::Num(v)) => cfg.clock_style = (v.max(0.0) as usize).min(4),
+            ("", "clock_style", Value::Num(v)) => cfg.clock_style = (v.max(0.0) as usize).min(5),
             ("", "calendar_ics", Value::Str(s)) => {
                 let urls: Vec<String> = s.split_whitespace().map(|x| x.to_string()).collect();
                 cfg.calendar_ics = normalize_calendar_urls(&urls);

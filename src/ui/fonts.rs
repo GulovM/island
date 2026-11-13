@@ -128,8 +128,10 @@ pub struct Fonts {
     /// Заголовок трека.
     pub title: IDWriteTextFormat,
     /// Заголовочный кегль по центру с табличными цифрами (время в кольце таймера).
+    #[allow(dead_code)] // формат остаётся в таблице шрифтов; таймер теперь рисует время через digits
     pub title_c: IDWriteTextFormat,
     /// Крупные числа: скорость интернета (слева) и температура (по центру).
+    #[allow(dead_code)] // раньше рисовал кольца Stats; формат ещё входит в таблицу ролей
     pub num_c: IDWriteTextFormat,
     /// Цифры часов по центру.
     pub big_c: IDWriteTextFormat,
@@ -149,6 +151,9 @@ pub struct Fonts {
     /// Семейство крупных цифр (Display) и сделанные по месту форматы `display` по (кегль×4, вес, выравнивание).
     display_family: windows::core::PCWSTR,
     sized: RefCell<HashMap<(u32, u32, u8), IDWriteTextFormat>>,
+    /// Основной шрифт интерфейса и сделанные по месту подписи caps_at по (кегль×4, вес, трекинг×100); выравнивание — по левому краю, остальное делает Canvas::line.
+    ui_family: windows::core::PCWSTR,
+    sized_caps: RefCell<HashMap<(u32, u32, i32), IDWriteTextFormat>>,
     /// Готовые раскладки текста: `DrawText` строит её заново при каждом вызове, а в кадре
     /// десятки строк, которые не меняются от кадра к кадру.
     layouts: RefCell<HashMap<u64, (String, IDWriteTextLayout)>>,
@@ -384,6 +389,8 @@ impl Fonts {
             tabular,
             display_family: display,
             sized: RefCell::new(HashMap::new()),
+            ui_family: ui,
+            sized_caps: RefCell::new(HashMap::new()),
             layouts: RefCell::new(HashMap::new()),
         })
     }
@@ -407,6 +414,20 @@ impl Fonts {
         self.register_tracking(&t, -0.015 * size);
         self.tabular.borrow_mut().insert(t.as_raw() as usize);
         self.sized.borrow_mut().insert(key, t.clone());
+        t
+    }
+
+    /// Подпись нужного кегля, веса и трекинга (в долях кегля) — для капса циферблатов, где
+    /// готовых 7 px `caps` мало. Формат создаётся один раз и берётся из кэша; выравнивание —
+    /// по левому краю, остальное делает `Canvas::line`.
+    pub unsafe fn caps_at(&self, size: f32, weight: u32, tracking: f32) -> IDWriteTextFormat {
+        let key = ((size * 4.0).round() as u32, weight, (tracking * 100.0).round() as i32);
+        if let Some(t) = self.sized_caps.borrow().get(&key) {
+            return t.clone();
+        }
+        let Ok(t) = fmt_var(&self.factory, self.ui_family, weight, size, false) else { return self.caps.clone() };
+        self.register_tracking(&t, tracking * size);
+        self.sized_caps.borrow_mut().insert(key, t.clone());
         t
     }
 

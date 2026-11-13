@@ -7,6 +7,7 @@ mod calendar;
 mod clock;
 mod event_form;
 mod events;
+mod sun;
 mod timer;
 mod todo;
 mod weather;
@@ -40,7 +41,7 @@ const ID_FACE_NEXT: u32 = 72;
 const ID_RANGES: &[(u32, u32)] = &[(ID_CLOCK, ID_FACE_NEXT + 1)];
 
 /// Число циферблатов часов.
-pub const CLOCK_STYLES: usize = 5;
+pub const CLOCK_STYLES: usize = 6;
 /// Через сколько без действий выключается режим выбора циферблата.
 const CLOCK_PICK_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -65,7 +66,8 @@ static WEATHER_SIZES: [Size; 3] = [sz(2, 1), sz(2, 2), sz(4, 1)];
 /// Неделя: с ближайшим событием, шире, и расширенная со списком событий на сегодня.
 static WEEK_SIZES: [Size; 3] = [sz(4, 2), sz(6, 2), sz(4, 4)];
 static TIMER_SIZES: [Size; 3] = [sz(4, 1), sz(4, 2), sz(6, 2)];
-static TODO_SIZES: [Size; 3] = [sz(4, 2), sz(4, 4), sz(6, 4)];
+/// Задачи: два ряда, три ряда, четыре ряда (по умолчанию) и на всю ширину.
+static TODO_SIZES: [Size; 4] = [sz(4, 2), sz(4, 3), sz(4, 4), sz(6, 4)];
 
 /// Сетка вкладки: 10 колонок и 4 ряда крупных ячеек (шаг CELL=56, зазор GAP=8; рядов до 5 — под месячный календарь). Часы и погода стоят
 /// столбцом шириной 2 ячейки, неделя и таймер — 4×2 рядом, задачи — 4×4: исходные пропорции макета.
@@ -82,7 +84,7 @@ pub static SPEC: TabSpec = TabSpec {
         Spec { key: "weather", title: "Погода", sizes: &WEATHER_SIZES, size: 1, col: 0, row: 2 },
         Spec { key: "week", title: "Эта неделя", sizes: &WEEK_SIZES, size: 0, col: 2, row: 0 },
         Spec { key: "timer", title: "Таймер", sizes: &TIMER_SIZES, size: 1, col: 2, row: 2 },
-        Spec { key: "todo", title: "Задачи", sizes: &TODO_SIZES, size: 1, col: 6, row: 0 },
+        Spec { key: "todo", title: "Задачи", sizes: &TODO_SIZES, size: 2, col: 6, row: 0 },
     ],
 };
 
@@ -162,8 +164,6 @@ pub struct Today {
     /// Режим выбора циферблата включён (время последнего действия) и время последнего клика по часам.
     clock_pick: Option<Instant>,
     clock_click: Option<Instant>,
-    /// Круг секунд циферблатов с секундами.
-    sec_ring: Spring,
     /// Какое поле времени (0 — часы, 1 — минуты, 2 — секунды) было в фокусе в прошлом кадре.
     time_focus: Option<usize>,
     seconds: u32,
@@ -213,7 +213,6 @@ impl Default for Today {
             clock_style: 0,
             clock_pick: None,
             clock_click: None,
-            sec_ring: Spring::unit(0.0, 120.0, 20.0),
             time_focus: None,
             seconds: 0,
             week_rect: Rect::new(0.0, 0.0, 0.0, 0.0),
@@ -265,7 +264,6 @@ impl Today {
 
     pub fn step(&mut self, dt: f32) {
         self.ring.step(dt);
-        self.sec_ring.step(dt);
         self.month_t.step(dt);
         for a in &mut self.anim {
             a.step(dt);
@@ -273,7 +271,7 @@ impl Today {
     }
 
     pub fn animating(&self) -> bool {
-        !self.ring.settled() || !self.sec_ring.settled() || !self.month_t.settled() || self.anim.iter().any(|a| !a.settled())
+        !self.ring.settled() || !self.month_t.settled() || self.anim.iter().any(|a| !a.settled())
     }
 
     /// Сработал ли таймер с прошлого вызова.
@@ -412,7 +410,7 @@ impl Today {
         }
     }
 
-    /// Часы: 5 циферблатов. Двойной клик включает режим выбора (подсветка и стрелки по бокам),
+    /// Часы: 6 циферблатов. Двойной клик включает режим выбора (подсветка и стрелки по бокам),
     /// стрелки и колесо мыши листают по кругу; клик мимо или бездействие выключают режим.
     /// `size` — индекс в `CLOCK_SIZES`: у каждого циферблата своя композиция под каждый размер.
     unsafe fn clock_card(&mut self, ui: &mut Ui, cv: &Canvas, c: Rect, size: usize, t: &SYSTEMTIME, dow: usize) {
@@ -452,9 +450,6 @@ impl Today {
                 self.clock_pick = Some(Instant::now());
             }
         }
-        if self.clock_style == 2 {
-            clock::aim_seconds(&mut self.sec_ring, t.wSecond);
-        }
         self.clock_face(cv, c, t, size, dow);
         if picking {
             // Какой циферблат из скольких: точки на капсуле у нижнего края.
@@ -485,7 +480,7 @@ impl Today {
             exdates: Vec::new(),
             uid: title.into(),
         };
-        self.online.weather = Some(online::Weather { temp: 18.4, code: 1, city: "Душанбе".into() });
+        self.online.weather = Some(online::Weather { temp: 18.4, code: 1, city: "Душанбе".into(), coords: Some((38.56, 68.79)) });
         self.online.calendar_set = true;
         self.online.cal = Arc::new(vec![
             ev(9, 30, 30, "Планёрка команды"),
@@ -519,6 +514,10 @@ impl Today {
     pub unsafe fn gallery(&mut self, ui: &mut Ui, cv: &Canvas, idx: usize, size: usize, rect: Rect, t: &SYSTEMTIME) {
         let dow = (t.wDayOfWeek as usize + 6) % 7;
         let today = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
+        if idx == TODO {
+            // Галерея рисует все размеры на одном списке: строки встают на место заново, без пружин.
+            self.unplace_rows();
+        }
         self.widget(ui, cv, &Item { idx, size, rect }, None, t, today, dow);
     }
 }

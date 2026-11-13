@@ -13,6 +13,8 @@ pub struct Weather {
     pub temp: f32,
     pub code: i32,
     pub city: String,
+    /// Широта и долгота города: по ним считаются восход и закат для циферблата «Небо».
+    pub coords: Option<(f64, f64)>,
 }
 
 /// Инициализирует снимок погоды сохранённым кэшем (до первого сетевого ответа).
@@ -22,7 +24,7 @@ pub fn init_cached_weather(temp: f32, code: i32, city: String) {
     }
     with(|s| {
         if s.snap.weather.is_none() {
-            s.snap.weather = Some(Weather { temp, code, city: city.clone() });
+            s.snap.weather = Some(Weather { temp, code, city: city.clone(), coords: None });
             s.weather_key = city;
             s.snap.weather_note = None;
         }
@@ -128,7 +130,7 @@ fn forecast(lat: f64, lon: f64, name: String) -> Result<Weather, String> {
     let cur = fc.find("\"current\":{").map(|i| &fc[i..]).ok_or("в ответе нет current")?;
     let temp = json_num(cur, "temperature_2m").ok_or("нет температуры")? as f32;
     let code = json_num(cur, "weather_code").unwrap_or(0.0) as i32;
-    Ok(Weather { temp, code, city: name })
+    Ok(Weather { temp, code, city: name, coords: Some((lat, lon)) })
 }
 
 /// Описание погоды по коду WMO.

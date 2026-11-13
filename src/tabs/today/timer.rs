@@ -6,9 +6,10 @@ use super::Today;
 use crate::tabs::{id, TODAY};
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
-use crate::ui::{chip_bg, dim, icon, mix, txt, Align, Canvas, Rect, Submit, Ui};
+use crate::ui::{chip_bg, dim, icon, mix, txt, Align, Canvas, Corner, Rect, Submit, Ui};
 
 const PRESETS: [u32; 5] = [1, 5, 10, 15, 20];
+static PRESET_LABELS: [&str; 5] = ["1", "5", "10", "15", "20"];
 
 // ID таймера на вкладке: пресеты, звук, циферблат, пуск/сброс и поля часов/минут/секунд.
 const ID_PRESET: u32 = 0;
@@ -37,20 +38,112 @@ fn clock_label(secs: u64) -> String {
     }
 }
 
+/// Подпись общей длительности для карточки 4x2: «из 5:00» или «из 1:02:05».
+fn total_label_4x2(secs: u64) -> String {
+    let of = crate::i18n::pick("из", "of");
+    if secs >= 3600 {
+        format!("{of} {}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
+    } else {
+        format!("{of} {}:{:02}", secs / 60, secs % 60)
+    }
+}
+
+/// Подпись общей длительности для карточки 6x2: «из 5 мин», «из 1:30», «из 1 ч».
+fn total_label_6x2(secs: u64) -> String {
+    let of = crate::i18n::pick("из", "of");
+    if secs % 60 == 0 && secs < 3600 {
+        format!("{of} {} {}", secs / 60, crate::i18n::pick("мин", "min"))
+    } else if secs % 3600 == 0 {
+        format!("{of} {} {}", secs / 3600, crate::i18n::pick("ч", "h"))
+    } else if secs >= 3600 {
+        format!("{of} {}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
+    } else {
+        format!("{of} {}:{:02}", secs / 60, secs % 60)
+    }
+}
+
 /// Круглая кнопка со значком (пуск, сброс). `true` — нажата.
 #[allow(clippy::too_many_arguments)]
-unsafe fn round_button(ui: &mut Ui, cv: &Canvas, id: u32, cx: f32, cy: f32, rad: f32, glyph: &str, fill: D2D1_COLOR_F, fg: D2D1_COLOR_F) -> bool {
+unsafe fn round_button(
+    ui: &mut Ui,
+    cv: &Canvas,
+    id: u32,
+    cx: f32,
+    cy: f32,
+    rad: f32,
+    glyph: &str,
+    fill: D2D1_COLOR_F,
+    fg: D2D1_COLOR_F,
+    tip: &str,
+) -> bool {
     let r = Rect::new(cx - rad, cy - rad, 2.0 * rad, 2.0 * rad);
     let (_, clicked) = ui.click_area(id, r);
     let hv = ui.hover_of(id);
     cv.circle(cx, cy, rad, mix(fill, crate::ui::fg(), 0.08 * hv));
     cv.glyph(glyph, r, false, fg);
+    if !tip.is_empty() {
+        ui.tip(id, r, tip);
+    }
     clicked
 }
 
 /// Число из текста поля: берутся только цифры, пусто — 0.
 fn parse_num(s: &str) -> u32 {
     s.chars().filter_map(|c| c.to_digit(10)).fold(0u32, |a, d| a.saturating_mul(10).saturating_add(d)).min(99_999)
+}
+
+/// Поля ч:м:с (боксы 24x24 с ":" между ними) для режима правки времени.
+unsafe fn render_time_fields(
+    today: &mut Today,
+    ui: &mut Ui,
+    cv: &Canvas,
+    tf: [u32; 3],
+    tx: f32,
+    by: f32,
+) {
+    let f = &cv.g.fonts;
+    let vals = [today.hours, today.minutes, today.seconds];
+    let (box_w, box_h, gap) = (24.0f32, 24.0f32, 6.0f32);
+    let mut wheel_handled = false;
+    for (slot, k) in (0..3).enumerate() {
+        let bx = tx + slot as f32 * (box_w + gap);
+        let b = Rect::new(bx, by, box_w, box_h);
+        if today.time_focus != Some(k) {
+            ui.set_field_text(tf[k], &if k == 0 { vals[k].to_string() } else { format!("{:02}", vals[k]) });
+        }
+        ui.text_field_at(cv, tf[k], b, "00", "", Submit::Keep, 0.0, 0.0);
+        if k < 2 {
+            cv.text(":", Rect::new(b.right(), by - 1.0, gap, box_h), &f.mono_c, dim());
+        }
+        let w = ui.wheel_in(b);
+        if w != 0.0 {
+            today.wheel_time(k, w);
+            wheel_handled = true;
+        }
+    }
+    if !wheel_handled {
+        let w = ui.wheel_in(Rect::new(tx, by, 3.0 * box_w + 2.0 * gap, box_h));
+        if w != 0.0 {
+            today.wheel_time(today.time_focus.unwrap_or(1), w);
+        }
+    }
+}
+
+/// Клик и колесо мыши над цифрами времени / кольцом: пауза (если шёл) и фокус на поле минут.
+unsafe fn handle_digits_interaction(today: &mut Today, ui: &mut Ui, tf: [u32; 3], area: Rect) {
+    let (_, clicked) = ui.click_area(id(TODAY, ID_DIGITS), area);
+    if clicked {
+        if today.deadline.is_some() {
+            today.toggle_run();
+        }
+        ui.set_field_text(tf[1], &format!("{:02}", today.minutes));
+        ui.select_all(tf[1]);
+        ui.focus = Some(tf[1]);
+        ui.caret_on = true;
+        today.time_focus = Some(1);
+    }
+    let wheel = ui.wheel_in(area);
+    today.wheel_time(1, wheel);
 }
 
 impl Today {
@@ -177,25 +270,24 @@ impl Today {
         }
     }
 
-    /// Таймер. `size`: 0 — низкая карточка (круг, Старт/Сброс, без ввода времени и пресетов),
-    /// 1 и 2 — полная; в широкой содержимое центрируется по ширине.
+    /// Карточка таймера по макету:
+    /// - 4x1 (216x48): кольцо с колокольчиком звука, крупные цифры времени и круглые кнопки Сброс / Старт-Пауза.
+    /// - 4x2 (216x104): шапка с «ТАЙМЕР» и общей длительностью, огромное время с кнопками и 30 сегментов внизу.
+    /// - 6x2 (328x104): кольцо с временем слева, шапка «ПРЕСЕТЫ», 5 чипов-пресетов, широкая кнопка Старт/Пауза и сброс.
     pub(super) unsafe fn timer_card(&mut self, ui: &mut Ui, cv: &Canvas, tm: Rect, size: usize) {
         let f = &cv.g.fonts;
+        // Оранжевый акцент таймера и мягкий оранжевый ореол в левом верхнем углу карточки.
+        let tint = crate::ui::status_orange();
         cv.card(tm);
-        let compact = size == 0;
-        // Содержимое рассчитано на 230 px по ширине (в узкой карточке 4×2 — на 208 px, элементы
-        // чуть теснее); лишнее место делим пополам.
-        let narrow = tm.w < 224.0;
-        let ox = ((tm.w - if narrow { 208.0 } else { 230.0 }) / 2.0).max(0.0);
-        // Сдвиги кольца и блока справа от него, шаги полей времени и пресетов, ширина кнопок.
-        let (cx_off, bx_off, f_step, p_step, btn_w) = if narrow { (35.0, 66.0, 46.0, 27.0, 66.0) } else { (40.0, 82.0, 49.0, 29.0, 68.0) };
+        cv.glow(tm, 14.0, tint, Corner::TopLeft);
+
         let rem = self.remaining();
         let frac = if self.total.is_zero() { 0.0 } else { rem.as_secs_f32() / self.total.as_secs_f32() };
         self.ring.target = frac.clamp(0.0, 1.0);
-        let (cx, cy) = (tm.x + ox + cx_off, tm.y + 46.0);
+
         // Поля времени (ч, мин, с): ввод цифр, Enter или уход из поля применяет.
         let tf = [id(TODAY, ID_FIELDS), id(TODAY, ID_FIELDS + 1), id(TODAY, ID_FIELDS + 2)];
-        let focused = (0..3).find(|&k| ui.has_focus(tf[k]));
+        let mut focused = (0..3).find(|&k| ui.has_focus(tf[k]));
         let entered = (0..3).any(|k| ui.take_submitted(tf[k]).is_some());
         for &t in &tf {
             ui.set_digits(t, true);
@@ -207,6 +299,7 @@ impl Today {
             self.set_time_hms(n[0], n[1], n[2]);
             if entered {
                 ui.blur();
+                focused = None;
             }
         }
         if let Some(k) = focused.filter(|_| focused != self.time_focus) {
@@ -216,134 +309,185 @@ impl Today {
             ui.select_all(tf[k]);
         }
         self.time_focus = focused;
+
         let secs = rem.as_secs_f32().ceil() as u64;
         let label = clock_label(secs);
-        // Цвет таймера — оранжевый, как его полоска на свёрнутом острове.
-        let tint = crate::ui::status_orange();
+        let p = 12.0f32;
 
-        if compact {
-            // Полоса 216×48..248×56: кольцо, поля/остаток времени и справа круглые кнопки.
-            const P: f32 = 12.0;
-            let r = tm.h / 2.0 - 10.0;
-            let (rx, cy) = (tm.x + P + r, tm.cy());
-            cv.ring(rx, cy, r, 3.0, self.ring.value, tint);
-            let sound_tip = if self.sound {
-                crate::i18n::pick("Выключить звук сигнала", "Mute alarm sound")
-            } else {
-                crate::i18n::pick("Включить звук сигнала", "Unmute alarm sound")
-            };
-            if ui.icon_button_tinted(cv, id(TODAY, ID_SOUND), Rect::new(rx - 9.0, cy - 9.0, 18.0, 18.0), icon::RINGER, self.sound, tint, sound_tip) {
-                self.sound = !self.sound;
-                self.save_timer();
-            }
-            let tx = rx + r + 10.0;
-            let vals = [self.hours, self.minutes, self.seconds];
-            if self.deadline.is_some() {
-                let compact_label = format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60);
-                cv.digits(&compact_label, tx - 1.0, 90.0, cy - 6.0, 22.0, 600, Align::Leading, txt());
-                let of_secs = self.total.as_secs();
-                let of_label = format!("{}:{:02}:{:02}", of_secs / 3600, of_secs / 60 % 60, of_secs % 60);
-                let of = format!("{} {}", crate::i18n::pick("из", "of"), of_label);
-                cv.line(&of, &f.small, tx, 90.0, cy + 13.0, Align::Leading, dim());
-                let digits_r = Rect::new(tx - 2.0, tm.y + 4.0, 86.0, tm.h - 8.0);
-                if ui.click_area(id(TODAY, ID_DIGITS), digits_r).1 {
-                    self.toggle_run();
-                    ui.set_field_text(tf[1], &format!("{:02}", self.minutes));
-                    ui.select_all(tf[1]);
-                    ui.focus = Some(tf[1]);
-                    ui.caret_on = true;
-                    self.time_focus = Some(1);
-                }
-                let wheel = ui.wheel_in(digits_r);
-                self.wheel_time(1, wheel);
-            } else {
-                let (box_w, gap) = (24.0f32, 6.0f32);
-                let box_h = 24.0f32;
-                let by = cy - box_h / 2.0;
-                let mut wheel_handled = false;
-                for (slot, k) in (0..3).enumerate() {
-                    let bx = tx + slot as f32 * (box_w + gap);
-                    let b = Rect::new(bx, by, box_w, box_h);
-                    if self.time_focus != Some(k) {
-                        ui.set_field_text(tf[k], &if k == 0 { vals[k].to_string() } else { format!("{:02}", vals[k]) });
-                    }
-                    ui.text_field_at(cv, tf[k], b, "00", "", Submit::Keep, 0.0, 0.0);
-                    if k < 2 {
-                        cv.text(":", Rect::new(b.right(), by - 1.0, gap, box_h), &f.mono_c, dim());
-                    }
-                    let w = ui.wheel_in(b);
-                    if w != 0.0 {
-                        self.wheel_time(k, w);
-                        wheel_handled = true;
-                    }
-                }
-                if !wheel_handled {
-                    let w = ui.wheel_in(Rect::new(tx, tm.y, 88.0, tm.h));
-                    if w != 0.0 {
-                        self.wheel_time(self.time_focus.unwrap_or(1), w);
-                    }
-                }
-            }
-            let reset_x = tm.right() - P - 14.0;
-            let run_x = reset_x - 34.0;
-            let run_icon = if self.deadline.is_some() { icon::PAUSE } else { icon::PLAY_SOLID };
-            if round_button(ui, cv, id(TODAY, ID_RUN), run_x, cy, 14.0, run_icon, tint, crate::ui::WHITE) {
-                self.toggle_run();
-            }
-            if round_button(ui, cv, id(TODAY, ID_RESET), reset_x, cy, 14.0, icon::RESTART, chip_bg(), txt()) {
-                self.left = self.total;
-                self.deadline = None;
-                self.save_timer();
-            }
-            return;
-        }
-
-        cv.ring(cx, cy, 25.0, 3.5, self.ring.value, tint);
-        // Оставшееся время — крупными табличными цифрами: главное в карточке.
-        cv.text(&label, Rect::new(cx - 25.0, cy - 10.0, 50.0, 20.0), &f.title_c, txt());
-        // Звук сигнала — под кольцом, по его оси.
         let sound_tip = if self.sound {
             crate::i18n::pick("Выключить звук сигнала", "Mute alarm sound")
         } else {
             crate::i18n::pick("Включить звук сигнала", "Unmute alarm sound")
         };
-        if ui.icon_button_tinted(cv, id(TODAY, ID_SOUND), Rect::new(cx - 9.0, tm.y + 77.0, 18.0, 18.0), icon::RINGER, self.sound, tint, sound_tip) {
-            self.sound = !self.sound;
-            self.save_timer();
-        }
+        let run_glyph = if self.deadline.is_some() { icon::PAUSE } else { icon::PLAY_SOLID };
+        let run_tip = if self.deadline.is_some() {
+            crate::i18n::pick("Пауза", "Pause")
+        } else {
+            crate::i18n::pick("Старт", "Start")
+        };
+        let reset_tip = crate::i18n::pick("Сброс", "Reset");
 
-        // Часы, минуты, секунды: поле ввода; колесо мыши меняет значение.
-        let bx = tm.x + ox + bx_off;
-        let vals = [self.hours, self.minutes, self.seconds];
-        let units = [crate::i18n::pick("ч", "h"), crate::i18n::pick("м", "m"), crate::i18n::pick("с", "s")];
-        for k in 0..3 {
-            let b = Rect::new(bx + k as f32 * f_step, tm.y + 10.0, f_step - 3.0, 24.0);
-            if self.time_focus != Some(k) {
-                ui.set_field_text(tf[k], &if k == 0 { vals[k].to_string() } else { format!("{:02}", vals[k]) });
+        if size == 0 || tm.h < 65.0 {
+            // 4x1 (216x48): кольцо с колокольчиком звука внутри, правее время, справа кнопки сброс и пуск/пауза.
+            let r = 13.0f32;
+            let (rx, cy) = (tm.x + p + r, tm.cy());
+            cv.ring(rx, cy, r, 3.0, self.ring.value, tint);
+            let bell_r = Rect::new(rx - 9.0, cy - 9.0, 18.0, 18.0);
+            if ui.icon_button_tinted(cv, id(TODAY, ID_SOUND), bell_r, icon::RINGER, self.sound, tint, sound_tip) {
+                self.sound = !self.sound;
+                self.save_timer();
             }
-            ui.text_field_at(cv, tf[k], b, "0", "", Submit::Keep, 8.0, 16.0);
-            cv.text(units[k], Rect::new(b.right() - 15.0, b.y + 1.0, 12.0, b.h), &f.small, dim());
-            let wheel = ui.wheel_in(b);
-            self.wheel_time(k, wheel);
-        }
 
-        // Пресеты.
-        for (i, m) in PRESETS.iter().enumerate() {
-            let r = Rect::new(bx + i as f32 * p_step, tm.y + 42.0, p_step - 4.0, 18.0);
-            if ui.chip_ex(cv, id(TODAY, ID_PRESET + i as u32), r, &format!("{m}{}", crate::i18n::pick("м", "m")), self.preset == Some(i), false, Some(tint)) {
-                self.set_preset(i);
+            let btn_rad = 14.0f32;
+            let run_x = tm.right() - p - btn_rad;
+            let reset_x = run_x - 2.0 * btn_rad - 6.0;
+
+            if round_button(ui, cv, id(TODAY, ID_RESET), reset_x, cy, btn_rad, icon::RESTART, chip_bg(), txt(), reset_tip) {
+                self.left = self.total;
+                self.deadline = None;
+                self.save_timer();
             }
-        }
+            if round_button(ui, cv, id(TODAY, ID_RUN), run_x, cy, btn_rad, run_glyph, tint, crate::ui::WHITE, run_tip) {
+                self.toggle_run();
+            }
 
-        // Старт / пауза и сброс.
-        let start = if self.deadline.is_some() { "Пауза" } else { "Старт" };
-        if ui.solid_button(cv, id(TODAY, ID_RUN), Rect::new(bx, tm.y + 68.0, btn_w, 26.0), start, tint, crate::ui::WHITE, 6.0) {
-            self.toggle_run();
-        }
-        if ui.solid_button(cv, id(TODAY, ID_RESET), Rect::new(bx + btn_w + 6.0, tm.y + 68.0, btn_w, 26.0), "Сброс", chip_bg(), txt(), 6.0) {
-            self.left = self.total;
-            self.deadline = None;
-            self.save_timer();
+            let tx = rx + r + 10.0;
+            let avail_w = (reset_x - btn_rad - 6.0 - tx).max(60.0);
+            if self.time_focus.is_some() {
+                // В режиме правки вместо цифр показываем поля ввода ч:м:с.
+                render_time_fields(self, ui, cv, tf, tx, cy - 12.0);
+            } else {
+                let digit_size = if secs >= 3600 { 18.0 } else { 22.0 };
+                cv.digits(&label, tx, avail_w, cy, digit_size, 600, Align::Leading, txt());
+                let digits_r = Rect::new(tx, tm.y + 4.0, avail_w, tm.h - 8.0);
+                handle_digits_interaction(self, ui, tf, digits_r);
+            }
+        } else if size == 2 || tm.w > 260.0 {
+            // 6x2 (328x104): большое кольцо с временем и «из 5 мин» слева, шапка «ПРЕСЕТЫ», чипы и кнопки справа.
+            let ring_rad = 38.0f32;
+            let (rx, cy) = (tm.x + p + ring_rad, tm.cy());
+            cv.ring(rx, cy, ring_rad, 5.0, self.ring.value, tint);
+
+            let time_size = if secs >= 3600 { 16.0 } else { 20.0 };
+            cv.digits(&label, rx - 35.0, 70.0, cy - 7.0, time_size, 600, Align::Center, txt());
+            let sub_text = total_label_6x2(self.total.as_secs());
+            cv.line(&sub_text, &f.small, rx - 35.0, 70.0, cy + 13.0, Align::Center, dim());
+
+            let ring_area = Rect::new(rx - ring_rad, cy - ring_rad, 2.0 * ring_rad, 2.0 * ring_rad);
+            handle_digits_interaction(self, ui, tf, ring_area);
+
+            let bx = rx + ring_rad + 16.0;
+            let bw = (tm.right() - p - bx).max(120.0);
+
+            // Шапка «ПРЕСЕТЫ» и колокольчик звука.
+            let bell_r = Rect::new(tm.right() - p - 18.0, tm.y + 7.0, 18.0, 18.0);
+            cv.line(crate::i18n::pick("ПРЕСЕТЫ", "PRESETS"), &f.caps, bx, bell_r.x - 6.0 - bx, tm.y + 16.0, Align::Leading, dim());
+            if ui.icon_button_tinted(cv, id(TODAY, ID_SOUND), bell_r, icon::RINGER, self.sound, tint, sound_tip) {
+                self.sound = !self.sound;
+                self.save_timer();
+            }
+
+            // Ряд пресетов; в режиме правки подменяется на поля ввода ч:м:с.
+            if self.time_focus.is_some() {
+                render_time_fields(self, ui, cv, tf, bx, tm.y + 34.0);
+            } else {
+                let n_presets = PRESETS.len();
+                let gap = 6.0f32;
+                let chip_w = ((bw - (n_presets - 1) as f32 * gap) / n_presets as f32).floor();
+                for (i, label) in PRESET_LABELS.iter().enumerate() {
+                    let cx = bx + i as f32 * (chip_w + gap);
+                    let cr = Rect::new(cx, tm.y + 36.0, chip_w, 20.0);
+                    if ui.chip_ex(cv, id(TODAY, ID_PRESET + i as u32), cr, label, self.preset == Some(i), false, Some(tint)) {
+                        self.set_preset(i);
+                    }
+                }
+            }
+
+            // Нижний ряд: широкая кнопка-пилюля «Пауза»/«Старт» и круглая кнопка сброса.
+            let rad = 14.0f32;
+            let reset_cx = tm.right() - p - rad;
+            let reset_cy = tm.y + 66.0 + rad;
+            if round_button(ui, cv, id(TODAY, ID_RESET), reset_cx, reset_cy, rad, icon::RESTART, chip_bg(), txt(), reset_tip) {
+                self.left = self.total;
+                self.deadline = None;
+                self.save_timer();
+            }
+
+            let pill_w = (reset_cx - rad - 8.0 - bx).max(60.0);
+            let pill_r = Rect::new(bx, tm.y + 66.0, pill_w, 28.0);
+            let (_, clicked) = ui.click_area(id(TODAY, ID_RUN), pill_r);
+            let hv = ui.hover_of(id(TODAY, ID_RUN));
+            cv.rr(pill_r, pill_r.h / 2.0, mix(tint, crate::ui::fg(), 0.08 * hv));
+
+            let text_w = cv.text_w(run_tip, &f.small);
+            let icon_sz = 14.0f32;
+            let gap = 6.0f32;
+            let content_w = icon_sz + gap + text_w;
+            let start_x = pill_r.x + (pill_r.w - content_w).max(0.0) / 2.0;
+            cv.glyph(run_glyph, Rect::new(start_x, pill_r.cy() - icon_sz / 2.0, icon_sz, icon_sz), false, crate::ui::WHITE);
+            cv.line(run_tip, &f.small, start_x + icon_sz + gap, text_w + 2.0, pill_r.cy(), Align::Leading, crate::ui::WHITE);
+            ui.tip(id(TODAY, ID_RUN), pill_r, run_tip);
+            if clicked {
+                self.toggle_run();
+            }
+        } else {
+            // 4x2 (216x104): шапка с «ТАЙМЕР» и «из 5:00», крупное время с кнопками, 30 сегментов внизу.
+            let bell_r = Rect::new(tm.right() - p - 16.0, tm.y + 8.0, 16.0, 16.0);
+            if ui.icon_button_tinted(cv, id(TODAY, ID_SOUND), bell_r, icon::RINGER, self.sound, tint, sound_tip) {
+                self.sound = !self.sound;
+                self.save_timer();
+            }
+
+            let of_str = total_label_4x2(self.total.as_secs());
+            let of_w = cv.text_w(&of_str, &f.small);
+            cv.line(&of_str, &f.small, bell_r.x - 6.0 - of_w, of_w + 2.0, tm.y + 16.0, Align::Leading, dim());
+            cv.line(crate::i18n::pick("ТАЙМЕР", "TIMER"), &f.caps, tm.x + p, (bell_r.x - 12.0 - of_w - (tm.x + p)).max(40.0), tm.y + 16.0, Align::Leading, dim());
+
+            let btn_rad = 15.0f32;
+            let cy = tm.y + 51.0;
+            let run_x = tm.right() - p - btn_rad;
+            let reset_x = run_x - 2.0 * btn_rad - 6.0;
+
+            if round_button(ui, cv, id(TODAY, ID_RESET), reset_x, cy, btn_rad, icon::RESTART, chip_bg(), txt(), reset_tip) {
+                self.left = self.total;
+                self.deadline = None;
+                self.save_timer();
+            }
+            if round_button(ui, cv, id(TODAY, ID_RUN), run_x, cy, btn_rad, run_glyph, tint, crate::ui::WHITE, run_tip) {
+                self.toggle_run();
+            }
+
+            let tx = tm.x + p;
+            let avail_w = (reset_x - btn_rad - 6.0 - tx).max(60.0);
+            if self.time_focus.is_some() {
+                // В режиме правки вместо цифр показываем поля ввода ч:м:с.
+                render_time_fields(self, ui, cv, tf, tx, cy - 12.0);
+            } else {
+                let font_sz = if secs >= 3600 { 28.0 } else { 38.0 };
+                cv.digits(&label, tx, avail_w, cy, font_sz, 600, Align::Leading, txt());
+                let digits_r = Rect::new(tx, cy - 20.0, avail_w, 40.0);
+                handle_digits_interaction(self, ui, tf, digits_r);
+            }
+
+            if self.deadline.is_none() && self.left == self.total {
+                // Таймер ещё не запущен: внизу ряд пресетов (по умолчанию именно этот размер), как в 6×2.
+                let n_presets = PRESETS.len();
+                let gap = 6.0f32;
+                let row_w = tm.w - 2.0 * p;
+                let chip_w = ((row_w - (n_presets - 1) as f32 * gap) / n_presets as f32).floor();
+                for (i, label) in PRESET_LABELS.iter().enumerate() {
+                    let cr = Rect::new(tm.x + p + i as f32 * (chip_w + gap), tm.bottom() - p - 20.0, chip_w, 20.0);
+                    if ui.chip_ex(cv, id(TODAY, ID_PRESET + i as u32), cr, label, self.preset == Some(i), false, Some(tint)) {
+                        self.set_preset(i);
+                    }
+                }
+            } else {
+                // Идёт отсчёт или пауза: полоса из 30 сегментов внизу карточки (оставшееся время).
+                let seg_h = 10.0f32;
+                let seg_r = Rect::new(tm.x + p, tm.bottom() - p - seg_h, tm.w - 2.0 * p, seg_h);
+                let filled = (frac * 30.0).round().clamp(0.0, 30.0) as usize;
+                cv.segments(seg_r, 30, filled, tint);
+            }
         }
     }
 }

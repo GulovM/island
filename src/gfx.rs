@@ -66,6 +66,8 @@ pub(crate) struct Gfx {
     /// Градиентные кисти: ключ — остановки с альфой, нормированной на самую плотную (общая
     /// прозрачность уходит в `SetOpacity`), поэтому затухание не создаёт новых текстур градиента.
     gradients: RefCell<Recent<Vec<u32>, ID2D1LinearGradientBrush>>,
+    /// Радиальные кисти (ореол в углу карточек): тот же принцип кэша, что у линейных.
+    radials: RefCell<Recent<Vec<u32>, ID2D1RadialGradientBrush>>,
     /// Контуры тела острова (ключ — точные параметры формы): в простое кадр их не перестраивает.
     pub(crate) paths: RefCell<Recent<[u32; 6], ID2D1PathGeometry1>>,
     /// Маска тени капли под выбранной вкладкой (вычитание геометрий — дорогая операция на CPU).
@@ -193,6 +195,7 @@ impl Gfx {
             fonts,
             round,
             gradients: RefCell::new(Recent::new(GRADIENT_CACHE)),
+            radials: RefCell::new(Recent::new(GRADIENT_CACHE)),
             paths: RefCell::new(Recent::new(PATH_CACHE)),
             pill_masks: RefCell::new(Recent::new(2)),
             symbols: RefCell::new(std::collections::HashMap::new()),
@@ -267,6 +270,36 @@ impl Gfx {
         };
         br.SetStartPoint(a);
         br.SetEndPoint(b);
+        br.SetOpacity(peak.min(1.0));
+        Some(br)
+    }
+
+    /// Радиальный градиент с центром `c` и радиусами `rx`/`ry`; остановки и кэш — как у `linear_gradient`.
+    pub(crate) unsafe fn radial_gradient(&self, c: Vector2, rx: f32, ry: f32, stops: &[(f32, D2D1_COLOR_F)]) -> Option<ID2D1RadialGradientBrush> {
+        let peak = stops.iter().fold(0.0f32, |m, s| m.max(s.1.a));
+        if peak <= 0.0 {
+            return None;
+        }
+        let q = |v: f32| (v.clamp(0.0, 1.0) * 4096.0).round() as u32;
+        let key: Vec<u32> = stops.iter().flat_map(|&(p, col)| [q(p), q(col.r), q(col.g), q(col.b), q(col.a / peak)]).collect();
+        let mut cache = self.radials.borrow_mut();
+        let br = match cache.get(&key) {
+            Some(br) => br,
+            None => {
+                let list: Vec<D2D1_GRADIENT_STOP> = stops
+                    .iter()
+                    .map(|&(position, col)| D2D1_GRADIENT_STOP { position, color: D2D1_COLOR_F { a: col.a / peak, ..col } })
+                    .collect();
+                let coll = ID2D1RenderTarget::CreateGradientStopCollection(&self.dc, &list, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP).ok()?;
+                let props = D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES { center: c, gradientOriginOffset: Vector2 { X: 0.0, Y: 0.0 }, radiusX: rx, radiusY: ry };
+                let br = self.dc.CreateRadialGradientBrush(&props, None, &coll).ok()?;
+                cache.put(key, br.clone());
+                br
+            }
+        };
+        br.SetCenter(c);
+        br.SetRadiusX(rx);
+        br.SetRadiusY(ry);
         br.SetOpacity(peak.min(1.0));
         Some(br)
     }

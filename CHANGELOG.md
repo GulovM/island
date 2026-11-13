@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### RU
+
+- Виджеты получили новый вид по макетам: открытые дуги и графики-«искры» в статистике, мягкий цветной «ореол» в углу карточек, обновлённые «Батарея», «Погода», «Таймер», «Задачи» и «Эта неделя». День недели и события выделяются цветом темы.
+- «Задачи»: новый размер 4×3.
+- «Часы»: шесть циферблатов — «Часы», «Классика», «Точки», «Шкала», «Минимал» и «Небо» — заменили прежние пять, поэтому сохранённый циферблат может выглядеть иначе. Восход и закат для «Неба» считаются по координатам города из погоды.
+- «Скорость сети»: размер 6×2 убран, 4×2 переработан со спидометром. «GPU» в размере 2×2 показывает «занято / всего» видеопамяти.
+- «Батарея»: режим энергосбережения теперь отражается в карточке, а в размере 2×2 заливка показывает заряд.
+
+### EN
+
+- Widgets have a new look based on the design mockups: open arcs and sparklines in Stats, a soft coloured glow in the card corner, and refreshed Battery, Weather, Timer, Tasks and This week cards. The current day and events use the theme colour.
+- Tasks: new 4×3 size.
+- Clock: six faces — Clock, Classic, Dots, Ruler, Minimal and Sky — replace the previous five, so a saved face may look different. Sunrise and sunset for Sky are calculated from the weather city's coordinates.
+- Network speed: the 6×2 size is removed and 4×2 is redesigned with a speedometer. GPU at 2×2 shows used / total video memory.
+- Battery: the energy saver state now shows on the card, and at 2×2 the fill shows the charge level.
+
 ## [1.4.0] — 2026-11-12
 
 ### RU

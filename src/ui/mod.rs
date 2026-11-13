@@ -30,6 +30,9 @@ pub use fonts::*;
 mod canvas;
 pub use canvas::*;
 
+mod chart;
+pub use chart::*;
+
 mod scroll;
 use scroll::{Scroll, SCROLL_FRICTION};
 

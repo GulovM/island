@@ -13,6 +13,9 @@ pub const VIOLET: D2D1_COLOR_F = rgb(0.78, 0.61, 0.91);
 pub const ORANGE: D2D1_COLOR_F = rgb(0.95, 0.63, 0.14);
 pub const PINK: D2D1_COLOR_F = rgb(0.91, 0.42, 0.60);
 pub const RED: D2D1_COLOR_F = rgb(0.93, 0.36, 0.33);
+pub const BLUE: D2D1_COLOR_F = rgb(0.38, 0.64, 1.0);
+pub const TEAL: D2D1_COLOR_F = rgb(0.18, 0.84, 0.75);
+pub const CYAN: D2D1_COLOR_F = rgb(0.25, 0.72, 0.98);
 
 // Цвета темы (см. `theme`): меняются на лету, поэтому это функции, а не константы.
 
@@ -245,6 +248,27 @@ pub fn status_violet() -> D2D1_COLOR_F {
     status_color(crate::ios::SysColor::Purple, VIOLET)
 }
 
+/// Статусный синий (CPU в stats):
+/// в стиле Windows — константа `BLUE`,
+/// в стиле iOS — `ios::sys(Blue, dark)`.
+pub fn status_blue() -> D2D1_COLOR_F {
+    status_color(crate::ios::SysColor::Blue, BLUE)
+}
+
+/// Статусный бирюзовый (диск в stats):
+/// в стиле Windows — константа `TEAL`,
+/// в стиле iOS — `ios::sys(Teal, dark)`.
+pub fn status_teal() -> D2D1_COLOR_F {
+    status_color(crate::ios::SysColor::Teal, TEAL)
+}
+
+/// Статусный голубой (сеть и стрелка загрузки в stats):
+/// в стиле Windows — константа `CYAN`,
+/// в стиле iOS — `ios::sys(Cyan, dark)`.
+pub fn status_cyan() -> D2D1_COLOR_F {
+    status_color(crate::ios::SysColor::Cyan, CYAN)
+}
+
 /// Статусный оранжевый (таймер, предупреждение о батарее, заметка в grid):
 /// в стиле Windows — константа `ORANGE`,
 /// в стиле iOS — `ios::sys(Orange, dark)`.
@@ -271,6 +295,14 @@ pub fn status_red() -> D2D1_COLOR_F {
 /// в стиле Windows — текущий цвет акцента.
 pub fn switch_on_color(accent: D2D1_COLOR_F) -> D2D1_COLOR_F {
     status_color(crate::ios::SysColor::Green, accent)
+}
+
+/// Проверяет и подтягивает контраст цвета `c` против текущего фона темы (`theme::get().bg`)
+/// до порога APCA `min_lc`. На тёмной теме читаемый цвет остаётся без изменений.
+pub fn readable(c: D2D1_COLOR_F, min_lc: f32) -> D2D1_COLOR_F {
+    let bg = crate::theme::get().bg;
+    let rgb = ensure_apca([c.r, c.g, c.b], &[[bg.r, bg.g, bg.b]], min_lc);
+    D2D1_COLOR_F { r: rgb[0], g: rgb[1], b: rgb[2], a: c.a }
 }
 
 #[cfg(test)]
@@ -369,6 +401,9 @@ mod tests {
         assert_eq!(status_green(), GREEN);
         assert_eq!(status_bar_green(), BAR_GREEN);
         assert_eq!(status_violet(), VIOLET);
+        assert_eq!(status_blue(), BLUE);
+        assert_eq!(status_teal(), TEAL);
+        assert_eq!(status_cyan(), CYAN);
         assert_eq!(status_orange(), ORANGE);
         assert_eq!(status_pink(), PINK);
         assert_eq!(status_red(), RED);
@@ -380,6 +415,9 @@ mod tests {
         assert_eq!(status_green(), GREEN);
         assert_eq!(status_bar_green(), BAR_GREEN);
         assert_eq!(status_violet(), VIOLET);
+        assert_eq!(status_blue(), BLUE);
+        assert_eq!(status_teal(), TEAL);
+        assert_eq!(status_cyan(), CYAN);
         assert_eq!(status_orange(), ORANGE);
         assert_eq!(status_pink(), PINK);
         assert_eq!(status_red(), RED);
@@ -392,6 +430,9 @@ mod tests {
         assert_eq!(status_green(), to_d2d(crate::ios::SysColor::Green));
         assert_eq!(status_bar_green(), to_d2d(crate::ios::SysColor::Green));
         assert_eq!(status_violet(), to_d2d(crate::ios::SysColor::Purple));
+        assert_eq!(status_blue(), to_d2d(crate::ios::SysColor::Blue));
+        assert_eq!(status_teal(), to_d2d(crate::ios::SysColor::Teal));
+        assert_eq!(status_cyan(), to_d2d(crate::ios::SysColor::Cyan));
         assert_eq!(status_orange(), to_d2d(crate::ios::SysColor::Orange));
         assert_eq!(status_pink(), to_d2d(crate::ios::SysColor::Red));
         assert_eq!(status_red(), to_d2d(crate::ios::SysColor::Red));
@@ -404,9 +445,19 @@ mod tests {
         assert_eq!(status_green(), to_d2d_l(crate::ios::SysColor::Green));
         assert_eq!(status_bar_green(), to_d2d_l(crate::ios::SysColor::Green));
         assert_eq!(status_violet(), to_d2d_l(crate::ios::SysColor::Purple));
+        assert_eq!(status_blue(), to_d2d_l(crate::ios::SysColor::Blue));
+        assert_eq!(status_teal(), to_d2d_l(crate::ios::SysColor::Teal));
+        assert_eq!(status_cyan(), to_d2d_l(crate::ios::SysColor::Cyan));
         assert_eq!(status_orange(), to_d2d_l(crate::ios::SysColor::Orange));
         assert_eq!(status_pink(), to_d2d_l(crate::ios::SysColor::Red));
         assert_eq!(status_red(), to_d2d_l(crate::ios::SysColor::Red));
+
+        // Читаемость на светлой и тёмной темах
+        let light_read = readable(VIOLET, 45.0);
+        assert!(apca_lc([light_read.r, light_read.g, light_read.b], bg_light).abs() >= 44.9);
+        crate::theme::set(p_win_dark);
+        let dark_read = readable(VIOLET, 45.0);
+        assert_eq!(dark_read.r, VIOLET.r);
 
         // Восстанавливаем палитру по умолчанию
         crate::theme::set(p_win_dark);

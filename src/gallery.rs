@@ -68,7 +68,7 @@ fn rows(tab: Tab, idx: &[usize]) -> Vec<Row> {
 }
 
 fn sheets() -> Vec<(&'static str, Vec<Row>)> {
-    let clock = (0..today::CLOCK_STYLES).map(|s| Row { title: format!("Часы — циферблат {}", s + 1), tab: Tab::Today, idx: 0, clock: Some(s) }).collect();
+    let clock = (0..today::CLOCK_STYLES).map(|s| Row { title: ["Часы", "Классика", "Точки", "Шкала", "Минимал", "Небо"][s].to_string(), tab: Tab::Today, idx: 0, clock: Some(s) }).collect();
     vec![
         ("clock", clock),
         ("today", rows(Tab::Today, &[1, 2, 3, 4])),
@@ -214,24 +214,27 @@ unsafe fn run_inner(dir: &Path) -> Result<()> {
     let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
     let g = Gfx::new(hwnd, 16, 16, SCALE, &dwrite)?;
 
-    // Время 10:09:30 — классическое «витринное» положение стрелок; дата сегодняшняя.
+    // Время 09:41:30 — как в макете (часовая ~290°, минутная 246°, секундная 180°); дата сегодняшняя.
     let mut t = GetLocalTime();
-    (t.wHour, t.wMinute, t.wSecond) = (10, 9, 30);
+    (t.wHour, t.wMinute, t.wSecond) = (9, 41, 30);
     let day = days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
 
     let accent = [0.184, 0.435, 0.929];
-    for (name, bg) in [("light", [0.945, 0.953, 0.965]), ("dark", [0.05, 0.05, 0.05])] {
-        theme::set(theme::derive(bg, accent, PaletteStyle::Ios));
-        theme::set_glass(true);
-        for (sheet, rows) in sheets() {
-            let mut tabs = Tabs { controls: Default::default(), today: Default::default(), stats: Default::default() };
-            tabs.controls.demo();
-            tabs.today.demo(day);
-            tabs.stats.demo();
-            let mut ui = Ui::default();
-            let path = dir.join(format!("{sheet}-{name}.png"));
-            render(&g, &mut ui, &mut tabs, &rows, &t, &path)?;
-            println!("{}", path.display());
+    // Обе палитры: iOS — файлы `<лист>-<тема>.png`, Windows (по умолчанию в острове) — `<лист>-<тема>-win.png`.
+    for (style, suffix) in [(PaletteStyle::Ios, ""), (PaletteStyle::Windows, "-win")] {
+        for (name, bg) in [("light", [0.945, 0.953, 0.965]), ("dark", [0.05, 0.05, 0.05])] {
+            theme::set(theme::derive(bg, accent, style));
+            theme::set_glass(true);
+            for (sheet, rows) in sheets() {
+                let mut tabs = Tabs { controls: Default::default(), today: Default::default(), stats: Default::default() };
+                tabs.controls.demo();
+                tabs.today.demo(day);
+                tabs.stats.demo();
+                let mut ui = Ui::default();
+                let path = dir.join(format!("{sheet}-{name}{suffix}.png"));
+                render(&g, &mut ui, &mut tabs, &rows, &t, &path)?;
+                println!("{}", path.display());
+            }
         }
     }
     Ok(())

@@ -98,12 +98,20 @@ impl Default for Fade {
 struct BatteryState {
     status: Option<sys::BatteryStatus>,
     bolt: Spring,
+    /// Показываемый уровень заряда 0..1: плавно доезжает до реального (при показе вкладки заполняется с нуля).
+    level: Spring,
 }
 
 impl Default for BatteryState {
     fn default() -> Self {
         // Опрос сразу: без него виджет считался бы недоступным до первого показа вкладки.
-        BatteryState { status: sys::battery_status(), bolt: Spring::unit(0.0, 260.0, 12.0) }
+        let mut s = BatteryState {
+            status: sys::battery_status(),
+            bolt: Spring::unit(0.0, 260.0, 12.0),
+            level: Spring::unit(0.0, 70.0, 14.0),
+        };
+        s.aim_level();
+        s
     }
 }
 
@@ -118,7 +126,15 @@ impl BatteryState {
         }
         let changed = next != self.status;
         self.status = next;
+        self.aim_level();
         changed
+    }
+
+    /// Цель показываемого уровня — реальный заряд (пружина сама доедет до него).
+    fn aim_level(&mut self) {
+        if let Some(b) = self.status {
+            self.level.target = f32::from(b.percent.min(100)) / 100.0;
+        }
     }
 }
 
@@ -242,15 +258,18 @@ impl Controls {
         self.join = None;
         self.seek_hold = None;
         self.last_seek_send = None;
+        // При следующем показе батарея 2×2 снова заполняется с нуля до текущего заряда.
+        self.battery.level.value = 0.0;
     }
 
     pub fn step(&mut self, dt: f32) {
         self.list_t.0.step(dt);
         self.battery.bolt.step(dt);
+        self.battery.level.step(dt);
     }
 
     pub fn animating(&self) -> bool {
-        !self.list_t.0.settled() || !self.battery.bolt.settled()
+        !self.list_t.0.settled() || !self.battery.bolt.settled() || !self.battery.level.settled()
     }
 
     /// Открывает/закрывает список устройств по стрелке плитки.
@@ -551,52 +570,104 @@ impl Controls {
         }
     }
 
-    /// Батарея: процент, полоса заряда и молния, которая «подпрыгивает» при подключении питания.
-    /// Оформление — как у карточек «Статистики», откуда виджет переехал.
+    /// Батарея по макету: 2x2 — «волна» заряда на фоне карточки, 4x2 — крупный процент и значок батареи
+    /// с молнией (молния «подпрыгивает» при подключении питания) и плашкой режима экономии.
     unsafe fn battery_card(&self, cv: &Canvas, r: Rect, size: usize) {
-        use super::stats::{header, P};
+        use super::stats::header;
+        use crate::ui::{readable, status_green, status_orange, status_red};
         let f = &cv.g.fonts;
-        let wide = size > 0;
-        let iw = r.w - 2.0 * P;
         cv.card(r);
         let Some(b) = self.battery.status else {
             header(cv, r, icon::BATTERY, "Батарея", dim());
             return;
         };
+        // Энергосбережение: системный флаг или состояние, которое выставляет сама плитка «Энергосбережение».
+        let saver_on = b.saver_on || self.saver == Some(true);
         let tint = if !b.ac_online && b.percent <= 20 {
-            crate::ui::status_red()
-        } else if b.saver_on {
-            crate::ui::status_orange()
+            status_red()
+        } else if saver_on {
+            status_orange()
         } else {
-            crate::ui::status_green()
+            status_green()
         };
-        header(cv, r, icon::BATTERY, "Батарея", tint);
-        let frac = f32::from(b.percent) / 100.0;
+        let col = readable(tint, 45.0);
+        let frac = f32::from(b.percent.min(100)) / 100.0;
         let big = b.percent.to_string();
-        let bw = cv.digits_w(&big, 30.0, 600);
-        let dy = r.y + 44.0;
-        cv.digits(&big, r.x + P - 1.0, bw + 4.0, dy, 30.0, 600, Align::Leading, txt());
-        cv.line("%", &f.body, r.x + P + bw + 5.0, 20.0, dy + 4.0, Align::Leading, dim());
-        if b.ac_online {
-            let k = 1.0 + 0.5 * self.battery.bolt.value.max(0.0);
-            let s = 12.0 * k;
-            let cx = r.x + P + bw + 5.0 + 28.0;
-            cv.symbol(icon::BOLT, Rect::new(cx - s / 2.0, dy - s / 2.0, s, s), 11.0 * k, tint);
-        }
-        let status = if b.charging {
+        let status = crate::i18n::tr(if b.charging {
             "Заряжается"
         } else if b.ac_online {
             "Питание от сети"
         } else {
             "От батареи"
-        };
-        let status = crate::i18n::tr(status);
-        if wide {
-            cv.line(&status, &f.body, r.x + P, iw, dy + 4.0, Align::Trailing, txt());
-        } else {
-            cv.line(&status, &f.small, r.x + P, iw, r.bottom() - P - 5.0, Align::Leading, dim());
+        });
+        let k = 1.0 + 0.5 * self.battery.bolt.value.max(0.0);
+        if size == 0 {
+            // Заливка до показываемого уровня (доезжает до реального заряда пружиной), 100% заполняет карточку целиком.
+            // Поверхность ровная и неподвижная; заливка обрезается по скруглениям карточки.
+            let shown = self.battery.level.value.clamp(0.0, 1.0);
+            let (top_y, bot_y) = (r.y + 0.75, r.bottom() - 2.0);
+            let level = bot_y - shown * (bot_y - top_y);
+            let mut hi = tint;
+            hi.a = 0.40;
+            let mut lo = tint;
+            lo.a = 0.14;
+            if shown > 0.02 {
+                cv.liquid(r, level, (0.0, 0.0, 0.0), (hi, lo), None, crate::ui::card_radius());
+            }
+            // Заголовок: молния и статус по центру.
+            let sw = cv.text_w(&status, &f.small_b).min(r.w - 36.0);
+            let bolt = if b.ac_online { 10.0 + 3.0 } else { 0.0 };
+            let x0 = r.cx() - (sw + bolt) / 2.0;
+            if b.ac_online {
+                let s = 10.0 * k;
+                cv.symbol(icon::BOLT, Rect::new(x0 + 5.0 - s / 2.0, r.y + 14.0 - s / 2.0, s, s), 10.0 * k, col);
+            }
+            cv.line(&status, &f.small_b, x0 + bolt, sw + 2.0, r.y + 14.0, Align::Leading, txt());
+            let dy = r.bottom() - 26.0;
+            let bw = cv.digits_w(&big, 30.0, 600);
+            cv.digits(&big, r.x + 12.0, bw + 4.0, dy, 30.0, 600, Align::Leading, txt());
+            cv.line("%", &f.small, r.x + 12.0 + bw + 3.0, 20.0, dy + 5.0, Align::Leading, dim());
+            return;
         }
-        cv.progress(Rect::new(r.x + P, r.bottom() - P - if wide { 6.0 } else { 21.0 }, iw, 6.0), frac, tint);
+
+        cv.glow(r, 14.0, tint, crate::ui::Corner::TopRight);
+        let x = r.x + 14.0;
+        cv.line(&crate::i18n::tr("БАТАРЕЯ"), &f.caps, x, 90.0, r.y + 16.0, Align::Leading, dim());
+        let dy = r.y + 44.0;
+        let bw = cv.digits_w(&big, 34.0, 600);
+        cv.digits(&big, x - 1.0, bw + 4.0, dy, 34.0, 600, Align::Leading, txt());
+        cv.line("%", &f.body, x + bw + 4.0, 20.0, dy + 6.0, Align::Leading, dim());
+        // Одна строка статуса («Заряжается» / «Питание от сети» / «От батареи»): вторая только повторяла бы её.
+        cv.line(&status, &f.body, x, 98.0, r.y + 78.0, Align::Leading, txt());
+
+        // Значок батареи: корпус, выступ-контакт и заливка по уровню заряда.
+        let body = Rect::new(r.right() - 14.0 - 6.0 - 84.0, r.y + 16.0, 84.0, 42.0);
+        let mut edge = dim();
+        edge.a *= 0.6;
+        cv.rr_line(body, 12.0, edge, 2.0);
+        cv.rr(Rect::new(body.right() + 3.0, body.cy() - 7.0, 3.0, 14.0), 1.5, edge);
+        let inner = Rect::new(body.x + 4.0, body.y + 4.0, body.w - 8.0, body.h - 8.0);
+        let fw = (inner.w * frac).max(inner.h.min(inner.w * 0.5)).min(inner.w);
+        let mut lighter = tint;
+        lighter.r = (lighter.r + 0.12).min(1.0);
+        lighter.g = (lighter.g + 0.12).min(1.0);
+        lighter.b = (lighter.b + 0.12).min(1.0);
+        let fill = Rect::new(inner.x, inner.y, fw, inner.h);
+        cv.gradient_rr(fill, 8.0, lighter, tint);
+        if b.ac_online {
+            let s = 18.0 * k;
+            cv.symbol(icon::BOLT, Rect::new(fill.cx() - s / 2.0, fill.cy() - s / 2.0, s, s), 16.0 * k, ink());
+        }
+
+        // Плашка режима экономии.
+        // Плашка стоит под значком по его ширине (корпус и контакт): левый край — край корпуса, правый — край контакта.
+        let label = crate::i18n::tr(if saver_on { "Экономия вкл." } else { "Экономия выкл." });
+        let chip = Rect::new(body.x, r.y + 69.0, body.w + 6.0, 20.0);
+        let mut bg = if saver_on { tint } else { dim() };
+        bg.a = if saver_on { 0.22 } else { 0.14 };
+        cv.rr(chip, 10.0, bg);
+        let label_col = if saver_on { col } else { dim() };
+        cv.line(&label, &f.small_b, chip.x + 2.0, chip.w - 4.0, chip.cy(), Align::Center, label_col);
     }
 
     /// Устройство вывода звука для подписей.
@@ -973,6 +1044,8 @@ impl Controls {
         self.brightness = 0.8;
         self.audio = Some("Наушники AirPods".into());
         self.battery.status = Some(sys::BatteryStatus { ac_online: false, charging: false, saver_on: false, percent: 78 });
+        self.battery.aim_level();
+        self.battery.level.snap();
         self.media = Some(Media {
             title: "Blinding Lights".into(),
             artist: "The Weeknd".into(),

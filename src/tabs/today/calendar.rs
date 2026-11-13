@@ -5,7 +5,10 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use super::Today;
 use crate::online::{self, civil_from_days, days_from_civil, weekday, DayEvent, Event};
 use crate::tabs::{id, TODAY};
-use crate::ui::{dim, fg, icon, inset, mix, status_pink, txt, Canvas, Rect, Submit, Ui};
+use crate::ui::{
+    dim, fg, hairline, icon, inset, mix, readable, status_blue, status_green, status_orange,
+    status_pink, txt, Canvas, Corner, Rect, Submit, Ui,
+};
 
 // Формы подключения аккаунтов. Свой блок, потому что форма рисуется на одной вкладке с таймером
 // и формой события: общий ID заставлял таймер писать минуты в поле Apple ID.
@@ -51,10 +54,9 @@ fn week_dates(y: i32, m: u32, d: u32) -> [(u32, u32); 7] {
     out
 }
 
-/// Первая строка блока события: «Далее • 11:00», «Завтра • 09:30», «Пт 16 окт • весь день».
-fn event_when(ev: &Event, now: i64) -> String {
+/// Строка времени события без префикса: «15:00–15:45», «11:00», «весь день», «весь день → 18 окт», «22:00 → 16 окт 01:30».
+fn event_time_str(ev: &Event) -> String {
     let day = ev.start.div_euclid(1440);
-    let today = now.div_euclid(1440);
     let hm = |t: i64| format!("{:02}:{:02}", t.rem_euclid(1440) / 60, t.rem_euclid(1440) % 60);
     // Конец у события на весь день — начало дня после последнего, поэтому «до» считаем от предыдущей минуты.
     let last_day = if ev.end > ev.start { (ev.end - 1).div_euclid(1440) } else { day };
@@ -62,7 +64,7 @@ fn event_when(ev: &Event, now: i64) -> String {
         let (_, m, d) = civil_from_days(last_day);
         format!("{d} {}", crate::i18n::months_short()[(m as usize).clamp(1, 12) - 1])
     };
-    let when = if ev.all_day {
+    if ev.all_day {
         let all = crate::i18n::t("весь день");
         if last_day > day { format!("{all} → {}", until()) } else { all.to_string() }
     } else if ev.end <= ev.start {
@@ -71,7 +73,14 @@ fn event_when(ev: &Event, now: i64) -> String {
         format!("{}–{}", hm(ev.start), hm(ev.end))
     } else {
         format!("{} → {} {}", hm(ev.start), until(), hm(ev.end))
-    };
+    }
+}
+
+/// Первая строка блока события: «Далее • 11:00», «Завтра • 09:30», «Пт 16 окт • весь день».
+fn event_when(ev: &Event, now: i64) -> String {
+    let day = ev.start.div_euclid(1440);
+    let today = now.div_euclid(1440);
+    let when = event_time_str(ev);
     if day == today {
         format!("{} • {when}", crate::i18n::pick("Далее", "Next"))
     } else if day == today + 1 {
@@ -79,6 +88,120 @@ fn event_when(ev: &Event, now: i64) -> String {
     } else {
         let (_, m, d) = civil_from_days(day);
         format!("{} {} {} • {when}", crate::i18n::weekdays()[weekday(day) as usize], d, crate::i18n::months_short()[(m as usize).clamp(1, 12) - 1])
+    }
+}
+
+/// Относительное время события: «через 40 мин», «сейчас», «Завтра», «Пт 16 окт».
+fn event_relative_time(ev: &Event, now: i64) -> String {
+    let day = ev.start.div_euclid(1440);
+    let today = now.div_euclid(1440);
+    if day == today {
+        if now < ev.start {
+            let diff = ev.start - now;
+            if diff < 60 {
+                crate::i18n::pick(&format!("через {diff} мин"), &format!("in {diff} min")).to_string()
+            } else {
+                let h = diff / 60;
+                let m = diff % 60;
+                if m == 0 {
+                    crate::i18n::pick(&format!("через {h} ч"), &format!("in {h} h")).to_string()
+                } else {
+                    crate::i18n::pick(&format!("через {h} ч {m} мин"), &format!("in {h} h {m} min")).to_string()
+                }
+            }
+        } else if now < ev.end || (ev.end <= ev.start && now == ev.start) {
+            crate::i18n::pick("сейчас", "now").to_string()
+        } else {
+            crate::i18n::pick("завершено", "ended").to_string()
+        }
+    } else if day == today + 1 {
+        crate::i18n::pick("Завтра", "Tomorrow").to_string()
+    } else {
+        let (_, m, d) = civil_from_days(day);
+        format!("{} {} {}", crate::i18n::weekdays()[weekday(day) as usize], d, crate::i18n::months_short()[(m as usize).clamp(1, 12) - 1])
+    }
+}
+
+/// Относительное время события на сегодня в минутах от полуночи: «через 40 мин», «сейчас».
+fn today_event_relative_time(minute: Option<i64>, end_minute: Option<i64>, today_minute: i64) -> String {
+    match minute {
+        None => crate::i18n::pick("сейчас", "now").to_string(),
+        Some(s) => {
+            if today_minute < s {
+                let diff = s - today_minute;
+                if diff < 60 {
+                    crate::i18n::pick(&format!("через {diff} мин"), &format!("in {diff} min")).to_string()
+                } else {
+                    let h = diff / 60;
+                    let m = diff % 60;
+                    if m == 0 {
+                        crate::i18n::pick(&format!("через {h} ч"), &format!("in {h} h")).to_string()
+                    } else {
+                        crate::i18n::pick(&format!("через {h} ч {m} мин"), &format!("in {h} h {m} min")).to_string()
+                    }
+                }
+            } else {
+                let e = end_minute.unwrap_or(s);
+                if today_minute < e || (e <= s && today_minute == s) {
+                    crate::i18n::pick("сейчас", "now").to_string()
+                } else {
+                    crate::i18n::pick("завершено", "ended").to_string()
+                }
+            }
+        }
+    }
+}
+
+/// Длительность события: «15 мин», «1 ч», «1 ч 30 мин», «весь день».
+fn format_event_duration(minute: Option<i64>, end_minute: Option<i64>) -> String {
+    match (minute, end_minute) {
+        (None, _) => crate::i18n::t("весь день").to_string(),
+        (Some(s), Some(e)) if e > s => {
+            let dur = e - s;
+            if dur < 60 {
+                crate::i18n::pick(&format!("{dur} мин"), &format!("{dur} min")).to_string()
+            } else {
+                let h = dur / 60;
+                let m = dur % 60;
+                if m == 0 {
+                    crate::i18n::pick(&format!("{h} ч"), &format!("{h} h")).to_string()
+                } else {
+                    crate::i18n::pick(&format!("{h} ч {m} мин"), &format!("{h} h {m} min")).to_string()
+                }
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+/// Заголовок секции событий на сегодня с правильным склонением: «СЕГОДНЯ · 4 СОБЫТИЯ» / «TODAY · 4 EVENTS».
+fn format_today_events_header(count: usize) -> String {
+    let ru = match (count % 100, count % 10) {
+        (11..=19, _) => format!("СЕГОДНЯ · {count} СОБЫТИЙ"),
+        (_, 1) => format!("СЕГОДНЯ · {count} СОБЫТИЕ"),
+        (_, 2..=4) => format!("СЕГОДНЯ · {count} СОБЫТИЯ"),
+        _ => format!("СЕГОДНЯ · {count} СОБЫТИЙ"),
+    };
+    let en = if count == 1 {
+        format!("TODAY · {count} EVENT")
+    } else {
+        format!("TODAY · {count} EVENTS")
+    };
+    crate::i18n::pick(&ru, &en).to_string()
+}
+
+/// Детерминированный цвет события из набора [status_blue, status_green, status_pink, status_orange].
+/// Для ближайшего/текущего события — цвет темы (`accent`), одинаково во всех палитрах и размерах.
+fn event_color(idx: usize, is_nearest: bool, accent: D2D1_COLOR_F) -> D2D1_COLOR_F {
+    if is_nearest {
+        accent
+    } else {
+        match idx % 4 {
+            0 => status_blue(),
+            1 => status_green(),
+            2 => status_pink(),
+            _ => status_orange(),
+        }
     }
 }
 
@@ -275,7 +398,21 @@ pub fn format_event_range(minute: Option<i64>, end: Option<i64>) -> String {
 }
 
 /// Ширина кнопки-метки «ICS» рядом с кнопкой добавления события.
-const ICS_W: f32 = 26.0;
+const ICS_W: f32 = 24.0;
+/// Ширина левой секции (дни недели) в карточке 6x2 (~60% от 328 px).
+const WEEK_WIDE_LEFT_W: f32 = 200.0;
+/// Высота строки расписания в расширенной карточке недели (4x4).
+const SCHEDULE_ROW_H: f32 = 28.0;
+/// Высота плашки «+N ещё» в расписании недели.
+const SCHEDULE_MORE_H: f32 = 20.0;
+/// Ширина колонки времени в расписании недели.
+const SCHEDULE_TIME_W: f32 = 32.0;
+/// Толщина цветной полоски события.
+const EVENT_STRIP_W: f32 = 3.0;
+/// Радиус точки наличия событий под числом дня.
+const DAY_DOT_R: f32 = 1.6;
+/// Радиус точки отметки «сейчас» на временной шкале.
+const NOW_MARKER_R: f32 = 2.5;
 
 /// Кнопка-метка «ICS»: только текст, без подложки; при наведении подсвечивается. `true` — нажата.
 unsafe fn ics_label(ui: &mut Ui, cv: &Canvas, r: Rect) -> bool {
@@ -295,13 +432,114 @@ fn tip_ics() -> &'static str {
     crate::i18n::pick("Подключить календарь по ссылке (iCal)", "Connect a calendar by link (iCal)")
 }
 
-/// Минимальная высота и ширина контейнера списка событий для показа расширенной формы.
-const MIN_LIST_BOX_H: f32 = 70.0;
-const MIN_LIST_BOX_W: f32 = 140.0;
-const EVENT_ROW_H: f32 = 22.0;
-/// Ширина колонки времени в списках событий: хватает на «10:00–11:30».
+/// Ширина колонки времени в месячном списке событий: хватает на «10:00–11:30».
 const TIME_COL_W: f32 = 74.0;
-const EVENT_MORE_H: f32 = 20.0;
+
+/// Параметры раскладки ряда дней недели.
+struct DaysRowLayout {
+    left: f32,
+    margin: f32,
+    step: f32,
+    label_cy: f32,
+    day_cy: f32,
+}
+
+/// Отрисовка шапки карточки недели: название месяца капсом, кнопки раскрытия/добавления/ICS и «неделя N».
+unsafe fn draw_week_header(
+    today_tab: &mut Today,
+    ui: &mut Ui,
+    cv: &Canvas,
+    left: f32,
+    right: f32,
+    head_cy: f32,
+    today: i64,
+) {
+    let f = &cv.g.fonts;
+    let (_, month, _) = civil_from_days(today);
+    let month_name = crate::i18n::months_full()[(month as usize).clamp(1, 12) - 1].to_uppercase();
+    let mw = cv.text_w(&month_name, &f.caps);
+    cv.text(&month_name, Rect::new(left, head_cy - 5.0, mw + 2.0, 11.0), &f.caps, dim());
+
+    let mut bx = left + mw + 4.0;
+    // Шеврон раскрытия месяца
+    let down_r = Rect::new(bx, head_cy - 9.0, 16.0, 18.0);
+    if ui.icon_button(cv, id(TODAY, 90), down_r, icon::DOWN, false, crate::i18n::pick("Месяц", "Month")) {
+        today_tab.open_month(today);
+    }
+    bx = down_r.right() + 1.0;
+
+    // Кнопка добавления события
+    let add_r = Rect::new(bx, head_cy - 9.0, 16.0, 18.0);
+    if ui.icon_button(cv, id(TODAY, 98), add_r, icon::ADD, false, tip_add_event()) {
+        today_tab.open_month(today);
+        today_tab.begin_event(ui, today);
+    }
+    bx = add_r.right() + 1.0;
+
+    // Метка ICS
+    let ics_r = Rect::new(bx, head_cy - 9.0, ICS_W, 18.0);
+    if ics_label(ui, cv, ics_r) {
+        today_tab.begin_calendar_edit(ui);
+    }
+
+    // Номер недели справа: «неделя N» / «week N»
+    let week_str = format!("{} {}", crate::i18n::pick("неделя", "week"), super::clock::iso_week(today));
+    let ww = cv.text_w(&week_str, &f.small_r);
+    let week_x = (right - ww).max(bx + 4.0);
+    cv.text(&week_str, Rect::new(week_x, head_cy - 6.0, ww, 13.0), &f.small_r, dim());
+}
+
+/// Отрисовка ряда дней Пн..Вс: подпись дня мелко, число в капсуле для сегодня, точка событий.
+unsafe fn draw_days_row(
+    today_tab: &mut Today,
+    ui: &mut Ui,
+    cv: &Canvas,
+    lay: &DaysRowLayout,
+    today: i64,
+    dow: usize,
+    week_has_events: &[bool; 7],
+) {
+    let f = &cv.g.fonts;
+    let (y, m, d) = civil_from_days(today);
+    let dates = week_dates(y, m, d);
+    let monday = today - dow as i64;
+    // Сегодняшний день — цветом темы (во всех палитрах и размерах).
+    let pill_fill = cv.accent;
+    let on_pill = crate::ui::on_color(pill_fill);
+
+    for (i, (day, _)) in dates.iter().enumerate() {
+        let cx = lay.left + lay.margin + i as f32 * lay.step;
+        let is_today = i == dow;
+        // Как в макете: «сегодня» — вертикальная скруглённая плашка 24×38 (радиус 12), в ней день недели, число
+        // и точка событий; у остальных дней та же область служит областью наведения.
+        let pill_rect = Rect::new(cx - 12.0, lay.label_cy - 8.0, 24.0, (lay.day_cy - lay.label_cy) + 14.0 + DAY_DOT_R + 3.5 + 8.0);
+        let cid = id(TODAY, 80 + i as u32);
+        let (_, clicked) = ui.click_area(cid, pill_rect);
+        let hv = ui.hover_of(cid);
+
+        // Выходные дни приглушены сильнее будней
+        let wd = if is_today { D2D1_COLOR_F { a: 0.95, ..on_pill } } else if i >= 5 { mix(dim(), crate::ui::card(), 0.3) } else { dim() };
+        let num_col = if is_today { on_pill } else if i >= 5 { dim() } else { txt() };
+
+        if is_today {
+            cv.rr(pill_rect, 12.0, pill_fill);
+        } else if hv > 0.01 {
+            cv.rr(pill_rect, 12.0, D2D1_COLOR_F { a: 0.07 * hv, ..fg() });
+        }
+        cv.text(crate::i18n::weekdays()[i], Rect::new(cx - 14.0, lay.label_cy - 6.0, 28.0, 12.0), &f.small_c, wd);
+        cv.text(&day.to_string(), Rect::new(cx - 10.0, lay.day_cy - 7.0, 20.0, 14.0), &f.body_c, num_col);
+
+        // Точка наличия событий под числом дня
+        if week_has_events[i] {
+            let dot_col = if is_today { D2D1_COLOR_F { a: 0.9, ..on_pill } } else { dim() };
+            cv.circle(cx, lay.day_cy + 14.0, DAY_DOT_R, dot_col);
+        }
+
+        if clicked {
+            today_tab.open_month(monday + i as i64);
+        }
+    }
+}
 
 /// События показанного месяца: (месяц, версия календаря, дни сетки).
 pub(super) type MonthCache = ((i32, u32), u64, Vec<Vec<DayEvent>>);
@@ -323,183 +561,280 @@ impl Today {
         self.sel = if self.view == (ty, tm) { today } else { days_from_civil(self.view.0, self.view.1, 1) };
     }
 
-    /// Неделя. `size`: 0 и 1 — дни недели и блок ближайшего события (1 шире: дни расходятся
-    /// по ширине карточки), 2 — расширенная форма со списком нескольких событий на сегодня.
+    /// Неделя. Размеры карточки:
+    /// 4x2 = 216x104 (size 0) — дни недели и плашка ближайшего события;
+    /// 6x2 = 328x104 (size 1) — дни слева (~60%), колонка ближайшего события справа;
+    /// 4x4 = 216x216 (size 2) — дни сверху, расписание событий на сегодня снизу.
     pub(super) unsafe fn week_card(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect, size: usize, today: i64, dow: usize) {
-        let f = &cv.g.fonts;
         cv.card(wk);
         if self.cal_editing {
             self.calendar_form(ui, cv, wk);
             return;
         }
-        let (y, m, d) = civil_from_days(today);
-        let dates = week_dates(y, m, d);
+
+        // Цветной ореол в правом верхнем углу (только в стиле Windows)
+        cv.glow(wk, crate::ui::card_radius(), cv.accent, Corner::TopRight);
+
         let monday = today - dow as i64;
-        // В низкой карточке (только дни) ряды разнесены по всей высоте, иначе под ними — событие.
+        let week_evs = online::events_by_day(&self.online.cal, monday, 7, online::utc_offset_minutes());
+        let mut week_has_events = [false; 7];
+        for (i, day_evs) in week_evs.iter().enumerate().take(7) {
+            week_has_events[i] = !day_evs.is_empty();
+        }
+
         let low = wk.h < 90.0;
-        // Карточка 4×2 (104 px) ниже макета в 120: шапка и ряды дней подтянуты вверх, чтобы событие поместилось.
-        let tight = !low && wk.h < 112.0;
-        let head_cy = wk.y + if low { 17.0 } else if tight { 14.0 } else { 16.0 };
-        let tw = cv.line("Эта неделя", &f.body, wk.x + 12.0, 120.0, head_cy, crate::ui::Align::Leading, txt());
-        // Раскрыть месяц.
-        if ui.icon_button(cv, id(TODAY, 90), Rect::new(wk.x + 12.0 + tw + 1.0, head_cy - 9.0, 18.0, 18.0), icon::DOWN, false, crate::i18n::pick("Месяц", "Month")) {
-            self.open_month(today);
-        }
-        // Новое событие: месячный календарь раскрывается сразу с формой на сегодня.
-        let add_r = Rect::new(wk.x + 12.0 + tw + 21.0, head_cy - 9.0, 18.0, 18.0);
-        if ui.icon_button(cv, id(TODAY, 98), add_r, icon::ADD, false, tip_add_event()) {
-            self.open_month(today);
-            self.begin_event(ui, today);
-        }
-        let ics_r = Rect::new(add_r.right() + 2.0, head_cy - 9.0, ICS_W, 18.0);
-        if ics_label(ui, cv, ics_r) {
-            self.begin_calendar_edit(ui);
-        }
-        // Диапазон недели: полный, короткий или (в узкой карточке) без него, если не хватает места.
-        let months = crate::i18n::months_short();
-        let month_of = |m: u32| months[(m as usize).clamp(1, 12) - 1];
-        let full = format!("{} {} – {} {}", dates[0].0, month_of(dates[0].1), dates[6].0, month_of(dates[6].1));
-        let short = (dates[0].1 == dates[6].1).then(|| format!("{}–{} {}", dates[0].0, dates[6].0, month_of(dates[6].1)));
-        let room = wk.right() - 12.0 - (ics_r.right() + 8.0);
-        if let Some(range) = [Some(full), short].into_iter().flatten().find(|s| cv.text_w(s, &f.small_r) <= room) {
-            cv.text(&range, Rect::new(wk.right() - 12.0 - room, head_cy - 7.0, room, 14.0), &f.small_r, dim());
-        }
-        let (label_cy, day_cy) = if low {
-            (wk.y + 41.0, wk.y + 64.0)
-        } else if tight {
-            (wk.y + 30.0, wk.y + 46.0)
+        let is_wide = size == 1 || (size != 2 && wk.w >= 260.0);
+        let is_tall = size >= 2 || wk.h >= 160.0;
+
+        if is_wide {
+            // 6x2 (size 1): левая секция ~60% ширины
+            let left_w = WEEK_WIDE_LEFT_W;
+            let head_cy = wk.y + 16.0;
+            draw_week_header(self, ui, cv, wk.x + 12.0, wk.x + left_w - 8.0, head_cy, today);
+
+            let lay = DaysRowLayout {
+                left: wk.x,
+                margin: 17.0,
+                step: (left_w - 34.0) / 6.0,
+                label_cy: wk.y + 39.0,
+                day_cy: wk.y + 57.0,
+            };
+            draw_days_row(self, ui, cv, &lay, today, dow, &week_has_events);
+
+            // Вертикальный тонкий разделитель
+            let sep_x = wk.x + left_w;
+            cv.rr(Rect::new(sep_x, wk.y + 10.0, 1.0, wk.h - 20.0), 0.5, hairline());
+
+            // Правая колонка
+            self.draw_single_event(ui, cv, wk);
+        } else if is_tall {
+            // 4x4 (size 2): шапка + дни, разделитель, расписание
+            let head_cy = wk.y + 15.0;
+            draw_week_header(self, ui, cv, wk.x + 12.0, wk.right() - 12.0, head_cy, today);
+
+            let lay = DaysRowLayout {
+                left: wk.x,
+                margin: 24.0,
+                step: (wk.w - 48.0) / 6.0,
+                label_cy: wk.y + 30.0,
+                day_cy: wk.y + 45.0,
+            };
+            draw_days_row(self, ui, cv, &lay, today, dow, &week_has_events);
+
+            // Горизонтальный тонкий разделитель
+            let sep_y = wk.y + 65.0;
+            cv.rr(Rect::new(wk.x + 12.0, sep_y, wk.w - 24.0, 1.0), 0.5, hairline());
+
+            let box_r = Rect::new(wk.x, sep_y + 1.0, wk.w, wk.bottom() - (sep_y + 1.0));
+            if !self.draw_expanded_events(ui, cv, box_r, today) {
+                self.draw_single_event(ui, cv, wk);
+            }
         } else {
-            (wk.y + 34.0, wk.y + 54.0)
-        };
-        for (i, (day, _)) in dates.iter().enumerate() {
-            let cx = wk.x + 24.0 + i as f32 * (wk.w - 48.0) / 6.0;
-            // Выходные приглушены сильнее будней, как в Календаре iOS.
-            let wd = if i >= 5 { mix(dim(), crate::ui::card(), 0.3) } else { dim() };
-            cv.text(crate::i18n::weekdays()[i], Rect::new(cx - 14.0, label_cy - 6.0, 28.0, 12.0), &f.small_c, wd);
-            let b = Rect::new(cx - 11.5, day_cy - 11.5, 23.0, 23.0);
-            let is_today = i == dow;
-            // Клик по дню открывает месяц с выбранным днём.
-            let cid = id(TODAY, 80 + i as u32);
-            let (_, clicked) = ui.click_area(cid, b);
-            let hv = ui.hover_of(cid);
-            // Сегодня — акцентом: красный календаря iOS на «Сегодня» лишний (#10), он остаётся в месяце.
-            let cal = cv.accent;
-            if is_today {
-                cv.circle(b.cx(), b.cy(), b.h / 2.0, cal);
-            } else if hv > 0.01 {
-                cv.circle(b.cx(), b.cy(), b.h / 2.0, D2D1_COLOR_F { a: 0.07 * hv, ..fg() });
-            }
-            cv.text(&day.to_string(), b, &f.body_c, if is_today { crate::ui::on_color(cal) } else { txt() });
-            if clicked {
-                self.open_month(monday + i as i64);
+            // 4x2 (size 0) или компактная низкая карточка
+            let head_cy = wk.y + if low { 17.0 } else { 14.0 };
+            draw_week_header(self, ui, cv, wk.x + 12.0, wk.right() - 12.0, head_cy, today);
+
+            let (label_cy, day_cy) = if low {
+                (wk.y + 41.0, wk.y + 64.0)
+            } else {
+                (wk.y + 26.5, wk.y + 41.5)
+            };
+            let lay = DaysRowLayout {
+                left: wk.x,
+                margin: 24.0,
+                step: (wk.w - 48.0) / 6.0,
+                label_cy,
+                day_cy,
+            };
+            draw_days_row(self, ui, cv, &lay, today, dow, &week_has_events);
+
+            if !low {
+                self.draw_single_event(ui, cv, wk);
             }
         }
-
-        // Ближайшее событие или расширенный список (в низкой карточке компактного размера их нет).
-        if low {
-            return;
-        }
-
-        // В расширенном размере (size >= 2), если хватает места по высоте и ширине,
-        // показываем СПИСОК событий на сегодня.
-        if size >= 2 {
-            let events_top = wk.y + 72.0;
-            let events_bottom = wk.bottom() - 8.0;
-            let events_h = events_bottom - events_top;
-            let events_w = wk.w - 16.0;
-
-            if events_h >= MIN_LIST_BOX_H && events_w >= MIN_LIST_BOX_W {
-                let box_r = Rect::new(wk.x + 8.0, events_top, events_w, events_h);
-                if self.draw_expanded_events(ui, cv, box_r, today) {
-                    return;
-                }
-            }
-            // Если места для списка не хватило или деградировали — переходим к обычному виду с одним событием.
-        }
-
-        self.draw_single_event(ui, cv, wk);
     }
 
-    /// Обычный компактный вид с одним ближайшим событием (для стандартных размеров карточки
-    /// или при деградации, когда расширенный список не влезает).
+    /// Блок ближайшего события:
+    /// в 4x2 — компактная плашка снизу под днями;
+    /// в 6x2 — вертикальная колонка справа («ДАЛЕЕ», название, время, «через N мин»).
     unsafe fn draw_single_event(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect) {
         let f = &cv.g.fonts;
-        let ev_y = if wk.h > 140.0 { wk.y + 72.0 } else if wk.h < 112.0 { wk.bottom() - 43.0 } else { wk.bottom() - 46.0 };
-        let ev = Rect::new(wk.x + 8.0, ev_y, wk.w - 16.0, 38.0);
-        cv.rr(ev, 8.0, inset());
-        cv.rr(Rect::new(ev.x + 8.0, ev.y + 8.0, 3.0, 20.0), 1.5, cv.accent);
-        let (l1, l2) = match (&self.next, self.online.calendar_set) {
-            (Some(e), _) => (event_when(e, online::now_local_minutes()), e.title.clone()),
-            (None, true) if self.online.calendar_failed => (
-                crate::i18n::pick("Не удалось загрузить", "Couldn't load").to_string(),
-                if self.ics.len() > 1 {
-                    crate::i18n::pick("Проверьте ссылки календаря", "Check calendar links").to_string()
-                } else {
-                    crate::i18n::t("Проверьте ссылку calendar_ics").to_string()
-                },
-            ),
-            (None, true) => (
-                crate::i18n::pick("Событий нет", "No events").to_string(),
-                crate::i18n::pick("Календарь пуст на ближайшее время", "The calendar is empty for now").to_string(),
-            ),
-            (None, false) => (
-                crate::i18n::pick("Календарь не подключён", "Calendar not connected").to_string(),
-                crate::i18n::pick("Нажмите, чтобы добавить ссылку", "Click to add a link").to_string(),
-            ),
+        let is_wide = wk.w >= 260.0;
+        let ev_col = cv.accent;
+        let readable_ev = readable(ev_col, 60.0);
+
+        let now_min = if self.next_min != i64::MIN && self.next_min != 0 {
+            self.next_min
+        } else {
+            online::now_local_minutes()
         };
-        cv.text(&l1, Rect::new(ev.x + 17.0, ev.y + 5.0, ev.w - 24.0, 13.0), &f.small_b, txt());
-        cv.text(&l2, Rect::new(ev.x + 17.0, ev.y + 18.0, ev.w - 24.0, 13.0), &f.small, dim());
-        // Событие острова правится кликом по блоку (карандаш); пока календарь не подключён, клик
-        // ведёт к вводу ссылки; у событий из подключённого календаря кнопки нет.
-        let local = self.next.as_ref().and_then(|e| e.local_id.map(|id| (id, e.start.div_euclid(1440))));
-        let connect = self.next.is_none() && !self.online.calendar_set;
-        let (_, clicked) = ui.click_area(id(TODAY, 63), ev);
-        let hv = if local.is_some() || connect { ui.hover_of(id(TODAY, 63)) } else { 0.0 };
-        if hv > 0.01 {
-            cv.rr(ev, 8.0, D2D1_COLOR_F { a: 0.05 * hv, ..fg() });
-            if local.is_some() {
-                cv.glyph(icon::EDIT, Rect::new(ev.right() - 22.0, ev.y + 10.0, 16.0, 16.0), false, D2D1_COLOR_F { a: hv, ..dim() });
+
+        if is_wide {
+            // 6x2 (size 1): правая колонка
+            let col_x = wk.x + WEEK_WIDE_LEFT_W + 1.0;
+            let col_w = (wk.right() - col_x).max(20.0);
+            let col_r = Rect::new(col_x, wk.y, col_w, wk.h);
+            let cx = col_r.x + 14.0;
+            let cw = (col_r.w - 24.0).max(10.0);
+
+            let local = self.next.as_ref().and_then(|e| e.local_id.map(|id| (id, e.start.div_euclid(1440))));
+            let connect = self.next.is_none() && !self.online.calendar_set;
+            let (_, clicked) = ui.click_area(id(TODAY, 63), col_r);
+            let hv = if local.is_some() || connect { ui.hover_of(id(TODAY, 63)) } else { 0.0 };
+
+            if hv > 0.01 {
+                cv.rr(col_r, 8.0, D2D1_COLOR_F { a: 0.05 * hv, ..fg() });
+                if local.is_some() {
+                    cv.glyph(icon::EDIT, Rect::new(col_r.right() - 20.0, col_r.y + 10.0, 14.0, 14.0), false, D2D1_COLOR_F { a: hv, ..dim() });
+                }
+            } else if self.online.calendar_failed {
+                cv.circle(col_r.right() - 14.0, col_r.y + 18.0, 2.5, dim());
             }
-        } else if self.online.calendar_failed {
-            // Предупреждение об ошибке загрузки при наличии событий: нейтральная точка, без красного.
-            cv.circle(ev.right() - 14.0, ev.y + 19.0, 2.5, dim());
-        }
-        if clicked {
-            if let Some((lid, day)) = local {
-                self.open_month(day);
-                self.edit_event(ui, lid);
-            } else if connect {
-                self.begin_calendar_edit(ui);
+
+            if let Some(ref e) = self.next {
+                let next_label = crate::i18n::pick("ДАЛЕЕ", "NEXT");
+                cv.text(next_label, Rect::new(cx, col_r.y + 14.0, cw, 11.0), &f.caps, readable_ev);
+
+                let clipped = cv.wrap_clip(&e.title, &f.body_b, cw, 2);
+                let (lines, _) = cv.wrapped(&clipped, &f.body_b, cw);
+                let title_h = if lines > 1 { 28.0 } else { 14.0 };
+                cv.text(&clipped, Rect::new(cx, col_r.y + 27.0, cw, title_h), &f.body_b, txt());
+
+                let time_str = event_time_str(e);
+                let time_y = col_r.y + 27.0 + title_h + 3.0;
+                cv.text(&time_str, Rect::new(cx, time_y, cw, 13.0), &f.small, dim());
+
+                let rel_str = event_relative_time(e, now_min);
+                let rel_y = time_y + 14.0;
+                cv.text(&rel_str, Rect::new(cx, rel_y, cw, 13.0), &f.small, readable_ev);
+            } else {
+                let (tag, l1, l2) = match self.online.calendar_set {
+                    true if self.online.calendar_failed => (
+                        crate::i18n::pick("ОШИБКА", "ERROR"),
+                        crate::i18n::pick("Не удалось загрузить", "Couldn't load"),
+                        if self.ics.len() > 1 {
+                            crate::i18n::pick("Проверьте ссылки календаря", "Check calendar links")
+                        } else {
+                            crate::i18n::t("Проверьте ссылку calendar_ics")
+                        },
+                    ),
+                    true => (
+                        crate::i18n::pick("КАЛЕНДАРЬ", "CALENDAR"),
+                        crate::i18n::pick("Событий нет", "No events"),
+                        crate::i18n::pick("Календарь пуст на ближайшее время", "The calendar is empty for now"),
+                    ),
+                    false => (
+                        crate::i18n::pick("КАЛЕНДАРЬ", "CALENDAR"),
+                        crate::i18n::pick("Календарь не подключён", "Calendar not connected"),
+                        crate::i18n::pick("Нажмите, чтобы добавить ссылку", "Click to add a link"),
+                    ),
+                };
+                cv.text(tag, Rect::new(cx, col_r.y + 14.0, cw, 11.0), &f.caps, dim());
+                cv.text(l1, Rect::new(cx, col_r.y + 28.0, cw, 13.0), &f.small_b, txt());
+                cv.text(l2, Rect::new(cx, col_r.y + 44.0, cw, 26.0), &f.small, dim());
+            }
+
+            if clicked {
+                if let Some((lid, day)) = local {
+                    self.open_month(day);
+                    self.edit_event(ui, lid);
+                } else if connect {
+                    self.begin_calendar_edit(ui);
+                }
+            }
+        } else {
+            // 4x2 (size 0): блок снизу под рядом дней
+            let ev_y = wk.bottom() - 42.0;
+            let ev = Rect::new(wk.x + 8.0, ev_y, wk.w - 16.0, 34.0);
+            cv.rr(ev, 8.0, inset());
+            cv.rr(Rect::new(ev.x + 7.0, ev.y + 7.0, EVENT_STRIP_W, ev.h - 14.0), 1.5, ev_col);
+
+            let local = self.next.as_ref().and_then(|e| e.local_id.map(|id| (id, e.start.div_euclid(1440))));
+            let connect = self.next.is_none() && !self.online.calendar_set;
+            let (_, clicked) = ui.click_area(id(TODAY, 63), ev);
+            let hv = if local.is_some() || connect { ui.hover_of(id(TODAY, 63)) } else { 0.0 };
+
+            if hv > 0.01 {
+                cv.rr(ev, 8.0, D2D1_COLOR_F { a: 0.05 * hv, ..fg() });
+                if local.is_some() {
+                    cv.glyph(icon::EDIT, Rect::new(ev.right() - 20.0, ev.y + 9.0, 14.0, 14.0), false, D2D1_COLOR_F { a: hv, ..dim() });
+                }
+            } else if self.online.calendar_failed {
+                cv.circle(ev.right() - 14.0, ev.y + 17.0, 2.5, dim());
+            }
+
+            if let Some(ref e) = self.next {
+                let title_x = ev.x + 15.0;
+                let title_w = (ev.w - 23.0).max(10.0);
+                cv.text(&e.title, Rect::new(title_x, ev.y + 4.0, title_w, 13.0), &f.small_b, txt());
+
+                let time_str = event_time_str(e);
+                let rel_str = event_relative_time(e, now_min);
+                let rel_w = cv.text_w(&rel_str, &f.small_r);
+                let max_time_w = (ev.w - 23.0 - rel_w - 6.0).max(30.0);
+                cv.text(&time_str, Rect::new(title_x, ev.y + 18.0, max_time_w, 13.0), &f.small, dim());
+                cv.text(&rel_str, Rect::new(ev.right() - 8.0 - rel_w, ev.y + 18.0, rel_w, 13.0), &f.small_r, readable_ev);
+            } else {
+                let (l1, l2) = match self.online.calendar_set {
+                    true if self.online.calendar_failed => (
+                        crate::i18n::pick("Не удалось загрузить", "Couldn't load"),
+                        if self.ics.len() > 1 {
+                            crate::i18n::pick("Проверьте ссылки календаря", "Check calendar links")
+                        } else {
+                            crate::i18n::t("Проверьте ссылку calendar_ics")
+                        },
+                    ),
+                    true => (
+                        crate::i18n::pick("Событий нет", "No events"),
+                        crate::i18n::pick("Календарь пуст на ближайшее время", "The calendar is empty for now"),
+                    ),
+                    false => (
+                        crate::i18n::pick("Календарь не подключён", "Calendar not connected"),
+                        crate::i18n::pick("Нажмите, чтобы добавить ссылку", "Click to add a link"),
+                    ),
+                };
+                cv.text(l1, Rect::new(ev.x + 15.0, ev.y + 4.0, ev.w - 23.0, 13.0), &f.small_b, txt());
+                cv.text(l2, Rect::new(ev.x + 15.0, ev.y + 18.0, ev.w - 23.0, 13.0), &f.small, dim());
+            }
+
+            if clicked {
+                if let Some((lid, day)) = local {
+                    self.open_month(day);
+                    self.edit_event(ui, lid);
+                } else if connect {
+                    self.begin_calendar_edit(ui);
+                }
             }
         }
     }
 
-    /// Расширенная форма: список нескольких событий на сегодня.
+    /// Расширенная форма: расписание событий на сегодня (4x4).
     /// Возвращает `true`, если список успешно отрисован, или `false`, если места не хватило
     /// и карточка должна деградировать к одному событию.
     unsafe fn draw_expanded_events(&mut self, ui: &mut Ui, cv: &Canvas, box_r: Rect, today: i64) -> bool {
         let f = &cv.g.fonts;
         let today_days = online::events_by_day(&self.online.cal, today, 1, online::utc_offset_minutes());
         let raw_events = today_days.into_iter().next().unwrap_or_default();
-        let now_min = online::now_local_minutes();
+        let now_min = if self.next_min != i64::MIN && self.next_min != 0 {
+            self.next_min
+        } else {
+            online::now_local_minutes()
+        };
         let today_minute = now_min.rem_euclid(1440);
         let items = select_today_events(&raw_events, today_minute);
 
-        cv.rr(box_r, 8.0, inset());
-
-        // Шапка карточки событий на сегодня
-        let head_r = Rect::new(box_r.x + 8.0, box_r.y + 6.0, box_r.w - 36.0, 14.0);
-        cv.text(crate::i18n::pick("Сегодня", "Today"), head_r, &f.small_b, txt());
+        // Заголовок «СЕГОДНЯ · N СОБЫТИЙ»
+        let head_text = format_today_events_header(items.len());
+        cv.text(&head_text, Rect::new(box_r.x + 12.0, box_r.y + 7.0, box_r.w - 24.0, 11.0), &f.caps, dim());
 
         if self.online.calendar_failed {
-            cv.circle(box_r.right() - 28.0, box_r.y + 12.0, 2.5, dim());
+            cv.circle(box_r.right() - 14.0, box_r.y + 12.0, 2.5, dim());
         }
 
-        let content_top = box_r.y + 24.0;
+        let content_top = box_r.y + 22.0;
         let content_h = box_r.bottom() - 6.0 - content_top;
 
         if items.is_empty() {
-            // Если на сегодня событий нет — аккуратная заглушка и ближайшее будущее событие
             let note = if !self.online.calendar_set {
                 crate::i18n::pick("Календарь не подключён", "Calendar not connected")
             } else if self.online.calendar_failed {
@@ -507,18 +842,18 @@ impl Today {
             } else {
                 crate::i18n::pick("На сегодня событий нет", "No events for today")
             };
-            cv.text(note, Rect::new(box_r.x + 8.0, content_top, box_r.w - 16.0, 14.0), &f.small, dim());
+            cv.text(note, Rect::new(box_r.x + 12.0, content_top, box_r.w - 24.0, 14.0), &f.small, dim());
 
             if let Some(ref e) = self.next {
                 let next_y = content_top + 18.0;
                 let next_h = (box_r.bottom() - 6.0 - next_y).min(44.0);
                 if next_h >= 32.0 {
-                    let next_r = Rect::new(box_r.x + 6.0, next_y, box_r.w - 12.0, next_h);
-                    cv.rr(next_r, 6.0, D2D1_COLOR_F { a: 0.04, ..fg() });
-                    cv.rr(Rect::new(next_r.x + 6.0, next_r.y + 7.0, 2.5, next_r.h - 14.0), 1.25, cv.accent);
+                    let next_r = Rect::new(box_r.x + 8.0, next_y, box_r.w - 16.0, next_h);
+                    cv.rr(next_r, 6.0, inset());
+                    cv.rr(Rect::new(next_r.x + 7.0, next_r.y + 7.0, EVENT_STRIP_W, next_r.h - 14.0), 1.5, cv.accent);
                     let l1 = event_when(e, now_min);
-                    cv.text(&l1, Rect::new(next_r.x + 14.0, next_r.y + 4.0, next_r.w - 20.0, 13.0), &f.small_b, txt());
-                    cv.text(&e.title, Rect::new(next_r.x + 14.0, next_r.y + 17.0, next_r.w - 20.0, 13.0), &f.small, dim());
+                    cv.text(&l1, Rect::new(next_r.x + 15.0, next_r.y + 4.0, next_r.w - 22.0, 13.0), &f.small_b, txt());
+                    cv.text(&e.title, Rect::new(next_r.x + 15.0, next_r.y + 17.0, next_r.w - 22.0, 13.0), &f.small, dim());
                 }
             } else {
                 let sub = if !self.online.calendar_set {
@@ -532,7 +867,7 @@ impl Today {
                 } else {
                     crate::i18n::pick("Календарь пуст на ближайшее время", "The calendar is empty for now")
                 };
-                cv.text(sub, Rect::new(box_r.x + 8.0, content_top + 18.0, box_r.w - 16.0, 14.0), &f.small, mix(dim(), crate::ui::card(), 0.35));
+                cv.text(sub, Rect::new(box_r.x + 12.0, content_top + 18.0, box_r.w - 24.0, 14.0), &f.small, mix(dim(), crate::ui::card(), 0.35));
             }
 
             if !self.online.calendar_set && ui.click_area(id(TODAY, 95), box_r).1 {
@@ -541,32 +876,65 @@ impl Today {
             return true;
         }
 
-        let layout = calculate_event_list_layout(items.len(), content_h, EVENT_ROW_H, EVENT_MORE_H);
+        let layout = calculate_event_list_layout(items.len(), content_h, SCHEDULE_ROW_H, SCHEDULE_MORE_H);
         let Some(layout) = layout else {
-            // Места не хватает даже для минимального списка без обрезки строк -> деградация
             return false;
+        };
+
+        // Определение позиции отметки «сейчас» между прошедшими и будущими событиями
+        let timed: Vec<&TodayEventItem> = items.iter().filter(|it| it.minute.is_some()).collect();
+        let now_marker_split = if let Some(first_start) = timed.first().and_then(|it| it.minute) {
+            let last_end = timed.iter().filter_map(|it| it.end_minute.or(it.minute)).max().unwrap_or(first_start);
+            if today_minute >= first_start && today_minute <= last_end {
+                items.iter().enumerate().position(|(idx, it)| {
+                    idx > 0 && it.status == EventStatus::Future && items[idx - 1].status == EventStatus::Past
+                })
+            } else {
+                None
+            }
+        } else {
+            None
         };
 
         let mut edit_id = None;
         for (i, item) in items[..layout.visible_count].iter().enumerate() {
-            let ry = content_top + i as f32 * EVENT_ROW_H;
-            let row_r = Rect::new(box_r.x + 4.0, ry, box_r.w - 8.0, EVENT_ROW_H - 2.0);
+            let ry = content_top + i as f32 * SCHEDULE_ROW_H;
+            let row_r = Rect::new(box_r.x + 6.0, ry, box_r.w - 12.0, SCHEDULE_ROW_H);
 
-            let (strip_color, time_color, title_color) = if item.highlighted {
-                let cal = cv.accent;
-                cv.rr(row_r, 4.0, D2D1_COLOR_F { a: 0.10, ..cal });
-                (cal, cal, txt())
-            } else if item.status == EventStatus::Past {
-                (D2D1_COLOR_F { a: 0.35, ..cv.accent }, dim(), mix(dim(), crate::ui::card(), 0.3))
-            } else {
-                (cv.accent, dim(), txt())
+            let is_past = item.status == EventStatus::Past;
+            let col = event_color(i, item.highlighted, cv.accent);
+            let strip_col = if is_past { D2D1_COLOR_F { a: 0.35, ..col } } else { col };
+
+            // Время начала слева (f.small, tabular, dim())
+            let time_str = match item.minute {
+                Some(m) => format!("{:02}:{:02}", m / 60, m % 60),
+                None => String::new(),
             };
+            let time_col = if is_past { mix(dim(), crate::ui::card(), 0.3) } else { dim() };
+            cv.text(&time_str, Rect::new(row_r.x + 2.0, ry + 2.0, SCHEDULE_TIME_W, 13.0), &f.small_r, time_col);
 
-            // Цветная полоска
-            cv.rr(Rect::new(row_r.x + 3.0, row_r.y + 2.5, 3.0, row_r.h - 5.0), 1.5, strip_color);
+            // Цветная вертикальная полоска
+            let strip_x = row_r.x + 2.0 + SCHEDULE_TIME_W + 5.0;
+            cv.rr(Rect::new(strip_x, ry + 3.0, EVENT_STRIP_W, SCHEDULE_ROW_H - 6.0), 1.5, strip_col);
 
-            // Время начала или «весь день»
-            // Событие острова: клик по строке открывает правку, при наведении виден карандаш.
+            // Название события
+            let title_x = strip_x + EVENT_STRIP_W + 6.0;
+            let title_w = (row_r.right() - title_x - 4.0).max(10.0);
+            let title_col = if is_past { mix(dim(), crate::ui::card(), 0.25) } else { txt() };
+            cv.text(&item.title, Rect::new(title_x, ry + 1.0, title_w, 13.0), &f.small_b, title_col);
+
+            // Длительность или «через N мин»
+            if item.highlighted {
+                let rel = today_event_relative_time(item.minute, item.end_minute, today_minute);
+                let rel_col = readable(col, 60.0);
+                cv.text(&rel, Rect::new(title_x, ry + 14.0, title_w, 12.0), &f.small, rel_col);
+            } else {
+                let dur = format_event_duration(item.minute, item.end_minute);
+                let dur_col = if is_past { mix(dim(), crate::ui::card(), 0.35) } else { dim() };
+                cv.text(&dur, Rect::new(title_x, ry + 14.0, title_w, 12.0), &f.small, dur_col);
+            }
+
+            // Клик по строке локального события
             if let Some(lid) = item.local_id.filter(|_| i < ROW_IDS) {
                 let rid = id(TODAY, WEEK_ROW + i as u32);
                 if ui.click_area(rid, row_r).1 {
@@ -575,15 +943,21 @@ impl Today {
                 let hv = ui.hover_of(rid);
                 if hv > 0.01 {
                     cv.rr(row_r, 4.0, D2D1_COLOR_F { a: 0.06 * hv, ..fg() });
-                    cv.glyph(icon::EDIT, Rect::new(row_r.right() - 18.0, row_r.y + 3.0, 14.0, 14.0), false, D2D1_COLOR_F { a: hv, ..dim() });
+                    cv.glyph(icon::EDIT, Rect::new(row_r.right() - 16.0, ry + 7.0, 14.0, 14.0), false, D2D1_COLOR_F { a: hv, ..dim() });
                 }
             }
-            let when = format_event_range(item.minute, item.end_minute);
-            cv.text(&when, Rect::new(row_r.x + 10.0, row_r.y + 2.0, TIME_COL_W, 14.0), &f.small_b, time_color);
+        }
 
-            // Название события
-            let title_w = (row_r.w - TIME_COL_W - 16.0).max(10.0);
-            cv.text(&item.title, Rect::new(row_r.x + 14.0 + TIME_COL_W, row_r.y + 2.0, title_w, 14.0), &f.small, title_color);
+        // Горизонтальная линия «сейчас» с точкой слева — цветом темы
+        if let Some(split_idx) = now_marker_split {
+            if split_idx <= layout.visible_count {
+                let line_y = content_top + split_idx as f32 * SCHEDULE_ROW_H;
+                let circle_x = box_r.x + 12.0;
+                cv.circle(circle_x, line_y, NOW_MARKER_R, cv.accent);
+                let line_left = circle_x + NOW_MARKER_R + 2.0;
+                let line_w = (box_r.right() - 10.0 - line_left).max(10.0);
+                cv.rr(Rect::new(line_left, line_y - 0.5, line_w, 1.0), 0.5, cv.accent);
+            }
         }
 
         if let Some(lid) = edit_id {
@@ -592,8 +966,8 @@ impl Today {
         }
 
         if layout.more_count > 0 {
-            let my = content_top + layout.visible_count as f32 * EVENT_ROW_H;
-            let more_r = Rect::new(box_r.x + 4.0, my, box_r.w - 8.0, EVENT_MORE_H - 2.0);
+            let my = content_top + layout.visible_count as f32 * SCHEDULE_ROW_H;
+            let more_r = Rect::new(box_r.x + 6.0, my, box_r.w - 12.0, SCHEDULE_MORE_H);
             let cid = id(TODAY, 96);
             let (_, clicked) = ui.click_area(cid, more_r);
             let hv = ui.hover_of(cid);
@@ -1301,5 +1675,41 @@ mod tests {
             assert_eq!(l.entry(2).unwrap().size, new, "старый размер {old}");
             assert_eq!((l.entry(2).unwrap().col, l.entry(2).unwrap().row), (2, 0));
         }
+    }
+
+    #[test]
+    fn test_event_helpers_formatting() {
+        let now = days_from_civil(2026, 10, 15) * 1440 + 9 * 60;
+        let today = now / 1440;
+        let ev = |start: i64, end: i64, all_day| Event { start, end, all_day, title: String::new(), local_id: None };
+
+        // event_time_str
+        assert_eq!(event_time_str(&ev(today * 1440 + 600, today * 1440 + 690, false)), "10:00–11:30");
+        assert_eq!(event_time_str(&ev(today * 1440 + 600, today * 1440 + 600, false)), "10:00");
+        assert_eq!(event_time_str(&ev(today * 1440, today * 1440 + 1440, true)), "весь день");
+
+        // event_relative_time
+        // сейчас 9:00 (540). Событие в 9:40 (580) -> через 40 мин
+        assert_eq!(event_relative_time(&ev(today * 1440 + 580, today * 1440 + 620, false), now), "через 40 мин");
+        // Событие в 10:30 (630) -> через 1 ч 30 мин
+        assert_eq!(event_relative_time(&ev(today * 1440 + 630, today * 1440 + 690, false), now), "через 1 ч 30 мин");
+        // Событие идёт сейчас 8:30-9:30
+        assert_eq!(event_relative_time(&ev(today * 1440 + 510, today * 1440 + 570, false), now), "сейчас");
+        // Завтра
+        assert_eq!(event_relative_time(&ev((today + 1) * 1440 + 500, (today + 1) * 1440 + 600, false), now), "Завтра");
+
+        // format_event_duration
+        assert_eq!(format_event_duration(Some(600), Some(615)), "15 мин");
+        assert_eq!(format_event_duration(Some(600), Some(660)), "1 ч");
+        assert_eq!(format_event_duration(Some(600), Some(690)), "1 ч 30 мин");
+        assert_eq!(format_event_duration(None, None), "весь день");
+
+        // format_today_events_header
+        assert_eq!(format_today_events_header(1), "СЕГОДНЯ · 1 СОБЫТИЕ");
+        assert_eq!(format_today_events_header(2), "СЕГОДНЯ · 2 СОБЫТИЯ");
+        assert_eq!(format_today_events_header(4), "СЕГОДНЯ · 4 СОБЫТИЯ");
+        assert_eq!(format_today_events_header(5), "СЕГОДНЯ · 5 СОБЫТИЙ");
+        assert_eq!(format_today_events_header(12), "СЕГОДНЯ · 12 СОБЫТИЙ");
+        assert_eq!(format_today_events_header(21), "СЕГОДНЯ · 21 СОБЫТИЕ");
     }
 }

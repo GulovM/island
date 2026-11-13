@@ -380,6 +380,19 @@ impl Canvas<'_> {
         self.g.dc.DrawLine(pt(a.0, a.1), pt(b.0, b.1), &self.g.brush, thick, &self.g.round);
     }
 
+    /// Жирная векторная стрелка высотой `size` (загрузка вниз при `up = false`, отдача вверх при `up = true`).
+    /// Вертикальный стержень толщиной ~1.8 с круглыми концами и две диагонали-наконечник.
+    pub unsafe fn arrow(&self, cx: f32, cy: f32, size: f32, up: bool, c: D2D1_COLOR_F) {
+        let thick = 1.8;
+        let h2 = size / 2.0;
+        let (tip_y, base_y) = if up { (cy - h2, cy + h2) } else { (cy + h2, cy - h2) };
+        self.stroke_line((cx, base_y), (cx, tip_y), thick, c);
+        let barb = (size * 0.38).max(2.5);
+        let dy = if up { barb } else { -barb };
+        self.stroke_line((cx, tip_y), (cx - barb, tip_y + dy), thick, c);
+        self.stroke_line((cx, tip_y), (cx + barb, tip_y + dy), thick, c);
+    }
+
     pub unsafe fn progress(&self, r: Rect, frac: f32, c: D2D1_COLOR_F) {
         self.rr(r, r.h / 2.0, track());
         let fw = (r.w * frac.clamp(0.0, 1.0)).max(if frac > 0.0 { r.h } else { 0.0 });
@@ -387,6 +400,255 @@ impl Canvas<'_> {
             self.rr(Rect::new(r.x, r.y, fw, r.h), r.h / 2.0, c);
         }
     }
+
+    /// Открытая дуга ~270° (зазор снизу от 135° до 225°): от -135° (низ-лево) по часовой стрелке
+    /// до +135° (низ-право); серая направляющая дорожка `track()`, поверх неё цветная заливка до `frac`.
+    pub unsafe fn arc_gauge(&self, cx: f32, cy: f32, radius: f32, thick: f32, frac: f32, color: D2D1_COLOR_F) {
+        self.stroke_arc(cx, cy, radius, -135.0, 135.0, thick, track());
+        let f = frac.clamp(0.0, 1.0);
+        if f >= 0.005 {
+            let (from_deg, to_deg) = super::chart::arc_span(f);
+            self.stroke_arc(cx, cy, radius, from_deg, to_deg, thick, color);
+        }
+    }
+
+    /// «Жидкость» в карточке `r`: заливка от поверхности `level` вниз до низа карточки, обрезанная по скруглённому
+    /// прямоугольнику карточки (`radius`), градиент `colors.0` (у поверхности) → `colors.1` (внизу). Поверхность —
+    /// волна `wave` = (амплитуда, длина, фаза в радианах) либо плоская при нулевой амплитуде. `line` — цвет линии
+    /// гребня (`None` — без линии); линия тоже не выходит за скругления. Заливка — одна геометрия: швов нет,
+    /// а при полном уровне она повторяет верхние скругления карточки, а не вылезает за них.
+    pub unsafe fn liquid(&self, r: Rect, level: f32, wave: (f32, f32, f32), colors: (D2D1_COLOR_F, D2D1_COLOR_F), line: Option<D2D1_COLOR_F>, radius: f32) {
+        let (amp, len, phase) = wave;
+        let (x0, x1) = (r.x + 0.75, r.right() - 0.75);
+        let (top, bottom) = (r.y + 0.75, r.bottom() - 0.75);
+        if x1 <= x0 || bottom <= level {
+            return;
+        }
+        let rad = (radius - 0.75).max(0.0);
+        let y_at = |x: f32| {
+            if amp > 0.0 && len > 0.0 {
+                level + amp * ((x - x0) / len * std::f32::consts::TAU + phase).sin()
+            } else {
+                level
+            }
+        };
+        // Область под поверхностью (с запасом за края) пересекается со скруглённой формой карточки.
+        let card = D2D1_ROUNDED_RECT { rect: Rect::new(x0, top, x1 - x0, bottom - top).d2d(), radiusX: rad, radiusY: rad };
+        let Ok(card_geo) = self.g.d2d.CreateRoundedRectangleGeometry(&card) else { return };
+        let Ok(under) = self.g.d2d.CreatePathGeometry() else { return };
+        let Ok(sink) = under.Open() else { return };
+        sink.BeginFigure(pt(x0 - 2.0, y_at(x0)), D2D1_FIGURE_BEGIN_FILLED);
+        sink.AddLine(pt(x0, y_at(x0)));
+        let mut x = x0;
+        while x < x1 {
+            x = (x + 3.0).min(x1);
+            sink.AddLine(pt(x, y_at(x)));
+        }
+        sink.AddLine(pt(x1 + 2.0, y_at(x1)));
+        sink.AddLine(pt(x1 + 2.0, bottom + 2.0));
+        sink.AddLine(pt(x0 - 2.0, bottom + 2.0));
+        sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+        if sink.Close().is_err() {
+            return;
+        }
+        let Ok(clipped) = self.g.d2d.CreatePathGeometry() else { return };
+        let Ok(out) = clipped.Open() else { return };
+        if card_geo.CombineWithGeometry(&under, D2D1_COMBINE_MODE_INTERSECT, None, D2D1_DEFAULT_FLATTENING_TOLERANCE, &out).is_err() || out.Close().is_err() {
+            return;
+        }
+        let stops = [(0.0, self.col(colors.0)), (1.0, self.col(colors.1))];
+        if let Some(br) = self.g.linear_gradient(pt(0.0, level - amp), pt(0.0, bottom), &stops) {
+            self.g.dc.FillGeometry(&clipped, &br, None);
+        }
+        if let Some(c) = line {
+            // Точка внутри скруглённой карточки: у верхних углов линия не заходит за дугу.
+            let inside = |x: f32, y: f32| {
+                let dx = (x - x0).min(x1 - x);
+                if dx >= rad {
+                    y >= top + 0.5
+                } else {
+                    y >= top + rad - (rad * rad - (rad - dx) * (rad - dx)).max(0.0).sqrt() + 1.0
+                }
+            };
+            let mut prev = (x0, y_at(x0));
+            let mut x = x0;
+            while x < x1 {
+                x = (x + 3.0).min(x1);
+                let cur = (x, y_at(x));
+                if inside(prev.0, prev.1) && inside(cur.0, cur.1) {
+                    self.stroke_line(prev, cur, 1.5, c);
+                }
+                prev = cur;
+            }
+        }
+    }
+
+    /// Цветной ореол в углу карточки: только для стиля Windows (`!is_ios_palette()`).
+    /// Радиальный градиент с центром в выбранном углу: alpha ~0.42 у угла, ~0.16 на 45% радиуса, 0 на краю.
+    pub unsafe fn glow(&self, r: Rect, radius: f32, color: D2D1_COLOR_F, corner: Corner) {
+        if crate::ui::is_ios_palette() {
+            return;
+        }
+        // Радиальное свечение с центром в углу, как в макете: плотное у угла и мягко затухающее к середине карточки.
+        let center = match corner {
+            Corner::TopRight => pt(r.right(), r.y),
+            Corner::BottomRight => pt(r.right(), r.bottom()),
+            Corner::TopLeft => pt(r.x, r.y),
+            Corner::BottomLeft => pt(r.x, r.bottom()),
+        };
+        let mut c_start = color;
+        c_start.a = 0.42;
+        let mut c_mid = color;
+        c_mid.a = 0.16;
+        let mut c_end = color;
+        c_end.a = 0.0;
+        let stops = [
+            (0.0, self.col(c_start)),
+            (0.45, self.col(c_mid)),
+            (1.0, self.col(c_end)),
+        ];
+        let reach = r.w.max(r.h) * 0.95;
+        let Some(br) = self.g.radial_gradient(center, reach, reach, &stops) else { return };
+        let rad = radius.min(r.w / 2.0).min(r.h / 2.0).max(0.0);
+        self.g.dc.FillRoundedRectangle(
+            &D2D1_ROUNDED_RECT { rect: r.d2d(), radiusX: rad, radiusY: rad },
+            &br,
+        );
+    }
+
+    /// Сегментная шкала: `count` вертикальных скруглённых столбиков с зазором,
+    /// заполненные цветом `color`, остальные — `track()`.
+    pub unsafe fn segments(&self, rect: Rect, count: usize, filled: usize, color: D2D1_COLOR_F) {
+        if count == 0 || rect.w <= 0.0 || rect.h <= 0.0 {
+            return;
+        }
+        let gap = 2.0f32;
+        let total_gaps = (count.saturating_sub(1)) as f32 * gap;
+        let bar_w = ((rect.w - total_gaps) / count as f32).max(1.0);
+        let rad = (bar_w / 2.0).min(rect.h / 2.0);
+        for i in 0..count {
+            let x = rect.x + i as f32 * (bar_w + gap);
+            let bar_r = Rect::new(x, rect.y, bar_w, rect.h);
+            let c = if i < filled { color } else { track() };
+            self.rr(bar_r, rad, c);
+        }
+    }
+
+    /// Сглаженная линия спарклайна (`AddQuadraticBezier` по серединам отрезков, круглые соединения, толщина ~1.5)
+    /// с опциональной градиентной заливкой под ней (цвет a=0.35 до 0).
+    /// Если `range.0 > range.1`, график строится вниз от верхней базовой линии (для отдачи в сети).
+    pub unsafe fn spark(
+        &self,
+        rect: Rect,
+        values: impl Iterator<Item = f32> + Clone,
+        range: (f32, f32),
+        color: D2D1_COLOR_F,
+        fill: bool,
+    ) {
+        let count = values.clone().count();
+        if count < 2 || rect.w <= 0.0 || rect.h <= 0.0 {
+            return;
+        }
+        let (min, max) = range;
+        if !min.is_finite() || !max.is_finite() {
+            return;
+        }
+        let downward = min > max;
+        let (val_lo, val_hi) = if downward { (max, min) } else { (min, max) };
+        let val_span = (val_hi - val_lo).max(1e-5);
+
+        let map_pt = |i: usize, v: f32| {
+            let x = rect.x + (i as f32 / (count - 1) as f32) * rect.w;
+            // NaN/inf в данных (нулевой интервал опроса) не должны попадать в геометрию Direct2D.
+            let v = if v.is_finite() { v } else { val_lo };
+            let norm = ((v - val_lo) / val_span).clamp(0.0, 1.0);
+            let y = if downward {
+                rect.y + norm * rect.h
+            } else {
+                rect.bottom() - norm * rect.h
+            };
+            pt(x, y)
+        };
+
+        let mut iter = values.clone().enumerate();
+        let (_, first_v) = iter.next().unwrap();
+        let p0 = map_pt(0, first_v);
+        let baseline_y = if downward { rect.y } else { rect.bottom() };
+
+        if fill {
+            if let Ok(fill_geo) = self.g.d2d.CreatePathGeometry() {
+                if let Ok(sink) = fill_geo.Open() {
+                    sink.BeginFigure(pt(p0.X, baseline_y), D2D1_FIGURE_BEGIN_FILLED);
+                    sink.AddLine(p0);
+                    let mut p_prev = p0;
+                    for (i, v) in iter {
+                        let p_cur = map_pt(i, v);
+                        let m = pt((p_prev.X + p_cur.X) / 2.0, (p_prev.Y + p_cur.Y) / 2.0);
+                        if i == 1 {
+                            sink.AddLine(m);
+                        } else {
+                            sink.AddQuadraticBezier(&D2D1_QUADRATIC_BEZIER_SEGMENT {
+                                point1: p_prev,
+                                point2: m,
+                            });
+                        }
+                        p_prev = p_cur;
+                    }
+                    sink.AddLine(p_prev);
+                    sink.AddLine(pt(p_prev.X, baseline_y));
+                    sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                    if sink.Close().is_ok() {
+                        let (top_a, bot_a) = if downward { (0.0, 0.35) } else { (0.35, 0.0) };
+                        let mut c_top = color;
+                        c_top.a = top_a;
+                        let mut c_bot = color;
+                        c_bot.a = bot_a;
+                        let stops = [(0.0, self.col(c_top)), (1.0, self.col(c_bot))];
+                        if let Some(br) = self.g.linear_gradient(pt(rect.x, rect.y), pt(rect.x, rect.bottom()), &stops) {
+                            self.g.dc.FillGeometry(&fill_geo, &br, None);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Отрисовка сглаженной линии
+        if let Ok(stroke_geo) = self.g.d2d.CreatePathGeometry() {
+            if let Ok(sink) = stroke_geo.Open() {
+                sink.BeginFigure(p0, D2D1_FIGURE_BEGIN_HOLLOW);
+                let mut p_prev = p0;
+                for (i, v) in values.enumerate().skip(1) {
+                    let p_cur = map_pt(i, v);
+                    let m = pt((p_prev.X + p_cur.X) / 2.0, (p_prev.Y + p_cur.Y) / 2.0);
+                    if i == 1 {
+                        sink.AddLine(m);
+                    } else {
+                        sink.AddQuadraticBezier(&D2D1_QUADRATIC_BEZIER_SEGMENT {
+                            point1: p_prev,
+                            point2: m,
+                        });
+                    }
+                    p_prev = p_cur;
+                }
+                sink.AddLine(p_prev);
+                sink.EndFigure(D2D1_FIGURE_END_OPEN);
+                if sink.Close().is_ok() {
+                    self.g.brush.SetColor(&self.col(color));
+                    self.g.dc.DrawGeometry(&stroke_geo, &self.g.brush, 1.5, &self.g.round);
+                }
+            }
+        }
+    }
+}
+
+/// Угол карточки для цветного ореола (`Canvas::glow`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)] // полный набор углов для переиспользования
+pub enum Corner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
 }
 
 /// Радиус скругления стандартных карточек по спецификации iOS 26 в масштабе острова:
