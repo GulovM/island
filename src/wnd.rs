@@ -361,6 +361,7 @@ pub(crate) unsafe extern "system" fn glass_proc(hwnd: HWND, msg: u32, wp: WPARAM
     match msg {
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
+        WM_ERASEBKGND => LRESULT(1),
         _ => DefWindowProcW(hwnd, msg, wp, lp),
     }
 }
@@ -517,5 +518,56 @@ pub(crate) unsafe fn enable_blur_behind(hwnd: HWND) -> bool {
     let mut acc = Accent { state: 3, flags: 0, color: 0, anim: 0 };
     let mut d = Wca { attr: 19, data: &mut acc, size: size_of::<Accent>() };
     f(hwnd, &mut d) != 0
+}
+
+/// Расширенные стили окна-подложки стекла:
+/// для `Windows.UI.Composition` (`HostBackdropBrush`, Win 11+) нужны `WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP`,
+/// а для отката `accent blur-behind + SetWindowRgn` (Win 10) окно должно иметь обычный bitmap перенаправления без этих флагов.
+pub(crate) const fn glass_ex_style(composition: bool) -> WINDOW_EX_STYLE {
+    let base = WS_EX_TOPMOST.0 | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0 | WS_EX_TRANSPARENT.0;
+    if composition {
+        WINDOW_EX_STYLE(base | WS_EX_LAYERED.0 | WS_EX_NOREDIRECTIONBITMAP.0)
+    } else {
+        WINDOW_EX_STYLE(base)
+    }
+}
+
+/// Создаёт вспомогательное окно-подложку стекла (`IslandGlass`) с нужными стилями.
+pub(crate) unsafe fn create_glass_window(hinst: HINSTANCE, composition: bool) -> Result<HWND> {
+    CreateWindowExW(
+        glass_ex_style(composition),
+        w!("IslandGlass"),
+        w!(""),
+        WS_POPUP,
+        0,
+        0,
+        16,
+        16,
+        None,
+        None,
+        Some(hinst),
+        None,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn glass_ex_style_differs_between_composition_and_win10_fallback() {
+        let win10 = glass_ex_style(false);
+        assert_eq!(win10.0 & WS_EX_LAYERED.0, 0);
+        assert_eq!(win10.0 & WS_EX_NOREDIRECTIONBITMAP.0, 0);
+        assert_ne!(win10.0 & WS_EX_TOPMOST.0, 0);
+        assert_ne!(win10.0 & WS_EX_TOOLWINDOW.0, 0);
+        assert_ne!(win10.0 & WS_EX_NOACTIVATE.0, 0);
+        assert_ne!(win10.0 & WS_EX_TRANSPARENT.0, 0);
+
+        let win11 = glass_ex_style(true);
+        assert_ne!(win11.0 & WS_EX_LAYERED.0, 0);
+        assert_ne!(win11.0 & WS_EX_NOREDIRECTIONBITMAP.0, 0);
+        assert_eq!(win11.0 & win10.0, win10.0);
+    }
 }
 

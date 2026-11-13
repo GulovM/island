@@ -182,48 +182,36 @@ impl App {
                 lpszClassName: w!("IslandGlass"),
                 ..Default::default()
             });
-            let glass_wnd = CreateWindowExW(
-                WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
-                w!("IslandGlass"),
-                w!(""),
-                WS_POPUP,
-                0,
-                0,
-                16,
-                16,
-                None,
-                None,
-                Some(hinst),
-                None,
-            )?;
-
-            // Новый путь: Windows.UI.Composition HostBackdropBrush с клипом по контуру тела.
-            // DWMWA_USE_HOSTBACKDROPBRUSH (17) + LWA_ALPHA разрешают HostBackdropBrush в окне.
-            let _ = SetLayeredWindowAttributes(glass_wnd, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
             let build = crate::sys::windows_build_number();
-            let backdrop = if crate::backdrop::use_host_backdrop(build) {
+            let (glass_wnd, backdrop) = if crate::backdrop::use_host_backdrop(build) {
+                let wnd = crate::wnd::create_glass_window(hinst, true)?;
+                // Новый путь: Windows.UI.Composition HostBackdropBrush с клипом по контуру тела.
+                // DWMWA_USE_HOSTBACKDROPBRUSH (17) + LWA_ALPHA разрешают HostBackdropBrush в окне.
+                let _ = SetLayeredWindowAttributes(wnd, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
                 let on = BOOL(1);
                 let _ = windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
-                    glass_wnd,
+                    wnd,
                     windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(17), // DWMWA_USE_HOSTBACKDROPBRUSH
                     &on as *const _ as _,
                     4,
                 );
-                match crate::backdrop::Backdrop::new(glass_wnd) {
+                match crate::backdrop::Backdrop::new(wnd) {
                     Ok(b) => {
                         log::info("стекло: подложка Composition HostBackdropBrush создана");
-                        Some(b)
+                        (wnd, Some(b))
                     }
                     Err(e) => {
                         log::info(&format!("стекло: Composition недоступна ({e}), откат к accent-размытию"));
-                        None
+                        // WS_EX_NOREDIRECTIONBITMAP нельзя снять после создания — пересоздаём окно под SetWindowRgn.
+                        let _ = DestroyWindow(wnd);
+                        (crate::wnd::create_glass_window(hinst, false)?, None)
                     }
                 }
             } else {
                 log::info(&format!("стекло: Windows 10 (build {build}), используется accent blur-behind"));
-                None
+                (crate::wnd::create_glass_window(hinst, false)?, None)
             };
-            // Если новый путь не удался — пробуем старый accent blur-behind.
+            // Если новый путь не используется или не удался — пробуем старый accent blur-behind.
             let blur_ok = if backdrop.is_some() {
                 true
             } else {

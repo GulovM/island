@@ -11,6 +11,7 @@
 - «Часы»: шесть циферблатов — «Часы», «Классика», «Точки», «Шкала», «Минимал» и «Небо» — заменили прежние пять, поэтому сохранённый циферблат может выглядеть иначе. Восход и закат для «Неба» считаются по координатам города из погоды.
 - «Скорость сети»: размер 6×2 убран, 4×2 переработан со спидометром. «GPU» в размере 2×2 показывает «занято / всего» видеопамяти.
 - «Батарея»: режим энергосбережения теперь отражается в карточке, а в размере 2×2 заливка показывает заряд.
+- Режим стекла снова работает на Windows 10 и при программном откате размытия: исправлены стили окна-подложки, обработка стирания фона и восстановление формы/акцента при обновлении порядка окон.
 
 ### EN
 
@@ -19,6 +20,7 @@
 - Clock: six faces — Clock, Classic, Dots, Ruler, Minimal and Sky — replace the previous five, so a saved face may look different. Sunrise and sunset for Sky are calculated from the weather city's coordinates.
 - Network speed: the 6×2 size is removed and 4×2 is redesigned with a speedometer. GPU at 2×2 shows used / total video memory.
 - Battery: the energy saver state now shows on the card, and at 2×2 the fill shows the charge level.
+- Glass mode now works reliably on Windows 10 and on backdrop fallback: fixed backdrop window styles (`WS_EX_NOREDIRECTIONBITMAP` / `WS_EX_LAYERED`), background erase handling, and region/accent recovery on Z-order changes.
 
 ## [1.4.0] — 2026-11-12
 

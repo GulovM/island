@@ -590,14 +590,20 @@ impl App {
             let shape = crate::glass::body_outline(x0, aw, ah, ear, r, 1.0);
             let bs = crate::glass::BlurShape::from_outline(&shape);
             let (gx, gy) = (self.win_x + bs.left, self.win_y + bs.top);
-            let key = if on { (gx, gy, bs.width, bs.height, bs.signature()) } else { (0, 0, 0, 0, -1) };
-            if self.blur_key.get() == key {
+            let valid = on && bs.points.len() >= 3 && bs.width > 0 && bs.height > 0;
+            let key = if valid { (gx, gy, bs.width, bs.height, bs.signature()) } else { (0, 0, 0, 0, -1) };
+            let prev = self.blur_key.get();
+            if prev == key {
                 return;
             }
             self.blur_key.set(key);
-            if !on || bs.points.len() < 3 {
+            if !valid {
                 let _ = ShowWindow(self.glass_wnd, SW_HIDE);
                 return;
+            }
+            // При выходе из скрытого состояния повторно включаем accent blur (устойчиво к смене настроек/перезапуску DWM).
+            if prev.0 == i32::MIN || prev.4 < 0 {
+                let _ = crate::wnd::enable_blur_behind(self.glass_wnd);
             }
 
             // Позиционируем окно подложки СТРОГО ДО SetWindowRgn, чтобы SetWindowPos не сбрасывал форму окна в DWM.
@@ -605,8 +611,12 @@ impl App {
 
             let pts: Vec<POINT> = bs.points.iter().map(|&(x, y)| POINT { x, y }).collect();
             let rgn = windows::Win32::Graphics::Gdi::CreatePolygonRgn(&pts, windows::Win32::Graphics::Gdi::ALTERNATE);
-            // bRedraw = true сообщает DWM о перерасчёте формы окна; система забирает владение регионом себе.
-            SetWindowRgn(self.glass_wnd, Some(rgn), true);
+            if !rgn.is_invalid() {
+                // bRedraw = true сообщает DWM о перерасчёте формы окна; при успехе система забирает владение регионом себе.
+                if SetWindowRgn(self.glass_wnd, Some(rgn), true) == 0 {
+                    let _ = windows::Win32::Graphics::Gdi::DeleteObject(rgn.into());
+                }
+            }
         }
     }
 

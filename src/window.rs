@@ -37,7 +37,8 @@ impl App {
             );
             // Подложка стекла должна иметь WS_EX_TOPMOST и стоять сразу за основным окном.
             let g_ex = GetWindowLongW(self.glass_wnd, GWL_EXSTYLE) as u32;
-            if (g_ex & WS_EX_TOPMOST.0) == 0 {
+            let lost_g_top = (g_ex & WS_EX_TOPMOST.0) == 0;
+            if lost_g_top {
                 let _ = SetWindowPos(
                     self.glass_wnd,
                     Some(HWND_TOPMOST),
@@ -48,7 +49,8 @@ impl App {
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
                 );
             }
-            if IsWindowVisible(self.glass_wnd).as_bool() {
+            let behind_main = GetWindow(self.hwnd, GW_HWNDNEXT).is_ok_and(|w| w == self.glass_wnd);
+            if IsWindowVisible(self.glass_wnd).as_bool() && (lost_g_top || !behind_main) {
                 let _ = SetWindowPos(
                     self.glass_wnd,
                     Some(self.hwnd),
@@ -58,6 +60,11 @@ impl App {
                     0,
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
                 );
+                // На пути Win 10 (`SetWindowRgn`) перестановка может сбросить регион в DWM — пересчитываем его.
+                if self.backdrop.is_none() {
+                    self.blur_key.set((i32::MIN, 0, 0, 0, 0));
+                    let _ = self.render();
+                }
             }
             // Горячие зоны на других мониторах тоже должны оставаться поверх окон.
             for z in &self.hot {
