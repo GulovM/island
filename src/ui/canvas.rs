@@ -417,6 +417,7 @@ impl Canvas<'_> {
     /// волна `wave` = (амплитуда, длина, фаза в радианах) либо плоская при нулевой амплитуде. `line` — цвет линии
     /// гребня (`None` — без линии); линия тоже не выходит за скругления. Заливка — одна геометрия: швов нет,
     /// а при полном уровне она повторяет верхние скругления карточки, а не вылезает за них.
+    #[allow(dead_code)]
     pub unsafe fn liquid(&self, r: Rect, level: f32, wave: (f32, f32, f32), colors: (D2D1_COLOR_F, D2D1_COLOR_F), line: Option<D2D1_COLOR_F>, radius: f32) {
         let (amp, len, phase) = wave;
         let (x0, x1) = (r.x + 0.75, r.right() - 0.75);

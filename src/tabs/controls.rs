@@ -44,8 +44,8 @@ static SLIDER: [Size; 2] = [sz(WIDE + 2, 1), sz(1, TALL + 2)];
 /// Плеер: высота 2 ячейки (или полоса в один ряд), ширина произвольная — от 3 (4 у полосы) ячеек
 /// до ширины острова. По умолчанию 3×2 (первый размер списка).
 static PLAYER: [Size; 2] = [sz(WIDE + 3, 2), sz(WIDE + 4, 1)];
-/// Батарея: узкая и широкая карточки, как на «Статистике».
-static BATTERY_SIZES: [Size; 2] = [sz(2, 2), sz(4, 2)];
+/// Батарея: 1×1 (кольцо 48×48) и 2×1 (карточка 104×48 со значком батареи).
+static BATTERY_SIZES: [Size; 2] = [sz(1, 1), sz(2, 1)];
 
 /// Сетка вкладки: до 10 колонок и 6 рядов крупных ячеек (шаг CELL=56, зазор GAP=8; рядов до 5 — под список устройств). По умолчанию в первом
 /// ряду три плитки по 2 ячейки, во втором — две по 3, ниже плеер 3×2 и два ползунка 3×1 рядом с ним.
@@ -570,104 +570,80 @@ impl Controls {
         }
     }
 
-    /// Батарея по макету: 2x2 — «волна» заряда на фоне карточки, 4x2 — крупный процент и значок батареи
-    /// с молнией (молния «подпрыгивает» при подключении питания) и плашкой режима экономии.
+    /// Батарея по макету: 1×1 (48×48) — кольцо заряда с процентом внутри, 2×1 (104×48) — подпись
+    /// («СЕТЬ» / «БАТАРЕЯ»), крупный процент слева и горизонтальный значок батареи справа
+    /// (с молнией при питании от сети).
     unsafe fn battery_card(&self, cv: &Canvas, r: Rect, size: usize) {
-        use super::stats::header;
-        use crate::ui::{readable, status_green, status_orange, status_red};
+        use crate::ui::{status_green, track};
         let f = &cv.g.fonts;
         cv.card(r);
         let Some(b) = self.battery.status else {
-            header(cv, r, icon::BATTERY, "Батарея", dim());
+            if size == 0 {
+                cv.ring(r.cx(), r.cy(), 15.5, 3.8, 0.0, track());
+                cv.line("—", &f.body, r.x + 4.0, r.w - 8.0, r.cy(), Align::Center, dim());
+            } else {
+                let tx = r.x + 10.0;
+                cv.line(crate::i18n::pick("БАТАРЕЯ", "BATTERY"), &f.caps, tx, 48.0, r.y + 16.0, Align::Leading, dim());
+                cv.line("—", &f.title, tx, 48.0, r.y + 33.0, Align::Leading, dim());
+            }
             return;
         };
-        // Энергосбережение: системный флаг или состояние, которое выставляет сама плитка «Энергосбережение».
-        let saver_on = b.saver_on || self.saver == Some(true);
-        let tint = if !b.ac_online && b.percent <= 20 {
-            status_red()
-        } else if saver_on {
-            status_orange()
-        } else {
-            status_green()
-        };
-        let col = readable(tint, 45.0);
-        let frac = f32::from(b.percent.min(100)) / 100.0;
+        let col = if b.ac_online { status_green() } else { slider_fill(cv.accent) };
+        let shown = self.battery.level.value.clamp(0.0, 1.0);
         let big = b.percent.to_string();
-        let status = crate::i18n::tr(if b.charging {
-            "Заряжается"
-        } else if b.ac_online {
-            "Питание от сети"
-        } else {
-            "От батареи"
-        });
-        let k = 1.0 + 0.5 * self.battery.bolt.value.max(0.0);
         if size == 0 {
-            // Заливка до показываемого уровня (доезжает до реального заряда пружиной), 100% заполняет карточку целиком.
-            // Поверхность ровная и неподвижная; заливка обрезается по скруглениям карточки.
-            let shown = self.battery.level.value.clamp(0.0, 1.0);
-            let (top_y, bot_y) = (r.y + 0.75, r.bottom() - 2.0);
-            let level = bot_y - shown * (bot_y - top_y);
-            let mut hi = tint;
-            hi.a = 0.40;
-            let mut lo = tint;
-            lo.a = 0.14;
-            if shown > 0.02 {
-                cv.liquid(r, level, (0.0, 0.0, 0.0), (hi, lo), None, crate::ui::card_radius());
-            }
-            // Заголовок: молния и статус по центру.
-            let sw = cv.text_w(&status, &f.small_b).min(r.w - 36.0);
-            let bolt = if b.ac_online { 10.0 + 3.0 } else { 0.0 };
-            let x0 = r.cx() - (sw + bolt) / 2.0;
-            if b.ac_online {
-                let s = 10.0 * k;
-                cv.symbol(icon::BOLT, Rect::new(x0 + 5.0 - s / 2.0, r.y + 14.0 - s / 2.0, s, s), 10.0 * k, col);
-            }
-            cv.line(&status, &f.small_b, x0 + bolt, sw + 2.0, r.y + 14.0, Align::Leading, txt());
-            let dy = r.bottom() - 26.0;
-            let bw = cv.digits_w(&big, 30.0, 600);
-            cv.digits(&big, r.x + 12.0, bw + 4.0, dy, 30.0, 600, Align::Leading, txt());
-            cv.line("%", &f.small, r.x + 12.0 + bw + 3.0, 20.0, dy + 5.0, Align::Leading, dim());
+            cv.ring(r.cx(), r.cy(), 15.5, 3.8, shown, col);
+            let font_sz = if b.percent >= 100 { 11.5 } else { 13.5 };
+            cv.digits(&big, r.x + 4.0, r.w - 8.0, r.cy(), font_sz, 600, Align::Center, txt());
             return;
         }
 
-        cv.glow(r, 14.0, tint, crate::ui::Corner::TopRight);
-        let x = r.x + 14.0;
-        cv.line(&crate::i18n::tr("БАТАРЕЯ"), &f.caps, x, 90.0, r.y + 16.0, Align::Leading, dim());
-        let dy = r.y + 44.0;
-        let bw = cv.digits_w(&big, 34.0, 600);
-        cv.digits(&big, x - 1.0, bw + 4.0, dy, 34.0, 600, Align::Leading, txt());
-        cv.line("%", &f.body, x + bw + 4.0, 20.0, dy + 6.0, Align::Leading, dim());
-        // Одна строка статуса («Заряжается» / «Питание от сети» / «От батареи»): вторая только повторяла бы её.
-        cv.line(&status, &f.body, x, 98.0, r.y + 78.0, Align::Leading, txt());
+        let tx = r.x + 10.0;
+        let label = if b.ac_online {
+            crate::i18n::pick("СЕТЬ", "AC")
+        } else {
+            crate::i18n::pick("БАТАРЕЯ", "BATTERY")
+        };
+        cv.line(label, &f.caps, tx, 48.0, r.y + 15.0, Align::Leading, dim());
 
-        // Значок батареи: корпус, выступ-контакт и заливка по уровню заряда.
-        let body = Rect::new(r.right() - 14.0 - 6.0 - 84.0, r.y + 16.0, 84.0, 42.0);
+        let num_sz = if b.percent >= 100 { 18.0 } else { 20.0 };
+        let dw = cv.digits_w(&big, num_sz, 600);
+        cv.digits(&big, tx, dw + 2.0, r.y + 32.5, num_sz, 600, Align::Leading, txt());
+        cv.line("%", &f.small_b, tx + dw + 1.5, 16.0, r.y + 33.5, Align::Leading, dim());
+
+        // Горизонтальный значок батареи справа (при питании от сети — с местом под молнию справа от контакта).
+        let (bx, bw) = if b.ac_online {
+            (r.right() - 49.0, 26.0)
+        } else {
+            (r.right() - 40.0, 28.0)
+        };
+        let body = Rect::new(bx, r.cy() - 7.5, bw, 15.0);
+        cv.rr(body, 4.5, track());
         let mut edge = dim();
-        edge.a *= 0.6;
-        cv.rr_line(body, 12.0, edge, 2.0);
-        cv.rr(Rect::new(body.right() + 3.0, body.cy() - 7.0, 3.0, 14.0), 1.5, edge);
-        let inner = Rect::new(body.x + 4.0, body.y + 4.0, body.w - 8.0, body.h - 8.0);
-        let fw = (inner.w * frac).max(inner.h.min(inner.w * 0.5)).min(inner.w);
-        let mut lighter = tint;
-        lighter.r = (lighter.r + 0.12).min(1.0);
-        lighter.g = (lighter.g + 0.12).min(1.0);
-        lighter.b = (lighter.b + 0.12).min(1.0);
-        let fill = Rect::new(inner.x, inner.y, fw, inner.h);
-        cv.gradient_rr(fill, 8.0, lighter, tint);
-        if b.ac_online {
-            let s = 18.0 * k;
-            cv.symbol(icon::BOLT, Rect::new(fill.cx() - s / 2.0, fill.cy() - s / 2.0, s, s), 16.0 * k, ink());
+        edge.a *= 0.24;
+        cv.rr_line(body, 4.5, edge, 1.0);
+
+        let mut nub = dim();
+        nub.a *= 0.72;
+        cv.rr(Rect::new(body.right() + 1.8, body.cy() - 2.8, 2.2, 5.6), 1.1, nub);
+
+        let inner = body.inset(2.0);
+        let fw = (inner.w * shown).max(if shown > 0.01 { 3.5 } else { 0.0 }).min(inner.w);
+        if fw > 0.0 {
+            let fill = Rect::new(inner.x, inner.y, fw, inner.h);
+            cv.rr(fill, 2.8, col);
+            if crate::theme::glass() {
+                let top = D2D1_COLOR_F { a: 0.14, ..crate::theme::get().rim_hi };
+                cv.gradient_stops(fill, 2.8, &[(0.0, top), (0.65, D2D1_COLOR_F { a: 0.0, ..top })], false);
+            }
         }
 
-        // Плашка режима экономии.
-        // Плашка стоит под значком по его ширине (корпус и контакт): левый край — край корпуса, правый — край контакта.
-        let label = crate::i18n::tr(if saver_on { "Экономия вкл." } else { "Экономия выкл." });
-        let chip = Rect::new(body.x, r.y + 69.0, body.w + 6.0, 20.0);
-        let mut bg = if saver_on { tint } else { dim() };
-        bg.a = if saver_on { 0.22 } else { 0.14 };
-        cv.rr(chip, 10.0, bg);
-        let label_col = if saver_on { col } else { dim() };
-        cv.line(&label, &f.small_b, chip.x + 2.0, chip.w - 4.0, chip.cy(), Align::Center, label_col);
+        if b.ac_online {
+            let k = 1.0 + 0.45 * self.battery.bolt.value.max(0.0);
+            let s = 11.5 * k;
+            let bolt_cx = body.right() + 11.0;
+            cv.symbol(icon::BOLT, Rect::new(bolt_cx - s / 2.0, body.cy() - s / 2.0, s, s), s, col);
+        }
     }
 
     /// Устройство вывода звука для подписей.
