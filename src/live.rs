@@ -103,7 +103,7 @@ impl Toast {
             // Минимум; пока звучит сигнал, остров ждёт его конца (см. `ToastTimer`).
             Toast::Timer => 4000,
             Toast::Event => 6000,
-            Toast::Notice => 2500,
+            Toast::Notice => 3000,
             Toast::Volume { .. } | Toast::Brightness { .. } => 1700,
             Toast::Charging { .. } => 3000,
             Toast::LowBattery(_) => 5000,
@@ -616,7 +616,7 @@ mod tests {
     #[test]
     fn toast_lifetimes_are_sane() {
         assert!(Toast::Volume { level: 0.5, muted: false }.lifetime() < Toast::Timer.lifetime());
-        assert_eq!(Toast::Notice.lifetime(), Duration::from_millis(2500));
+        assert_eq!(Toast::Notice.lifetime(), Duration::from_millis(3000));
         assert!(Toast::Notice.emerges_from_strip());
         assert!(!Toast::Notice.steals_focus());
         assert!(Toast::Event.emerges_from_strip());

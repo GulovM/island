@@ -14,8 +14,8 @@ use crate::bg::{NotifAccess, SysNotif, NOTIF_ICON_PX};
 use crate::ios::SysColor;
 use crate::sys;
 use crate::ui::{
-    bare, card, card_radius, chip_bg, dim, fg, hue, icon, ink, is_ios_palette, mix, on_color,
-    press_scale, txt, Align, Canvas, Rect, Ui, WHITE,
+    bare, card, card_radius, chip_bg, dim, fg, hue, icon, ink, is_ios_palette, mix,
+    press_scale, txt, Align, Canvas, Rect, Ui, RED, WHITE,
 };
 
 use super::{escape, id, read_lines, unescape, write_lines, Action, NOTIFICATIONS, PAD, TOP};
@@ -881,7 +881,7 @@ impl Notifications {
             Rect::new(sx, cy + 32.0, bw1, 24.0),
             l_allow,
             cv.accent,
-            crate::ui::readable(cv.accent, 45.0),
+            ink(),
             6.0,
         ) {
             crate::bg::send(crate::bg::Cmd::NotifRequestAccess);
@@ -938,100 +938,29 @@ unsafe fn notif_action_btn(
     label: &str,
     tone: BtnTone,
 ) -> bool {
-    let ios = is_ios_palette();
     let (_, clicked) = ui.click_area(bid, r);
     let hv = ui.hover_of(bid);
     let pr = ui.press_of(bid);
     let br = press_scale(r, pr);
-    let rad = if ios { br.h / 2.0 } else { 5.0 };
-    let rim_hi = crate::theme::get().rim_hi;
-    let red = hue(SysColor::Red, D2D1_COLOR_F { r: 0.92, g: 0.30, b: 0.28, a: 1.0 });
-    let ind = hue(SysColor::Indigo, cv.accent);
+    let rad = br.h / 2.0;
 
-    // Заливка, верхний/нижний цвета градиентного бордюра и высококонтрастный цвет текста.
-    let (bg, col, border_top, border_bot, sheen_a) = if ios {
-        match tone {
-            BtnTone::Accent => {
-                let fill = mix(cv.accent, fg(), 0.06 * hv);
-                (
-                    fill,
-                    on_color(fill),
-                    D2D1_COLOR_F { a: 0.36 + 0.14 * hv, ..rim_hi },
-                    D2D1_COLOR_F { a: 0.10, ..rim_hi },
-                    0.20 + 0.08 * hv,
-                )
-            }
-            BtnTone::Danger => (
-                mix(chip_bg(), red, 0.20 + 0.16 * hv),
-                txt(),
-                D2D1_COLOR_F { a: 0.30 + 0.14 * hv, ..rim_hi },
-                D2D1_COLOR_F { a: 0.32 + 0.14 * hv, ..red },
-                0.15,
-            ),
-            BtnTone::Silent => (
-                mix(chip_bg(), ind, 0.18 + 0.16 * hv),
-                txt(),
-                D2D1_COLOR_F { a: 0.30 + 0.14 * hv, ..rim_hi },
-                D2D1_COLOR_F { a: 0.30 + 0.14 * hv, ..ind },
-                0.15,
-            ),
-            BtnTone::Neutral => (
-                mix(chip_bg(), fg(), 0.10 * hv),
-                txt(),
-                D2D1_COLOR_F { a: 0.28 + 0.12 * hv, ..rim_hi },
-                D2D1_COLOR_F { a: 0.12, ..fg() },
-                0.14,
-            ),
+    let (bg, col, has_hairline) = match tone {
+        BtnTone::Accent => (mix(cv.accent, fg(), 0.08 * hv), ink(), false),
+        BtnTone::Danger => {
+            let red = hue(SysColor::Red, RED);
+            (mix(chip_bg(), red, 0.16 + 0.12 * hv), txt(), true)
         }
-    } else {
-        // Windows Fluent 2: акцентная кнопка с AccentControlElevation и приподнятые Default/Semantic контролы.
-        let base = mix(card(), fg(), 0.085 + 0.065 * hv);
-        match tone {
-            BtnTone::Accent => {
-                let fill = mix(cv.accent, fg(), 0.08 * hv);
-                (
-                    fill,
-                    on_color(fill),
-                    D2D1_COLOR_F { a: 0.45, ..mix(fill, rim_hi, 0.32) },
-                    D2D1_COLOR_F { a: 0.28, ..ink() },
-                    0.15 + 0.05 * hv,
-                )
-            }
-            BtnTone::Danger => (
-                mix(base, red, 0.14 + 0.14 * hv),
-                txt(),
-                D2D1_COLOR_F { a: 0.36 + 0.18 * hv, ..red },
-                D2D1_COLOR_F { a: 0.22 + 0.10 * hv, ..red },
-                0.08,
-            ),
-            BtnTone::Silent => (
-                mix(base, ind, 0.13 + 0.14 * hv),
-                txt(),
-                D2D1_COLOR_F { a: 0.34 + 0.16 * hv, ..ind },
-                D2D1_COLOR_F { a: 0.20 + 0.10 * hv, ..ind },
-                0.08,
-            ),
-            BtnTone::Neutral => (
-                mix(base, fg(), 0.02 + 0.04 * hv),
-                txt(),
-                D2D1_COLOR_F { a: 0.18 + 0.08 * hv, ..rim_hi },
-                D2D1_COLOR_F { a: 0.10, ..fg() },
-                0.07,
-            ),
+        BtnTone::Silent => {
+            let ind = hue(SysColor::Indigo, cv.accent);
+            (mix(chip_bg(), ind, 0.16 + 0.12 * hv), txt(), true)
         }
+        BtnTone::Neutral => (mix(chip_bg(), fg(), 0.06 * hv), txt(), true),
     };
 
     cv.rr(br, rad, bg);
-    cv.gradient_stops(
-        br,
-        rad,
-        &[
-            (0.0, D2D1_COLOR_F { a: sheen_a, ..rim_hi }),
-            (0.55, D2D1_COLOR_F { a: 0.0, ..rim_hi }),
-        ],
-        false,
-    );
-    cv.rr_line_grad(br, rad, border_top, border_bot, 1.0);
+    if has_hairline {
+        cv.hairline(br, rad);
+    }
 
     if let Some(g) = glyph {
         cv.symbol(g, Rect::new(br.x + 8.0, br.y + (br.h - 11.0) / 2.0, 11.0, 11.0), 10.5, col);

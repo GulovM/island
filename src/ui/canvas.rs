@@ -106,26 +106,6 @@ impl Canvas<'_> {
         );
     }
 
-    /// Контур скруглённого прямоугольника с вертикальным градиентом (бордюр Fluent 2 / Liquid Glass).
-    pub unsafe fn rr_line_grad(
-        &self,
-        r: Rect,
-        radius: f32,
-        top: D2D1_COLOR_F,
-        bottom: D2D1_COLOR_F,
-        width: f32,
-    ) {
-        let stops = [(0.0, self.col(top)), (1.0, self.col(bottom))];
-        let Some(br) = self.g.linear_gradient(pt(r.x, r.y), pt(r.x, r.bottom()), &stops) else { return };
-        let rad = radius.min(r.w / 2.0).min(r.h / 2.0).max(0.0);
-        self.g.dc.DrawRoundedRectangle(
-            &D2D1_ROUNDED_RECT { rect: r.inset(width / 2.0).d2d(), radiusX: rad, radiusY: rad },
-            &br,
-            width,
-            None,
-        );
-    }
-
     pub unsafe fn circle(&self, cx: f32, cy: f32, radius: f32, c: D2D1_COLOR_F) {
         self.g.brush.SetColor(&self.col(c));
         self.g.dc.FillEllipse(
