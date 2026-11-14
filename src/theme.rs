@@ -67,6 +67,9 @@ pub struct Palette {
     pub pill: D2D1_COLOR_F,
     /// Волосяная граница карточек.
     pub hairline: D2D1_COLOR_F,
+    /// Эффективная непрозрачность тела и верхнего осветления для оценки APCA (`1.0`/`0.0` без стекла).
+    pub body_alpha: f32,
+    pub sheen_alpha: f32,
 }
 
 fn col(c: Rgb) -> D2D1_COLOR_F {
@@ -142,8 +145,45 @@ pub fn to_hex(c: Rgb) -> String {
     format!("#{:02X}{:02X}{:02X}", b(c[0]), b(c[1]), b(c[2]))
 }
 
-/// Палитра из фона, акцента и выбранного стиля.
+/// Пара эффективных фонов `[c_min, c_max]` для оценки контраста APCA с учётом прозрачности тела
+/// (`body_alpha`) и верхнего блика (`sheen_alpha`) поверх тёмных и светлых обоев за островом.
+/// Полярный предел яркости удерживает расчёт внутри полярности темы при экстремально низкой альфе,
+/// чтобы иконки и вторичный текст не выцветали в сплошной белый или чёрный.
+pub fn backdrop_samples(bg: Rgb, body_alpha: f32, sheen_alpha: f32) -> [Rgb; 2] {
+    let ba = body_alpha.clamp(0.0, 1.0);
+    let sa = sheen_alpha.clamp(0.0, 1.0);
+    if ba >= 0.999 && sa <= 0.001 {
+        return [bg, bg];
+    }
+    let mut c_min = mix3([0.0, 0.0, 0.0], bg, ba);
+    let base_light = mix3([1.0, 1.0, 1.0], bg, ba);
+    let mut c_max = if sa > 0.001 { mix3(base_light, [1.0, 1.0, 1.0], sa) } else { base_light };
+    if is_light(bg) {
+        let floor = 0.70_f32.min(luminance(bg));
+        let lum = luminance(c_min);
+        if lum < floor && lum < 1.0 - 1e-5 {
+            c_min = mix3(c_min, [1.0, 1.0, 1.0], ((floor - lum) / (1.0 - lum)).clamp(0.0, 1.0));
+        }
+    } else {
+        let cap = 0.42_f32.max(luminance(bg));
+        let lum = luminance(c_max);
+        if lum > cap && lum > 1e-5 {
+            let k = cap / lum;
+            c_max = [c_max[0] * k, c_max[1] * k, c_max[2] * k];
+        }
+    }
+    [c_min, c_max]
+}
+
+/// Палитра из фона, акцента и стиля для непрозрачного режима.
 pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
+    derive_with_alpha(bg, accent, style, 1.0, 0.0)
+}
+
+/// Палитра из фона, акцента, стиля и фактической прозрачности стекла (`body_alpha`, `sheen_alpha`).
+pub fn derive_with_alpha(bg: Rgb, accent: Rgb, style: PaletteStyle, body_alpha: f32, sheen_alpha: f32) -> Palette {
+    let body_alpha = body_alpha.clamp(0.0, 1.0);
+    let sheen_alpha = sheen_alpha.clamp(0.0, 1.0);
     let light = is_light(bg);
     let dark = !light;
     let fg: Rgb = if light { [0.0, 0.0, 0.0] } else { [1.0, 1.0, 1.0] };
@@ -183,6 +223,8 @@ pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
         sheen: rgba(WHITE, sheen_a),
         pill: veil(if light { 0.08 } else { 0.16 }),
         hairline: D2D1_COLOR_F { a: if light { 0.08 } else { 0.07 }, ..col(fg) },
+        body_alpha,
+        sheen_alpha,
     };
 
     if style == PaletteStyle::Ios {
@@ -209,16 +251,16 @@ pub fn derive(bg: Rgb, accent: Rgb, style: PaletteStyle) -> Palette {
         p.pill = ios::fill_primary(dark);
     }
 
-    // Контраст APCA: подтягиваем только цвета текста и значков, акцент и фон не трогаем.
-    // Всегда включён: с выключенным пользовательские цвета темы давали нечитаемый текст.
-    let rgb3 = |c: D2D1_COLOR_F| [c.r, c.g, c.b];
-    let fix = |c: D2D1_COLOR_F, on: Rgb, min_lc: f32| {
-        let [r, g, b] = crate::ui::ensure_apca(rgb3(c), &[on], min_lc);
-        D2D1_COLOR_F { r, g, b, a: c.a }
+    // Контраст APCA: подтягиваем цвета текста и значков против эффективных фонов стекла и их
+    // собственной прозрачности; акцент и фон не трогаем.
+    let bgs = backdrop_samples(bg, body_alpha, sheen_alpha);
+    let fix = |c: D2D1_COLOR_F, on: &[Rgb], min_lc: f32| {
+        let (rgb, a) = crate::ui::ensure_apca_alpha([c.r, c.g, c.b], c.a, on, min_lc);
+        D2D1_COLOR_F { r: rgb[0], g: rgb[1], b: rgb[2], a }
     };
-    p.text = fix(p.text, bg, 75.0);
-    p.dim = fix(p.dim, bg, 60.0);
-    p.ink = fix(p.ink, accent, 60.0);
+    p.text = fix(p.text, &bgs, 75.0);
+    p.dim = fix(p.dim, &bgs, 60.0);
+    p.ink = fix(p.ink, &[accent], 60.0);
 
     p
 }
@@ -527,5 +569,24 @@ mod tests {
         let (bg, accent) = from_system(s, false);
         assert!(is_light(bg));
         assert!(luminance(accent) < 0.6);
+    }
+
+    #[test]
+    fn backdrop_samples_and_translucent_apca_adaptation() {
+        // Непрозрачная тема возвращает исходный цвет фона.
+        assert_eq!(backdrop_samples(DEFAULT_BG, 1.0, 0.0), [DEFAULT_BG, DEFAULT_BG]);
+
+        // При тонком тёмном стекле dim подтягивается по APCA, сохраняя иерархию (< text).
+        let dark_opaque = derive_with_alpha(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Ios, 1.0, 0.0);
+        let dark_glass = derive_with_alpha(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Ios, 0.55, 0.07);
+        assert!(dark_glass.dim.r > dark_opaque.dim.r);
+        assert!(dark_glass.dim.r < dark_glass.text.r);
+
+        // При светлом стекле dim становится темнее для читаемости, но не сливается с text.
+        let light_bg = [0.95, 0.95, 0.96];
+        let light_opaque = derive_with_alpha(light_bg, DEFAULT_ACCENT, PaletteStyle::Ios, 1.0, 0.0);
+        let light_glass = derive_with_alpha(light_bg, DEFAULT_ACCENT, PaletteStyle::Ios, 0.70, 0.30);
+        assert!(light_glass.dim.r < light_opaque.dim.r);
+        assert!(light_glass.dim.r > light_glass.text.r);
     }
 }

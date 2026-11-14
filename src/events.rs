@@ -200,6 +200,7 @@ impl App {
             }
             Ev::SysColors => self.on_sys_colors(),
             Ev::SysColorsRetry => self.on_sys_colors_retry(),
+            Ev::DwmChanged => self.refresh_glass() | self.check_sys_colors(),
             Ev::Volume(level, muted) => {
                 // Вкладка Controls берёт значения из снимка: обновляем его сразу, а не по секундному опросу.
                 bg::send(bg::Cmd::Tick);
@@ -209,10 +210,13 @@ impl App {
                     false
                 }
             }
-            Ev::PowerChange => match self.live.power_event() {
-                Some(t) => self.show_toast(t),
-                None => false,
-            },
+            Ev::PowerChange => {
+                let vis = self.check_sys_colors();
+                match self.live.power_event() {
+                    Some(t) => self.show_toast(t) | vis,
+                    None => vis,
+                }
+            }
             Ev::ToastTimer => {
                 // Уведомление о таймере живёт, пока звучит сигнал: закрываем его вслед за звуком.
                 if self.live.alert() && self.tabs.alarm_playing() {

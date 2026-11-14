@@ -73,6 +73,8 @@ pub(crate) enum Ev {
     SysColors,
     /// Повторная проверка системных цветов (отложенный опрос реестра после смены темы/обоев).
     SysColorsRetry,
+    /// Изменилось состояние композиции DWM (перезапуск DWM, RDP, смена видеодрайвера).
+    DwmChanged,
     /// Нажат PrtSc или Win+Shift+S: остров прячется на время скриншота.
     Shot,
     /// Кнопку удерживают дольше `LONG_MS`.
@@ -209,6 +211,9 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 if s.PowerSetting == GUID_CONSOLE_DISPLAY_STATE && s.DataLength >= 4 {
                     // 0 — экран выключен, 1 — включён, 2 — приглушён.
                     push(Ev::ScreenPower(s.Data[0] != 0));
+                } else if s.PowerSetting == windows::Win32::System::SystemServices::GUID_POWER_SAVING_STATUS {
+                    // Режим энергосбережения отключает эффекты композиции (UISettings::AdvancedEffectsEnabled).
+                    push(Ev::SysColors);
                 }
             }
             LRESULT(1)
@@ -310,6 +315,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_THEMECHANGED | WM_SYSCOLORCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
             push(Ev::SysColors);
+            LRESULT(0)
+        }
+        WM_DWMCOMPOSITIONCHANGED => {
+            push(Ev::DwmChanged);
             LRESULT(0)
         }
         WM_SETTINGCHANGE => {

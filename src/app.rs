@@ -49,6 +49,8 @@ pub struct App {
     /// Подложка стекла через Windows.UI.Composition (`HostBackdropBrush` + клип по контуру тела).
     /// `Some` — новый путь работает, `None` — откат к старому accent-размытию.
     pub(crate) backdrop: Option<crate::backdrop::Backdrop>,
+    /// Контроллер `DispatcherQueue` главного потока (живёт в `App`, переживает пересоздание `Backdrop`).
+    dq: Option<windows::System::DispatcherQueueController>,
     /// Системные «Эффекты прозрачности» включены; иначе DWM рисует плоский фон вместо размытия.
     pub(crate) transparency: bool,
 
@@ -182,44 +184,8 @@ impl App {
                 lpszClassName: w!("IslandGlass"),
                 ..Default::default()
             });
-            let build = crate::sys::windows_build_number();
-            let (glass_wnd, backdrop) = if crate::backdrop::use_host_backdrop(build) {
-                let wnd = crate::wnd::create_glass_window(hinst, true)?;
-                // Новый путь: Windows.UI.Composition HostBackdropBrush с клипом по контуру тела.
-                // DWMWA_USE_HOSTBACKDROPBRUSH (17) + LWA_ALPHA разрешают HostBackdropBrush в окне.
-                let _ = SetLayeredWindowAttributes(wnd, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
-                let on = BOOL(1);
-                let _ = windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
-                    wnd,
-                    windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(17), // DWMWA_USE_HOSTBACKDROPBRUSH
-                    &on as *const _ as _,
-                    4,
-                );
-                match crate::backdrop::Backdrop::new(wnd) {
-                    Ok(b) => {
-                        log::info("стекло: подложка Composition HostBackdropBrush создана");
-                        (wnd, Some(b))
-                    }
-                    Err(e) => {
-                        log::info(&format!("стекло: Composition недоступна ({e}), откат к accent-размытию"));
-                        // WS_EX_NOREDIRECTIONBITMAP нельзя снять после создания — пересоздаём окно под SetWindowRgn.
-                        let _ = DestroyWindow(wnd);
-                        (crate::wnd::create_glass_window(hinst, false)?, None)
-                    }
-                }
-            } else {
-                log::info(&format!("стекло: Windows 10 (build {build}), используется accent blur-behind"));
-                (crate::wnd::create_glass_window(hinst, false)?, None)
-            };
-            // Если новый путь не используется или не удался — пробуем старый accent blur-behind.
-            let blur_ok = if backdrop.is_some() {
-                true
-            } else {
-                crate::wnd::enable_blur_behind(glass_wnd)
-            };
-            if !blur_ok {
-                log::info("стекло: blur-behind недоступен, тело острова остаётся без размытия");
-            }
+            let mut dq = None;
+            let (glass_wnd, backdrop, blur_ok) = init_glass_window(hinst, &mut dq)?;
             MAIN_WND.with(|w| w.set(hwnd));
             TASKBAR_MSG.with(|c| c.set(RegisterWindowMessageW(w!("TaskbarCreated"))));
 
@@ -261,6 +227,7 @@ impl App {
                 glass_wnd,
                 blur_ok,
                 backdrop,
+                dq,
                 transparency: {
                     theme::set_reduced_motion(!sys::animations_enabled());
                     sys::transparency_enabled()
@@ -359,7 +326,17 @@ impl App {
     /// Пересчитывает палитру. `true` — цвета изменились и нужен кадр.
     pub(crate) fn apply_theme(&mut self) -> bool {
         let (bg, accent) = self.effective_colors();
-        let p = theme::derive(bg, accent, self.cfg.palette_style);
+        let (material, opacity) =
+            crate::glass::effective_density(self.cfg.palette_style, self.cfg.material, self.cfg.glass_opacity);
+        let layers =
+            crate::glass::body_layers(material, bg, self.cfg.glass, self.real_glass(), opacity, 1.0, 1.0);
+        let p = theme::derive_with_alpha(
+            bg,
+            accent,
+            self.cfg.palette_style,
+            layers.tint_alpha,
+            layers.sheen.alpha,
+        );
         if p == theme::get() {
             return false;
         }
@@ -373,9 +350,32 @@ impl App {
         theme::set_reduced_motion(!sys::animations_enabled());
         let t = sys::transparency_enabled();
         let flipped = std::mem::replace(&mut self.transparency, t) != t;
-        let theme_changed = self.cfg.system_colors && self.apply_theme();
+        let theme_changed = if self.cfg.system_colors || flipped { self.apply_theme() } else { false };
         self.refresh_tray_icon();
         theme_changed || flipped
+    }
+
+    /// Пересоздаёт подложку стекла и окно `glass_wnd` (при смене состояния DWM, RDP или после TDR).
+    pub(crate) fn refresh_glass(&mut self) -> bool {
+        if self.hinst.0.is_null() {
+            return false;
+        }
+        let Ok((new_wnd, new_bd, new_ok)) = (unsafe { init_glass_window(self.hinst, &mut self.dq) })
+        else {
+            return false;
+        };
+        let old_wnd = std::mem::replace(&mut self.glass_wnd, new_wnd);
+        self.backdrop = new_bd;
+        self.blur_ok = new_ok;
+        self.apply_theme();
+        self.blur_key.set((i32::MIN, 0, 0, 0, 0));
+        self.glass_shape.set((i32::MIN, 0, 0, 0, 0));
+        if !old_wnd.0.is_null() {
+            unsafe {
+                let _ = DestroyWindow(old_wnd);
+            }
+        }
+        true
     }
 
     /// Перерисовывает значок трея, если сменилась тема панели задач.
@@ -645,6 +645,45 @@ impl App {
     }
 }
 
+/// Создаёт окно подложки `glass_wnd` и инициализирует Composition (`HostBackdropBrush` +
+/// `GaussianBlurEffect`) на Win11+ либо `accent blur-behind` на Win10 / при откате.
+unsafe fn init_glass_window(
+    hinst: HINSTANCE,
+    dq: &mut Option<windows::System::DispatcherQueueController>,
+) -> windows::core::Result<(HWND, Option<crate::backdrop::Backdrop>, bool)> {
+    let build = crate::sys::windows_build_number();
+    if crate::backdrop::use_host_backdrop(build) {
+        let wnd = crate::wnd::create_glass_window(hinst, true)?;
+        match crate::backdrop::enable_host_backdrop(wnd)
+            .and_then(|()| crate::backdrop::Backdrop::new(wnd, dq))
+        {
+            Ok(b) => {
+                log::info("стекло: подложка Composition HostBackdropBrush создана");
+                return Ok((wnd, Some(b), true));
+            }
+            Err(e) => {
+                log::info(&format!("стекло: Composition недоступна ({e}), откат к accent-размытию"));
+                // WS_EX_NOREDIRECTIONBITMAP нельзя снять после создания — пересоздаём окно под SetWindowRgn.
+                let _ = DestroyWindow(wnd);
+            }
+        }
+    } else {
+        log::info(&format!("стекло: Windows 10 (build {build}), используется accent blur-behind"));
+    }
+    let wnd = crate::wnd::create_glass_window(hinst, false)?;
+    // На Win11 без поддержки композиционных эффектов (RDP / Basic Display Driver / VM)
+    // SetWindowCompositionAttribute часто возвращает 1 без реального размытия — не занижаем альфу впустую.
+    let blur_ok = if crate::backdrop::use_host_backdrop(build) && !crate::backdrop::effects_supported(wnd) {
+        false
+    } else {
+        crate::wnd::enable_blur_behind(wnd)
+    };
+    if !blur_ok {
+        log::info("стекло: blur-behind недоступен, тело острова остаётся без размытия");
+    }
+    Ok((wnd, None, blur_ok))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -670,6 +709,7 @@ mod tests {
                 glass_wnd: HWND(std::ptr::null_mut()),
                 blur_ok: false,
                 backdrop: None,
+                dq: None,
                 transparency: false,
                 dwrite,
                 gfx: None,

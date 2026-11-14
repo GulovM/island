@@ -173,42 +173,86 @@ pub fn apca_lc(fg: [f32; 3], bg: [f32; 3]) -> f32 {
 const APCA_WHITE: [f32; 3] = [1.0, 1.0, 1.0];
 const APCA_DARK: [f32; 3] = [0.07, 0.07, 0.08];
 
-fn min_lc_over(fg: [f32; 3], bgs: &[[f32; 3]]) -> f32 {
-    bgs.iter().map(|&b| apca_lc(fg, b).abs()).fold(f32::INFINITY, f32::min)
+/// Линейное смешение цвета `fg` с прозрачностью `fg_a` поверх непрозрачного фона `bg` (гамма-sRGB).
+/// Соответствует композитингу цели рендера `B8G8R8A8_UNORM` с `DXGI_ALPHA_MODE_PREMULTIPLIED`.
+pub fn blend_over(fg: [f32; 3], fg_a: f32, bg: [f32; 3]) -> [f32; 3] {
+    let a = fg_a.clamp(0.0, 1.0);
+    [0, 1, 2].map(|i| (bg[i] + (fg[i] - bg[i]) * a).clamp(0.0, 1.0))
 }
 
-/// Подтягивает светлоту `fg`, пока `|Lc|` на каждом из фонов `bgs` не достигнет `min_lc`: цвет
-/// линейно смешивается с полюсом (белым или тёмным — тем, что контрастнее на этих фонах), минимальная
-/// доля смешивания ищется за 8 шагов двоичного поиска. Если `fg` уже читается, он возвращается как есть.
-pub fn ensure_apca(fg: [f32; 3], bgs: &[[f32; 3]], min_lc: f32) -> [f32; 3] {
-    if bgs.is_empty() || min_lc_over(fg, bgs) >= min_lc {
-        return fg;
+/// APCA `Lc` с учётом альфа-канала переднего плана `fg_a` поверх `bg`.
+pub fn apca_lc_alpha(fg: [f32; 3], fg_a: f32, bg: [f32; 3]) -> f32 {
+    apca_lc(blend_over(fg, fg_a, bg), bg)
+}
+
+fn min_lc_over_alpha(fg: [f32; 3], fg_a: f32, bgs: &[[f32; 3]]) -> f32 {
+    bgs.iter().map(|&b| apca_lc_alpha(fg, fg_a, b).abs()).fold(f32::INFINITY, f32::min)
+}
+
+/// Подтягивает светлоту `fg` (и при необходимости альфу `fg_a`), пока `|Lc|` на каждом из фонов `bgs`
+/// с учётом прозрачности не достигнет `min_lc`. Сначала смешивает RGB с контрастным полюсом при
+/// исходной альфе; если при текущей альфе даже полюс ниже порога, поднимает альфу к `1.0`.
+pub fn ensure_apca_alpha(fg: [f32; 3], fg_a: f32, bgs: &[[f32; 3]], min_lc: f32) -> ([f32; 3], f32) {
+    let a = fg_a.clamp(0.0, 1.0);
+    if bgs.is_empty() || min_lc_over_alpha(fg, a, bgs) >= min_lc {
+        return (fg, a);
     }
-    let pole = if min_lc_over(APCA_WHITE, bgs) >= min_lc_over(APCA_DARK, bgs) { APCA_WHITE } else { APCA_DARK };
+    let pole = if min_lc_over_alpha(APCA_WHITE, 1.0, bgs) >= min_lc_over_alpha(APCA_DARK, 1.0, bgs) {
+        APCA_WHITE
+    } else {
+        APCA_DARK
+    };
     let blend = |t: f32| [0, 1, 2].map(|i| fg[i] + (pole[i] - fg[i]) * t);
-    if min_lc_over(pole, bgs) < min_lc {
-        return pole;
+    if min_lc_over_alpha(pole, a, bgs) >= min_lc {
+        let (mut lo, mut hi) = (0.0f32, 1.0f32);
+        for _ in 0..10 {
+            let mid = (lo + hi) / 2.0;
+            if min_lc_over_alpha(blend(mid), a, bgs) >= min_lc {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        return (blend(hi), a);
     }
-    let (mut lo, mut hi) = (0.0f32, 1.0f32);
-    for _ in 0..8 {
+    // Если исходный цвет темнее/светлее полюса (напр. #000 против APCA_DARK), сохраняем более контрастный.
+    let target = if min_lc_over_alpha(fg, 1.0, bgs) >= min_lc_over_alpha(pole, 1.0, bgs) { fg } else { pole };
+    if min_lc_over_alpha(target, 1.0, bgs) < min_lc {
+        return (target, 1.0);
+    }
+    let (mut lo, mut hi) = (a, 1.0f32);
+    for _ in 0..10 {
         let mid = (lo + hi) / 2.0;
-        if min_lc_over(blend(mid), bgs) >= min_lc {
+        if min_lc_over_alpha(target, mid, bgs) >= min_lc {
             hi = mid;
         } else {
             lo = mid;
         }
     }
-    blend(hi)
+    (target, hi)
 }
 
-/// Надпись на сплошной заливке `fill`: белая или почти чёрная — что контрастнее. Насыщенным
-/// системным цветам iOS (синий, красный, фиолетовый) достаётся белая, как в iOS; светлым
-/// (жёлтый, мятный, белая заливка ползунка) — тёмная. Выбор делает перцептивный контраст APCA.
+/// Подтягивает светлоту непрозрачного `fg`, пока `|Lc|` на каждом из фонов `bgs` не достигнет `min_lc`:
+/// цвет линейно смешивается с полюсом (белым или тёмным — тем, что контрастнее на этих фонах).
+#[cfg(test)]
+pub fn ensure_apca(fg: [f32; 3], bgs: &[[f32; 3]], min_lc: f32) -> [f32; 3] {
+    ensure_apca_alpha(fg, 1.0, bgs, min_lc).0
+}
+
+/// Надпись на заливке `fill`: белая или почти чёрная — что контрастнее по APCA. Если `fill.a < 1.0`,
+/// заливка предварительно композитится поверх текущих эффективных фонов острова (с учётом стекла).
 pub fn on_color(fill: D2D1_COLOR_F) -> D2D1_COLOR_F {
-    let bg = [fill.r, fill.g, fill.b];
+    let fg = [fill.r, fill.g, fill.b];
+    let eff: [[f32; 3]; 2] = if fill.a >= 0.999 {
+        [fg, fg]
+    } else {
+        let p = crate::theme::get();
+        crate::theme::backdrop_samples([p.bg.r, p.bg.g, p.bg.b], p.body_alpha, p.sheen_alpha)
+            .map(|b| blend_over(fg, fill.a, b))
+    };
     let dark = rgb(0.11, 0.11, 0.12);
-    let d = apca_lc([dark.r, dark.g, dark.b], bg).abs();
-    let w = apca_lc(APCA_WHITE, bg).abs();
+    let d = min_lc_over_alpha([dark.r, dark.g, dark.b], 1.0, &eff);
+    let w = min_lc_over_alpha(APCA_WHITE, 1.0, &eff);
     if d > w {
         dark
     } else {
@@ -297,12 +341,14 @@ pub fn switch_on_color(accent: D2D1_COLOR_F) -> D2D1_COLOR_F {
     status_color(crate::ios::SysColor::Green, accent)
 }
 
-/// Проверяет и подтягивает контраст цвета `c` против текущего фона темы (`theme::get().bg`)
-/// до порога APCA `min_lc`. На тёмной теме читаемый цвет остаётся без изменений.
+/// Проверяет и подтягивает контраст цвета `c` (включая его прозрачность `c.a`) против
+/// эффективных фонов темы (`theme::backdrop_samples` с учётом `body_alpha` и `sheen_alpha`) до
+/// порога APCA `min_lc`. На непрозрачной тёмной теме читаемый цвет остаётся без изменений.
 pub fn readable(c: D2D1_COLOR_F, min_lc: f32) -> D2D1_COLOR_F {
-    let bg = crate::theme::get().bg;
-    let rgb = ensure_apca([c.r, c.g, c.b], &[[bg.r, bg.g, bg.b]], min_lc);
-    D2D1_COLOR_F { r: rgb[0], g: rgb[1], b: rgb[2], a: c.a }
+    let p = crate::theme::get();
+    let bgs = crate::theme::backdrop_samples([p.bg.r, p.bg.g, p.bg.b], p.body_alpha, p.sheen_alpha);
+    let (rgb, a) = ensure_apca_alpha([c.r, c.g, c.b], c.a, &bgs, min_lc);
+    D2D1_COLOR_F { r: rgb[0], g: rgb[1], b: rgb[2], a }
 }
 
 #[cfg(test)]
@@ -461,5 +507,50 @@ mod tests {
 
         // Восстанавливаем палитру по умолчанию
         crate::theme::set(p_win_dark);
+    }
+
+    #[test]
+    fn ensure_apca_alpha_accounts_for_foreground_transparency() {
+        let bg = [0.05, 0.05, 0.05];
+        // Полупрозрачный серый на тёмном фоне теряет контраст: сначала осветляется RGB при той же alpha.
+        let (c1, a1) = ensure_apca_alpha([0.65, 0.65, 0.65], 0.68, &[bg], 45.0);
+        assert!(apca_lc_alpha(c1, a1, bg).abs() >= 45.0 - 0.1);
+        assert!(c1[0] > 0.65);
+
+        // При очень низкой альфе (0.35) даже белый [1;3] не дотягивает до 60 -> растёт сама alpha.
+        let (c2, a2) = ensure_apca_alpha([0.85, 0.85, 0.85], 0.35, &[bg], 60.0);
+        assert_eq!(c2, APCA_WHITE);
+        assert!(a2 > 0.35 && a2 < 1.0);
+        assert!(apca_lc_alpha(c2, a2, bg).abs() >= 60.0 - 0.1);
+
+        // Чистый чёрный [0,0,0] на [0.70] светлее APCA_DARK -> не деградирует к менее контрастному APCA_DARK.
+        let (c3, _) = ensure_apca_alpha([0.0, 0.0, 0.0], 1.0, &[[0.70, 0.70, 0.70]], 75.0);
+        assert_eq!(c3, [0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn readable_and_on_color_respect_glass_and_fill_alpha() {
+        use crate::theme::{PaletteStyle, DEFAULT_ACCENT, DEFAULT_BG, derive_with_alpha};
+
+        let opaque = derive_with_alpha(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows, 1.0, 0.0);
+        let glass = derive_with_alpha(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows, 0.55, 0.07);
+
+        // Полупрозрачный текст 0.68 на непрозрачной теме сохраняет 0.68, на тонком стекле поднимает яркость/alpha.
+        crate::theme::set(opaque);
+        let r_opaque = readable(D2D1_COLOR_F { r: 0.88, g: 0.88, b: 0.88, a: 0.68 }, 45.0);
+        crate::theme::set(glass);
+        let r_glass = readable(D2D1_COLOR_F { r: 0.88, g: 0.88, b: 0.88, a: 0.68 }, 45.0);
+        assert!(r_glass.r > r_opaque.r || r_glass.a > r_opaque.a);
+
+        // Полупрозрачная тёмно-серая заливка (0.25) на тёмном стекле остаётся тёмной (текст белый),
+        // а та же заливка на светлом непрозрачном/стеклянном фоне требует тёмный текст.
+        let translucent_fill = D2D1_COLOR_F { r: 0.4, g: 0.4, b: 0.4, a: 0.25 };
+        crate::theme::set(opaque);
+        assert!(on_color(translucent_fill).r > 0.9);
+        let light_glass = derive_with_alpha([0.95, 0.95, 0.96], DEFAULT_ACCENT, PaletteStyle::Windows, 0.70, 0.30);
+        crate::theme::set(light_glass);
+        assert!(on_color(translucent_fill).r < 0.2);
+
+        crate::theme::set(opaque);
     }
 }

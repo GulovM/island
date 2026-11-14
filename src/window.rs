@@ -645,10 +645,14 @@ impl App {
     // ---------- Сон, блокировка, потеря устройства ----------
 
     /// Остров не нужен на экране блокировки: сворачиваем, чтобы после входа не висел раскрытым.
-    /// Подписка на включение и выключение экрана: пока он погашен, напоминания о событиях ждут.
+    /// Подписка на состояние дисплея и энергосбережения (Energy Saver влияет на прозрачность DWM).
     pub(crate) unsafe fn watch_display_power(&self) {
-        if let Err(e) = RegisterPowerSettingNotification(windows::Win32::Foundation::HANDLE(self.hwnd.0), &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE) {
+        let h = windows::Win32::Foundation::HANDLE(self.hwnd.0);
+        if let Err(e) = RegisterPowerSettingNotification(h, &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE) {
             log::error(&format!("не удалось подписаться на состояние экрана: {e}"));
+        }
+        if let Err(e) = RegisterPowerSettingNotification(h, &windows::Win32::System::SystemServices::GUID_POWER_SAVING_STATUS, DEVICE_NOTIFY_WINDOW_HANDLE) {
+            log::error(&format!("не удалось подписаться на энергосбережение: {e}"));
         }
     }
 
@@ -675,6 +679,7 @@ impl App {
     /// Пробуждение или разблокировка: графика могла умереть, окружение — измениться.
     pub(crate) unsafe fn on_resume(&mut self) -> bool {
         let mut changed = self.refresh_environment();
+        changed |= self.check_sys_colors();
         if self.gfx.as_ref().is_some_and(|g| g.removed()) {
             log::error("устройство D3D потеряно после сна/блокировки, пересоздаю");
             self.gfx = None;
@@ -702,6 +707,8 @@ impl App {
                 self.gfx = Some(g);
                 self.tab_widths = tabs;
                 self.rgn = (-1, -1, -1);
+                let _ = self.refresh_glass();
+                let _ = self.check_sys_colors();
                 log::info("графика восстановлена");
                 true
             }

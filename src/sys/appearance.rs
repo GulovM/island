@@ -36,9 +36,21 @@ pub fn taskbar_light() -> bool {
     read_dword(PERSONALIZE, w!("SystemUsesLightTheme")) == Some(1)
 }
 
-/// В Windows включены «Эффекты прозрачности» (без значения в реестре — включены).
+/// Эффекты композиции и прозрачности разрешены (реестр + UISettings: учитывает Energy Saver и спецвозможности).
+pub(crate) const fn combine_transparency(reg_enabled: bool, advanced_effects: bool) -> bool {
+    reg_enabled && advanced_effects
+}
+
+fn advanced_effects_enabled() -> bool {
+    windows::UI::ViewManagement::UISettings::new()
+        .and_then(|u| u.AdvancedEffectsEnabled())
+        .unwrap_or(true)
+}
+
+/// В Windows включены «Эффекты прозрачности» (реестр + энергосбережение / политика DWM).
 pub fn transparency_enabled() -> bool {
-    read_dword(PERSONALIZE, w!("EnableTransparency")) != Some(0)
+    let reg = read_dword(PERSONALIZE, w!("EnableTransparency")) != Some(0);
+    combine_transparency(reg, advanced_effects_enabled())
 }
 
 /// Доля из `TextScaleFactor` (проценты) → множитель кегля, 1.0..=1.15. Потолок ниже системных
@@ -194,6 +206,8 @@ pub fn is_theme_setting_str(s: &str) -> bool {
         || lower.contains("accent")
         || lower.contains("personalize")
         || lower.contains("wallpaper")
+        || lower.contains("visualeffects")
+        || lower.contains("accessibility")
         || lower == "desktop"
 }
 
@@ -251,6 +265,8 @@ mod tests {
         assert!(is_theme_setting_str("Personalize"));
         assert!(is_theme_setting_str("WindowColor"));
         assert!(is_theme_setting_str("Wallpaper"));
+        assert!(is_theme_setting_str("VisualEffects"));
+        assert!(is_theme_setting_str("Accessibility"));
         assert!(is_theme_setting_str("desktop"));
         assert!(is_theme_setting_str(""));
         assert!(is_theme_setting_str("   "));
@@ -259,5 +275,13 @@ mod tests {
         assert!(!is_theme_setting_str("intl"));
         assert!(!is_theme_setting_str("Policy"));
         assert!(!is_theme_setting_str("FontSmoothing"));
+    }
+
+    #[test]
+    fn transparency_combines_registry_and_advanced_effects() {
+        assert!(combine_transparency(true, true));
+        assert!(!combine_transparency(false, true));
+        assert!(!combine_transparency(true, false));
+        assert!(!combine_transparency(false, false));
     }
 }

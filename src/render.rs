@@ -404,11 +404,11 @@ impl App {
                 // Выбранная читается на своей подложке: на акцентной капле `on_color`, на нейтральной капле `bare`,
                 // на плашке без стекла акцент, подтянутый к `bare`, чтобы бледный акцент не терялся.
                 let mut c = if !active {
-                    D2D1_COLOR_F { a: 0.68, ..ui::bare() }
+                    ui::readable(D2D1_COLOR_F { a: 0.68, ..ui::bare() }, 45.0)
                 } else if !self.cfg.glass {
-                    ui::mix(accent, ui::bare(), 0.4)
+                    ui::readable(ui::mix(accent, ui::bare(), 0.4), 45.0)
                 } else if self.cfg.accent_pill {
-                    ui::on_color(accent)
+                    ui::on_color(D2D1_COLOR_F { a: 0.92, ..accent })
                 } else {
                     ui::bare()
                 };
@@ -426,7 +426,7 @@ impl App {
                 gcv.circle(gx, gy, GEAR_R, D2D1_COLOR_F { a: 0.26, ..accent });
             }
             g.dc.SetTransform(&ui::matrix_rot(s, gx, gy, 60.0 * gv));
-            let gcol = if self.settings_open { accent } else { ui::mix(ui::dim(), ui::txt(), gv) };
+            let gcol = if self.settings_open { ui::readable(accent, 45.0) } else { ui::mix(ui::dim(), ui::txt(), gv) };
             gcv.glyph(ui::icon::SETTINGS, ui::Rect::new(gx - GEAR_R, gy - GEAR_R, 2.0 * GEAR_R, 2.0 * GEAR_R), false, gcol);
 
             // Карандаш справа (левее шестерёнки): правка виджетов. Появляется только на вкладках с сеткой, в режиме правки залит акцентом.
@@ -442,7 +442,7 @@ impl App {
                 if ev > 0.01 {
                     pcv.circle(ex, ey, GEAR_R, D2D1_COLOR_F { a: 0.26 * ev, ..accent });
                 }
-                let col = ui::mix(ui::mix(ui::dim(), ui::txt(), hv), accent, ev);
+                let col = ui::mix(ui::mix(ui::dim(), ui::txt(), hv), ui::readable(accent, 45.0), ev);
                 pcv.glyph(ui::icon::EDIT, ui::Rect::new(ex - 7.0, ey - 7.0, 14.0, 14.0), false, col);
             }
 
@@ -547,11 +547,38 @@ impl App {
                 if prev != (0, 0, 0, 0, -1) {
                     self.blur_key.set((0, 0, 0, 0, -1));
                     let _ = bd.set_visible(false);
+                    let _ = ShowWindow(self.glass_wnd, SW_HIDE);
                 }
                 return;
             }
 
-            // Позиция окна подложки — совпадает с главным окном, сразу за ним в Z-порядке.
+            if prev.0 == i32::MIN || prev.4 < 0 {
+                let _ = crate::backdrop::enable_host_backdrop(self.glass_wnd);
+            }
+
+            // Сначала обновляем контур, силу размытия и тень до показа окна, чтобы не мелькала заглушка 1×1.
+            if pos_changed || self.glass_shape.get() != shape_key {
+                self.glass_shape.set(shape_key);
+                if let Ok(geo) = self
+                    .body_path(g, x0, aw, ah, ear, r, false)
+                    .and_then(|p| p.cast::<windows::Win32::Graphics::Direct2D::ID2D1Geometry>())
+                {
+                    let _ = bd.set_shape(&geo, self.win_w as f32, self.win_h as f32);
+                }
+            }
+
+            let scale = self.scale;
+            let _ = bd.set_blur(crate::backdrop::blur_sigma(self.cfg.material, dark, scale));
+
+            // Тень: параметры из ios::GLASS_SHADOW, масштабированные под остров.
+            let shadow = crate::ios::GLASS_SHADOW;
+            let dy = shadow.offset_y * scale;
+            let blur = shadow.blur_radius * scale;
+            // Непрозрачность тени (подобрано): тёмная тема — 0.35, светлая — 0.18.
+            let opacity = if dark { 0.35 } else { 0.18 };
+            let _ = bd.set_shadow(dy, blur, opacity);
+
+            // Позиция и показ окна подложки — сразу за главным окном в Z-порядке.
             if pos_changed {
                 self.blur_key.set(key);
                 let _ = SetWindowPos(
@@ -565,26 +592,6 @@ impl App {
                 );
                 let _ = bd.set_visible(true);
             }
-
-            // Форма клипа — обновляем только при смене контура или окна (пружины анимируют тело каждый кадр).
-            if pos_changed || self.glass_shape.get() != shape_key {
-                self.glass_shape.set(shape_key);
-                if let Ok(geo) = self
-                    .body_path(g, x0, aw, ah, ear, r, false)
-                    .and_then(|p| p.cast::<windows::Win32::Graphics::Direct2D::ID2D1Geometry>())
-                {
-                    let _ = bd.set_shape(&geo, self.win_w as f32, self.win_h as f32);
-                }
-            }
-
-            // Тень: параметры из ios::GLASS_SHADOW, масштабированные под остров.
-            let shadow = crate::ios::GLASS_SHADOW;
-            let scale = self.scale;
-            let dy = shadow.offset_y * scale;
-            let blur = shadow.blur_radius * scale;
-            // Непрозрачность тени (подобрано): тёмная тема — 0.35, светлая — 0.18.
-            let opacity = if dark { 0.35 } else { 0.18 };
-            let _ = bd.set_shadow(dy, blur, opacity);
         } else {
             // ---- Старый путь: accent blur-behind + SetWindowRgn (Windows 10) ----
             let shape = crate::glass::body_outline(x0, aw, ah, ear, r, 1.0);
