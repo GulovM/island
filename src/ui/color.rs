@@ -117,11 +117,14 @@ pub fn is_ios_palette() -> bool {
     crate::theme::get().style == crate::theme::PaletteStyle::Ios
 }
 
+fn is_dark_bg() -> bool {
+    let p = crate::theme::get();
+    !crate::theme::is_light([p.bg.r, p.bg.g, p.bg.b])
+}
+
 fn status_color(sys_color: crate::ios::SysColor, fallback: D2D1_COLOR_F) -> D2D1_COLOR_F {
     if is_ios_palette() {
-        let p = crate::theme::get();
-        let dark = !crate::theme::is_light([p.bg.r, p.bg.g, p.bg.b]);
-        crate::ios::to_d2d(crate::ios::sys(sys_color, dark), 1.0)
+        crate::ios::to_d2d(crate::ios::sys(sys_color, is_dark_bg()), 1.0)
     } else {
         fallback
     }
@@ -260,15 +263,29 @@ pub fn on_color(fill: D2D1_COLOR_F) -> D2D1_COLOR_F {
     }
 }
 
-/// Заливка ползунков громкости, яркости и перемотки: в стиле iOS на тёмном острове — белая, как
-/// в Пункте управления; на светлом и в стиле Windows — акцент.
-pub fn slider_fill(accent: D2D1_COLOR_F) -> D2D1_COLOR_F {
-    let p = crate::theme::get();
-    if is_ios_palette() && !crate::theme::is_light([p.bg.r, p.bg.g, p.bg.b]) {
+/// Заливка ползунков громкости и яркости (и разряжающейся батареи): как в стиле macOS —
+/// белая на тёмном острове, акцент на светлом (в том числе в стиле Windows).
+pub fn ios_slider_fill(accent: D2D1_COLOR_F) -> D2D1_COLOR_F {
+    if is_dark_bg() {
         D2D1_COLOR_F { a: 0.96, ..WHITE }
     } else {
         accent
     }
+}
+
+/// Заливка ползунков перемотки: в стиле iOS на тёмном острове — белая, как
+/// в Пункте управления; на светлом и в стиле Windows — акцент.
+pub fn slider_fill(accent: D2D1_COLOR_F) -> D2D1_COLOR_F {
+    if is_ios_palette() {
+        ios_slider_fill(accent)
+    } else {
+        accent
+    }
+}
+
+/// Системный зелёный iOS/macOS (используется виджетом батареи в обоих стилях палитры).
+pub fn ios_green() -> D2D1_COLOR_F {
+    crate::ios::to_d2d(crate::ios::sys(crate::ios::SysColor::Green, is_dark_bg()), 1.0)
 }
 
 /// Статусный зелёный (батарея, задачи):
@@ -552,5 +569,30 @@ mod tests {
         assert!(on_color(translucent_fill).r < 0.2);
 
         crate::theme::set(opaque);
+    }
+
+    #[test]
+    fn windows_battery_and_slider_colors_match_macos() {
+        use crate::theme::{derive, DEFAULT_ACCENT, DEFAULT_BG, PaletteStyle};
+        let bg_dark = DEFAULT_BG;
+        let bg_light = [0.95, 0.95, 0.95];
+
+        for bg in [bg_dark, bg_light] {
+            let p_win = derive(bg, DEFAULT_ACCENT, PaletteStyle::Windows);
+            let p_ios = derive(bg, DEFAULT_ACCENT, PaletteStyle::Ios);
+
+            crate::theme::set(p_win);
+            let win_fill = ios_slider_fill(p_win.accent);
+            let win_green = ios_green();
+
+            crate::theme::set(p_ios);
+            let ios_fill = slider_fill(p_ios.accent);
+            let ios_g = status_green();
+
+            assert_eq!(win_fill, ios_fill);
+            assert_eq!(win_green, ios_g);
+        }
+
+        crate::theme::set(derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows));
     }
 }

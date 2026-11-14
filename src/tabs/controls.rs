@@ -10,7 +10,7 @@ use crate::anim::Spring;
 use crate::bg::{self, Cmd, DevItem, ListKind, Media, Timeline};
 use crate::sys;
 use crate::ios::SysColor;
-use crate::ui::{hue, icon, mix, on_color, slider_fill, Align, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink, txt, WHITE};
+use crate::ui::{hue, icon, ios_green, ios_slider_fill, mix, on_color, slider_fill, Align, Canvas, Chevron, Rect, Submit, Ui, chip_bg, dim, ink, txt, WHITE};
 
 use super::grid::{Grid, Item};
 use super::layout::{sz, Size, HIDDEN, Spec, TabSpec, CELL, GAP, TALL, WIDE};
@@ -564,9 +564,9 @@ impl Controls {
                     _ => icon::VOLUME3,
                 };
                 let moved = if r.h > r.w {
-                    ui.slider_bar_v(cv, id(CONTROLS, 10), r, g, &mut self.volume, slider_fill(cv.accent))
+                    ui.slider_bar_v(cv, id(CONTROLS, 10), r, g, &mut self.volume, ios_slider_fill(cv.accent))
                 } else {
-                    ui.slider_bar(cv, id(CONTROLS, 10), r, g, &mut self.volume, slider_fill(cv.accent))
+                    ui.slider_bar(cv, id(CONTROLS, 10), r, g, &mut self.volume, ios_slider_fill(cv.accent))
                 };
                 if moved {
                     self.hold_until = Some(Instant::now() + HOLD);
@@ -580,9 +580,9 @@ impl Controls {
             }
             BRIGHTNESS => {
                 let moved = if r.h > r.w {
-                    ui.slider_bar_v(cv, id(CONTROLS, 11), r, icon::BRIGHTNESS, &mut self.brightness, slider_fill(cv.accent))
+                    ui.slider_bar_v(cv, id(CONTROLS, 11), r, icon::BRIGHTNESS, &mut self.brightness, ios_slider_fill(cv.accent))
                 } else {
-                    ui.slider_bar(cv, id(CONTROLS, 11), r, icon::BRIGHTNESS, &mut self.brightness, slider_fill(cv.accent))
+                    ui.slider_bar(cv, id(CONTROLS, 11), r, icon::BRIGHTNESS, &mut self.brightness, ios_slider_fill(cv.accent))
                 };
                 if moved {
                     self.bright_hold = Some(Instant::now() + HOLD);
@@ -602,7 +602,7 @@ impl Controls {
     /// («СЕТЬ» / «БАТАРЕЯ»), крупный процент слева и горизонтальный значок батареи справа
     /// (с молнией при питании от сети).
     unsafe fn battery_card(&self, cv: &Canvas, r: Rect, size: usize) {
-        use crate::ui::{status_green, track};
+        use crate::ui::track;
         let f = &cv.g.fonts;
         cv.card(r);
         let Some(b) = self.battery.status else {
@@ -616,7 +616,7 @@ impl Controls {
             }
             return;
         };
-        let col = if b.ac_online { status_green() } else { slider_fill(cv.accent) };
+        let col = if b.ac_online { ios_green() } else { ios_slider_fill(cv.accent) };
         let shown = self.battery.level.value.clamp(0.0, 1.0);
         let big = b.percent.to_string();
         if size == 0 {
