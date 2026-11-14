@@ -146,9 +146,9 @@ impl App {
             v if v == VK_HOME.0 as u32 => KeyEv::Home(shift),
             v if v == VK_END.0 as u32 => KeyEv::End(shift),
             v if v == VK_BACK.0 as u32 => match (extended, ctrl) {
-                // Некоторые клавиатуры и драйверы (в т.ч. Mac/Fn+Backspace) шлют VK_BACK с флагом extended вместо VK_DELETE.
+                // Клавиатуры/драйверы (в т.ч. Mac/Fn+Backspace) шлют VK_BACK с флагом extended: удаляем строку с курсором.
                 (true, true) => KeyEv::DeleteWord,
-                (true, false) => KeyEv::Delete,
+                (true, false) => KeyEv::DeleteLine,
                 (false, true) => KeyEv::BackspaceWord,
                 (false, false) => KeyEv::Backspace,
             },

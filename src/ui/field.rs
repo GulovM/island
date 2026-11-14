@@ -96,6 +96,7 @@ pub enum KeyEv {
     BackspaceWord,
     Delete,
     DeleteWord,
+    DeleteLine,
     SelectAll,
     Copy,
     Cut,
@@ -153,6 +154,34 @@ fn next_word_end(chars: &[char], caret: usize) -> usize {
         }
     }
     i
+}
+
+/// Границы `[lo, hi)` строки, в которой находится `caret` (включая перевод строки).
+fn current_line_bounds(chars: &[char], caret: usize) -> (usize, usize) {
+    let n = chars.len();
+    let pos = caret.min(n);
+    let mut lo = pos;
+    while lo > 0 && chars[lo - 1] != '\n' && chars[lo - 1] != '\r' {
+        lo -= 1;
+    }
+    let mut hi = pos;
+    while hi < n && chars[hi] != '\n' && chars[hi] != '\r' {
+        hi += 1;
+    }
+    if hi < n {
+        if chars[hi] == '\r' && hi + 1 < n && chars[hi + 1] == '\n' {
+            hi += 2;
+        } else {
+            hi += 1;
+        }
+    } else if lo > 0 {
+        if chars[lo - 1] == '\n' && lo >= 2 && chars[lo - 2] == '\r' {
+            lo -= 2;
+        } else {
+            lo -= 1;
+        }
+    }
+    (lo, hi)
 }
 
 fn utf16_len(chars: &[char]) -> u32 {
@@ -495,6 +524,14 @@ impl Ui {
                     f.chars.drain(f.caret..hi);
                 }
             }
+            KeyEv::DeleteLine => {
+                if n > 0 {
+                    let (lo, hi) = if f.secret { (0, n) } else { current_line_bounds(&f.chars, f.caret) };
+                    f.chars.drain(lo..hi);
+                    f.caret = lo;
+                    f.anchor = lo;
+                }
+            }
             KeyEv::SelectAll => {
                 f.anchor = 0;
                 f.caret = n;
@@ -595,5 +632,37 @@ mod tests {
         ui.set_field_text(id, "sec ret");
         ui.key(KeyEv::BackspaceWord);
         assert_eq!(ui.field_text(id), "");
+    }
+
+    #[test]
+    fn fn_backspace_deletes_current_line() {
+        let mut ui = Ui::default();
+        let id = 11;
+        ui.focus = Some(id);
+
+        // Однострочный ввод очищается полностью.
+        ui.set_field_text(id, "hello world");
+        ui.key(KeyEv::Left(false));
+        ui.key(KeyEv::DeleteLine);
+        assert_eq!(ui.field_text(id), "");
+        assert_eq!(ui.nav.len(), 0);
+
+        // Пустое поле не отправляет Nav::Delete.
+        ui.key(KeyEv::DeleteLine);
+        assert_eq!(ui.nav.len(), 0);
+
+        // В многострочном тексте удаляется только строка с курсором.
+        ui.set_field_text(id, "one\ntwo\nthree");
+        // Ставим курсор в середину "two" (индекс 5).
+        ui.fields.get_mut(&id).unwrap().caret = 5;
+        ui.key(KeyEv::DeleteLine);
+        assert_eq!(ui.field_text(id), "one\nthree");
+        assert_eq!(ui.fields[&id].caret, 4);
+
+        // Удаление последней строки убирает предшествующий перевод строки.
+        ui.fields.get_mut(&id).unwrap().caret = 6;
+        ui.key(KeyEv::DeleteLine);
+        assert_eq!(ui.field_text(id), "one");
+        assert_eq!(ui.fields[&id].caret, 3);
     }
 }
