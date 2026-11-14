@@ -13,7 +13,9 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use super::sun::sun_times;
 use super::Today;
-use crate::online::{civil_from_days, days_from_civil};
+#[cfg(test)]
+use crate::online::civil_from_days;
+use crate::online::days_from_civil;
 use crate::ui::{card_radius, dim, mix, on_color, readable, track, txt, Align, Canvas, Corner, Rect};
 
 /// Внутренний отступ карточки часов.
@@ -41,6 +43,7 @@ impl Shape {
 }
 
 /// Номер недели по ISO 8601 (неделя с понедельника, первая — та, где первый четверг года).
+#[cfg(test)]
 pub(super) fn iso_week(day: i64) -> u32 {
     // 1970-01-01 — четверг: после сдвига 0 — понедельник.
     let dow = (day + 3).rem_euclid(7);

@@ -704,8 +704,8 @@ impl Today {
                 let count_w = cv.text_w(&count_s, &f.small);
                 cv.line(&count_s, &f.small, card.x + 12.0 + tw + 8.0, count_w + 2.0, card.y + 21.0, Align::Leading, dim());
 
-                let btn_sz = 22.0;
-                let btn_r = Rect::new(card.right() - 12.0 - btn_sz, card.y + 10.0, btn_sz, btn_sz);
+                let btn_sz = 18.0;
+                let btn_r = Rect::new(card.right() - 12.0 - btn_sz, card.y + 12.0, btn_sz, btn_sz);
 
                 // Чип сортировки: если места в шапке не хватает, не рисуется.
                 let sort_label = self.todo_sort.label();
@@ -716,12 +716,7 @@ impl Today {
                     self.resort();
                     self.save();
                 }
-                let (_, add_clicked) = ui.click_area(id(TODAY, ID_ADD), btn_r);
-                let hv = ui.hover_of(id(TODAY, ID_ADD));
-                cv.circle(btn_r.cx(), btn_r.cy(), 11.0, D2D1_COLOR_F { a: 0.16 + 0.84 * hv, ..cv.accent });
-                cv.glyph(icon::ADD, btn_r.inset(3.0), false, mix(cv.accent, crate::ui::on_color(cv.accent), hv));
-                ui.tip(id(TODAY, ID_ADD), btn_r, crate::i18n::pick("Добавить задачу", "Add task"));
-                if add_clicked {
+                if ui.icon_button(cv, id(TODAY, ID_ADD), btn_r, icon::ADD, false, crate::i18n::pick("Добавить задачу", "Add task")) {
                     self.todo_adding = true;
                     self.todo_draft_prio = Priority::None;
                     let _ = ui.submit_field(fid);
@@ -757,8 +752,8 @@ impl Today {
                 let pill_r = Rect::new(card.right() - 14.0 - pw, card.y + 14.0, pw, 24.0);
                 let (_, add_clicked) = ui.click_area(id(TODAY, ID_ADD), pill_r);
                 let hv = ui.hover_of(id(TODAY, ID_ADD));
-                cv.rr(pill_r, pill_r.h / 2.0, D2D1_COLOR_F { a: 0.16 + 0.84 * hv, ..cv.accent });
-                let fg_col = mix(cv.accent, crate::ui::on_color(cv.accent), hv);
+                cv.rr(pill_r, pill_r.h / 2.0, mix(crate::ui::chip_bg(), fg(), 0.10 * hv));
+                let fg_col = mix(dim(), txt(), 0.7 + 0.3 * hv);
                 cv.glyph(icon::ADD, Rect::new(pill_r.x + 7.0, pill_r.y + 4.0, 16.0, 16.0), false, fg_col);
                 cv.line(add_lbl, &f.small_c, pill_r.x + 24.0, pw - 30.0, pill_r.cy(), Align::Leading, fg_col);
                 if add_clicked {
@@ -775,8 +770,8 @@ impl Today {
             let tw = cv.text_w(title, &f.caps);
             cv.line(title, &f.caps, card.x + 12.0, tw + 2.0, card.y + 19.0, Align::Leading, dim());
 
-            let btn_sz = 20.0;
-            let btn_r = Rect::new(card.right() - 12.0 - btn_sz, card.y + 9.0, btn_sz, btn_sz);
+            let btn_sz = 18.0;
+            let btn_r = Rect::new(card.right() - 12.0 - btn_sz, card.y + 10.0, btn_sz, btn_sz);
 
             let count_s = format!("{done} {} {}", crate::i18n::pick("из", "of"), self.todo.len());
             let count_w = cv.text_w(&count_s, &f.small);
@@ -807,12 +802,7 @@ impl Today {
                 let field = Rect::new(card.x + 10.0, card.y + 32.0, card.w - 20.0, 26.0);
                 submitted = self.paint_field(ui, cv, field);
             } else {
-                let (_, add_clicked) = ui.click_area(id(TODAY, ID_ADD), btn_r);
-                let hv = ui.hover_of(id(TODAY, ID_ADD));
-                cv.circle(btn_r.cx(), btn_r.cy(), btn_sz / 2.0, D2D1_COLOR_F { a: 0.16 + 0.84 * hv, ..cv.accent });
-                cv.glyph(icon::ADD, btn_r.inset(2.5), false, mix(cv.accent, crate::ui::on_color(cv.accent), hv));
-                ui.tip(id(TODAY, ID_ADD), btn_r, crate::i18n::pick("Добавить задачу", "Add task"));
-                if add_clicked {
+                if ui.icon_button(cv, id(TODAY, ID_ADD), btn_r, icon::ADD, false, crate::i18n::pick("Добавить задачу", "Add task")) {
                     self.todo_adding = true;
                     self.todo_draft_prio = Priority::None;
                     let _ = ui.submit_field(fid);

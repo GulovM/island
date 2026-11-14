@@ -18,6 +18,10 @@ const CAL_APPLE_ID_FIELD: u32 = 142;
 const CAL_APPLE_PW_FIELD: u32 = 143;
 const CAL_APPLE_SUBMIT_BTN: u32 = 144;
 const CAL_APPLE_CANCEL_BTN: u32 = 145;
+const CAL_ICS_ADD_BTN: u32 = 146;
+const CAL_EMPTY_ADD_BTN: u32 = 147;
+const CAL_BACK_BTN: u32 = 148;
+const CAL_MONTH_CONN_BTN: u32 = 149;
 /// Кнопки удаления и строки ссылок iCal (до `MAX_CALENDAR_URLS` штук).
 const URL_DEL: u32 = 700;
 const URL_ROW: u32 = 720;
@@ -34,7 +38,7 @@ pub(super) const ID_RANGES: &[(u32, u32)] = &[
     (80, 87),
     (90, 100),
     (101, 102),
-    (CAL_GOOGLE_BTN, CAL_APPLE_CANCEL_BTN + 1),
+    (CAL_GOOGLE_BTN, CAL_MONTH_CONN_BTN + 1),
     (URL_DEL, URL_DEL + crate::config::MAX_CALENDAR_URLS as u32),
     (URL_ROW, URL_ROW + crate::config::MAX_CALENDAR_URLS as u32),
     (800, 842),
@@ -397,8 +401,6 @@ pub fn format_event_range(minute: Option<i64>, end: Option<i64>) -> String {
     }
 }
 
-/// Ширина кнопки-метки «ICS» рядом с кнопкой добавления события.
-const ICS_W: f32 = 24.0;
 /// Ширина левой секции (дни недели) в карточке 6x2 (~60% от 328 px).
 const WEEK_WIDE_LEFT_W: f32 = 200.0;
 /// Высота строки расписания в расширенной карточке недели (4x4).
@@ -414,22 +416,58 @@ const DAY_DOT_R: f32 = 1.6;
 /// Радиус точки отметки «сейчас» на временной шкале.
 const NOW_MARKER_R: f32 = 2.5;
 
-/// Кнопка-метка «ICS»: только текст, без подложки; при наведении подсвечивается. `true` — нажата.
-unsafe fn ics_label(ui: &mut Ui, cv: &Canvas, r: Rect) -> bool {
-    let cid = id(TODAY, 99);
-    let (_, clicked) = ui.click_area(cid, r);
-    let hv = ui.hover_of(cid);
-    cv.text("ICS", r, &cv.g.fonts.small_c, mix(dim(), cv.accent, hv));
-    ui.tip(cid, r, tip_ics());
+/// Кнопка «+» создания события в нейтральном сером стиле (совпадает с кнопкой настроек).
+unsafe fn add_event_button(ui: &mut Ui, cv: &Canvas, cid: u32, r: Rect) -> bool {
+    ui.icon_button(cv, cid, r, icon::ADD, false, crate::i18n::pick("Создать событие", "New event"))
+}
+
+/// Кнопка настроек подключений календаря (Google, Apple iCloud, iCal) с точкой статуса.
+unsafe fn connections_button(
+    ui: &mut Ui,
+    cv: &Canvas,
+    cid: u32,
+    r: Rect,
+    calendar_set: bool,
+    calendar_failed: bool,
+) -> bool {
+    let tip = if calendar_failed {
+        crate::i18n::pick("Ошибка календаря — проверить подключения", "Calendar error — check connections")
+    } else if !calendar_set {
+        crate::i18n::pick("Подключить Google, Apple или iCal", "Connect Google, Apple or iCal")
+    } else {
+        crate::i18n::pick("Аккаунты и календари", "Accounts & calendars")
+    };
+    let clicked = ui.icon_button(cv, cid, r, icon::SETTINGS, false, tip);
+    if calendar_failed {
+        cv.circle(r.right() - 2.5, r.y + 2.5, 2.2, status_pink());
+    } else if !calendar_set {
+        cv.circle(r.right() - 2.5, r.y + 2.5, 2.0, cv.accent);
+    }
     clicked
 }
 
-fn tip_add_event() -> &'static str {
-    crate::i18n::pick("Добавить событие", "Add event")
-}
-
-fn tip_ics() -> &'static str {
-    crate::i18n::pick("Подключить календарь по ссылке (iCal)", "Connect a calendar by link (iCal)")
+/// Компактная пилюля-действие для пустых и ошибочных состояний.
+unsafe fn compact_pill_btn(
+    ui: &mut Ui,
+    cv: &Canvas,
+    cid: u32,
+    r: Rect,
+    label: &str,
+    accent: bool,
+) -> bool {
+    let (_, clicked) = ui.click_area(cid, r);
+    let hv = ui.hover_of(cid);
+    let (bg, text_col) = if accent {
+        let fill = D2D1_COLOR_F { a: 0.16 + 0.84 * hv, ..cv.accent };
+        let fg_col = mix(readable(cv.accent, 60.0), crate::ui::on_color(cv.accent), hv);
+        (fill, fg_col)
+    } else {
+        let fill = mix(crate::ui::chip_bg(), fg(), 0.08 * hv);
+        (fill, txt())
+    };
+    cv.rr(r, r.h / 2.0, bg);
+    cv.text(label, r, &cv.g.fonts.small_c, text_col);
+    clicked
 }
 
 /// Ширина колонки времени в месячном списке событий: хватает на «10:00–11:30».
@@ -444,7 +482,7 @@ struct DaysRowLayout {
     day_cy: f32,
 }
 
-/// Отрисовка шапки карточки недели: название месяца капсом, кнопки раскрытия/добавления/ICS и «неделя N».
+/// Отрисовка шапки карточки недели: единая пилюля месяца с шевроном и кнопки «+» / подключений.
 unsafe fn draw_week_header(
     today_tab: &mut Today,
     ui: &mut Ui,
@@ -455,38 +493,44 @@ unsafe fn draw_week_header(
     today: i64,
 ) {
     let f = &cv.g.fonts;
+    let btn_sz = 18.0;
+    let conn_r = Rect::new(right - btn_sz, head_cy - btn_sz / 2.0, btn_sz, btn_sz);
+    let add_r = Rect::new(conn_r.x - 4.0 - btn_sz, head_cy - btn_sz / 2.0, btn_sz, btn_sz);
+
     let (_, month, _) = civil_from_days(today);
     let month_name = crate::i18n::months_full()[(month as usize).clamp(1, 12) - 1].to_uppercase();
     let mw = cv.text_w(&month_name, &f.caps);
-    cv.text(&month_name, Rect::new(left, head_cy - 5.0, mw + 2.0, 11.0), &f.caps, dim());
-
-    let mut bx = left + mw + 4.0;
-    // Шеврон раскрытия месяца
-    let down_r = Rect::new(bx, head_cy - 9.0, 16.0, 18.0);
-    if ui.icon_button(cv, id(TODAY, 90), down_r, icon::DOWN, false, crate::i18n::pick("Месяц", "Month")) {
+    let max_pill_w = (add_r.x - 6.0 - (left - 4.0)).max(36.0);
+    let pill_w = (mw + 18.0).min(max_pill_w);
+    let month_r = Rect::new(left - 4.0, head_cy - 9.0, pill_w, 18.0);
+    let (_, month_clicked) = ui.click_area(id(TODAY, 90), month_r);
+    let mhv = ui.hover_of(id(TODAY, 90));
+    if mhv > 0.01 {
+        cv.rr(month_r, 9.0, D2D1_COLOR_F { a: 0.08 * mhv, ..fg() });
+    }
+    let text_w = (pill_w - 16.0).max(10.0);
+    cv.text(&month_name, Rect::new(left, head_cy - 5.5, text_w, 11.0), &f.caps, mix(dim(), txt(), mhv));
+    cv.glyph(icon::DOWN, Rect::new(left + text_w + 1.0, head_cy - 5.0, 10.0, 10.0), false, mix(dim(), cv.accent, mhv));
+    ui.tip(id(TODAY, 90), month_r, crate::i18n::pick("Открыть месяц", "Open month"));
+    if month_clicked {
         today_tab.open_month(today);
     }
-    bx = down_r.right() + 1.0;
 
-    // Кнопка добавления события
-    let add_r = Rect::new(bx, head_cy - 9.0, 16.0, 18.0);
-    if ui.icon_button(cv, id(TODAY, 98), add_r, icon::ADD, false, tip_add_event()) {
+    if add_event_button(ui, cv, id(TODAY, 98), add_r) {
         today_tab.open_month(today);
         today_tab.begin_event(ui, today);
     }
-    bx = add_r.right() + 1.0;
 
-    // Метка ICS
-    let ics_r = Rect::new(bx, head_cy - 9.0, ICS_W, 18.0);
-    if ics_label(ui, cv, ics_r) {
+    if connections_button(
+        ui,
+        cv,
+        id(TODAY, 99),
+        conn_r,
+        today_tab.online.calendar_set,
+        today_tab.online.calendar_failed,
+    ) {
         today_tab.begin_calendar_edit(ui);
     }
-
-    // Номер недели справа: «неделя N» / «week N»
-    let week_str = format!("{} {}", crate::i18n::pick("неделя", "week"), super::clock::iso_week(today));
-    let ww = cv.text_w(&week_str, &f.small_r);
-    let week_x = (right - ww).max(bx + 4.0);
-    cv.text(&week_str, Rect::new(week_x, head_cy - 6.0, ww, 13.0), &f.small_r, dim());
 }
 
 /// Отрисовка ряда дней Пн..Вс: подпись дня мелко, число в капсуле для сегодня, точка событий.
@@ -510,9 +554,11 @@ unsafe fn draw_days_row(
     for (i, (day, _)) in dates.iter().enumerate() {
         let cx = lay.left + lay.margin + i as f32 * lay.step;
         let is_today = i == dow;
-        // Как в макете: «сегодня» — вертикальная скруглённая плашка 24×38 (радиус 12), в ней день недели, число
-        // и точка событий; у остальных дней та же область служит областью наведения.
-        let pill_rect = Rect::new(cx - 12.0, lay.label_cy - 8.0, 24.0, (lay.day_cy - lay.label_cy) + 14.0 + DAY_DOT_R + 3.5 + 8.0);
+        // Вертикальная скруглённая плашка дня недели, числа и точки событий.
+        let pill_top = lay.label_cy - 6.5;
+        let dot_y = lay.day_cy + 10.5;
+        let pill_h = (dot_y + 3.5) - pill_top;
+        let pill_rect = Rect::new(cx - 12.0, pill_top, 24.0, pill_h);
         let cid = id(TODAY, 80 + i as u32);
         let (_, clicked) = ui.click_area(cid, pill_rect);
         let hv = ui.hover_of(cid);
@@ -522,9 +568,9 @@ unsafe fn draw_days_row(
         let num_col = if is_today { on_pill } else if i >= 5 { dim() } else { txt() };
 
         if is_today {
-            cv.rr(pill_rect, 12.0, pill_fill);
+            cv.rr(pill_rect, 11.5, pill_fill);
         } else if hv > 0.01 {
-            cv.rr(pill_rect, 12.0, D2D1_COLOR_F { a: 0.07 * hv, ..fg() });
+            cv.rr(pill_rect, 11.5, D2D1_COLOR_F { a: 0.07 * hv, ..fg() });
         }
         cv.text(crate::i18n::weekdays()[i], Rect::new(cx - 14.0, lay.label_cy - 6.0, 28.0, 12.0), &f.small_c, wd);
         cv.text(&day.to_string(), Rect::new(cx - 10.0, lay.day_cy - 7.0, 20.0, 14.0), &f.body_c, num_col);
@@ -532,7 +578,7 @@ unsafe fn draw_days_row(
         // Точка наличия событий под числом дня
         if week_has_events[i] {
             let dot_col = if is_today { D2D1_COLOR_F { a: 0.9, ..on_pill } } else { dim() };
-            cv.circle(cx, lay.day_cy + 14.0, DAY_DOT_R, dot_col);
+            cv.circle(cx, dot_y, DAY_DOT_R, dot_col);
         }
 
         if clicked {
@@ -567,11 +613,6 @@ impl Today {
     /// 4x4 = 216x216 (size 2) — дни сверху, расписание событий на сегодня снизу.
     pub(super) unsafe fn week_card(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect, size: usize, today: i64, dow: usize) {
         cv.card(wk);
-        if self.cal_editing {
-            self.calendar_form(ui, cv, wk);
-            return;
-        }
-
         // Цветной ореол в правом верхнем углу (только в стиле Windows)
         cv.glow(wk, crate::ui::card_radius(), cv.accent, Corner::TopRight);
 
@@ -596,8 +637,8 @@ impl Today {
                 left: wk.x,
                 margin: 17.0,
                 step: (left_w - 34.0) / 6.0,
-                label_cy: wk.y + 39.0,
-                day_cy: wk.y + 57.0,
+                label_cy: wk.y + 40.0,
+                day_cy: wk.y + 58.0,
             };
             draw_days_row(self, ui, cv, &lay, today, dow, &week_has_events);
 
@@ -609,15 +650,15 @@ impl Today {
             self.draw_single_event(ui, cv, wk);
         } else if is_tall {
             // 4x4 (size 2): шапка + дни, разделитель, расписание
-            let head_cy = wk.y + 15.0;
+            let head_cy = wk.y + 14.5;
             draw_week_header(self, ui, cv, wk.x + 12.0, wk.right() - 12.0, head_cy, today);
 
             let lay = DaysRowLayout {
                 left: wk.x,
                 margin: 24.0,
                 step: (wk.w - 48.0) / 6.0,
-                label_cy: wk.y + 30.0,
-                day_cy: wk.y + 45.0,
+                label_cy: wk.y + 31.5,
+                day_cy: wk.y + 45.5,
             };
             draw_days_row(self, ui, cv, &lay, today, dow, &week_has_events);
 
@@ -637,7 +678,7 @@ impl Today {
             let (label_cy, day_cy) = if low {
                 (wk.y + 41.0, wk.y + 64.0)
             } else {
-                (wk.y + 26.5, wk.y + 41.5)
+                (wk.y + 30.0, wk.y + 43.5)
             };
             let lay = DaysRowLayout {
                 left: wk.x,
@@ -674,24 +715,21 @@ impl Today {
             let col_x = wk.x + WEEK_WIDE_LEFT_W + 1.0;
             let col_w = (wk.right() - col_x).max(20.0);
             let col_r = Rect::new(col_x, wk.y, col_w, wk.h);
-            let cx = col_r.x + 14.0;
-            let cw = (col_r.w - 24.0).max(10.0);
-
-            let local = self.next.as_ref().and_then(|e| e.local_id.map(|id| (id, e.start.div_euclid(1440))));
-            let connect = self.next.is_none() && !self.online.calendar_set;
-            let (_, clicked) = ui.click_area(id(TODAY, 63), col_r);
-            let hv = if local.is_some() || connect { ui.hover_of(id(TODAY, 63)) } else { 0.0 };
-
-            if hv > 0.01 {
-                cv.rr(col_r, 8.0, D2D1_COLOR_F { a: 0.05 * hv, ..fg() });
-                if local.is_some() {
-                    cv.glyph(icon::EDIT, Rect::new(col_r.right() - 20.0, col_r.y + 10.0, 14.0, 14.0), false, D2D1_COLOR_F { a: hv, ..dim() });
-                }
-            } else if self.online.calendar_failed {
-                cv.circle(col_r.right() - 14.0, col_r.y + 18.0, 2.5, dim());
-            }
+            let cx = col_r.x + 12.0;
+            let cw = (col_r.w - 22.0).max(10.0);
 
             if let Some(ref e) = self.next {
+                let local = e.local_id.map(|id| (id, e.start.div_euclid(1440)));
+                let ev_day = e.start.div_euclid(1440);
+                let (_, clicked) = ui.click_area(id(TODAY, 63), col_r);
+                let hv = ui.hover_of(id(TODAY, 63));
+                if hv > 0.01 {
+                    cv.rr(col_r.inset(4.0), 8.0, D2D1_COLOR_F { a: 0.05 * hv, ..fg() });
+                    if local.is_some() {
+                        cv.glyph(icon::EDIT, Rect::new(col_r.right() - 20.0, col_r.y + 10.0, 14.0, 14.0), false, D2D1_COLOR_F { a: hv, ..dim() });
+                    }
+                }
+
                 let next_label = crate::i18n::pick("ДАЛЕЕ", "NEXT");
                 cv.text(next_label, Rect::new(cx, col_r.y + 14.0, cw, 11.0), &f.caps, readable_ev);
 
@@ -707,63 +745,68 @@ impl Today {
                 let rel_str = event_relative_time(e, now_min);
                 let rel_y = time_y + 14.0;
                 cv.text(&rel_str, Rect::new(cx, rel_y, cw, 13.0), &f.small, readable_ev);
+
+                if clicked {
+                    if let Some((lid, day)) = local {
+                        self.open_month(day);
+                        self.edit_event(ui, lid);
+                    } else {
+                        self.open_month(ev_day);
+                    }
+                }
             } else {
-                let (tag, l1, l2) = match self.online.calendar_set {
+                let (tag, l1, l2, btn_lbl) = match self.online.calendar_set {
                     true if self.online.calendar_failed => (
                         crate::i18n::pick("ОШИБКА", "ERROR"),
-                        crate::i18n::pick("Не удалось загрузить", "Couldn't load"),
-                        if self.ics.len() > 1 {
-                            crate::i18n::pick("Проверьте ссылки календаря", "Check calendar links")
-                        } else {
-                            crate::i18n::t("Проверьте ссылку calendar_ics")
-                        },
+                        crate::i18n::pick("Сбой загрузки", "Load error"),
+                        crate::i18n::pick("Проверьте подключения", "Check connections"),
+                        Some(crate::i18n::pick("Проверить", "Check")),
                     ),
                     true => (
                         crate::i18n::pick("КАЛЕНДАРЬ", "CALENDAR"),
                         crate::i18n::pick("Событий нет", "No events"),
-                        crate::i18n::pick("Календарь пуст на ближайшее время", "The calendar is empty for now"),
+                        crate::i18n::pick("Ближайшее время свободно", "No upcoming events"),
+                        None,
                     ),
                     false => (
                         crate::i18n::pick("КАЛЕНДАРЬ", "CALENDAR"),
-                        crate::i18n::pick("Календарь не подключён", "Calendar not connected"),
-                        crate::i18n::pick("Нажмите, чтобы добавить ссылку", "Click to add a link"),
+                        crate::i18n::pick("Не подключён", "Not connected"),
+                        crate::i18n::pick("Google, Apple, iCal", "Google, Apple, iCal"),
+                        Some(crate::i18n::pick("Подключить", "Connect")),
                     ),
                 };
-                cv.text(tag, Rect::new(cx, col_r.y + 14.0, cw, 11.0), &f.caps, dim());
-                cv.text(l1, Rect::new(cx, col_r.y + 28.0, cw, 13.0), &f.small_b, txt());
-                cv.text(l2, Rect::new(cx, col_r.y + 44.0, cw, 26.0), &f.small, dim());
-            }
-
-            if clicked {
-                if let Some((lid, day)) = local {
-                    self.open_month(day);
-                    self.edit_event(ui, lid);
-                } else if connect {
-                    self.begin_calendar_edit(ui);
+                cv.text(tag, Rect::new(cx, col_r.y + 13.0, cw, 11.0), &f.caps, dim());
+                cv.text(l1, Rect::new(cx, col_r.y + 27.0, cw, 13.0), &f.small_b, txt());
+                cv.text(l2, Rect::new(cx, col_r.y + 42.0, cw, 13.0), &f.small, dim());
+                if let Some(lbl) = btn_lbl {
+                    let btn_r = Rect::new(cx, col_r.bottom() - 30.0, cw.min(96.0), 20.0);
+                    if compact_pill_btn(ui, cv, id(TODAY, 95), btn_r, lbl, !self.online.calendar_failed) {
+                        self.begin_calendar_edit(ui);
+                    }
                 }
             }
         } else {
             // 4x2 (size 0): блок снизу под рядом дней
-            let ev_y = wk.bottom() - 42.0;
-            let ev = Rect::new(wk.x + 8.0, ev_y, wk.w - 16.0, 34.0);
+            let ev_y = wk.bottom() - 41.0;
+            let ev = Rect::new(wk.x + 8.0, ev_y, wk.w - 16.0, 33.0);
             cv.rr(ev, 8.0, inset());
-            cv.rr(Rect::new(ev.x + 7.0, ev.y + 7.0, EVENT_STRIP_W, ev.h - 14.0), 1.5, ev_col);
-
-            let local = self.next.as_ref().and_then(|e| e.local_id.map(|id| (id, e.start.div_euclid(1440))));
-            let connect = self.next.is_none() && !self.online.calendar_set;
-            let (_, clicked) = ui.click_area(id(TODAY, 63), ev);
-            let hv = if local.is_some() || connect { ui.hover_of(id(TODAY, 63)) } else { 0.0 };
-
-            if hv > 0.01 {
-                cv.rr(ev, 8.0, D2D1_COLOR_F { a: 0.05 * hv, ..fg() });
-                if local.is_some() {
-                    cv.glyph(icon::EDIT, Rect::new(ev.right() - 20.0, ev.y + 9.0, 14.0, 14.0), false, D2D1_COLOR_F { a: hv, ..dim() });
-                }
-            } else if self.online.calendar_failed {
-                cv.circle(ev.right() - 14.0, ev.y + 17.0, 2.5, dim());
-            }
 
             if let Some(ref e) = self.next {
+                cv.rr(Rect::new(ev.x + 7.0, ev.y + 7.0, EVENT_STRIP_W, ev.h - 14.0), 1.5, ev_col);
+
+                let local = e.local_id.map(|id| (id, e.start.div_euclid(1440)));
+                let ev_day = e.start.div_euclid(1440);
+                let (_, clicked) = ui.click_area(id(TODAY, 63), ev);
+                let hv = ui.hover_of(id(TODAY, 63));
+                if hv > 0.01 {
+                    cv.rr(ev, 8.0, D2D1_COLOR_F { a: 0.05 * hv, ..fg() });
+                    if local.is_some() {
+                        cv.glyph(icon::EDIT, Rect::new(ev.right() - 20.0, ev.y + 9.0, 14.0, 14.0), false, D2D1_COLOR_F { a: hv, ..dim() });
+                    }
+                } else if self.online.calendar_failed {
+                    cv.circle(ev.right() - 14.0, ev.y + 17.0, 2.5, status_pink());
+                }
+
                 let title_x = ev.x + 15.0;
                 let title_w = (ev.w - 23.0).max(10.0);
                 cv.text(&e.title, Rect::new(title_x, ev.y + 4.0, title_w, 13.0), &f.small_b, txt());
@@ -774,36 +817,53 @@ impl Today {
                 let max_time_w = (ev.w - 23.0 - rel_w - 6.0).max(30.0);
                 cv.text(&time_str, Rect::new(title_x, ev.y + 18.0, max_time_w, 13.0), &f.small, dim());
                 cv.text(&rel_str, Rect::new(ev.right() - 8.0 - rel_w, ev.y + 18.0, rel_w, 13.0), &f.small_r, readable_ev);
-            } else {
-                let (l1, l2) = match self.online.calendar_set {
-                    true if self.online.calendar_failed => (
-                        crate::i18n::pick("Не удалось загрузить", "Couldn't load"),
-                        if self.ics.len() > 1 {
-                            crate::i18n::pick("Проверьте ссылки календаря", "Check calendar links")
-                        } else {
-                            crate::i18n::t("Проверьте ссылку calendar_ics")
-                        },
-                    ),
-                    true => (
-                        crate::i18n::pick("Событий нет", "No events"),
-                        crate::i18n::pick("Календарь пуст на ближайшее время", "The calendar is empty for now"),
-                    ),
-                    false => (
-                        crate::i18n::pick("Календарь не подключён", "Calendar not connected"),
-                        crate::i18n::pick("Нажмите, чтобы добавить ссылку", "Click to add a link"),
-                    ),
-                };
-                cv.text(l1, Rect::new(ev.x + 15.0, ev.y + 4.0, ev.w - 23.0, 13.0), &f.small_b, txt());
-                cv.text(l2, Rect::new(ev.x + 15.0, ev.y + 18.0, ev.w - 23.0, 13.0), &f.small, dim());
-            }
 
-            if clicked {
-                if let Some((lid, day)) = local {
-                    self.open_month(day);
-                    self.edit_event(ui, lid);
-                } else if connect {
+                if clicked {
+                    if let Some((lid, day)) = local {
+                        self.open_month(day);
+                        self.edit_event(ui, lid);
+                    } else {
+                        self.open_month(ev_day);
+                    }
+                }
+            } else if !self.online.calendar_set || self.online.calendar_failed {
+                let (l1, l2, btn_lbl, accent_btn) = if self.online.calendar_failed {
+                    (
+                        crate::i18n::pick("Ошибка загрузки", "Load error"),
+                        crate::i18n::pick("Проверьте доступ", "Check access"),
+                        crate::i18n::pick("Открыть", "Open"),
+                        false,
+                    )
+                } else {
+                    (
+                        crate::i18n::pick("Нет подключений", "No calendars"),
+                        crate::i18n::pick("Google, Apple, iCal", "Google, Apple, iCal"),
+                        crate::i18n::pick("Подключить", "Connect"),
+                        true,
+                    )
+                };
+                let bw = (cv.text_w(btn_lbl, &f.small_c) + 16.0).clamp(58.0, 82.0);
+                let btn_r = Rect::new(ev.right() - 6.0 - bw, ev.cy() - 10.0, bw, 20.0);
+                let text_w = (btn_r.x - 6.0 - (ev.x + 10.0)).max(20.0);
+                cv.text(l1, Rect::new(ev.x + 10.0, ev.y + 4.0, text_w, 13.0), &f.small_b, txt());
+                cv.text(l2, Rect::new(ev.x + 10.0, ev.y + 18.0, text_w, 13.0), &f.small, dim());
+                if compact_pill_btn(ui, cv, id(TODAY, 95), btn_r, btn_lbl, accent_btn) {
                     self.begin_calendar_edit(ui);
                 }
+            } else {
+                cv.rr(Rect::new(ev.x + 7.0, ev.y + 7.0, EVENT_STRIP_W, ev.h - 14.0), 1.5, dim());
+                cv.text(
+                    crate::i18n::pick("Событий нет", "No events"),
+                    Rect::new(ev.x + 15.0, ev.y + 4.0, ev.w - 23.0, 13.0),
+                    &f.small_b,
+                    txt(),
+                );
+                cv.text(
+                    crate::i18n::pick("Ближайшее время свободно", "No upcoming events"),
+                    Rect::new(ev.x + 15.0, ev.y + 18.0, ev.w - 23.0, 13.0),
+                    &f.small,
+                    dim(),
+                );
             }
         }
     }
@@ -828,50 +888,90 @@ impl Today {
         cv.text(&head_text, Rect::new(box_r.x + 12.0, box_r.y + 7.0, box_r.w - 24.0, 11.0), &f.caps, dim());
 
         if self.online.calendar_failed {
-            cv.circle(box_r.right() - 14.0, box_r.y + 12.0, 2.5, dim());
+            cv.circle(box_r.right() - 14.0, box_r.y + 12.0, 2.5, status_pink());
         }
 
         let content_top = box_r.y + 22.0;
         let content_h = box_r.bottom() - 6.0 - content_top;
 
         if items.is_empty() {
-            let note = if !self.online.calendar_set {
-                crate::i18n::pick("Календарь не подключён", "Calendar not connected")
-            } else if self.online.calendar_failed {
-                crate::i18n::pick("Не удалось загрузить", "Couldn't load")
-            } else {
-                crate::i18n::pick("На сегодня событий нет", "No events for today")
-            };
-            cv.text(note, Rect::new(box_r.x + 12.0, content_top, box_r.w - 24.0, 14.0), &f.small, dim());
-
             if let Some(ref e) = self.next {
+                cv.text(
+                    crate::i18n::pick("На сегодня событий нет", "No events for today"),
+                    Rect::new(box_r.x + 12.0, content_top, box_r.w - 24.0, 14.0),
+                    &f.small,
+                    dim(),
+                );
                 let next_y = content_top + 18.0;
-                let next_h = (box_r.bottom() - 6.0 - next_y).min(44.0);
-                if next_h >= 32.0 {
+                let next_h = (box_r.bottom() - 8.0 - next_y).min(46.0);
+                if next_h >= 34.0 {
                     let next_r = Rect::new(box_r.x + 8.0, next_y, box_r.w - 16.0, next_h);
-                    cv.rr(next_r, 6.0, inset());
+                    cv.rr(next_r, 8.0, inset());
                     cv.rr(Rect::new(next_r.x + 7.0, next_r.y + 7.0, EVENT_STRIP_W, next_r.h - 14.0), 1.5, cv.accent);
+                    let local = e.local_id.map(|id| (id, e.start.div_euclid(1440)));
+                    let ev_day = e.start.div_euclid(1440);
+                    let (_, clicked) = ui.click_area(id(TODAY, 63), next_r);
+                    let hv = ui.hover_of(id(TODAY, 63));
+                    if hv > 0.01 {
+                        cv.rr(next_r, 8.0, D2D1_COLOR_F { a: 0.05 * hv, ..fg() });
+                    }
                     let l1 = event_when(e, now_min);
-                    cv.text(&l1, Rect::new(next_r.x + 15.0, next_r.y + 4.0, next_r.w - 22.0, 13.0), &f.small_b, txt());
-                    cv.text(&e.title, Rect::new(next_r.x + 15.0, next_r.y + 17.0, next_r.w - 22.0, 13.0), &f.small, dim());
+                    cv.text(&l1, Rect::new(next_r.x + 15.0, next_r.y + 5.0, next_r.w - 22.0, 13.0), &f.small_b, txt());
+                    cv.text(&e.title, Rect::new(next_r.x + 15.0, next_r.y + 20.0, next_r.w - 22.0, 13.0), &f.small, dim());
+                    if clicked {
+                        if let Some((lid, day)) = local {
+                            self.open_month(day);
+                            self.edit_event(ui, lid);
+                        } else {
+                            self.open_month(ev_day);
+                        }
+                    }
                 }
             } else {
-                let sub = if !self.online.calendar_set {
-                    crate::i18n::pick("Нажмите, чтобы добавить ссылку", "Click to add a link")
+                let card_h = (content_h - 4.0).min(88.0);
+                let empty_r = Rect::new(box_r.x + 8.0, content_top + 2.0, box_r.w - 16.0, card_h);
+                cv.rr(empty_r, 8.0, inset());
+                let (title, sub) = if !self.online.calendar_set {
+                    (
+                        crate::i18n::pick("Календарь не подключён", "Calendar not connected"),
+                        crate::i18n::pick("Google, Apple iCloud или iCal", "Google, Apple iCloud or iCal"),
+                    )
                 } else if self.online.calendar_failed {
-                    if self.ics.len() > 1 {
-                        crate::i18n::pick("Проверьте ссылки календаря", "Check calendar links")
-                    } else {
-                        crate::i18n::t("Проверьте ссылку calendar_ics")
-                    }
+                    (
+                        crate::i18n::pick("Не удалось загрузить", "Couldn't load"),
+                        crate::i18n::pick("Проверьте аккаунты и ссылки", "Check accounts and links"),
+                    )
                 } else {
-                    crate::i18n::pick("Календарь пуст на ближайшее время", "The calendar is empty for now")
+                    (
+                        crate::i18n::pick("На сегодня событий нет", "No events for today"),
+                        crate::i18n::pick("Ближайшее время свободно", "No upcoming events"),
+                    )
                 };
-                cv.text(sub, Rect::new(box_r.x + 12.0, content_top + 18.0, box_r.w - 24.0, 14.0), &f.small, mix(dim(), crate::ui::card(), 0.35));
-            }
+                cv.text(title, Rect::new(empty_r.x + 10.0, empty_r.y + 10.0, empty_r.w - 20.0, 14.0), &f.small_b, txt());
+                cv.text(sub, Rect::new(empty_r.x + 10.0, empty_r.y + 26.0, empty_r.w - 20.0, 14.0), &f.small, dim());
 
-            if !self.online.calendar_set && ui.click_area(id(TODAY, 95), box_r).1 {
-                self.begin_calendar_edit(ui);
+                let btn_y = empty_r.bottom() - 28.0;
+                let mut bx = empty_r.x + 10.0;
+                if !self.online.calendar_set || self.online.calendar_failed {
+                    let lbl = if self.online.calendar_failed {
+                        crate::i18n::pick("Проверить", "Check")
+                    } else {
+                        crate::i18n::pick("Подключить", "Connect")
+                    };
+                    let bw = (cv.text_w(lbl, &f.small_c) + 18.0).clamp(68.0, 96.0);
+                    if compact_pill_btn(ui, cv, id(TODAY, 95), Rect::new(bx, btn_y, bw, 20.0), lbl, !self.online.calendar_failed) {
+                        self.begin_calendar_edit(ui);
+                    }
+                    bx += bw + 6.0;
+                }
+                let add_lbl = crate::i18n::pick("+ Событие", "+ Event");
+                let aw = (cv.text_w(add_lbl, &f.small_c) + 16.0).clamp(62.0, 88.0);
+                if bx + aw <= empty_r.right() - 8.0
+                    && compact_pill_btn(ui, cv, id(TODAY, CAL_EMPTY_ADD_BTN), Rect::new(bx, btn_y, aw, 20.0), add_lbl, false)
+                {
+                    self.open_month(today);
+                    self.begin_event(ui, today);
+                }
             }
             return true;
         }
@@ -986,6 +1086,7 @@ impl Today {
 
     fn begin_calendar_edit(&mut self, ui: &mut Ui) {
         let field = id(TODAY, 62);
+        self.ev_form = None;
         self.cal_editing = true;
         self.cal_bad = false;
         self.apple_form_open = false;
@@ -993,13 +1094,16 @@ impl Today {
         // и пользователь должен увидеть, почему подключение не удалось.
         ui.set_field_text(field, "");
         ui.set_secret(id(TODAY, CAL_APPLE_PW_FIELD), true);
-        ui.focus = Some(field);
-        ui.caret_on = true;
+        ui.blur();
     }
 
-    /// Форма управления источниками календаря: Google OAuth 2.0, Apple iCloud CalDAV и ссылки iCal.
-    unsafe fn calendar_form(&mut self, ui: &mut Ui, cv: &Canvas, wk: Rect) {
+    /// Форма управления источниками календаря в оверлее 216×216:
+    /// Google OAuth 2.0, Apple iCloud CalDAV и ссылки iCal.
+    pub(super) unsafe fn calendar_form(&mut self, ui: &mut Ui, cv: &Canvas, r: Rect) {
         let f = &cv.g.fonts;
+        cv.card(r);
+        cv.glow(r, crate::ui::card_radius(), cv.accent, Corner::TopRight);
+
         let field = id(TODAY, 62);
         let google_btn = id(TODAY, CAL_GOOGLE_BTN);
         let apple_toggle = id(TODAY, CAL_APPLE_TOGGLE_BTN);
@@ -1007,241 +1111,308 @@ impl Today {
         let apple_pw_field = id(TODAY, CAL_APPLE_PW_FIELD);
         let apple_submit = id(TODAY, CAL_APPLE_SUBMIT_BTN);
         let apple_cancel = id(TODAY, CAL_APPLE_CANCEL_BTN);
+        let ics_add_btn = id(TODAY, CAL_ICS_ADD_BTN);
         ui.set_secret(apple_pw_field, true);
 
-        // Обработка ввода новой ссылки iCal в поле
-        if let Some(url) = ui.take_submitted(field) {
-            let url = url.trim().to_string();
-            if url.is_empty() {
+        // Клик вне оверлея закрывает форму подключений
+        let ptr = ui.pointer();
+        if self.cal_editing && ui.pressed && !r.contains(ptr) {
+            self.cal_editing = false;
+            self.apple_form_open = false;
+            online::clear_cal_auth_error();
+            ui.blur();
+            return;
+        }
+
+        // Шапка оверлея
+        let mut title_x = r.x + 10.0;
+        if self.month_open {
+            let back_r = Rect::new(r.x + 8.0, r.y + 7.0, 18.0, 18.0);
+            if ui.icon_button(cv, id(TODAY, CAL_BACK_BTN), back_r, icon::LEFT, false, crate::i18n::pick("Назад к месяцу", "Back to month")) {
                 self.cal_editing = false;
+                self.apple_form_open = false;
+                online::clear_cal_auth_error();
                 ui.blur();
                 return;
             }
-            if crate::config::valid_calendar_url(&url) {
-                if !self.ics.iter().any(|u| u == &url) && self.ics.len() < crate::config::MAX_CALENDAR_URLS {
-                    self.ics.push(url);
-                    crate::config::save_calendar_ics(&self.ics);
-                    online::refresh_calendar(&self.ics);
-                    self.sync();
-                }
-                self.cal_bad = false;
-                ui.set_field_text(field, "");
-                ui.focus = Some(field);
-                ui.caret_on = true;
-            } else {
-                self.cal_bad = true;
-                ui.set_field_text(field, &url);
-                ui.focus = Some(field);
-                ui.caret_on = true;
-            }
+            title_x = back_r.right() + 4.0;
         }
-
-        // Клик вне карточки закрывает форму
-        let ptr = ui.pointer();
-        if ui.pressed && !wk.contains(ptr) {
-            // Клик по острову мимо карточки — пользователь закончил с формой, старая ошибка
-            // больше не нужна. Возврат из браузера кликом не считается: тот клик вне окна.
-            self.cal_editing = false;
-            self.apple_form_open = false;
-            online::clear_cal_auth_error();
-            ui.blur();
-            return;
-        }
-
-        // Заголовок и кнопка закрытия
         cv.text(
-            crate::i18n::pick("Календари (iCal)", "Calendars (iCal)"),
-            Rect::new(wk.x + 9.0, wk.y + 6.0, wk.w - 36.0, 14.0),
-            &f.body,
+            crate::i18n::pick("Календари", "Calendars"),
+            Rect::new(title_x, r.y + 7.0, r.right() - 32.0 - title_x, 18.0),
+            &f.body_b,
             txt(),
         );
-        let close_btn = Rect::new(wk.right() - 24.0, wk.y + 5.0, 16.0, 16.0);
+        let close_btn = Rect::new(r.right() - 26.0, r.y + 7.0, 18.0, 18.0);
         if ui.icon_button(cv, id(TODAY, 64), close_btn, icon::CLOSE, false, crate::i18n::pick("Закрыть", "Close")) {
             self.cal_editing = false;
+            self.month_open = false;
             self.apple_form_open = false;
             online::clear_cal_auth_error();
             ui.blur();
             return;
         }
+        cv.rr(Rect::new(r.x + 10.0, r.y + 30.0, r.w - 20.0, 1.0), 0.5, hairline());
+
+        // Обработка ввода новой ссылки iCal (Enter или кнопка «+»)
+        let mut submitted_url = ui.take_submitted(field);
 
         let status = online::cal_account_status();
         if status.apple_id.is_some() {
             self.apple_form_open = false;
         }
-        let err_h = if self.cal_bad || status.error.is_some() { 14.0 } else { 0.0 };
-        let apple_h = if self.apple_form_open { 22.0 } else { 0.0 };
-        let total_h = 22.0 + 22.0 + apple_h + 24.0 + err_h + (self.ics.len() as f32 * 19.0);
-        let view_top = wk.y + 22.0;
-        let view = Rect::new(wk.x + 7.0, view_top, wk.w - 14.0, (wk.bottom() - 4.0 - view_top).max(20.0));
+
+        let err_msg = if self.cal_bad {
+            Some(crate::i18n::pick(
+                "Нужна ссылка вида https:// или webcal://",
+                "A link like https:// or webcal:// is required",
+            ).to_string())
+        } else {
+            status.error.as_ref().map(|e| crate::i18n::tr(e).into_owned())
+        };
+
+        let view_top = r.y + 35.0;
+        let view = Rect::new(r.x + 8.0, view_top, r.w - 16.0, (r.bottom() - 8.0 - view_top).max(40.0));
+        let row_w = view.w - 4.0;
+
+        let err_h = if let Some(ref msg) = err_msg {
+            let (lines, lh) = cv.wrapped(msg, &f.small, row_w - 4.0);
+            (lines.min(2) as f32) * lh + 6.0
+        } else {
+            0.0
+        };
+        let apple_card_h = if self.apple_form_open { 106.0 } else { 36.0 };
+        let ics_rows_h = self.ics.len() as f32 * 22.0;
+        let total_h = 36.0 + 6.0 + apple_card_h + 10.0 + 14.0 + 24.0 + err_h + 4.0 + ics_rows_h;
+
         let sid = id(TODAY, 65);
         let off = ui.scroll_begin(cv, sid, view, total_h);
         let mut y = view.y - off;
-        let row_w = view.w;
+        let btn_w = 68.0;
+        let on_accent = crate::ui::on_color(cv.accent);
 
-        // 1. Строка Google Календаря
-        let btn_w = 76.0;
-        let g_label = if let Some(email) = &status.google_email {
-            format!("Google: {email}")
-        } else if status.google_busy {
-            crate::i18n::pick("Google: вход в браузере…", "Google: browser sign-in…").to_string()
-        } else {
-            crate::i18n::pick("Google Календарь", "Google Calendar").to_string()
-        };
-        cv.text(&g_label, Rect::new(view.x + 2.0, y + 3.0, row_w - btn_w - 6.0, 14.0), &f.small, txt());
-        let g_rect = Rect::new(view.x + row_w - btn_w, y + 1.0, btn_w, 18.0);
-        if status.google_email.is_some() {
-            if ui.solid_button(cv, google_btn, g_rect, "Отключить", crate::ui::chip_bg(), txt(), 5.0) {
-                online::disconnect_google(&self.ics);
-                self.sync();
-            }
-        } else if status.google_busy {
-            let _ = ui.solid_button(cv, google_btn, g_rect, "Ожидание…", crate::ui::chip_bg(), dim(), 5.0);
-        } else if online::oauth::google_available() {
-            if ui.solid_button(cv, google_btn, g_rect, "Подключить", cv.accent, crate::ui::ink(), 5.0) {
-                online::connect_google(self.ics.clone());
-            }
-        } else {
-            let _ = ui.solid_button(cv, google_btn, g_rect, "Нет ключей", crate::ui::chip_bg(), dim(), 5.0);
-        }
-        y += 22.0;
+        // 1. Карточка Google Календаря
+        {
+            let card_r = Rect::new(view.x, y, row_w, 36.0);
+            cv.rr(card_r, 8.0, inset());
+            let badge_r = Rect::new(card_r.x + 7.0, card_r.cy() - 10.0, 20.0, 20.0);
+            let g_col = status_blue();
+            cv.rr(badge_r, 6.0, D2D1_COLOR_F { a: 0.18, ..g_col });
+            cv.text("G", badge_r, &f.small_c, g_col);
 
-        // 2. Строка Apple iCloud Календаря: поля Apple ID и пароля раскрываются только по кнопке,
-        // чтобы не загромождать карточку тем, кто пользуется лишь Google или ссылками iCal.
-        let a_rect = Rect::new(view.x + row_w - btn_w, y + 1.0, btn_w, 18.0);
-        let a_label_r = Rect::new(view.x + 2.0, y + 3.0, row_w - btn_w - 6.0, 14.0);
-        if let Some(apple_id) = &status.apple_id {
-            cv.text(&format!("iCloud: {apple_id}"), a_label_r, &f.small, txt());
-            if ui.solid_button(cv, apple_toggle, a_rect, "Отключить", crate::ui::chip_bg(), txt(), 5.0) {
-                online::disconnect_apple(&self.ics);
-                self.sync();
-            }
-        } else if !self.apple_form_open {
-            cv.text(crate::i18n::pick("Apple Календарь", "Apple Calendar"), a_label_r, &f.small, txt());
-            if ui.solid_button(cv, apple_toggle, a_rect, "Подключить", cv.accent, crate::ui::ink(), 5.0) {
-                self.apple_form_open = true;
-                online::clear_cal_auth_error();
-                ui.focus = Some(apple_id_field);
-                ui.caret_on = true;
-            }
-        } else {
-            cv.text(crate::i18n::pick("Apple Календарь", "Apple Calendar"), a_label_r, &f.small, txt());
-            if ui.solid_button(cv, apple_cancel, a_rect, "Отмена", crate::ui::chip_bg(), txt(), 5.0) {
-                self.apple_form_open = false;
-                ui.set_field_text(apple_id_field, "");
-                ui.set_field_text(apple_pw_field, "");
-                ui.blur();
-            }
-            y += 22.0;
-            let fields_w = (row_w - btn_w - 6.0).max(80.0);
-            let id_w = (fields_w * 0.52).floor();
-            let pw_w = fields_w - id_w - 4.0;
-            // Поля узкие и без значка: подсказка от левого края (без места под значок), а не
-            // влезшая — один раз прокручивается по кругу, чтобы её можно было прочитать целиком.
-            const FIELD_PAD_L: f32 = 8.0;
-            const FIELD_PAD_R: f32 = 6.0;
-            ui.set_hint_marquee(apple_id_field, true);
-            ui.set_hint_marquee(apple_pw_field, true);
-            ui.text_field_at(
-                cv,
-                apple_id_field,
-                Rect::new(view.x, y, id_w, 20.0),
-                crate::i18n::pick("Apple ID (iCloud)", "Apple ID (iCloud)"),
-                "",
-                Submit::Keep,
-                FIELD_PAD_L,
-                FIELD_PAD_R,
-            );
-            ui.text_field_at(
-                cv,
-                apple_pw_field,
-                Rect::new(view.x + id_w + 4.0, y, pw_w, 20.0),
-                crate::i18n::pick("Пароль приложения", "App-specific password"),
-                "",
-                Submit::Keep,
-                FIELD_PAD_L,
-                FIELD_PAD_R,
-            );
-            let a_id = ui.field_text(apple_id_field);
-            let a_pw = ui.field_text(apple_pw_field);
-            let can_apple = !status.apple_busy && !a_id.trim().is_empty() && !a_pw.trim().is_empty();
-            let (abg, afg) = if can_apple {
-                (cv.accent, crate::ui::ink())
+            let tx = badge_r.right() + 7.0;
+            let btn_r = Rect::new(card_r.right() - 7.0 - btn_w, card_r.cy() - 10.0, btn_w, 20.0);
+            let tw = (btn_r.x - 6.0 - tx).max(20.0);
+            cv.text(crate::i18n::pick("Google Календарь", "Google Calendar"), Rect::new(tx, card_r.y + 4.0, tw, 13.0), &f.small_b, txt());
+            let (sub, sub_col) = if let Some(email) = &status.google_email {
+                (email.as_str(), status_green())
+            } else if status.google_busy {
+                (crate::i18n::pick("Вход в браузере…", "Browser sign-in…"), readable(cv.accent, 60.0))
             } else {
-                (crate::ui::chip_bg(), dim())
+                (crate::i18n::pick("Вход через браузер", "Browser sign-in"), dim())
             };
-            let alabel = if status.apple_busy { "Проверка…" } else { "Подключить" };
-            let mut submit_apple = ui.take_submitted(apple_pw_field).is_some() || ui.take_submitted(apple_id_field).is_some();
-            if ui.solid_button(cv, apple_submit, Rect::new(view.x + row_w - btn_w, y + 1.0, btn_w, 18.0), alabel, abg, afg, 5.0) {
-                submit_apple = true;
-            }
-            if submit_apple && can_apple {
-                online::connect_apple(a_id, a_pw, self.ics.clone());
-                ui.set_field_text(apple_pw_field, "");
-            }
-        }
-        y += 22.0;
+            cv.text(sub, Rect::new(tx, card_r.y + 18.0, tw, 13.0), &f.small, sub_col);
 
-        // 3. Поле ввода для добавления новой ссылки iCal
+            if status.google_email.is_some() {
+                if ui.solid_button(cv, google_btn, btn_r, crate::i18n::pick("Отключить", "Disconnect"), crate::ui::chip_bg(), txt(), 10.0) {
+                    online::disconnect_google(&self.ics);
+                    self.sync();
+                }
+            } else if status.google_busy {
+                let _ = ui.solid_button(cv, google_btn, btn_r, crate::i18n::pick("Ожидание…", "Waiting…"), crate::ui::chip_bg(), dim(), 10.0);
+            } else if online::oauth::google_available() {
+                if ui.solid_button(cv, google_btn, btn_r, crate::i18n::pick("Подключить", "Connect"), cv.accent, on_accent, 10.0) {
+                    online::connect_google(self.ics.clone());
+                }
+            } else {
+                let _ = ui.solid_button(cv, google_btn, btn_r, crate::i18n::pick("Нет ключей", "No keys"), crate::ui::chip_bg(), dim(), 10.0);
+            }
+            y += 42.0;
+        }
+
+        // 2. Карточка Apple iCloud Календаря
+        {
+            let card_r = Rect::new(view.x, y, row_w, apple_card_h);
+            cv.rr(card_r, 8.0, inset());
+            let badge_r = Rect::new(card_r.x + 7.0, card_r.y + 8.0, 20.0, 20.0);
+            let a_col = status_orange();
+            cv.rr(badge_r, 6.0, D2D1_COLOR_F { a: 0.18, ..a_col });
+            cv.symbol(icon::CLOUD, badge_r, 11.0, a_col);
+
+            let tx = badge_r.right() + 7.0;
+            let btn_r = Rect::new(card_r.right() - 7.0 - btn_w, card_r.y + 8.0, btn_w, 20.0);
+            let tw = (btn_r.x - 6.0 - tx).max(20.0);
+            cv.text(crate::i18n::pick("Apple iCloud", "Apple iCloud"), Rect::new(tx, card_r.y + 4.0, tw, 13.0), &f.small_b, txt());
+            let (sub, sub_col) = if let Some(apple_id) = &status.apple_id {
+                (apple_id.as_str(), status_green())
+            } else {
+                (crate::i18n::pick("Apple ID и пароль прил.", "Apple ID & app password"), dim())
+            };
+            cv.text(sub, Rect::new(tx, card_r.y + 18.0, tw, 13.0), &f.small, sub_col);
+
+            if status.apple_id.is_some() {
+                if ui.solid_button(cv, apple_toggle, btn_r, crate::i18n::pick("Отключить", "Disconnect"), crate::ui::chip_bg(), txt(), 10.0) {
+                    online::disconnect_apple(&self.ics);
+                    self.sync();
+                }
+            } else if !self.apple_form_open {
+                if ui.solid_button(cv, apple_toggle, btn_r, crate::i18n::pick("Подключить", "Connect"), cv.accent, on_accent, 10.0) {
+                    self.apple_form_open = true;
+                    online::clear_cal_auth_error();
+                    ui.focus = Some(apple_id_field);
+                    ui.caret_on = true;
+                }
+            } else {
+                if ui.solid_button(cv, apple_cancel, btn_r, crate::i18n::pick("Отмена", "Cancel"), crate::ui::chip_bg(), txt(), 10.0) {
+                    self.apple_form_open = false;
+                    ui.set_field_text(apple_id_field, "");
+                    ui.set_field_text(apple_pw_field, "");
+                    ui.blur();
+                }
+                let fw = row_w - 14.0;
+                let fx = card_r.x + 7.0;
+                ui.set_hint_marquee(apple_id_field, true);
+                ui.set_hint_marquee(apple_pw_field, true);
+                ui.text_field_at(
+                    cv,
+                    apple_id_field,
+                    Rect::new(fx, card_r.y + 36.0, fw, 21.0),
+                    crate::i18n::pick("Apple ID (email@icloud.com)", "Apple ID (email@icloud.com)"),
+                    "",
+                    Submit::Keep,
+                    8.0,
+                    8.0,
+                );
+                ui.text_field_at(
+                    cv,
+                    apple_pw_field,
+                    Rect::new(fx, card_r.y + 60.0, fw, 21.0),
+                    crate::i18n::pick("Пароль приложения", "App-specific password"),
+                    "",
+                    Submit::Keep,
+                    8.0,
+                    8.0,
+                );
+                let a_id = ui.field_text(apple_id_field);
+                let a_pw = ui.field_text(apple_pw_field);
+                let can_apple = !status.apple_busy && !a_id.trim().is_empty() && !a_pw.trim().is_empty();
+                let (abg, afg) = if can_apple { (cv.accent, on_accent) } else { (crate::ui::chip_bg(), dim()) };
+                let alabel = if status.apple_busy {
+                    crate::i18n::pick("Проверка…", "Checking…")
+                } else {
+                    crate::i18n::pick("Войти", "Sign in")
+                };
+                let sub_r = Rect::new(card_r.right() - 7.0 - btn_w, card_r.y + 83.0, btn_w, 18.0);
+                cv.text(
+                    "account.apple.com",
+                    Rect::new(fx, card_r.y + 85.0, (sub_r.x - 6.0 - fx).max(20.0), 13.0),
+                    &f.small,
+                    dim(),
+                );
+                let mut submit_apple = ui.take_submitted(apple_pw_field).is_some() || ui.take_submitted(apple_id_field).is_some();
+                if ui.solid_button(cv, apple_submit, sub_r, alabel, abg, afg, 9.0) {
+                    submit_apple = true;
+                }
+                if submit_apple && can_apple {
+                    online::connect_apple(a_id, a_pw, self.ics.clone());
+                    ui.set_field_text(apple_pw_field, "");
+                }
+            }
+            y += apple_card_h + 10.0;
+        }
+
+        // 3. Поле добавления ссылки iCal
+        cv.text(
+            crate::i18n::pick("ПО ССЫЛКЕ (ICAL)", "BY LINK (ICAL)"),
+            Rect::new(view.x + 2.0, y, row_w - 4.0, 11.0),
+            &f.caps,
+            dim(),
+        );
+        y += 14.0;
+
         let at_limit = self.ics.len() >= crate::config::MAX_CALENDAR_URLS;
         let placeholder = if at_limit {
             crate::i18n::pick("Лимит: макс. 8 ссылок", "Limit: max 8 links")
         } else {
             crate::i18n::pick("https://… или webcal://…", "https://… or webcal://…")
         };
-        ui.text_field_ex(
-            cv,
-            field,
-            Rect::new(view.x, y, row_w, 21.0),
-            placeholder,
-            icon::ADD,
-            Submit::Keep,
-        );
-        y += 23.0;
+        let field_r = Rect::new(view.x, y, row_w, 22.0);
+        let add_btn_r = Rect::new(field_r.right() - 20.0, field_r.y + 2.0, 18.0, 18.0);
+        let add_clicked = ui.click_area(ics_add_btn, add_btn_r).1;
+        if ui.is_dragging(ics_add_btn) || add_clicked {
+            ui.claim_focus(field);
+        }
+        ui.text_field_at(cv, field, field_r, placeholder, icon::LINK, Submit::Keep, 28.0, 24.0);
+        let has_url_text = !ui.field_text(field).trim().is_empty() && !at_limit;
+        let add_hv = ui.hover_of(ics_add_btn);
+        let (btn_bg, btn_fg) = if has_url_text {
+            (D2D1_COLOR_F { a: 0.20 + 0.80 * add_hv, ..cv.accent }, mix(cv.accent, on_accent, add_hv))
+        } else {
+            (D2D1_COLOR_F { a: 0.08 * add_hv, ..fg() }, mix(dim(), txt(), add_hv))
+        };
+        cv.circle(add_btn_r.cx(), add_btn_r.cy(), 8.5, btn_bg);
+        cv.glyph(icon::ADD, add_btn_r.inset(2.0), false, btn_fg);
+        ui.tip(ics_add_btn, add_btn_r, crate::i18n::pick("Добавить ссылку", "Add link"));
+        if add_clicked && has_url_text {
+            submitted_url = ui.submit_field(field);
+        }
+        y += 24.0;
 
         // 4. Сообщение об ошибке
-        if self.cal_bad {
-            let msg = crate::i18n::pick(
-                "Нужна ссылка вида https:// или webcal://",
-                "A link like https:// or webcal:// is required",
-            );
-            cv.text(msg, Rect::new(view.x + 2.0, y, row_w - 4.0, 12.0), &f.small, status_pink());
-            y += 14.0;
-        } else if let Some(err) = &status.error {
-            cv.text(&crate::i18n::tr(err), Rect::new(view.x + 2.0, y, row_w - 4.0, 12.0), &f.small, status_pink());
-            y += 14.0;
+        if let Some(ref msg) = err_msg {
+            cv.text(msg, Rect::new(view.x + 2.0, y + 2.0, row_w - 4.0, err_h - 2.0), &f.wrap_l, status_pink());
+            y += err_h;
         }
+        y += 4.0;
 
         // 5. Список добавленных ссылок в сокращённом виде
-        const ROW_H: f32 = 19.0;
+        const ROW_H: f32 = 22.0;
         let mut remove_idx = None;
         for (i, url) in self.ics.iter().enumerate() {
             let ry = y + i as f32 * ROW_H;
             if ry + ROW_H < view.y || ry > view.bottom() {
                 continue;
             }
-            let row = Rect::new(view.x, ry, row_w, ROW_H - 1.0);
+            let row = Rect::new(view.x, ry, row_w, ROW_H - 2.0);
             let row_id = id(TODAY, URL_ROW + i as u32);
             let hv = ui.hover_of(row_id);
-            if hv > 0.01 {
-                cv.rr(row, 3.0, D2D1_COLOR_F { a: 0.04 * hv, ..fg() });
-            }
-            cv.glyph(icon::LINK, Rect::new(row.x + 2.0, row.y + 2.5, 12.0, 12.0), false, dim());
+            cv.rr(row, 6.0, mix(inset(), fg(), 0.04 * hv));
+            cv.glyph(icon::LINK, Rect::new(row.x + 5.0, row.y + 4.0, 12.0, 12.0), false, dim());
             let abbrev = abbreviate_url(url);
-            cv.text(&abbrev, Rect::new(row.x + 17.0, row.y + 1.0, row.w - 35.0, 13.0), &f.small, txt());
-            let del_btn = Rect::new(row.right() - 17.0, row.y + 1.0, 14.0, 14.0);
+            cv.text(&abbrev, Rect::new(row.x + 21.0, row.y + 2.5, row.w - 42.0, 14.0), &f.small, txt());
+            let del_btn = Rect::new(row.right() - 19.0, row.y + 2.0, 16.0, 16.0);
             if ui.icon_button(cv, id(TODAY, URL_DEL + i as u32), del_btn, icon::CLOSE, false, crate::i18n::pick("Удалить подписку", "Remove subscription")) {
                 remove_idx = Some(i);
             }
         }
         ui.scroll_end(cv, sid);
 
+        if let Some(url) = submitted_url {
+            let url = url.trim().to_string();
+            if !url.is_empty() {
+                if crate::config::valid_calendar_url(&url) {
+                    if !self.ics.iter().any(|u| u == &url) && self.ics.len() < crate::config::MAX_CALENDAR_URLS {
+                        self.ics.push(url);
+                        crate::config::save_calendar_ics(&self.ics);
+                        online::refresh_calendar(&self.ics);
+                        self.sync();
+                    }
+                    self.cal_bad = false;
+                    ui.set_field_text(field, "");
+                } else {
+                    self.cal_bad = true;
+                    ui.set_field_text(field, &url);
+                    ui.focus = Some(field);
+                    ui.caret_on = true;
+                }
+            }
+        }
+
         if let Some(i) = remove_idx {
             self.ics.remove(i);
             crate::config::save_calendar_ics(&self.ics);
             online::refresh_calendar(&self.ics);
             self.sync();
-            ui.focus = Some(field);
-            ui.caret_on = true;
         }
     }
 
@@ -1267,31 +1438,41 @@ impl Today {
             _ => online::events_by_day(&self.online.cal, start, 42, online::utc_offset_minutes()),
         };
 
-        // Шапка: «Октябрь 2026» (клик — к текущему месяцу), стрелки и свернуть.
+        // Шапка: «< Ноябрь 2026 >» слева, справа «+», подключения и свернуть.
+        let close_r = Rect::new(r.right() - 7.0 - 16.0, r.y + 7.0, 16.0, 18.0);
+        let conn_r = Rect::new(close_r.x - 3.0 - 18.0, r.y + 7.0, 18.0, 18.0);
+        let add_r = Rect::new(conn_r.x - 2.0 - 18.0, r.y + 7.0, 18.0, 18.0);
+
+        let mut shift = 0;
+        let prev_r = Rect::new(r.x + 6.0, r.y + 7.0, 16.0, 18.0);
+        if ui.icon_button(cv, id(TODAY, 92), prev_r, icon::LEFT, false, crate::i18n::pick("Предыдущий месяц", "Previous month")) {
+            shift = -1;
+        }
         let name = format!("{} {}", crate::i18n::months_full()[vm as usize - 1], vy);
-        let name_w = cv.text_w(&name, &f.body).ceil() + 2.0;
-        let title = Rect::new(r.x + 9.0, r.y + 7.0, name_w, 18.0);
+        let max_title_w = (add_r.x - 4.0 - 16.0 - 2.0 - (prev_r.right() + 2.0)).max(40.0);
+        let name_w = (cv.text_w(&name, &f.body).ceil() + 2.0).min(max_title_w);
+        let title = Rect::new(prev_r.right() + 2.0, r.y + 7.0, name_w, 18.0);
         let (_, jump) = ui.click_area(id(TODAY, 91), title);
         let hv = ui.hover_of(id(TODAY, 91));
         cv.text(&name, title, &f.body, mix(txt(), cv.accent, hv));
-        // Новое событие и подключение календаря по ссылке — те же кнопки, что в карточке недели.
-        let add_r = Rect::new(title.right() + 4.0, r.y + 7.0, 16.0, 18.0);
-        let add = ui.icon_button(cv, id(TODAY, 97), add_r, icon::ADD, false, tip_add_event());
-        if ics_label(ui, cv, Rect::new(add_r.right() + 2.0, r.y + 7.0, ICS_W, 18.0)) {
-            self.month_open = false;
-            self.begin_calendar_edit(ui);
-        }
-        if self.online.calendar_failed {
-            cv.circle(r.right() - 62.0, r.y + 16.0, 2.5, dim());
-        }
-        let mut shift = 0;
-        if ui.icon_button(cv, id(TODAY, 92), Rect::new(r.right() - 58.0, r.y + 7.0, 16.0, 18.0), icon::LEFT, false, crate::i18n::pick("Предыдущий месяц", "Previous month")) {
-            shift = -1;
-        }
-        if ui.icon_button(cv, id(TODAY, 93), Rect::new(r.right() - 40.0, r.y + 7.0, 16.0, 18.0), icon::RIGHT, false, crate::i18n::pick("Следующий месяц", "Next month")) {
+
+        let next_r = Rect::new(title.right() + 2.0, r.y + 7.0, 16.0, 18.0);
+        if ui.icon_button(cv, id(TODAY, 93), next_r, icon::RIGHT, false, crate::i18n::pick("Следующий месяц", "Next month")) {
             shift = 1;
         }
-        let close = ui.icon_button(cv, id(TODAY, 94), Rect::new(r.right() - 22.0, r.y + 7.0, 16.0, 18.0), icon::UP, false, crate::i18n::pick("Свернуть", "Collapse"));
+
+        let add = add_event_button(ui, cv, id(TODAY, 97), add_r);
+        if connections_button(
+            ui,
+            cv,
+            id(TODAY, CAL_MONTH_CONN_BTN),
+            conn_r,
+            self.online.calendar_set,
+            self.online.calendar_failed,
+        ) {
+            self.begin_calendar_edit(ui);
+        }
+        let close = ui.icon_button(cv, id(TODAY, 94), close_r, icon::UP, false, crate::i18n::pick("Свернуть", "Collapse"));
 
         // Сетка месяца.
         let cw = (r.w - 14.0) / 7.0;
@@ -1347,10 +1528,7 @@ impl Today {
         let view = Rect::new(det.x + 4.0, det.y + 19.0, det.w - 8.0, (det.h - 21.0).max(PITCH));
         if list.is_empty() {
             let note = if !self.online.calendar_set {
-                crate::i18n::pick(
-                    "Календарь не подключён — нажмите, чтобы добавить ссылку",
-                    "Calendar not connected — click to add a link",
-                )
+                crate::i18n::pick("Календарь не подключён", "Calendar not connected")
             } else if self.online.calendar_failed {
                 if self.ics.len() > 1 {
                     crate::i18n::pick("Не удалось загрузить часть календарей", "Couldn't load some calendars")
@@ -1364,9 +1542,17 @@ impl Today {
             };
             let nr = Rect::new(view.x + 4.0, view.y, view.w - 8.0, PITCH);
             cv.text(note, nr, &f.small, dim());
-            if !self.online.calendar_set && ui.click_area(id(TODAY, 95), nr).1 {
-                self.month_open = false;
-                self.begin_calendar_edit(ui);
+            if (!self.online.calendar_set || self.online.calendar_failed) && view.h >= PITCH + 22.0 {
+                let lbl = if self.online.calendar_failed {
+                    crate::i18n::pick("Проверить", "Check")
+                } else {
+                    crate::i18n::pick("Подключить", "Connect")
+                };
+                let bw = (cv.text_w(lbl, &f.small_c) + 18.0).clamp(68.0, 108.0);
+                let br = Rect::new(view.x + 4.0, nr.bottom() + 4.0, bw, 19.0);
+                if compact_pill_btn(ui, cv, id(TODAY, 95), br, lbl, !self.online.calendar_failed) {
+                    self.begin_calendar_edit(ui);
+                }
             }
         }
         let sid = id(TODAY, 101);

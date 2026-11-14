@@ -143,6 +143,8 @@ pub struct Today {
     cal_bad: bool,
     /// В форме календарей раскрыты поля Apple ID и пароля приложения.
     apple_form_open: bool,
+    /// Последний открытый оверлей был формой подключений (чтобы не мигать месяцем при закрытии).
+    cal_last_overlay: bool,
     online: Online,
     /// События, созданные в острове (`events.txt`); `local_ver` растёт при каждом изменении.
     local: Vec<crate::online::LocalEvent>,
@@ -206,6 +208,7 @@ impl Default for Today {
             cal_editing: false,
             cal_bad: false,
             apple_form_open: false,
+            cal_last_overlay: false,
             online: Online::default(),
             local: Vec::new(),
             local_ver: 0,
@@ -247,6 +250,8 @@ impl Today {
         self.month_t.value = 0.0;
         self.month_t.target = 0.0;
         self.cal_editing = false;
+        self.apple_form_open = false;
+        self.cal_last_overlay = false;
         self.edit = None;
         self.todo_adding = false;
         self.sync()
@@ -259,6 +264,8 @@ impl Today {
         self.month_t.snap();
         self.editing = false;
         self.cal_editing = false;
+        self.apple_form_open = false;
+        self.cal_last_overlay = false;
         self.ev_form = None;
         self.edit = None;
         self.todo_adding = false;
@@ -343,8 +350,14 @@ impl Today {
     /// Состояние месячного календаря на кадр: сколько рядов сетки он требует. Нужно и вкладке «Сегодня»,
     /// и собственным вкладкам, на которых лежат её виджеты.
     pub fn prepare(&mut self) -> u8 {
-        self.month_t.target = if self.month_open { 1.0 } else { 0.0 };
-        let month_active = self.month_open || self.month_t.value > 0.0;
+        let overlay_open = self.month_open || self.cal_editing;
+        self.month_t.target = if overlay_open { 1.0 } else { 0.0 };
+        if self.cal_editing {
+            self.cal_last_overlay = true;
+        } else if self.month_open {
+            self.cal_last_overlay = false;
+        }
+        let month_active = overlay_open || self.month_t.value > 0.0;
         if month_active { today_overlay_rows(MONTH_H) } else { 0 }
     }
 
@@ -375,9 +388,14 @@ impl Today {
             let mut r = self.month_rect(area);
             r.y += (1.0 - mt) * 6.0;
             let mcv = Canvas { g: cv.g, alpha: cv.alpha * mt, accent: cv.accent };
-            // Закрывающийся календарь уже не принимает нажатий.
-            let prev = if self.month_open { None } else { Some(ui.mute()) };
-            self.month_card(ui, &mcv, r, today);
+            let overlay_open = self.month_open || self.cal_editing;
+            // Закрывающийся оверлей уже не принимает нажатий.
+            let prev = if overlay_open { None } else { Some(ui.mute()) };
+            if self.cal_editing || (!self.month_open && self.cal_last_overlay) {
+                self.calendar_form(ui, &mcv, r);
+            } else {
+                self.month_card(ui, &mcv, r, today);
+            }
             if let Some(p) = prev {
                 ui.unmute(p);
             }
