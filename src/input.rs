@@ -98,7 +98,7 @@ impl App {
 
     // ---------- Клавиатура ----------
 
-    pub(crate) unsafe fn on_key(&mut self, vk: u32) -> bool {
+    pub(crate) unsafe fn on_key(&mut self, vk: u32, extended: bool) -> bool {
         // Остров без фокуса клавиатуры (свёрнут, и ни одно поле его не держит) эти сообщения
         // вообще не получает — проверка здесь на случай, если что-то всё же пробилось.
         if !self.kbd {
@@ -138,8 +138,20 @@ impl App {
             v if v == VK_RIGHT.0 as u32 => KeyEv::Right(shift),
             v if v == VK_HOME.0 as u32 => KeyEv::Home(shift),
             v if v == VK_END.0 as u32 => KeyEv::End(shift),
-            v if v == VK_BACK.0 as u32 => KeyEv::Backspace,
-            v if v == VK_DELETE.0 as u32 => KeyEv::Delete,
+            v if v == VK_BACK.0 as u32 => match (extended, ctrl) {
+                // Некоторые клавиатуры и драйверы (в т.ч. Mac/Fn+Backspace) шлют VK_BACK с флагом extended вместо VK_DELETE.
+                (true, true) => KeyEv::DeleteWord,
+                (true, false) => KeyEv::Delete,
+                (false, true) => KeyEv::BackspaceWord,
+                (false, false) => KeyEv::Backspace,
+            },
+            v if v == VK_DELETE.0 as u32 => {
+                if ctrl {
+                    KeyEv::DeleteWord
+                } else {
+                    KeyEv::Delete
+                }
+            }
             v if v == VK_RETURN.0 as u32 => KeyEv::Enter,
             v if v == VK_ESCAPE.0 as u32 => KeyEv::Escape,
             v if v == VK_UP.0 as u32 => KeyEv::Up,

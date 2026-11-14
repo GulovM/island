@@ -16,9 +16,9 @@ pub(crate) enum Ev {
     Up,
     /// Колесо мыши, сырое значение `WHEEL_DELTA` (120 на «ступеньку»).
     Wheel(i32),
-    /// Символ из `WM_CHAR` и код клавиши из `WM_KEYDOWN`.
+    /// Символ из `WM_CHAR` и код клавиши из `WM_KEYDOWN` (с флагом расширенной клавиши из `lParam`).
     Char(u32),
-    Key(u32),
+    Key(u32, bool),
     /// Окно потеряло активацию (клик в другое окно).
     Deactivated,
     /// Таймер мигания курсора.
@@ -252,11 +252,11 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             LRESULT(0)
         }
         WM_KEYDOWN => {
-            push(Ev::Key(wp.0 as u32));
+            push(Ev::Key(wp.0 as u32, (lp.0 & (1 << 24)) != 0));
             LRESULT(0)
         }
         WM_SYSKEYDOWN if RECORDING.load(Ordering::Relaxed) => {
-            push(Ev::Key(wp.0 as u32));
+            push(Ev::Key(wp.0 as u32, (lp.0 & (1 << 24)) != 0));
             LRESULT(0)
         }
         WM_ACTIVATE => {

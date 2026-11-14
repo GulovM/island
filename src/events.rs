@@ -112,7 +112,7 @@ impl App {
                 }
                 true
             }
-            Ev::Key(vk) => self.on_key(vk),
+            Ev::Key(vk, ext) => self.on_key(vk, ext),
             Ev::Deactivated => {
                 if self.kbd {
                     // Пользователь кликнул в другое окно: возвращать ему фокус не нужно.

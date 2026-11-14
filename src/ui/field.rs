@@ -93,7 +93,9 @@ pub enum KeyEv {
     Home(bool),
     End(bool),
     Backspace,
+    BackspaceWord,
     Delete,
+    DeleteWord,
     SelectAll,
     Copy,
     Cut,
@@ -104,6 +106,53 @@ pub enum KeyEv {
     Down,
     Pin,
     Tab,
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Позиция начала слова слева от `caret` для Ctrl+Backspace.
+fn prev_word_start(chars: &[char], caret: usize) -> usize {
+    let mut i = caret.min(chars.len());
+    while i > 0 && chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    if i == 0 {
+        return 0;
+    }
+    if is_word_char(chars[i - 1]) {
+        while i > 0 && is_word_char(chars[i - 1]) {
+            i -= 1;
+        }
+    } else {
+        while i > 0 && !chars[i - 1].is_whitespace() && !is_word_char(chars[i - 1]) {
+            i -= 1;
+        }
+    }
+    i
+}
+
+/// Позиция конца слова справа от `caret` для Ctrl+Delete.
+fn next_word_end(chars: &[char], caret: usize) -> usize {
+    let n = chars.len();
+    let mut i = caret.min(n);
+    while i < n && chars[i].is_whitespace() {
+        i += 1;
+    }
+    if i == n {
+        return n;
+    }
+    if is_word_char(chars[i]) {
+        while i < n && is_word_char(chars[i]) {
+            i += 1;
+        }
+    } else {
+        while i < n && !chars[i].is_whitespace() && !is_word_char(chars[i]) {
+            i += 1;
+        }
+    }
+    i
 }
 
 fn utf16_len(chars: &[char]) -> u32 {
@@ -423,11 +472,27 @@ impl Ui {
                     f.anchor = f.caret;
                 }
             }
+            KeyEv::BackspaceWord => {
+                if !f.delete_sel() && f.caret > 0 {
+                    let lo = if f.secret { 0 } else { prev_word_start(&f.chars, f.caret) };
+                    f.chars.drain(lo..f.caret);
+                    f.caret = lo;
+                    f.anchor = lo;
+                }
+            }
             KeyEv::Delete => {
                 if n == 0 {
                     self.nav.push(Nav::Delete);
                 } else if !f.delete_sel() && f.caret < n {
                     f.chars.remove(f.caret);
+                }
+            }
+            KeyEv::DeleteWord => {
+                if n == 0 {
+                    self.nav.push(Nav::Delete);
+                } else if !f.delete_sel() && f.caret < n {
+                    let hi = if f.secret { n } else { next_word_end(&f.chars, f.caret) };
+                    f.chars.drain(f.caret..hi);
                 }
             }
             KeyEv::SelectAll => {
@@ -490,5 +555,45 @@ mod tests {
         assert_eq!(utf16_len(&chars), 4);
         assert_eq!(char_at_utf16(&chars, 3), 2);
         assert_eq!(char_at_utf16(&chars, 4), 3);
+    }
+
+    #[test]
+    fn ctrl_backspace_and_delete_word() {
+        let mut ui = Ui::default();
+        let id = 42;
+        ui.set_field_text(id, "привет,   world_1  test");
+        ui.focus = Some(id);
+
+        // Ctrl+Backspace удаляет слово целиком.
+        ui.key(KeyEv::BackspaceWord);
+        assert_eq!(ui.field_text(id), "привет,   world_1  ");
+
+        // Повторный Ctrl+Backspace пропускает хвостовые пробелы и удаляет "world_1".
+        ui.key(KeyEv::BackspaceWord);
+        assert_eq!(ui.field_text(id), "привет,   ");
+
+        // Пропускает пробелы и удаляет знак препинания.
+        ui.key(KeyEv::BackspaceWord);
+        assert_eq!(ui.field_text(id), "привет");
+
+        // Перемещаемся в начало и проверяем Delete / Ctrl+Delete.
+        ui.key(KeyEv::Home(false));
+        ui.key(KeyEv::Delete);
+        assert_eq!(ui.field_text(id), "ривет");
+        ui.key(KeyEv::DeleteWord);
+        assert_eq!(ui.field_text(id), "");
+
+        // Выделение удаляется целиком одним Ctrl+Backspace / Delete.
+        ui.set_field_text(id, "alpha beta");
+        ui.key(KeyEv::Left(true));
+        ui.key(KeyEv::Left(true));
+        ui.key(KeyEv::BackspaceWord);
+        assert_eq!(ui.field_text(id), "alpha be");
+
+        // В поле пароля Ctrl+Backspace стирает до начала, не выдавая границ слов.
+        ui.set_secret(id, true);
+        ui.set_field_text(id, "sec ret");
+        ui.key(KeyEv::BackspaceWord);
+        assert_eq!(ui.field_text(id), "");
     }
 }

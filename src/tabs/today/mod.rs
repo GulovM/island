@@ -116,12 +116,18 @@ pub struct Today {
     todo: Vec<(bool, String)>,
     /// Время создания каждой задачи, секунды с 1970 (та же длина, что у `todo`); 0 — даты нет.
     todo_ts: Vec<u64>,
+    /// Важность каждой задачи (та же длина, что у `todo`).
+    todo_prio: Vec<todo::Priority>,
     /// Сортировка списка задач (сохраняется в `todo.txt`).
     todo_sort: todo::Sort,
     /// Убирать выполненные задачи при смене дня (настройка `todo_clean_done`).
     clean_done: bool,
     /// День (от 1970-01-01), в который список проверялся в последний раз; 0 — ещё не записан.
     todo_day: i64,
+    /// Открыто ли поле добавления новой задачи (скрыто по умолчанию).
+    todo_adding: bool,
+    /// Выбранная важность в открытом поле добавления/редактирования.
+    todo_draft_prio: todo::Priority,
     /// Состояние анимации каждой задачи (та же длина, что у `todo`).
     anim: Vec<RowAnim>,
     /// Перетаскивание задачи мышью для ручной перестановки.
@@ -185,9 +191,12 @@ impl Default for Today {
             ring: Spring::unit(1.0, 160.0, 22.0),
             todo: Vec::new(),
             todo_ts: Vec::new(),
+            todo_prio: Vec::new(),
             todo_sort: todo::Sort::default(),
             clean_done: false,
             todo_day: 0,
+            todo_adding: false,
+            todo_draft_prio: todo::Priority::None,
             anim: Vec::new(),
             todo_drag: None,
             month_t: Spring::unit(0.0, 240.0, 26.0),
@@ -239,6 +248,7 @@ impl Today {
         self.month_t.target = 0.0;
         self.cal_editing = false;
         self.edit = None;
+        self.todo_adding = false;
         self.sync()
     }
 
@@ -251,6 +261,7 @@ impl Today {
         self.cal_editing = false;
         self.ev_form = None;
         self.edit = None;
+        self.todo_adding = false;
         self.clock_pick = None;
     }
 
@@ -502,6 +513,14 @@ impl Today {
             (true, "Записаться к стоматологу".into()),
         ];
         self.todo_ts = vec![0; self.todo.len()];
+        self.todo_prio = vec![
+            todo::Priority::High,
+            todo::Priority::None,
+            todo::Priority::Medium,
+            todo::Priority::Low,
+            todo::Priority::None,
+        ];
+        self.todo_adding = false;
         self.anim = self.todo.iter().map(|(d, _)| RowAnim::new(*d, false)).collect();
         self.todo_drag = None;
     }

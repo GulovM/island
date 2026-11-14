@@ -493,6 +493,19 @@ fn parts(code: u32) -> Option<Vec<Part>> {
             let p = svg("M13.6 2.6 L5.6 13.4 H11.6 L10.4 21.4 L18.4 10.6 H12.4 Z");
             vec![Fill(p.clone()), Stroke(p, 1.3)]
         }
+        // flag / flag.fill (метка важности)
+        0xE7C1 => vec![
+            Stroke(line((6.0, 4.0), (6.0, 20.5)), 2.0),
+            Stroke(svg("M6.0 4.5 H18.2 Q19.2 4.5 18.6 5.4 L16.2 8.8 L18.6 12.2 Q19.2 13.1 18.2 13.1 H6.0"), 1.9),
+        ],
+        0xE7C2 => {
+            let p = svg("M6.0 4.5 H18.2 Q19.2 4.5 18.6 5.4 L16.2 8.8 L18.6 12.2 Q19.2 13.1 18.2 13.1 H6.0 Z");
+            vec![
+                Stroke(line((6.0, 4.0), (6.0, 20.5)), 2.1),
+                Fill(p.clone()),
+                Stroke(p, 1.4),
+            ]
+        }
         _ => return None,
     })
 }
@@ -668,6 +681,7 @@ mod tests {
             PLAY_SOLID, PAUSE, POWER, RESTART, COPY, LINK, PICTURE, PIN, DELETE, ADD, CHECK, CLOCK, CALENDAR, FOLDER,
             APPS, PREV, NEXT, REWIND, FAST_FORWARD, MUSIC, CLOSE, PASTE, LEFT, RIGHT, STAR, REFRESH, DOWN, UP, EDIT,
             STAR_FILL, SETTINGS_GEAR, RINGER, SPEAKER, CONTRAST, SUN, CLOUD, FORWARD, TEXT_DOC, BOLT, AIRPLANE, BATTERY,
+            FLAG, FLAG_FILL,
         ] {
             assert!(parts(code_of(g).unwrap()).is_some(), "нет значка для U+{:04X}", code_of(g).unwrap());
         }

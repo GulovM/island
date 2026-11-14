@@ -32,6 +32,69 @@ impl Canvas<'_> {
         );
     }
 
+    /// Прямоугольник со своим радиусом скругления для левого (`rad_l`) и правого (`rad_r`) краёв.
+    pub unsafe fn rr_ends(&self, r: Rect, rad_l: f32, rad_r: f32, c: D2D1_COLOR_F) {
+        if r.w <= 0.0 || r.h <= 0.0 {
+            return;
+        }
+        let max_r = (r.h / 2.0).max(0.0);
+        let mut rl = rad_l.clamp(0.0, max_r);
+        let mut rr = rad_r.clamp(0.0, max_r);
+        if rl + rr > r.w && rl + rr > 0.0 {
+            let s = r.w / (rl + rr);
+            rl *= s;
+            rr *= s;
+        }
+        if (rl - rr).abs() < 0.01 {
+            if rl < 0.01 {
+                self.g.brush.SetColor(&self.col(c));
+                self.g.dc.FillRectangle(&r.d2d(), &self.g.brush);
+            } else {
+                self.rr(r, rl, c);
+            }
+            return;
+        }
+        let Ok(geo) = self.g.d2d.CreatePathGeometry() else { return };
+        let Ok(sink) = geo.Open() else { return };
+        let arc = |x: f32, y: f32, rad: f32| D2D1_ARC_SEGMENT {
+            point: pt(x, y),
+            size: D2D_SIZE_F { width: rad, height: rad },
+            rotationAngle: 0.0,
+            sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE,
+            arcSize: D2D1_ARC_SIZE_SMALL,
+        };
+        sink.BeginFigure(pt(r.x + rl, r.y), D2D1_FIGURE_BEGIN_FILLED);
+        if rl + rr < r.w - 0.01 {
+            sink.AddLine(pt(r.right() - rr, r.y));
+        }
+        if rr > 0.01 {
+            sink.AddArc(&arc(r.right(), r.y + rr, rr));
+        }
+        if rr * 2.0 < r.h - 0.01 {
+            sink.AddLine(pt(r.right(), r.bottom() - rr));
+        }
+        if rr > 0.01 {
+            sink.AddArc(&arc(r.right() - rr, r.bottom(), rr));
+        }
+        if rl + rr < r.w - 0.01 {
+            sink.AddLine(pt(r.x + rl, r.bottom()));
+        }
+        if rl > 0.01 {
+            sink.AddArc(&arc(r.x, r.bottom() - rl, rl));
+        }
+        if rl * 2.0 < r.h - 0.01 {
+            sink.AddLine(pt(r.x, r.y + rl));
+        }
+        if rl > 0.01 {
+            sink.AddArc(&arc(r.x + rl, r.y, rl));
+        }
+        sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+        if sink.Close().is_ok() {
+            self.g.brush.SetColor(&self.col(c));
+            self.g.dc.FillGeometry(&geo, &self.g.brush, None);
+        }
+    }
+
     pub unsafe fn rr_line(&self, r: Rect, radius: f32, c: D2D1_COLOR_F, width: f32) {
         self.g.brush.SetColor(&self.col(c));
         let rad = radius.min(r.w / 2.0).min(r.h / 2.0).max(0.0);

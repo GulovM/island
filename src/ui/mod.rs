@@ -216,6 +216,13 @@ impl Ui {
         self.focus = None;
     }
 
+    /// Ставит фокус на поле `id` и удерживает его в текущем кадре (при клике по кнопке внутри формы).
+    pub fn claim_focus(&mut self, id: u32) {
+        self.focus = Some(id);
+        self.focus_claimed = true;
+        self.caret_on = true;
+    }
+
     /// `id` сейчас в фокусе ради ввода текста (а не ради клавиатурной активации клика).
     pub fn is_field(&self, id: u32) -> bool {
         self.fields.contains_key(&id)
