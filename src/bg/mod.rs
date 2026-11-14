@@ -34,6 +34,8 @@ pub fn notify() {
 pub struct Snapshot {
     pub wifi: Option<bool>,
     pub bluetooth: Option<bool>,
+    /// Подключено ли хотя бы одно Bluetooth-устройство (классическое или BLE).
+    pub bt_connected: bool,
     /// Режим полёта: все радио выключены; `None` — радио в системе нет.
     pub airplane: Option<bool>,
     pub volume: Option<f32>,
@@ -67,7 +69,7 @@ pub use media::{Media, Timeline, ART};
 pub use net::{net_status, NetStatus};
 
 use audio_policy::audio_set_default;
-use bluetooth::{bluetooth_devices, bt_spawn};
+use bluetooth::{bluetooth_devices, bt_any_connected, bt_spawn, ensure_bt_watch};
 use devices::{audio_devices, device, device_name, endpoint, store_list};
 use media::{media_command, read_media_pair, refresh_media};
 use volume::watch_volume;
@@ -93,6 +95,8 @@ pub enum Cmd {
     Tick,
     /// Обновить состояние радиомодулей и Wi-Fi (по событиям или после переключения).
     Radios,
+    /// Изменился список подключённых Bluetooth-устройств (из `DeviceWatcher`).
+    BtConn,
     /// Обновить только медиа: приходит по событиям медиасессии (индикатор в свёрнутой форме).
     Media,
     /// Перечитать состояние сети (значок Wi-Fi на свёрнутом острове).
@@ -179,6 +183,7 @@ pub fn start(hwnd: HWND) {
                         | Cmd::Mute(_)
                         | Cmd::Net
                         | Cmd::Radios
+                        | Cmd::BtConn
                         | Cmd::Media
                         | Cmd::PrevSession
                         | Cmd::NextSession
@@ -187,6 +192,7 @@ pub fn start(hwnd: HWND) {
             });
             let wants_media = batch.iter().any(|c| matches!(c, Cmd::Media | Cmd::PrevSession | Cmd::NextSession | Cmd::ResetSession));
             let wants_net = batch.iter().any(|c| matches!(c, Cmd::Net | Cmd::Radios));
+            let wants_bt_conn = batch.iter().any(|c| matches!(c, Cmd::BtConn));
             let last_volume = batch.iter().rposition(|c| matches!(c, Cmd::Volume(_)));
             let last_bright = batch.iter().rposition(|c| matches!(c, Cmd::Brightness(_)));
             let last_seek = batch.iter().rposition(|c| matches!(c, Cmd::Seek(_)));
@@ -214,11 +220,24 @@ pub fn start(hwnd: HWND) {
             if wants_net || full {
                 unsafe { net::refresh_net() };
             }
+            let mut bt_conn_changed = false;
+            if wants_bt_conn && !needs_refresh && !wants_radios {
+                if let Ok(mut s) = SNAPSHOT.lock() {
+                    let mut snap = s.clone().unwrap_or_default();
+                    let next = snap.bluetooth == Some(true) && bt_any_connected();
+                    if snap.bt_connected != next {
+                        snap.bt_connected = next;
+                        snap.rev += 1;
+                        *s = Some(snap);
+                        bt_conn_changed = true;
+                    }
+                }
+            }
             if full {
                 // Загрузка WinRT раздувает рабочий набор; в простое он не нужен.
                 crate::sys::trim_working_set();
             }
-            if needs_refresh || wants_radios || wants_media || wants_net || full {
+            if needs_refresh || wants_radios || wants_media || wants_net || bt_conn_changed || full {
                 notify();
             }
         }
@@ -261,7 +280,7 @@ fn schedule_radio_recheck() {
 
 unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
     match cmd {
-        Cmd::Tick | Cmd::Media | Cmd::Net | Cmd::Radios => {}
+        Cmd::Tick | Cmd::Media | Cmd::Net | Cmd::Radios | Cmd::BtConn => {}
         Cmd::Refresh => watch_volume(),
         Cmd::List(ListKind::Wifi) => store_list(ListKind::Wifi, wifi_networks(true)),
         Cmd::List(ListKind::Bluetooth) => store_list(ListKind::Bluetooth, bluetooth_devices()),
@@ -504,6 +523,10 @@ unsafe fn update_radio_fields(
     snap.wifi = PendingRadios::resolve(&mut pending.wifi, raw_wifi);
     snap.ssid = if snap.wifi == Some(false) { None } else { raw_ssid };
     snap.bluetooth = PendingRadios::resolve(&mut pending.bluetooth, winrt_bt);
+    if snap.bluetooth == Some(true) {
+        ensure_bt_watch();
+    }
+    snap.bt_connected = snap.bluetooth == Some(true) && bt_any_connected();
     let resolved_air = PendingRadios::resolve(&mut pending.airplane, winrt_airplane);
     snap.airplane = match resolved_air {
         Some(true) if snap.wifi == Some(true) || snap.bluetooth == Some(true) => Some(false),

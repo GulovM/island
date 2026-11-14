@@ -169,14 +169,15 @@ impl App {
             Ev::Alarm => self.tabs.alarm() && self.expanded,
             Ev::Bg => {
                 let tab = self.tabs.on_bg() && self.expanded;
-                let media = self.live.sync_media(&bg::snapshot());
+                let snap = bg::snapshot();
+                let media = self.live.sync_media(&snap);
                 if media {
                     self.retarget();
                     if !self.expanded {
                         self.trim_pending = true;
                     }
                 }
-                let net = self.face.sync_net() && self.face.visible();
+                let net = (self.face.sync_net() | self.face.sync_snapshot(&snap)) && self.face.visible();
                 // Проверка или скачивание обновления закончились — страница настроек перерисуется.
                 tab || media || net || (self.expanded && self.settings_open)
             }
@@ -212,9 +213,10 @@ impl App {
             }
             Ev::PowerChange => {
                 let vis = self.check_sys_colors();
+                let face_pow = self.face.sync_power() && self.face.visible();
                 match self.live.power_event() {
-                    Some(t) => self.show_toast(t) | vis,
-                    None => vis,
+                    Some(t) => self.show_toast(t) | vis | face_pow,
+                    None => vis | face_pow,
                 }
             }
             Ev::ToastTimer => {

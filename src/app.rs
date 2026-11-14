@@ -249,7 +249,7 @@ impl App {
                 tab: initial_tab,
                 settings_open: false,
                 glow: Spring::unit(0.0, 220.0, 26.0),
-                face: face::Face::new(cfg.idle_face),
+                face: face::Face::new(cfg.idle_face, cfg.collapsed_left, cfg.collapsed_right),
                 face_tick_on: false,
                 save_pending: false,
                 body: anim::Body::new((cfg.collapsed.0 * scale, cfg.collapsed.1 * scale)),
@@ -474,6 +474,8 @@ impl App {
         self.cfg.strip_over_maximized = new.strip_over_maximized;
         self.cfg.always_strip = new.always_strip;
         self.cfg.idle_face = new.idle_face;
+        self.cfg.collapsed_left = new.collapsed_left;
+        self.cfg.collapsed_right = new.collapsed_right;
         self.cfg.todo_clean_done = new.todo_clean_done;
         self.cfg.free_layout = new.free_layout;
         self.cfg.hide_on_screenshot = new.hide_on_screenshot;
@@ -496,6 +498,7 @@ impl App {
         self.order = self.cfg.visible_tabs();
         self.tab = self.order.iter().position(|&i| i == current).unwrap_or(0);
         self.face.set_enabled(self.cfg.idle_face);
+        self.face.set_slots(self.cfg.collapsed_left, self.cfg.collapsed_right);
         self.apply_theme();
         self.retarget();
         self.save_pending = true;
@@ -536,6 +539,7 @@ impl App {
         self.refresh_language();
         self.apply_monitor(self.mon, true);
         self.face.set_enabled(self.cfg.idle_face);
+        self.face.set_slots(self.cfg.collapsed_left, self.cfg.collapsed_right);
         self.apply_theme();
         self.live.set_media_enabled(self.cfg.live_media);
         self.tabs.apply_config(&self.cfg);
@@ -728,7 +732,7 @@ mod tests {
                 tab: 0,
                 settings_open: false,
                 glow: Spring::unit(0.0, 220.0, 26.0),
-                face: face::Face::new(cfg.idle_face),
+                face: face::Face::new(cfg.idle_face, cfg.collapsed_left, cfg.collapsed_right),
                 face_tick_on: false,
                 save_pending: false,
                 body: anim::Body::new((180.0, 24.0)),
@@ -792,6 +796,7 @@ mod tests {
         let snap = bg::Snapshot {
             wifi: None,
             bluetooth: None,
+            bt_connected: false,
             airplane: None,
             volume: None,
             brightness: None,

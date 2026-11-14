@@ -59,4 +59,6 @@ pub mod icon {
     pub const LIST: &str = "\u{E8FD}";
     pub const FLAG: &str = "\u{E7C1}";
     pub const FLAG_FILL: &str = "\u{E7C2}";
+    pub const KEYBOARD: &str = "\u{E765}";
+    pub const NONE: &str = "\u{F140}";
 }

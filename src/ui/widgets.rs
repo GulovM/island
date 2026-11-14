@@ -506,6 +506,87 @@ impl Ui {
         clicked
     }
 
+    /// Сегментированный переключатель-ползунок на 2 позиции (`false` — левая, `true` — правая).
+    /// Реагирует на клик по половинам, перетягивание и клавиатуру; акцентный бегунок плавно скользит.
+    pub unsafe fn segmented(&mut self, cv: &Canvas, id: u32, r: Rect, labels: [&str; 2], right: &mut bool) -> bool {
+        let (_, clicked) = self.interact(id, r);
+        let mut changed = false;
+        if self.is_dragging(id) && self.down {
+            let target = self.mouse.0 >= r.cx();
+            if target != *right {
+                *right = target;
+                changed = true;
+            }
+        } else if clicked {
+            let target = if self.interactive && r.contains(self.mouse) {
+                self.mouse.0 >= r.cx()
+            } else {
+                !*right
+            };
+            if target != *right {
+                *right = target;
+                changed = true;
+            }
+        }
+        let w = self.widget(id);
+        w.on.target = if *right { 1.0 } else { 0.0 };
+        let (hv, pr, ov) = (w.hover.value, w.press.value, w.on.value);
+
+        cv.rr(r, r.h / 2.0, mix(chip_bg(), fg(), 0.04 * hv));
+        cv.hairline(r, r.h / 2.0);
+        let pad = 2.0;
+        let thumb_w = (r.w - 2.0 * pad) / 2.0;
+        let thumb_x = r.x + pad + thumb_w * ov;
+        let thumb = press_scale(Rect::new(thumb_x, r.y + pad, thumb_w, r.h - 2.0 * pad), pr);
+        cv.rr(thumb, thumb.h / 2.0, cv.accent);
+
+        let inactive = mix(dim(), txt(), hv * 0.5);
+        cv.text(labels[0], Rect::new(r.x + pad, r.y, thumb_w, r.h), &cv.g.fonts.small_c, mix(ink(), inactive, ov));
+        cv.text(labels[1], Rect::new(r.x + pad + thumb_w, r.y, thumb_w, r.h), &cv.g.fonts.small_c, mix(inactive, ink(), ov));
+        changed
+    }
+
+    /// Кнопка-чип со значком: выбранная залита акцентом, недоступная (`!enabled`) приглушена
+    /// и не реагирует на нажатие, но показывает подсказку при наведении.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn icon_chip(
+        &mut self,
+        cv: &Canvas,
+        id: u32,
+        r: Rect,
+        glyph: &str,
+        selected: bool,
+        enabled: bool,
+        tip: &str,
+    ) -> bool {
+        let clicked = if enabled {
+            self.interact(id, r).1
+        } else {
+            self.hover_amount(id, self.hovering(r));
+            false
+        };
+        let w = self.widget(id);
+        w.on.target = if enabled && selected { 1.0 } else { 0.0 };
+        if !enabled {
+            w.press.target = 0.0;
+        }
+        let (hv, pr, ov) = (w.hover.value, w.press.value, w.on.value);
+
+        let (bg, mark, bg_rect) = if enabled {
+            let base = mix(chip_bg(), fg(), 0.06 * hv);
+            (mix(base, cv.accent, ov), mix(txt(), ink(), ov), press_scale(r, pr))
+        } else {
+            (D2D1_COLOR_F { a: 0.36, ..chip_bg() }, D2D1_COLOR_F { a: 0.30, ..dim() }, r)
+        };
+        cv.rr(bg_rect, bg_rect.h / 2.0, bg);
+        cv.hairline(bg_rect, bg_rect.h / 2.0);
+        cv.symbol(glyph, bg_rect, (bg_rect.h - 8.0).clamp(11.0, 14.0), mark);
+        if !tip.is_empty() {
+            self.tip(id, r, tip);
+        }
+        clicked
+    }
+
     /// Переключатель-«пилюля» в прямоугольнике `r` (пропорции iOS 26: высота 31, диаметр ручки 27, отступ 2).
     /// `enabled == false` — серый и неактивный (opacity 0.40).
     /// Возвращает `true` в кадре, когда значение переключили.

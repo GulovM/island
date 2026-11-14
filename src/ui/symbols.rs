@@ -506,6 +506,23 @@ fn parts(code: u32) -> Option<Vec<Part>> {
                 Stroke(p, 1.4),
             ]
         }
+        // keyboard (раскладка клавиатуры)
+        0xE765 => {
+            let mut v = vec![Stroke(rrect(2.4, 5.8, 19.2, 12.4, 2.5), 1.8)];
+            for &kx in &[5.4, 9.1, 12.8, 16.5] {
+                v.push(Fill(rrect(kx, 8.6, 2.1, 1.7, 0.5)));
+                v.push(Fill(rrect(kx, 11.2, 2.1, 1.7, 0.5)));
+            }
+            v.push(Fill(rrect(5.4, 13.8, 2.1, 1.7, 0.5)));
+            v.push(Fill(rrect(8.7, 13.8, 6.6, 1.7, 0.5)));
+            v.push(Fill(rrect(16.5, 13.8, 2.1, 1.7, 0.5)));
+            v
+        }
+        // nosign (без значка)
+        0xF140 => vec![
+            Stroke(circle(12.0, 12.0, 7.2), 1.9),
+            Stroke(line((7.1, 16.9), (16.9, 7.1)), 1.9),
+        ],
         _ => return None,
     })
 }
@@ -681,7 +698,7 @@ mod tests {
             PLAY_SOLID, PAUSE, POWER, RESTART, COPY, LINK, PICTURE, PIN, DELETE, ADD, CHECK, CLOCK, CALENDAR, FOLDER,
             APPS, PREV, NEXT, REWIND, FAST_FORWARD, MUSIC, CLOSE, PASTE, LEFT, RIGHT, STAR, REFRESH, DOWN, UP, EDIT,
             STAR_FILL, SETTINGS_GEAR, RINGER, SPEAKER, CONTRAST, SUN, CLOUD, FORWARD, TEXT_DOC, BOLT, AIRPLANE, BATTERY,
-            FLAG, FLAG_FILL,
+            FLAG, FLAG_FILL, KEYBOARD, NONE,
         ] {
             assert!(parts(code_of(g).unwrap()).is_some(), "нет значка для U+{:04X}", code_of(g).unwrap());
         }

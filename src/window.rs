@@ -601,8 +601,10 @@ impl App {
             }
         }
         // Раскладка клавиатуры окна в фокусе: событий об её смене нет, проверяем вместе с окружением.
-        // Опрашиваем, когда остров свёрнут, не полоска, не скрыт игрой и показ лица разрешён (или активен таймер).
-        if should_poll_lang(self.expanded, self.hidden, self.stripped(), self.cfg.idle_face, self.live.timer().is_some())
+        // Опрашиваем, когда остров свёрнут, не полоска, не скрыт игрой, показ лица разрешён (или активен таймер)
+        // и хотя бы в одном слоте выбрана раскладка.
+        if self.face.uses_layout()
+            && should_poll_lang(self.expanded, self.hidden, self.stripped(), self.cfg.idle_face, self.live.timer().is_some())
             && self.face.poll_lang()
         {
             changed = true;

@@ -1,5 +1,6 @@
 //! Управление Bluetooth-устройствами и сопряжением через WinRT и IKsControl.
 
+use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -251,4 +252,123 @@ pub(super) unsafe fn bluetooth_devices() -> Vec<DevItem> {
     }
     out.sort_by_key(|d| (std::cmp::Reverse(d.active), d.name.to_lowercase()));
     out
+}
+
+#[derive(Default)]
+struct BtConnState {
+    classic: HashSet<String>,
+    le: HashSet<String>,
+    watchers: Vec<windows::Devices::Enumeration::DeviceWatcher>,
+}
+
+static BT_CONN: Mutex<Option<BtConnState>> = Mutex::new(None);
+
+/// Есть ли сейчас хотя бы одно подключённое Bluetooth-устройство (классическое или BLE).
+pub(super) fn bt_any_connected() -> bool {
+    BT_CONN
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|s| !s.classic.is_empty() || !s.le.is_empty()))
+        .unwrap_or(false)
+}
+
+/// Обновляет набор подключённых устройств (classic/BLE) и шлёт Cmd::BtConn только при смене факта подключения.
+fn update_bt_conn(id: &windows::core::HSTRING, is_le: bool, add: bool) {
+    let id = id.to_string();
+    let changed = if let Ok(mut g) = BT_CONN.lock() {
+        let st = g.get_or_insert_with(BtConnState::default);
+        let before = !st.classic.is_empty() || !st.le.is_empty();
+        let set = if is_le { &mut st.le } else { &mut st.classic };
+        if add {
+            set.insert(id);
+        } else {
+            set.remove(&id);
+        }
+        let after = !st.classic.is_empty() || !st.le.is_empty();
+        before != after
+    } else {
+        false
+    };
+    if changed {
+        send(Cmd::BtConn);
+    }
+}
+
+unsafe fn spawn_bt_watcher(aqs: windows::core::HSTRING, is_le: bool) -> Option<windows::Devices::Enumeration::DeviceWatcher> {
+    use windows::Devices::Enumeration::{DeviceInformation, DeviceInformationUpdate, DeviceWatcher};
+    use windows::Foundation::TypedEventHandler;
+
+    let w = DeviceInformation::CreateWatcherAqsFilter(&aqs).ok()?;
+    let _ = w.Added(&TypedEventHandler::<DeviceWatcher, DeviceInformation>::new(move |_, info| {
+        if let Some(info) = info.as_ref() {
+            if let Ok(id) = info.Id() {
+                update_bt_conn(&id, is_le, true);
+            }
+        }
+        Ok(())
+    }));
+    let _ = w.Removed(&TypedEventHandler::<DeviceWatcher, DeviceInformationUpdate>::new(move |_, upd| {
+        if let Some(upd) = upd.as_ref() {
+            if let Ok(id) = upd.Id() {
+                update_bt_conn(&id, is_le, false);
+            }
+        }
+        Ok(())
+    }));
+    let _ = w.EnumerationCompleted(&TypedEventHandler::<DeviceWatcher, windows::core::IInspectable>::new(|_, _| {
+        send(Cmd::BtConn);
+        Ok(())
+    }));
+    w.Start().ok()?;
+    Some(w)
+}
+
+/// Поддерживает WinRT-наблюдатели за подключёнными Bluetooth-устройствами (без опроса в простое).
+pub(super) unsafe fn ensure_bt_watch() {
+    use windows::Devices::Bluetooth::{BluetoothConnectionStatus, BluetoothDevice, BluetoothLEDevice};
+    use windows::Devices::Enumeration::DeviceWatcherStatus;
+
+    let alive = BT_CONN.lock().ok().is_some_and(|g| {
+        g.as_ref().is_some_and(|s| {
+            !s.watchers.is_empty()
+                && s.watchers.iter().all(|w| {
+                    matches!(
+                        w.Status(),
+                        Ok(DeviceWatcherStatus::Created | DeviceWatcherStatus::Started | DeviceWatcherStatus::EnumerationCompleted)
+                    )
+                })
+        })
+    });
+    if alive {
+        return;
+    }
+
+    let old_watchers = if let Ok(mut g) = BT_CONN.lock() {
+        let st = g.get_or_insert_with(BtConnState::default);
+        st.classic.clear();
+        st.le.clear();
+        std::mem::take(&mut st.watchers)
+    } else {
+        Vec::new()
+    };
+    for w in old_watchers {
+        let _ = w.Stop();
+    }
+
+    let mut watchers = Vec::new();
+    if let Ok(sel) = BluetoothDevice::GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus::Connected) {
+        if let Some(w) = spawn_bt_watcher(sel, false) {
+            watchers.push(w);
+        }
+    }
+    if let Ok(sel) = BluetoothLEDevice::GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus::Connected) {
+        if let Some(w) = spawn_bt_watcher(sel, true) {
+            watchers.push(w);
+        }
+    }
+
+    if let Ok(mut g) = BT_CONN.lock() {
+        let st = g.get_or_insert_with(BtConnState::default);
+        st.watchers = watchers;
+    }
 }

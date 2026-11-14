@@ -73,8 +73,12 @@ collapsed_mode = "auto"
 # Скрытые вкладки (список имён из tabs ниже)
 hidden_tabs = []
 
-# 1 — в свёрнутом острове без музыки показывать время, раскладку клавиатуры и Wi-Fi
+# 1 — в свёрнутом острове без музыки показывать время и значки слева и справа
 idle_face = 1
+
+# Значки слева и справа на свёрнутом острове: "layout" (раскладка), "wifi", "bluetooth", "battery".
+collapsed_left = "layout"
+collapsed_right = "wifi"
 
 # 1 — выполненные задачи в списке дел убираются сами с наступлением нового дня; 0 — не убираются.
 # Меняется и в Настройках.
@@ -156,6 +160,57 @@ weather = ""
 # gmail = "https://mail.google.com"
 "##;
 
+/// Значок в левом или правом слоте свёрнутой чёлки (`face.rs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CollapsedIcon {
+    None,
+    Layout,
+    Wifi,
+    Bluetooth,
+    Battery,
+}
+
+impl CollapsedIcon {
+    pub const ALL: [CollapsedIcon; 5] = [
+        CollapsedIcon::None,
+        CollapsedIcon::Layout,
+        CollapsedIcon::Wifi,
+        CollapsedIcon::Bluetooth,
+        CollapsedIcon::Battery,
+    ];
+
+    pub fn parse(s: &str, default: Self) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "none" | "off" | "empty" | "" => Self::None,
+            "layout" | "lang" => Self::Layout,
+            "wifi" | "wi-fi" => Self::Wifi,
+            "bluetooth" | "bt" => Self::Bluetooth,
+            "battery" | "bat" => Self::Battery,
+            _ => default,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Layout => "layout",
+            Self::Wifi => "wifi",
+            Self::Bluetooth => "bluetooth",
+            Self::Battery => "battery",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "Без значка",
+            Self::Layout => "Раскладка",
+            Self::Wifi => "Wi-Fi",
+            Self::Bluetooth => "Bluetooth",
+            Self::Battery => "Батарея",
+        }
+    }
+}
+
 /// Собственная вкладка пользователя: стабильный номер, название и раскладка (формат `tabs::layout`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CustomTab {
@@ -225,8 +280,12 @@ pub struct Config {
     pub language: String,
     /// Имена скрытых вкладок.
     pub hidden_tabs: Vec<String>,
-    /// Время, раскладка и Wi-Fi на свёрнутом острове, когда музыка не играет.
+    /// Время и значки слева/справа на свёрнутом острове, когда музыка не играет.
     pub idle_face: bool,
+    /// Значок слева на свёрнутом острове.
+    pub collapsed_left: CollapsedIcon,
+    /// Значок справа на свёрнутом острове.
+    pub collapsed_right: CollapsedIcon,
     /// Убирать выполненные задачи при смене дня.
     pub todo_clean_done: bool,
     /// Устанавливать найденные обновления без вопросов.
@@ -282,6 +341,8 @@ impl Default for Config {
             language: "auto".to_string(),
             hidden_tabs: Vec::new(),
             idle_face: true,
+            collapsed_left: CollapsedIcon::Layout,
+            collapsed_right: CollapsedIcon::Wifi,
             todo_clean_done: false,
             auto_update: false,
             hide_on_screenshot: true,
@@ -405,6 +466,8 @@ fn save_updates(cfg: &Config) -> Vec<(&'static str, String)> {
         ("hidden_tabs", fmt_list(&cfg.hidden_tabs)),
         ("custom_tabs", fmt_list(&cfg.custom.iter().map(CustomTab::encode).collect::<Vec<_>>())),
         ("idle_face", (cfg.idle_face as u8).to_string()),
+        ("collapsed_left", fmt_str(cfg.collapsed_left.as_str())),
+        ("collapsed_right", fmt_str(cfg.collapsed_right.as_str())),
         ("todo_clean_done", (cfg.todo_clean_done as u8).to_string()),
         ("auto_update", (cfg.auto_update as u8).to_string()),
         ("free_layout", (cfg.free_layout as u8).to_string()),
@@ -654,6 +717,8 @@ fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
         "hidden_tabs",
         "custom_tabs",
         "idle_face",
+        "collapsed_left",
+        "collapsed_right",
         "todo_clean_done",
         "auto_update",
         "free_layout",
@@ -715,6 +780,8 @@ pub fn parse(text: &str) -> Config {
             },
             ("", "system_colors", Value::Num(v)) => cfg.system_colors = v != 0.0,
             ("", "idle_face", Value::Num(v)) => cfg.idle_face = v != 0.0,
+            ("", "collapsed_left", Value::Str(s)) => cfg.collapsed_left = CollapsedIcon::parse(&s, CollapsedIcon::Layout),
+            ("", "collapsed_right", Value::Str(s)) => cfg.collapsed_right = CollapsedIcon::parse(&s, CollapsedIcon::Wifi),
             // Автоподбор контраста APCA теперь всегда включён: старый ключ молча пропускаем.
             ("", "auto_contrast", _) => {}
             ("", "todo_clean_done", Value::Num(v)) => cfg.todo_clean_done = v != 0.0,
@@ -784,6 +851,12 @@ pub fn parse(text: &str) -> Config {
             ("keys", k, Value::Str(s)) => cfg.keys.push((k.to_string(), s)),
             ("snippets", k, Value::Str(s)) => cfg.snippets.push((k.to_string(), s)),
             _ => log::error(&format!("config.toml:{}: неизвестный параметр «{key}»", n + 1)),
+        }
+    }
+    // Не допускаем одинакового значка с обеих сторон свёрнутой чёлки (пустые слоты допустимы с обеих сторон).
+    if cfg.collapsed_left != CollapsedIcon::None && cfg.collapsed_left == cfg.collapsed_right {
+        if let Some(&alt) = CollapsedIcon::ALL.iter().find(|&&o| o != CollapsedIcon::None && o != cfg.collapsed_left) {
+            cfg.collapsed_right = alt;
         }
     }
     cfg
@@ -1341,5 +1414,36 @@ gmail = \"https://mail.google.com\"
         assert!(!parse("accent_pill = 0\n").accent_pill);
         assert!(parse("accent_pill = true\n").accent_pill);
         assert!(!parse("accent_pill = false\n").accent_pill);
+    }
+
+    #[test]
+    fn collapsed_icon_slots_parse_and_roundtrip() {
+        let def = Config::default();
+        assert_eq!((def.collapsed_left, def.collapsed_right), (CollapsedIcon::Layout, CollapsedIcon::Wifi));
+        let tmpl = parse(DEFAULT_TEMPLATE);
+        assert_eq!((tmpl.collapsed_left, tmpl.collapsed_right), (CollapsedIcon::Layout, CollapsedIcon::Wifi));
+
+        let c = parse("collapsed_left = \"bluetooth\"\ncollapsed_right = \"battery\"\n");
+        assert_eq!(c.collapsed_left, CollapsedIcon::Bluetooth);
+        assert_eq!(c.collapsed_right, CollapsedIcon::Battery);
+
+        let fallback = parse("collapsed_left = \"unknown\"\ncollapsed_right = \"unknown\"\n");
+        assert_eq!(fallback.collapsed_left, CollapsedIcon::Layout);
+        assert_eq!(fallback.collapsed_right, CollapsedIcon::Wifi);
+
+        let dedup = parse("collapsed_left = \"wifi\"\ncollapsed_right = \"wifi\"\n");
+        assert_eq!(dedup.collapsed_left, CollapsedIcon::Wifi);
+        assert_ne!(dedup.collapsed_right, CollapsedIcon::Wifi);
+        assert_ne!(dedup.collapsed_right, CollapsedIcon::None);
+
+        let both_none = parse("collapsed_left = \"none\"\ncollapsed_right = \"none\"\n");
+        assert_eq!((both_none.collapsed_left, both_none.collapsed_right), (CollapsedIcon::None, CollapsedIcon::None));
+
+        let updates = save_updates(&c);
+        assert!(updates.contains(&("collapsed_left", "\"bluetooth\"".to_string())));
+        assert!(updates.contains(&("collapsed_right", "\"battery\"".to_string())));
+        let round = parse(&set_keys(DEFAULT_TEMPLATE, &updates));
+        assert_eq!(round.collapsed_left, CollapsedIcon::Bluetooth);
+        assert_eq!(round.collapsed_right, CollapsedIcon::Battery);
     }
 }

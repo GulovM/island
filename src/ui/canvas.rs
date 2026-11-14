@@ -443,6 +443,22 @@ impl Canvas<'_> {
         self.g.dc.DrawLine(pt(a.0, a.1), pt(b.0, b.1), &self.g.brush, thick, &self.g.round);
     }
 
+    /// Ломаная с круглыми концами и скруглёнными стыками.
+    pub unsafe fn stroke_polyline(&self, pts: &[(f32, f32)], thick: f32, c: D2D1_COLOR_F) {
+        let Some((&first, rest)) = pts.split_first() else { return };
+        let Ok(geo) = self.g.d2d.CreatePathGeometry() else { return };
+        let Ok(sink) = geo.Open() else { return };
+        sink.BeginFigure(pt(first.0, first.1), D2D1_FIGURE_BEGIN_HOLLOW);
+        for &(x, y) in rest {
+            sink.AddLine(pt(x, y));
+        }
+        sink.EndFigure(D2D1_FIGURE_END_OPEN);
+        if sink.Close().is_ok() {
+            self.g.brush.SetColor(&self.col(c));
+            self.g.dc.DrawGeometry(&geo, &self.g.brush, thick, &self.g.round);
+        }
+    }
+
     /// Жирная векторная стрелка высотой `size` (загрузка вниз при `up = false`, отдача вверх при `up = true`).
     /// Вертикальный стержень толщиной ~1.8 с круглыми концами и две диагонали-наконечник.
     pub unsafe fn arrow(&self, cx: f32, cy: f32, size: f32, up: bool, c: D2D1_COLOR_F) {

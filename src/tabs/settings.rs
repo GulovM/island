@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use crate::anim::Spring;
-use crate::config::{Config, DEFAULT_RADIUS, DEFAULT_SCALE, MAX_RADIUS, MAX_SCALE, MIN_SCALE, Material};
+use crate::config::{CollapsedIcon, Config, DEFAULT_RADIUS, DEFAULT_SCALE, MAX_RADIUS, MAX_SCALE, MIN_SCALE, Material};
 use crate::theme::{self, PaletteStyle, Rgb};
 use crate::ui::{card, chip_bg, dim, fg, icon, ink, inset, mix, txt, Canvas, Rect, Submit, Ui, WHITE};
 
@@ -65,6 +65,9 @@ const N_CREATE: u32 = 121;
 const N_CANCEL: u32 = 122;
 const N_SCROLL: u32 = 123;
 const N_NOTES_SCROLL: u32 = 124;
+/// Ползунок стороны свёрнутой чёлки (130) и пять кнопок-иконок (131–135).
+const N_FACE_SIDE: u32 = 130;
+const N_FACE_ICON: u32 = 131;
 
 /// Раздел страницы настроек.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -163,6 +166,24 @@ enum Target {
     Bg,
 }
 
+/// Выбранный для редактирования край свёрнутой чёлки.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum FaceSide {
+    #[default]
+    Left,
+    Right,
+}
+
+fn collapsed_icon_glyph(opt: CollapsedIcon) -> &'static str {
+    match opt {
+        CollapsedIcon::None => icon::NONE,
+        CollapsedIcon::Layout => icon::KEYBOARD,
+        CollapsedIcon::Wifi => icon::WIFI,
+        CollapsedIcon::Bluetooth => icon::BLUETOOTH,
+        CollapsedIcon::Battery => icon::BATTERY,
+    }
+}
+
 /// Состояние перетаскивания строки вкладки мышью.
 #[derive(Clone, Copy, Debug)]
 struct TabDrag {
@@ -202,6 +223,8 @@ pub struct Settings {
     confirm_del: Option<usize>,
     /// Выбранный раздел: помнится, пока программа работает (в конфиг не пишется).
     section: Section,
+    /// Какой край свёрнутой чёлки сейчас редактируется в разделе «Система».
+    face_side: FaceSide,
     /// Кэш состояния «Эффектов прозрачности» Windows: (время проверки, значение).
     transparency_cache: Option<(Instant, bool)>,
 }
@@ -222,6 +245,7 @@ impl Default for Settings {
             renaming: None,
             confirm_del: None,
             section: Section::Look,
+            face_side: FaceSide::Left,
             transparency_cache: None,
         }
     }
@@ -426,6 +450,8 @@ impl Settings {
         self.cfg.hidden_tabs = self.cfg.custom.iter().enumerate().map(|(i, _)| self.cfg.tab_key(crate::tabs::CUSTOM_BASE + i)).collect();
         self.cfg.tabs = self.cfg.tab_keys().into_iter().map(|(_, k)| k).collect();
         self.cfg.idle_face = true;
+        self.cfg.collapsed_left = d.collapsed_left;
+        self.cfg.collapsed_right = d.collapsed_right;
         self.cfg.strip_over_maximized = d.strip_over_maximized;
         self.hsv = theme::rgb_to_hsv(self.current());
         self.changed = true;
@@ -1042,13 +1068,61 @@ impl Settings {
             self.autostart = crate::sys::autostart_enabled();
         }
         y += 24.0;
-        cv.text("Время и Wi-Fi на свёрнутом острове", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        cv.text("Время и значки на свёрнутом острове", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
         let mut face = self.cfg.idle_face;
         if ui.switch(cv, id(SETTINGS, N_FACE), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut face, true) {
             self.cfg.idle_face = face;
             self.changed = true;
         }
-        y += 24.0;
+        y += 23.0;
+        let (box_pad_x, box_pad_y, row_gap) = (8.0, 7.0, 6.0);
+        let box_h = box_pad_y * 2.0 + 20.0 + row_gap + 22.0;
+        let box_r = Rect::new(x, y, iw, box_h);
+        cv.rr(box_r, 9.0, inset());
+        cv.rr_line(box_r, 9.0, D2D1_COLOR_F { a: 0.14, ..fg() }, 1.0);
+
+        let ix = box_r.x + box_pad_x;
+        let mut iy = box_r.y + box_pad_y;
+        let ctrl_w = 166.0;
+        let ctrl_x = box_r.right() - box_pad_x - ctrl_w;
+        cv.text("Сторона", Rect::new(ix, iy, ctrl_x - ix - 6.0, 20.0), &f.body, txt());
+        let mut right = self.face_side == FaceSide::Right;
+        if ui.segmented(cv, id(SETTINGS, N_FACE_SIDE), Rect::new(ctrl_x, iy, ctrl_w, 20.0), ["Слева", "Справа"], &mut right) {
+            self.face_side = if right { FaceSide::Right } else { FaceSide::Left };
+        }
+        iy += 20.0 + row_gap;
+        cv.text("Значок", Rect::new(ix, iy, ctrl_x - ix - 6.0, 22.0), &f.body, txt());
+        let (current, other) = if right {
+            (self.cfg.collapsed_right, self.cfg.collapsed_left)
+        } else {
+            (self.cfg.collapsed_left, self.cfg.collapsed_right)
+        };
+        let gap = 4.0;
+        let bw = (ctrl_w - gap * (CollapsedIcon::ALL.len() - 1) as f32) / CollapsedIcon::ALL.len() as f32;
+        for (k, &opt) in CollapsedIcon::ALL.iter().enumerate() {
+            let r = Rect::new(ctrl_x + k as f32 * (bw + gap), iy, bw, 22.0);
+            let enabled = opt == CollapsedIcon::None || opt != other;
+            let selected = current == opt;
+            let tip = if enabled {
+                crate::i18n::tr(opt.label()).to_string()
+            } else {
+                let busy = if right {
+                    crate::i18n::pick("уже слева", "already on left")
+                } else {
+                    crate::i18n::pick("уже справа", "already on right")
+                };
+                format!("{} ({busy})", crate::i18n::tr(opt.label()))
+            };
+            if ui.icon_chip(cv, id(SETTINGS, N_FACE_ICON + k as u32), r, collapsed_icon_glyph(opt), selected, enabled, &tip) {
+                if right {
+                    self.cfg.collapsed_right = opt;
+                } else {
+                    self.cfg.collapsed_left = opt;
+                }
+                self.changed = true;
+            }
+        }
+        y = box_r.bottom() + 8.0;
         // Режим свёрнутого острова: «Авто» — чёлка (полоска только над окнами на весь экран), «Полоска» — всегда.
         cv.text("Свёрнутый остров", Rect::new(x, y, 130.0, 18.0), &f.body, txt());
         let modes = [("Авто", false), ("Всегда полоска", true)];
@@ -1330,6 +1404,9 @@ mod tests {
             (N_CREATE, 1),
             (N_CANCEL, 1),
             (N_SCROLL, 1),
+            (N_NOTES_SCROLL, 1),
+            (N_FACE_SIDE, 1),
+            (N_FACE_ICON, CollapsedIcon::ALL.len() as u32),
         ];
         let mut seen = std::collections::HashSet::new();
         for (start, len) in groups {
