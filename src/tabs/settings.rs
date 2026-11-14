@@ -1213,14 +1213,13 @@ impl Settings {
             crate::state::set_dnd_restore_popups(false);
             self.changed = true;
         }
-        y += 18.0;
-        let hint = if crate::bg::snapshot().dnd_active {
-            "В Windows включён режим «Не беспокоить»"
+        if crate::bg::snapshot().dnd_active {
+            y += 18.0;
+            cv.text("В Windows включён режим «Не беспокоить»", Rect::new(x, y, iw, 13.0), &f.small, dim());
+            y += 22.0;
         } else {
-            "Выключаются при режиме «Не беспокоить»"
-        };
-        cv.text(hint, Rect::new(x, y, iw, 13.0), &f.small, dim());
-        y += 22.0;
+            y += 28.0;
+        }
 
         cv.text("ОБНОВЛЕНИЯ", Rect::new(x, y, iw, 11.0), &f.caps, dim());
         y += 17.0;

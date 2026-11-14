@@ -455,7 +455,6 @@ const TABLE: &[(&str, &str)] = &[
     ("УВЕДОМЛЕНИЯ", "NOTIFICATIONS"),
     ("Всплывающие уведомления", "Popup notifications"),
     ("В Windows включён режим «Не беспокоить»", "Windows Do Not Disturb is active"),
-    ("Выключаются при режиме «Не беспокоить»", "Automatically paused when Do Not Disturb is on"),
 ];
 
 #[cfg(test)]
