@@ -1,9 +1,9 @@
-# Island — инструкции для Claude Code
+# Kite Island — инструкции для Claude Code
 
 ## Проект
 GPU-рисуемый (Direct2D) «остров» для Windows 10/11, чистый Rust, без веб-стека.
-Жёсткие бюджеты (CONTRIBUTING.md): CPU в простое ≈ 0%, RAM ≤ 30 МБ, exe ≤ 3 МБ,
-минимум зависимостей (сейчас только `windows-rs`). Обзор структуры — docs/PLAN.md.
+Жёсткие бюджеты (CONTRIBUTING.md): CPU в простое ≈ 0%, RAM ≤ 60 МБ (пик по замерам ~55 МБ), exe ≤ 3 МБ,
+минимум зависимостей (сейчас только крейты семейства `windows-rs`). Точка входа — `src/main.rs`.
 
 ## Рабочий процесс: реализация делегируется, Claude всегда проверяет
 Для задач, попадающих в зону одного из под-агентов ниже (`.claude/agents/agy-*.md`),
@@ -106,7 +106,7 @@ jetski: no output produced — a tool required the "command" permission that hea
 Поэтому `-p`/headless-запуск **обязательно** требует `--dangerously-skip-permissions`:
 
 ```bash
-agy -p "<задача> | Acceptance: <конкретный критерий приёмки> | Используй скиллы: <релевантные ecc:*-patterns, если применимо> | Не выходи за бюджеты (CPU простой ≈ 0, RAM ≤ 30 МБ, exe ≤ 3 МБ, зависимостей сверх windows-rs не добавлять)" \
+agy -p "<задача> | Acceptance: <конкретный критерий приёмки> | Используй скиллы: <релевантные ecc:*-patterns, если применимо> | Не выходи за бюджеты (CPU простой ≈ 0, RAM ≤ 60 МБ, exe ≤ 3 МБ, зависимостей сверх семейства windows-rs не добавлять)" \
     --mode accept-edits \
     --dangerously-skip-permissions \
     --add-dir "D:/Desktop/Files/mainnew/island" \

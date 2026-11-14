@@ -1,26 +1,25 @@
-# Terms of Service — Island
+# Terms of Service — Kite Island
 
-Last updated: 2026-11-10
+Last updated: 2026-11-14
 
-By downloading, installing, or using **Island**, you agree to be bound by these Terms of Service. If you do not agree with any part of these terms, please do not use the application.
+By downloading, installing, or using **Kite Island**, you agree to be bound by these Terms of Service. If you do not agree with any part of these terms, please do not use the application.
 
 ## 1. License and Open Source
 
-Island is free, non-commercial, open-source software released under the [MIT License](LICENSE). You may use, copy, modify, and distribute the code in accordance with that license. The project's non-commercial intent is described in [NOTICE.md](NOTICE.md).
+Kite Island is free, non-commercial, open-source software released under the [MIT License](LICENSE). You may use, copy, modify, and distribute the code in accordance with that license. The project's non-commercial intent is described in [NOTICE.md](NOTICE.md).
 
 ## 2. Connected Services
 
-Island can show information from third-party services:
+Kite Island can show and sync information with third-party services:
 
+- Google Calendar (via OAuth 2.0) and Apple iCloud Calendar (via CalDAV) to display your events and, when you choose to add/edit/delete an event to your calendar, sync those changes back;
 - events from calendar feeds (ICS links) that you add yourself;
 - weather data, city lookup by IP address, and the speed test service that you start yourself;
 - GitHub, to check for new program releases.
 
-Island may also connect to Google Calendar (via OAuth 2.0) and iCloud Calendar (via CalDAV) in future releases. Any such connection will be described in the [CHANGELOG](CHANGELOG.md) when it is released, and it will only be used after you connect your account yourself.
+Connected calendars are used only after you connect your account or add a link yourself. Your use of Google services is governed by [Google Terms of Service](https://policies.google.com/terms). You are responsible for maintaining the security of your own accounts and your computer.
 
-Your use of Google services is governed by [Google Terms of Service](https://policies.google.com/terms). You are responsible for maintaining the security of your own accounts and your computer.
-
-Island does not guarantee continuous or uninterrupted access to third-party services. Those services may change, limit, or stop their features at any time.
+Kite Island does not guarantee continuous or uninterrupted access to third-party services. Those services may change, limit, or stop their features at any time.
 
 ## 3. "AS IS" Disclaimer
 
@@ -32,7 +31,7 @@ In no event shall the author or copyright holders be liable for any claim, damag
 
 ## 5. Termination
 
-You may stop using these terms at any time by uninstalling the application. If you connected a third-party account, you can also revoke Island's access in that account's settings (for example, in your Google Account under "Third-party apps with account access"). To delete the data that Island stores on your computer, see the [Privacy Policy](PRIVACY.md).
+You may stop using these terms at any time by uninstalling the application. If you connected a third-party account, you can also revoke Kite Island's access in that account's settings (for example, in your Google Account under "Third-party apps with account access"). To delete the data that Kite Island stores on your computer, see the [Privacy Policy](PRIVACY.md).
 
 ## 6. Changes and Contact
 
