@@ -89,6 +89,40 @@ impl App {
         self.body.size(self.open.value)
     }
 
+    /// Точная геометрия тела острова в физических пикселях окна:
+    /// `(x0, y0, aw, ah, ear, r_top, r_bot)`. При переходе в капсулу «ушки» убираются,
+    /// тело отрывается вниз от верхней кромки и все четыре угла скругляются в пилюлю.
+    pub(crate) fn body_geometry(&self) -> (f32, f32, f32, f32, f32, f32, f32) {
+        let s = self.scale;
+        let (bw, bh) = self.body_size();
+        let aw = bw.max(1.0);
+        let ah = bh.max(1.0);
+        let x0 = (self.win_w as f32 - aw) / 2.0;
+        let open = self.open.value.clamp(0.0, 1.0);
+        let collapsed_h = self.collapsed().1;
+
+        let cap = self.capsule.value.clamp(0.0, 1.0) * (1.0 - open);
+        let ear_cap = (1.0 - cap / 0.25).clamp(0.0, 1.0);
+        let t = ((cap - 0.15) / 0.85).clamp(0.0, 1.0);
+        let detach = t * t * (3.0 - 2.0 * t);
+
+        let base_ear = (EAR * s * (ah / (collapsed_h * s)).min(1.0)).min(ah) * ear_cap;
+        let ear = if base_ear < 0.5 { 0.0 } else { base_ear };
+
+        let y0 = live::CAPSULE_TOP_Y * s * detach;
+        let base_r = (self.cfg.corner_radius * (0.72 + 0.28 * open) * s)
+            .min(aw / 2.0)
+            .min(ah - ear)
+            .max(0.0);
+        let pill_r = (ah / 2.0).min(aw / 2.0);
+        let r_top = (pill_r * detach).min(aw / 2.0).min(ah / 2.0);
+        let r_bot = (base_r + (pill_r - base_r) * detach)
+            .min(aw / 2.0)
+            .min((ah - r_top).max(0.0))
+            .max(0.0);
+        (x0, y0, aw, ah, ear, r_top, r_bot)
+    }
+
     /// Размер, к которому остров идёт: раскрытая форма или свёрнутая.
     pub(crate) fn target_size(&self) -> (f32, f32) {
         if self.expanded { self.expanded_target() } else { self.collapsed_target() }
@@ -107,6 +141,13 @@ impl App {
         (w + extra, h)
     }
 
+    fn toast_size(&self) -> (f32, f32) {
+        match self.live.display_toast() {
+            Some(live::Toast::Notice) => live::TOAST_NOTICE,
+            _ => live::TOAST,
+        }
+    }
+
     pub(crate) fn collapsed_target(&self) -> (f32, f32) {
         let collapsed = self.collapsed();
         let (w, h) = if self.stripped() {
@@ -114,7 +155,10 @@ impl App {
             (collapsed.0, STRIP_H)
         } else {
             match self.live_form() {
-                live::Form::Toast => (live::TOAST.0.max(collapsed.0), live::TOAST.1.max(collapsed.1)),
+                live::Form::Toast => {
+                    let ts = self.toast_size();
+                    (ts.0.max(collapsed.0), ts.1.max(collapsed.1))
+                }
                 live::Form::Drop => (DROP_PILL.0.max(collapsed.0), DROP_PILL.1.max(collapsed.1)),
                 live::Form::Idle => self.idle_pill_size(),
             }
@@ -124,10 +168,10 @@ impl App {
 
     /// Остров стал тонкой полоской: выбран режим «всегда полоска» либо окно развёрнуто на весь экран
     /// и включён режим полоски (переключатель в Настройках или правый клик по острову). Иначе остров остаётся обычной чёлкой.
-    /// На время уведомления об окончании таймера остров выходит из полоски: его надо заметить.
+    /// На время важных уведомлений (таймер, события, входящие уведомления) остров выходит из полоски: их надо заметить.
     pub(crate) fn stripped(&self) -> bool {
         (self.cfg.always_strip || (self.covered && self.cfg.strip_over_maximized))
-            && !self.live.alert()
+            && !self.live.emerges_from_strip()
             && self.drop_msg.is_none()
     }
 
@@ -161,18 +205,30 @@ impl App {
 
     /// Показывает уведомление в свёрнутой форме. `true` — нужен кадр.
     pub(crate) unsafe fn show_toast(&mut self, t: live::Toast) -> bool {
-        // Окончание таймера заметно и в режиме полоски; остальные уведомления полоска не показывает.
-        let strip_blocks = self.stripped() && !t.is_alert();
+        // Важные уведомления (таймер, события, входящие) выезжают и из полоски; громкость/яркость/заряд — нет.
+        let strip_blocks = self.stripped() && !t.emerges_from_strip();
+        let popup_blocks = t.is_popup_notif() && !self.cfg.popup_notifications;
         // В игре (остров спрятан) приходит только звук.
-        if !self.cfg.live_toasts || self.expanded || strip_blocks || self.hidden || self.gfx.is_none() {
+        if !self.cfg.live_toasts || popup_blocks || self.expanded || strip_blocks || self.hidden || self.gfx.is_none() {
             return false;
         }
         self.live.show(t);
         SetTimer(Some(self.hwnd), TOAST_TIMER, t.lifetime().as_millis() as u32, None);
-        if t.is_alert() {
-            // Клавиатура — на остров, чтобы закрыть уведомление по Esc; sync_focus запомнит прежнее окно.
+        if t.steals_focus() {
+            // Клавиатура — на остров, чтобы закрыть уведомление о таймере по Esc; sync_focus запомнит прежнее окно.
             self.ui.focus = Some(NOTICE_FOCUS);
         }
+        self.retarget();
+        true
+    }
+
+    /// Показывает входящее системное уведомление как плавающую капсулу-островок (если разрешено).
+    pub(crate) unsafe fn show_notice_toast(&mut self, p: crate::tabs::notifications::PopupNotice) -> bool {
+        if !self.cfg.live_toasts || !self.cfg.popup_notifications || self.expanded || self.hidden || self.gfx.is_none() {
+            return false;
+        }
+        self.live.show_notice(p);
+        SetTimer(Some(self.hwnd), TOAST_TIMER, live::Toast::Notice.lifetime().as_millis() as u32, None);
         self.retarget();
         true
     }
@@ -194,8 +250,14 @@ impl App {
     /// Центр острова по горизонтали и прямоугольник его уведомления (логические пиксели).
     pub(crate) fn toast_rect(&self) -> ui::Rect {
         let collapsed = self.collapsed();
-        let fw = live::TOAST.0.max(collapsed.0);
-        ui::Rect::new(self.win_w as f32 / self.scale / 2.0 - fw / 2.0, 0.0, fw, live::TOAST.1.max(collapsed.1))
+        let ts = self.toast_size();
+        let fw = ts.0.max(collapsed.0);
+        let y = if self.live.display_toast().is_some_and(|t| t.is_capsule()) {
+            live::CAPSULE_TOP_Y
+        } else {
+            0.0
+        };
+        ui::Rect::new(self.win_w as f32 / self.scale / 2.0 - fw / 2.0, y, fw, ts.1.max(collapsed.1))
     }
 
     /// Клик (в пикселях окна) попал в × уведомления о таймере.
@@ -235,9 +297,11 @@ impl App {
             self.ui.blur();
             self.sync_focus();
             self.ui.down = false;
-            // Настройки — временный вид: после сворачивания остров открывается на вкладке.
-            if self.settings_open {
+            // Настройки и уведомления — временные виды: после сворачивания остров открывается на вкладке.
+            let _ = KillTimer(Some(self.hwnd), NOTIF_MENU_TIMER);
+            if self.settings_open || self.notifications_open {
                 self.settings_open = false;
+                self.notifications_open = false;
                 self.tab_prev = None;
                 self.tab_t.snap();
             }
@@ -281,7 +345,7 @@ impl App {
         self.mon = mon;
         self.win_x = rc.left + ((rc.right - rc.left) - cw) / 2;
         self.win_y = rc.top;
-        self.rgn = (-1, -1, -1);
+        self.rgn = (-1, -1, -1, -1);
         self.place_window(false);
         if resized || snap {
             self.retarget();
@@ -371,21 +435,29 @@ impl App {
 
     // ---------- Область острова: регион окна, наведение, окружение ----------
 
-    /// Область, которую остров занимает или займёт к концу анимации: (left, right, bottom)
-    /// в пикселях окна, сверху всегда 0. Это и регион окна, и граница «мышь на острове».
-    pub(crate) fn hit_rect(&self) -> (i32, i32, i32) {
+    /// Область, которую остров занимает или займёт к концу анимации: (left, top, right, bottom)
+    /// в пикселях окна. Это и регион окна, и граница «мышь на острове».
+    pub(crate) fn hit_rect(&self) -> (i32, i32, i32, i32) {
         let win_w = self.win_w as f32;
         let (tw, th) = self.target_size();
         let (cw, ch) = self.body_size();
+        let (_, cur_y0, _, _, cur_ear, _, _) = self.body_geometry();
+        let target_y0 = if !self.expanded && self.capsule.target > 0.5 {
+            live::CAPSULE_TOP_Y * self.scale
+        } else {
+            0.0
+        };
         let l = ((win_w - cw) / 2.0).min((win_w - tw) / 2.0);
         let r = ((win_w + cw) / 2.0).max((win_w + tw) / 2.0);
-        let b = ch.max(th);
+        let t = cur_y0.min(target_y0);
+        let b = (cur_y0 + ch).max(target_y0 + th);
         // «Ушки» выходят за тело острова с обеих сторон.
-        let ears = EAR * self.scale;
+        let ears = cur_ear.max(if target_y0 == 0.0 { EAR * self.scale } else { 0.0 });
         // Допуск нужен только раскрытому острову, чтобы край не «дрожал»; свёрнутый — без запаса.
         let slop = if self.expanded { HIT_SLOP * self.scale } else { 0.0 };
         (
             (l - ears - slop).floor().max(0.0) as i32,
+            t.floor().max(0.0) as i32,
             (r + ears + slop).ceil().min(win_w) as i32,
             (b + slop).ceil().min(self.win_h as f32) as i32,
         )
@@ -400,8 +472,8 @@ impl App {
         // позже. Пока остров сжимается, берём объединение с последними кадрами: иначе регион обрезает
         // ещё большое тело прямоугольником, а подложка блюра торчит вокруг как отдельная плита.
         if self.animating() {
-            for &(l, r, b) in &self.rgn_hist {
-                rect = (rect.0.min(l), rect.1.max(r), rect.2.max(b));
+            for &(l, t, r, b) in &self.rgn_hist {
+                rect = (rect.0.min(l), rect.1.min(t), rect.2.max(r), rect.3.max(b));
             }
             self.rgn_hist.push(self.hit_rect());
             if self.rgn_hist.len() > RGN_TRAIL_FRAMES {
@@ -414,7 +486,7 @@ impl App {
             return;
         }
         self.rgn = rect;
-        let rgn = CreateRectRgn(rect.0, 0, rect.1, rect.2);
+        let rgn = CreateRectRgn(rect.0, rect.1, rect.2, rect.3);
         // Система забирает регион себе, удалять его не нужно.
         SetWindowRgn(self.hwnd, Some(rgn), false);
     }
@@ -424,9 +496,9 @@ impl App {
         if GetCursorPos(&mut p).is_err() {
             return true;
         }
-        let (l, r, b) = self.hit_rect();
+        let (l, t, r, b) = self.hit_rect();
         let (x, y) = (p.x - self.win_x, p.y - self.win_y);
-        x >= l && x < r && y >= 0 && y < b
+        x >= l && x < r && y >= t && y < b
     }
 
     pub(crate) unsafe fn arm_leave(&mut self) {
@@ -661,8 +733,8 @@ impl App {
     /// Показывает напоминание о событии календаря, если оно наступило, а экран включён и сессия
     /// не заблокирована. Звук играет и когда остров спрятан из-за игры. `true` — нужен кадр.
     pub(crate) unsafe fn show_event_notice(&mut self) -> bool {
-        let Some(n) = self.tabs.take_event_notice(!self.locked && !self.screen_off) else { return false };
-        if !self.cfg.live_toasts || self.expanded || self.hidden || self.gfx.is_none() {
+        let Some((n, popup)) = self.tabs.take_event_notice(!self.locked && !self.screen_off) else { return false };
+        if !popup || !self.cfg.live_toasts || !self.cfg.popup_notifications || self.expanded || self.hidden || self.gfx.is_none() {
             return false;
         }
         self.live.show_event(n.title, n.tag);
@@ -709,7 +781,7 @@ impl App {
             Ok((g, tabs)) => {
                 self.gfx = Some(g);
                 self.tab_widths = tabs;
-                self.rgn = (-1, -1, -1);
+                self.rgn = (-1, -1, -1, -1);
                 let _ = self.refresh_glass();
                 let _ = self.check_sys_colors();
                 log::info("графика восстановлена");

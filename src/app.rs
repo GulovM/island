@@ -40,8 +40,8 @@ pub struct App {
     /// Последняя применённая форма подложки размытия (x, y, ширина, высота, отпечаток контура;
     /// `(0, 0, 0, 0, −1)` — скрыта) — чтобы не дёргать `SetWindowPos`/`SetWindowRgn` зря.
     pub(crate) blur_key: std::cell::Cell<(i32, i32, i32, i32, i32)>,
-    /// Последняя форма клипа подложки Composition (округлённые x0, aw, ah, ear, r).
-    pub(crate) glass_shape: std::cell::Cell<(i32, i32, i32, i32, i32)>,
+    /// Последняя форма клипа подложки Composition (округлённые x0, y0, aw, ah, ear, r_top, r_bot).
+    pub(crate) glass_shape: std::cell::Cell<(i32, i32, i32, i32, i32, i32, i32)>,
     /// Вспомогательное окно под островом: на нём размытие (у основного окна без битмапа оно не обрезается регионом).
     pub(crate) glass_wnd: HWND,
     /// Размытие доступно: новый путь (Composition HostBackdropBrush) или старый (accent blur-behind).
@@ -76,14 +76,18 @@ pub struct App {
     pub(crate) leave_hold: Option<POINT>,
     /// Свернулись и успокоились — пора сбросить рабочий набор.
     pub(crate) trim_pending: bool,
-    /// Последний применённый регион окна: (left, right, bottom) в пикселях окна.
-    pub(crate) rgn: (i32, i32, i32),
+    /// Последний применённый регион окна: (left, top, right, bottom) в пикселях окна.
+    pub(crate) rgn: (i32, i32, i32, i32),
     /// Области последних кадров анимации: регион окна не сжимается быстрее, чем обновляется картинка.
-    pub(crate) rgn_hist: Vec<(i32, i32, i32)>,
+    pub(crate) rgn_hist: Vec<(i32, i32, i32, i32)>,
     /// Позиция выбранной вкладки в `order`.
     pub(crate) tab: usize,
     /// Вместо вкладки показана страница настроек (шестерёнка).
     pub(crate) settings_open: bool,
+    /// Вместо вкладки показана вкладка уведомлений (колокольчик).
+    pub(crate) notifications_open: bool,
+    /// Последнее известное состояние Windows «Не беспокоить» для автопереключения всплывающих уведомлений.
+    pub(crate) dnd_known: Option<bool>,
     /// Свечение острова, пока тянут ползунок радиуса углов.
     pub(crate) glow: Spring,
     /// Время, раскладка и Wi-Fi на свёрнутом острове, когда музыка не играет.
@@ -95,6 +99,8 @@ pub struct App {
     pub(crate) body: anim::Body,
     /// Единый прогресс раскрытия 0..1: от него зависят размер тела, скругление и гашение свёрнутой формы.
     pub(crate) open: Spring,
+    /// Плавный переход свёрнутой чёлки в плавающую капсулу-островок (0 — чёлка у края, 1 — капсула).
+    pub(crate) capsule: Spring,
 
     /// Надпись перетаскивания на острове (`None` — на остров ничего не тащат).
     pub(crate) drop_msg: Option<crate::dragdrop::DropMsg>,
@@ -223,7 +229,7 @@ impl App {
                 win_h: ch,
                 placed: (i32::MIN, 0, 0, 0),
                 blur_key: std::cell::Cell::new((i32::MIN, 0, 0, 0, 0)),
-                glass_shape: std::cell::Cell::new((i32::MIN, 0, 0, 0, 0)),
+                glass_shape: std::cell::Cell::new((i32::MIN, 0, 0, 0, 0, 0, 0)),
                 glass_wnd,
                 blur_ok,
                 backdrop,
@@ -244,10 +250,12 @@ impl App {
                 leave_armed: false,
                 leave_hold: None,
                 trim_pending: true,
-                rgn: (-1, -1, -1),
+                rgn: (-1, -1, -1, -1),
                 rgn_hist: Vec::new(),
                 tab: initial_tab,
                 settings_open: false,
+                notifications_open: false,
+                dnd_known: None,
                 glow: Spring::unit(0.0, 220.0, 26.0),
                 face: face::Face::new(cfg.idle_face, cfg.collapsed_left, cfg.collapsed_right),
                 face_tick_on: false,
@@ -256,6 +264,7 @@ impl App {
                 // Затухание чуть выше критического порога 0,7: почти без отскока, чтобы при сворачивании
                 // тело не уходило меньше свёрнутого размера.
                 open: Spring::unit(0.0, 420.0, 34.0),
+                capsule: Spring::unit(0.0, 340.0, 27.0),
                 drop_msg: None,
                 drag_a: Spring::unit(0.0, 260.0, 30.0),
                 ui: Ui::default(),
@@ -369,7 +378,7 @@ impl App {
         self.blur_ok = new_ok;
         self.apply_theme();
         self.blur_key.set((i32::MIN, 0, 0, 0, 0));
-        self.glass_shape.set((i32::MIN, 0, 0, 0, 0));
+        self.glass_shape.set((i32::MIN, 0, 0, 0, 0, 0, 0));
         if !old_wnd.0.is_null() {
             unsafe {
                 let _ = DestroyWindow(old_wnd);
@@ -413,10 +422,12 @@ impl App {
         self.order.get(self.tab).or_else(|| self.order.last()).copied().unwrap_or(0)
     }
 
-    /// Что показано сейчас: вкладка или страница настроек (`tabs::SETTINGS`).
+    /// Что показано сейчас: вкладка, страница настроек (`tabs::SETTINGS`) или уведомления (`tabs::NOTIFICATIONS`).
     pub(crate) fn cur_id(&self) -> usize {
         if self.settings_open {
             tabs::SETTINGS
+        } else if self.notifications_open {
+            tabs::NOTIFICATIONS
         } else {
             self.normal_id()
         }
@@ -428,11 +439,35 @@ impl App {
         (self.win_w as f32 / self.scale / 2.0 + half - 16.0, TAB_TOP + TAB_H / 2.0)
     }
 
+    /// Центр иконки колокольчика: левее шестерёнки и правее карандаша.
+    pub(crate) fn bell_center(&self) -> (f32, f32) {
+        let (gx, gy) = self.gear_center();
+        (gx - 24.0, gy)
+    }
+
     /// Открывает страницу настроек или возвращает на вкладку.
     pub(crate) fn toggle_settings(&mut self) {
         self.tab_prev = Some(self.cur_id());
         self.settings_open = !self.settings_open;
+        if self.settings_open {
+            self.notifications_open = false;
+        }
         self.tab_dir = if self.settings_open { 1.0 } else { -1.0 };
+        self.tab_t.value = 0.0;
+        self.tab_t.target = 1.0;
+        self.ui.blur();
+        self.hold_leave();
+        self.retarget();
+    }
+
+    /// Открывает вкладку уведомлений или возвращает на предыдущую вкладку.
+    pub(crate) fn toggle_notifications(&mut self) {
+        self.tab_prev = Some(self.cur_id());
+        self.notifications_open = !self.notifications_open;
+        if self.notifications_open {
+            self.settings_open = false;
+        }
+        self.tab_dir = if self.notifications_open { 1.0 } else { -1.0 };
         self.tab_t.value = 0.0;
         self.tab_t.target = 1.0;
         self.ui.blur();
@@ -479,6 +514,7 @@ impl App {
         self.cfg.todo_clean_done = new.todo_clean_done;
         self.cfg.free_layout = new.free_layout;
         self.cfg.hide_on_screenshot = new.hide_on_screenshot;
+        self.cfg.popup_notifications = new.popup_notifications;
         self.tabs.set_compact(!self.cfg.free_layout);
         self.cfg.auto_update = new.auto_update;
         if self.cfg.language != new.language {
@@ -547,7 +583,7 @@ impl App {
         start_env_timer(self.hwnd, self.cfg.env_poll_ms);
         self.retarget();
         self.body.snap();
-        self.rgn = (-1, -1, -1);
+        self.rgn = (-1, -1, -1, -1);
         self.apply_region();
         self.rebuild_hot();
     }
@@ -578,6 +614,11 @@ impl App {
         self.retarget_pill();
         let form = self.live_form();
         self.live.set_form(form);
+        self.capsule.target = if !self.expanded && !self.hidden && self.live.capsule_active() {
+            1.0
+        } else {
+            0.0
+        };
         // Часы, раскладка, Wi-Fi и эквалайзер — только когда свёрнутому острову больше нечего показывать.
         let idle = form == live::Form::Idle && !self.expanded && !self.stripped() && !self.hidden;
         let wave_on = idle && self.cfg.live_media && self.live.playing();
@@ -594,7 +635,7 @@ impl App {
         self.pill_sig = sig;
         self.pill_x.target = x;
         self.pill_w.target = w;
-        self.pill_a.target = if self.settings_open { 0.0 } else { 1.0 };
+        self.pill_a.target = if self.settings_open || self.notifications_open { 0.0 } else { 1.0 };
         if jump {
             self.pill_x.snap();
             self.pill_w.snap();
@@ -603,7 +644,7 @@ impl App {
     }
 
     pub(crate) fn animating(&self) -> bool {
-        !(self.body.settled() && self.open.settled())
+        !(self.body.settled() && self.open.settled() && self.capsule.settled())
             || !(self.pill_x.settled() && self.pill_w.settled() && self.pill_a.settled())
             || !self.tab_t.settled()
             || !self.glow.settled()
@@ -617,6 +658,10 @@ impl App {
     pub(crate) fn step(&mut self, dt: f32) {
         self.body.step(dt);
         self.open.step(dt);
+        self.capsule.step(dt);
+        if self.capsule.settled() {
+            self.capsule.snap();
+        }
         self.ui.step(dt);
         self.tabs.step(dt);
         self.live.step(dt);
@@ -709,7 +754,7 @@ mod tests {
                 win_h: 50,
                 placed: (0, 0, 0, 0),
                 blur_key: std::cell::Cell::new((0, 0, 0, 0, 0)),
-                glass_shape: std::cell::Cell::new((0, 0, 0, 0, 0)),
+                glass_shape: std::cell::Cell::new((0, 0, 0, 0, 0, 0, 0)),
                 glass_wnd: HWND(std::ptr::null_mut()),
                 blur_ok: false,
                 backdrop: None,
@@ -727,16 +772,19 @@ mod tests {
                 leave_armed: false,
                 leave_hold: None,
                 trim_pending: false,
-                rgn: (0, 0, 0),
+                rgn: (0, 0, 0, 0),
                 rgn_hist: Vec::new(),
                 tab: 0,
                 settings_open: false,
+                notifications_open: false,
+                dnd_known: None,
                 glow: Spring::unit(0.0, 220.0, 26.0),
                 face: face::Face::new(cfg.idle_face, cfg.collapsed_left, cfg.collapsed_right),
                 face_tick_on: false,
                 save_pending: false,
                 body: anim::Body::new((180.0, 24.0)),
                 open: Spring::unit(0.0, 420.0, 34.0),
+                capsule: Spring::unit(0.0, 340.0, 27.0),
                 drop_msg: None,
                 drag_a: Spring::unit(0.0, 260.0, 30.0),
                 ui: Ui::default(),
@@ -806,6 +854,7 @@ mod tests {
             ssid: None,
             audio: None,
             rev: 1,
+            ..Default::default()
         };
         app.live.sync_media(&snap);
         app.retarget();

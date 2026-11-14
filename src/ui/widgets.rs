@@ -425,6 +425,10 @@ impl Ui {
         self.widget(id).hover.value
     }
 
+    pub fn press_of(&mut self, id: u32) -> f32 {
+        self.widget(id).press.value
+    }
+
     /// Плавное состояние «включено» виджета `id` (для поля ввода — фокус), 0..1.
     pub fn on_of(&mut self, id: u32) -> f32 {
         self.widget(id).on.value

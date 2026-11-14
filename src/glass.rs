@@ -169,16 +169,32 @@ pub fn body_layers(
     }
 }
 
-/// Контур тела острова (как в `body_path`: плоский верх на краю экрана, вогнутые «ушки» радиуса `ear`,
-/// скруглённые снизу углы радиуса `r`), сдвинутый внутрь на `inset` px; точки по часовой стрелке в
-/// координатах окна острова. Подложка с размытием берёт именно этот контур, поэтому форма и углы у неё
-/// те же, что у тела (прежняя подложка была прямоугольником и не повторяла «ушки»).
-/// Верх не сдвигается: он упирается в край экрана. Дуги разбиты на отрезки по радиусу.
+#[cfg(test)]
 pub fn body_outline(x0: f32, aw: f32, ah: f32, ear: f32, r: f32, inset: f32) -> Vec<(f32, f32)> {
+    body_outline_capsule(x0, 0.0, aw, ah, ear, 0.0, r, inset)
+}
+
+/// Контур тела острова с поддержкой отрыва сверху (`y0`) и скругления верхних углов (`r_top`)
+/// для плавающей капсулы-уведомления. Точки по контуру, сдвинутому внутрь на `inset` px.
+#[allow(clippy::too_many_arguments)]
+pub fn body_outline_capsule(
+    x0: f32,
+    y0: f32,
+    aw: f32,
+    ah: f32,
+    ear: f32,
+    r_top: f32,
+    r_bot: f32,
+    inset: f32,
+) -> Vec<(f32, f32)> {
     let i = inset.max(0.0);
-    let (l, rt, bt) = (x0 + i, x0 + aw - i, ah - i);
-    let rr = (r - i).max(0.0).min((rt - l) / 2.0).min(bt.max(0.0));
-    let ear = ear.max(0.0);
+    let top_i = if y0 > 0.0 { i } else { 0.0 };
+    let (l, tp, rt, bt) = (x0 + i, y0 + top_i, x0 + aw - i, y0 + ah - i);
+    let max_rx = ((rt - l) / 2.0).max(0.0);
+    let max_h = (bt - tp).max(0.0);
+    let rtop = if ear > 0.0 { 0.0 } else { (r_top - i).max(0.0).min(max_rx).min(max_h / 2.0) };
+    let rbot = (r_bot - i).max(0.0).min(max_rx).min((max_h - rtop).max(0.0));
+    let ear = if y0 > 0.0 { 0.0 } else { ear.max(0.0) };
     let ring = ear + i;
     // Угол, на котором дуга «ушка» (радиус `ring` вокруг (x0 − ear, ear)) выходит на верхний край.
     let a0 = if ring > 0.0 { -(ear / ring).clamp(0.0, 1.0).asin() } else { 0.0 };
@@ -194,12 +210,23 @@ pub fn body_outline(x0: f32, aw: f32, ah: f32, ear: f32, r: f32, inset: f32) -> 
 
     if ear > 0.0 {
         arc(&mut pts, x0 - ear, ear, ring, a0, 0.0);
+    } else if rtop > 0.0 {
+        arc(&mut pts, l + rtop, tp + rtop, rtop, PI, PI + FRAC_PI_2);
+        arc(&mut pts, rt - rtop, tp + rtop, rtop, -FRAC_PI_2, 0.0);
+        if rbot > 0.0 {
+            arc(&mut pts, rt - rbot, bt - rbot, rbot, 0.0, FRAC_PI_2);
+            arc(&mut pts, l + rbot, bt - rbot, rbot, FRAC_PI_2, PI);
+        } else {
+            pts.push((rt, bt));
+            pts.push((l, bt));
+        }
+        return pts;
     } else {
-        pts.push((l, 0.0));
+        pts.push((l, tp));
     }
-    if rr > 0.0 {
-        arc(&mut pts, l + rr, bt - rr, rr, PI, FRAC_PI_2);
-        arc(&mut pts, rt - rr, bt - rr, rr, FRAC_PI_2, 0.0);
+    if rbot > 0.0 {
+        arc(&mut pts, l + rbot, bt - rbot, rbot, PI, FRAC_PI_2);
+        arc(&mut pts, rt - rbot, bt - rbot, rbot, FRAC_PI_2, 0.0);
     } else {
         pts.push((l, bt));
         pts.push((rt, bt));
@@ -207,7 +234,7 @@ pub fn body_outline(x0: f32, aw: f32, ah: f32, ear: f32, r: f32, inset: f32) -> 
     if ear > 0.0 {
         arc(&mut pts, x0 + aw + ear, ear, ring, PI, PI - a0);
     } else {
-        pts.push((rt, 0.0));
+        pts.push((rt, tp));
     }
     pts
 }
@@ -513,5 +540,18 @@ mod tests {
         assert_eq!(mid_l, 0.08);
         assert_eq!(lo_col_l, [0.0, 0.0, 0.0]);
         assert_eq!(lo_a_l, 0.10);
+    }
+
+    #[test]
+    fn test_body_outline_capsule_bounds() {
+        let cap = body_outline_capsule(100.0, 8.0, 316.0, 50.0, 0.0, 25.0, 25.0, 1.0);
+        assert!(cap.len() > 8);
+        for &(px, py) in &cap {
+            assert!((100.9..=415.1).contains(&px), "x out of bounds: {px}");
+            assert!((8.9..=57.1).contains(&py), "y out of bounds: {py}");
+        }
+        let notch = body_outline_capsule(100.0, 0.0, 200.0, 36.0, 10.0, 0.0, 16.0, 0.0);
+        assert!(notch.iter().any(|&(_, py)| py == 0.0));
+        assert!(notch.iter().all(|&(px, py)| (89.9..=310.1).contains(&px) && (-0.01..=36.01).contains(&py)));
     }
 }

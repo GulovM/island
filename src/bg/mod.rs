@@ -51,6 +51,14 @@ pub struct Snapshot {
     pub ssid: Option<String>,
     /// Короткое имя устройства вывода звука («Динамики»).
     pub audio: Option<String>,
+    /// Системные уведомления Windows (новые сверху).
+    pub notifications: Vec<notif::SysNotif>,
+    /// Счётчик обновлений списка уведомлений и доступа к ним.
+    pub notif_rev: u64,
+    /// Статус доступа к центру уведомлений Windows.
+    pub notif_access: notif::Access,
+    /// Включён ли в Windows режим «Не беспокоить».
+    pub dnd_active: bool,
     /// Сколько раз снимок обновлялся (чтобы вкладка понимала, что есть новое).
     pub rev: u64,
 }
@@ -60,6 +68,7 @@ mod bluetooth;
 mod devices;
 mod media;
 mod net;
+pub mod notif;
 mod volume;
 mod wifi;
 mod winrt;
@@ -67,6 +76,7 @@ mod winrt;
 pub use devices::{list, status, DevItem, ListKind};
 pub use media::{Media, Timeline, ART};
 pub use net::{net_status, NetStatus};
+pub use notif::{Access as NotifAccess, SysNotif, ICON_PX as NOTIF_ICON_PX};
 
 use audio_policy::audio_set_default;
 use bluetooth::{bluetooth_devices, bt_any_connected, bt_spawn, ensure_bt_watch};
@@ -103,6 +113,16 @@ pub enum Cmd {
     Net,
     Wifi(bool),
     Bluetooth(bool),
+    /// Обновить список системных уведомлений (по событию WinRT).
+    NotifRefresh,
+    /// Запросить разрешение на чтение уведомлений Windows.
+    NotifRequestAccess,
+    /// Удалить уведомление по его id в Windows.
+    NotifRemove(u32),
+    /// Очистить все уведомления в Windows.
+    NotifClearAll,
+    /// Обновить статус режима «Не беспокоить» (по событию WinRT).
+    DndRefresh,
     /// Режим полёта: выключить все радио или вернуть те, что были включены.
     Airplane(bool),
     Volume(f32),
@@ -157,17 +177,41 @@ pub fn start(hwnd: HWND) {
             watch_volume();
             net::watch_network();
             watch_wlan();
+            notif::init();
             refresh(true, &mut radio_access, &mut pending);
+            refresh_notifs();
+            refresh_dnd();
             net::refresh_net();
             crate::sys::trim_working_set();
             notify();
         }
         let mut last_radios = std::time::Instant::now();
-        while let Ok(first) = rx.recv() {
-            let mut batch = vec![first];
-            while let Ok(c) = rx.try_recv() {
-                batch.push(c);
-            }
+        let mut last_notif_poll = std::time::Instant::now();
+        loop {
+            let batch = match rx.recv_timeout(std::time::Duration::from_millis(900)) {
+                Ok(first) => {
+                    let mut b = vec![first];
+                    while let Ok(c) = rx.try_recv() {
+                        b.push(c);
+                    }
+                    b
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // WinRT NotificationChanged в unpackaged-приложениях может не срабатывать при свёрнутом окне,
+                    // поэтому раз в ~0.9 с тихо проверяем уведомления и DND; UI просыпается только при изменениях.
+                    let mut changed = false;
+                    unsafe {
+                        changed |= refresh_notifs();
+                        changed |= refresh_dnd();
+                    }
+                    if changed {
+                        notify();
+                    }
+                    last_notif_poll = std::time::Instant::now();
+                    continue;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            };
             // Слайдер громкости шлёт десятки значений — исполняем только последнее.
             let full = batch.iter().any(|c| matches!(c, Cmd::Refresh | Cmd::Wifi(_) | Cmd::Bluetooth(_) | Cmd::Airplane(_)));
             let has_radios = batch.iter().any(|c| matches!(c, Cmd::Radios));
@@ -188,11 +232,25 @@ pub fn start(hwnd: HWND) {
                         | Cmd::PrevSession
                         | Cmd::NextSession
                         | Cmd::ResetSession
+                        | Cmd::NotifRefresh
+                        | Cmd::NotifRequestAccess
+                        | Cmd::NotifRemove(_)
+                        | Cmd::NotifClearAll
+                        | Cmd::DndRefresh
                 )
             });
             let wants_media = batch.iter().any(|c| matches!(c, Cmd::Media | Cmd::PrevSession | Cmd::NextSession | Cmd::ResetSession));
             let wants_net = batch.iter().any(|c| matches!(c, Cmd::Net | Cmd::Radios));
             let wants_bt_conn = batch.iter().any(|c| matches!(c, Cmd::BtConn));
+            let explicit_notif = full
+                || batch.iter().any(|c| {
+                    matches!(
+                        c,
+                        Cmd::NotifRefresh | Cmd::NotifRequestAccess | Cmd::NotifRemove(_) | Cmd::NotifClearAll
+                    )
+                });
+            let explicit_dnd = full || batch.iter().any(|c| matches!(c, Cmd::DndRefresh));
+            let periodic_notif = last_notif_poll.elapsed() >= std::time::Duration::from_millis(900);
             let last_volume = batch.iter().rposition(|c| matches!(c, Cmd::Volume(_)));
             let last_bright = batch.iter().rposition(|c| matches!(c, Cmd::Brightness(_)));
             let last_seek = batch.iter().rposition(|c| matches!(c, Cmd::Seek(_)));
@@ -220,6 +278,15 @@ pub fn start(hwnd: HWND) {
             if wants_net || full {
                 unsafe { net::refresh_net() };
             }
+            let mut notif_changed = false;
+            if explicit_notif || periodic_notif {
+                notif_changed |= unsafe { refresh_notifs() };
+                last_notif_poll = std::time::Instant::now();
+            }
+            let mut dnd_changed = false;
+            if explicit_dnd || periodic_notif {
+                dnd_changed |= unsafe { refresh_dnd() };
+            }
             let mut bt_conn_changed = false;
             if wants_bt_conn && !needs_refresh && !wants_radios {
                 if let Ok(mut s) = SNAPSHOT.lock() {
@@ -237,7 +304,16 @@ pub fn start(hwnd: HWND) {
                 // Загрузка WinRT раздувает рабочий набор; в простое он не нужен.
                 crate::sys::trim_working_set();
             }
-            if needs_refresh || wants_radios || wants_media || wants_net || bt_conn_changed || full {
+            if needs_refresh
+                || wants_radios
+                || wants_media
+                || wants_net
+                || (explicit_notif && notif_changed)
+                || (explicit_dnd && dnd_changed)
+                || (periodic_notif && (notif_changed || dnd_changed))
+                || bt_conn_changed
+                || full
+            {
                 notify();
             }
         }
@@ -280,7 +356,12 @@ fn schedule_radio_recheck() {
 
 unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
     match cmd {
-        Cmd::Tick | Cmd::Media | Cmd::Net | Cmd::Radios | Cmd::BtConn => {}
+        Cmd::Tick | Cmd::Media | Cmd::Net | Cmd::Radios | Cmd::BtConn | Cmd::NotifRefresh | Cmd::DndRefresh => {}
+        Cmd::NotifRequestAccess => {
+            let _ = notif::request_access();
+        }
+        Cmd::NotifRemove(id) => notif::remove_notification(id),
+        Cmd::NotifClearAll => notif::clear_notifications(),
         Cmd::Refresh => watch_volume(),
         Cmd::List(ListKind::Wifi) => store_list(ListKind::Wifi, wifi_networks(true)),
         Cmd::List(ListKind::Bluetooth) => store_list(ListKind::Bluetooth, bluetooth_devices()),
@@ -544,9 +625,46 @@ unsafe fn refresh_radios(access: &mut bool, pending: &mut PendingRadios) {
     }
 }
 
+unsafe fn refresh_notifs() -> bool {
+    let (access, list) = notif::poll_notifications();
+    if let Ok(mut s) = SNAPSHOT.lock() {
+        let mut snap = s.clone().unwrap_or_default();
+        if snap.notif_access != access || snap.notifications != list {
+            snap.notif_access = access;
+            snap.notifications = list;
+            snap.notif_rev += 1;
+            snap.rev += 1;
+            *s = Some(snap);
+            return true;
+        }
+    }
+    false
+}
+
+unsafe fn refresh_dnd() -> bool {
+    if let Some(dnd) = notif::poll_dnd() {
+        if let Ok(mut s) = SNAPSHOT.lock() {
+            let mut snap = s.clone().unwrap_or_default();
+            if snap.dnd_active != dnd {
+                snap.dnd_active = dnd;
+                snap.rev += 1;
+                *s = Some(snap);
+                return true;
+            }
+        }
+    }
+    false
+}
+
 unsafe fn refresh(full: bool, access: &mut bool, pending: &mut PendingRadios) {
     let prev = snapshot();
-    let mut snap = Snapshot::default();
+    let mut snap = Snapshot {
+        notifications: prev.notifications.clone(),
+        notif_rev: prev.notif_rev,
+        notif_access: prev.notif_access,
+        dnd_active: prev.dnd_active,
+        ..Snapshot::default()
+    };
 
     update_radio_fields(&mut snap, &prev, full, access, pending);
     snap.brightness = if full || prev.brightness.is_none() && crate::bright::available() {

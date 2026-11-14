@@ -15,7 +15,7 @@ impl App {
 
     /// Раскрывает остров на вкладке в позиции `i` (индекс `tab` в `TABS`) и ставит фокус в её поле поиска.
     pub(crate) unsafe fn open_from_hotkey(&mut self, i: usize, tab: usize) {
-        if i != self.tab || self.settings_open {
+        if i != self.tab || self.settings_open || self.notifications_open {
             self.switch_tab(i);
         }
         // Остров переезжает на монитор с курсором (как при наведении на горячую зону).
@@ -94,7 +94,7 @@ impl App {
             }
             Ev::Char(c) => {
                 let field_focus = self.ui.focus.is_some_and(|id| self.ui.is_field(id));
-                if field_focus && !self.live.alert() && !self.tabs.recording_hotkey() && c >= 0x20 && c != 0x7f {
+                if field_focus && !self.live.steals_focus() && !self.tabs.recording_hotkey() && c >= 0x20 && c != 0x7f {
                     // Суррогатные пары приходят двумя WM_CHAR: сводим их в один символ.
                     if (0xD800..0xDC00).contains(&c) {
                         self.high_surrogate = c;
@@ -170,6 +170,45 @@ impl App {
             Ev::Bg => {
                 let tab = self.tabs.on_bg() && self.expanded;
                 let snap = bg::snapshot();
+
+                // Синхронизируем системный режим «Не беспокоить»: при включении выключаем всплывающие
+                // уведомления (запомнив исходное состояние), при выключении — возвращаем обратно.
+                let dnd = snap.dnd_active;
+                let mut dnd_dirty = false;
+                if self.dnd_known != Some(dnd) {
+                    self.dnd_known = Some(dnd);
+                    let mut cfg_changed = false;
+                    if dnd {
+                        if self.cfg.popup_notifications {
+                            state::set_dnd_restore_popups(true);
+                            state::flush();
+                            self.cfg.popup_notifications = false;
+                            cfg_changed = true;
+                        }
+                    } else if state::dnd_restore_popups() {
+                        state::set_dnd_restore_popups(false);
+                        state::flush();
+                        self.cfg.popup_notifications = true;
+                        cfg_changed = true;
+                    }
+                    if cfg_changed {
+                        config::save(&self.cfg);
+                        self.tabs.settings.set_config(&self.cfg);
+                        dnd_dirty = true;
+                    }
+                }
+
+                let popups = self.tabs.sync_notifications(
+                    &snap.notifications,
+                    snap.notif_rev,
+                    snap.notif_access,
+                    snap.dnd_active,
+                );
+                let mut popup_shown = false;
+                if let Some(p) = popups.into_iter().next() {
+                    popup_shown = self.show_notice_toast(p);
+                }
+
                 let media = self.live.sync_media(&snap);
                 if media {
                     self.retarget();
@@ -179,7 +218,7 @@ impl App {
                 }
                 let net = (self.face.sync_net() | self.face.sync_snapshot(&snap)) && self.face.visible();
                 // Проверка или скачивание обновления закончились — страница настроек перерисуется.
-                tab || media || net || (self.expanded && self.settings_open)
+                tab || media || net || popup_shown || dnd_dirty || (self.expanded && (self.settings_open || self.notifications_open))
             }
             Ev::UpdateTimer => {
                 update::hourly(self.cfg.auto_update);
@@ -221,7 +260,7 @@ impl App {
             }
             Ev::ToastTimer => {
                 // Уведомление о таймере живёт, пока звучит сигнал: закрываем его вслед за звуком.
-                if self.live.alert() && self.tabs.alarm_playing() {
+                if self.live.steals_focus() && self.tabs.alarm_playing() {
                     SetTimer(Some(self.hwnd), TOAST_TIMER, 400, None);
                     return false;
                 }
@@ -237,7 +276,25 @@ impl App {
                 let wave_on = self.cfg.live_media && self.live.playing() && !self.expanded && !self.stripped() && !self.hidden;
                 wave_on || self.live.timer().is_some()
             }
-            Ev::RightClick => self.toggle_strip_mode(),
+            Ev::RightClick(px, py) => {
+                if self.expanded && self.notifications_open && (py as f32 / self.scale) > TAB_TOP + TAB_H {
+                    let half = self.body_size().0 / self.scale / 2.0;
+                    let ox = self.win_w as f32 / self.scale / 2.0 - half;
+                    let (mx, my) = (px as f32 / self.scale - ox, py as f32 / self.scale);
+                    let (consumed, cancel_timer) = self.tabs.notif_right_click(mx, my);
+                    if cancel_timer {
+                        let _ = KillTimer(Some(self.hwnd), NOTIF_MENU_TIMER);
+                    }
+                    if consumed {
+                        return true;
+                    }
+                }
+                self.toggle_strip_mode()
+            }
+            Ev::NotifMenuTimer => {
+                let _ = KillTimer(Some(self.hwnd), NOTIF_MENU_TIMER);
+                self.tabs.notif_menu_timeout()
+            }
             Ev::Clip => self.on_clipboard(),
             Ev::PasteNow => {
                 let _ = KillTimer(Some(self.hwnd), PASTE_TIMER);
@@ -314,6 +371,9 @@ impl App {
         let want = if self.expanded { Some(self.cur_id()) } else { None };
         if want != self.shown_tab {
             if let Some(old) = self.shown_tab {
+                if old == tabs::NOTIFICATIONS {
+                    let _ = KillTimer(Some(self.hwnd), NOTIF_MENU_TIMER);
+                }
                 self.tabs.hide(old);
             }
             self.shown_tab = want;
@@ -470,6 +530,13 @@ impl App {
                     }
                 }
                 tabs::Action::Resize => self.retarget(),
+                tabs::Action::NotifMenuLeave(arm) => {
+                    if arm {
+                        SetTimer(Some(self.hwnd), NOTIF_MENU_TIMER, 1500, None);
+                    } else {
+                        let _ = KillTimer(Some(self.hwnd), NOTIF_MENU_TIMER);
+                    }
+                }
             }
         }
         // Приёму перетаскивания нужно знать об этом сразу, не дожидаясь события.

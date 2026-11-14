@@ -69,7 +69,7 @@ pub(crate) struct Gfx {
     /// Радиальные кисти (ореол в углу карточек): тот же принцип кэша, что у линейных.
     radials: RefCell<Recent<Vec<u32>, ID2D1RadialGradientBrush>>,
     /// Контуры тела острова (ключ — точные параметры формы): в простое кадр их не перестраивает.
-    pub(crate) paths: RefCell<Recent<[u32; 6], ID2D1PathGeometry1>>,
+    pub(crate) paths: RefCell<Recent<[u32; 8], ID2D1PathGeometry1>>,
     /// Маска тени капли под выбранной вкладкой (вычитание геометрий — дорогая операция на CPU).
     pub(crate) pill_masks: RefCell<Recent<[u32; 6], ID2D1Geometry>>,
     /// Векторные значки (`ui::symbols`) по коду глифа: строятся один раз, `None` — значка нет.

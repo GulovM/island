@@ -46,6 +46,7 @@ const N_ACCENT_PILL: u32 = 26;
 const N_TODO_CLEAN: u32 = 110;
 const N_FREE_LAYOUT: u32 = 111;
 const N_HIDE_SHOT: u32 = 112;
+const N_POPUP_NOTIFS: u32 = 113;
 const N_COLLAPSED: u32 = 115;
 /// Занимает два номера подряд (27–28) — по числу `PALETTE_STYLES`.
 const N_PALETTE_STYLE: u32 = 27;
@@ -1194,13 +1195,33 @@ impl Settings {
         }
     }
 
-    // ---------- «Система», правая карточка: обновления ----------
+    // ---------- «Система», правая карточка: уведомления и обновления ----------
 
     unsafe fn updates(&mut self, ui: &mut Ui, cv: &Canvas, rc: Rect) {
         let f = &cv.g.fonts;
         let x = rc.x + 10.0;
         let iw = rc.w - 20.0;
         let mut y = rc.y + 9.0;
+
+        cv.text("УВЕДОМЛЕНИЯ", Rect::new(x, y, iw, 11.0), &f.caps, dim());
+        y += 17.0;
+        cv.text("Всплывающие уведомления", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut popups = self.cfg.popup_notifications;
+        if ui.switch(cv, id(SETTINGS, N_POPUP_NOTIFS), Rect::new(rc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut popups, true) {
+            self.cfg.popup_notifications = popups;
+            // Ручное переключение сбрасывает отложенный возврат после «Не беспокоить».
+            crate::state::set_dnd_restore_popups(false);
+            self.changed = true;
+        }
+        y += 18.0;
+        let hint = if crate::bg::snapshot().dnd_active {
+            "В Windows включён режим «Не беспокоить»"
+        } else {
+            "Выключаются при режиме «Не беспокоить»"
+        };
+        cv.text(hint, Rect::new(x, y, iw, 13.0), &f.small, dim());
+        y += 22.0;
+
         cv.text("ОБНОВЛЕНИЯ", Rect::new(x, y, iw, 11.0), &f.caps, dim());
         y += 17.0;
 
@@ -1392,6 +1413,7 @@ mod tests {
             (N_TODO_CLEAN, 1),
             (N_FREE_LAYOUT, 1),
             (N_HIDE_SHOT, 1),
+            (N_POPUP_NOTIFS, 1),
             (N_COLLAPSED, 2),
             (N_PALETTE_STYLE, PALETTE_STYLES.len() as u32),
             (N_SECTION, SECTIONS.len() as u32),

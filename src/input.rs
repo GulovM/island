@@ -5,11 +5,12 @@ impl App {
     /// новое проявляется. Закрывает настройки и снимает фокус.
     pub(crate) fn switch_tab(&mut self, i: usize) {
         self.tab_prev = Some(self.cur_id());
-        self.tab_dir = if !self.settings_open && i > self.tab { 1.0 } else { -1.0 };
+        self.tab_dir = if !self.settings_open && !self.notifications_open && i > self.tab { 1.0 } else { -1.0 };
         self.tab_t.value = 0.0;
         self.tab_t.target = 1.0;
         self.tab = i;
         self.settings_open = false;
+        self.notifications_open = false;
         self.hold_leave();
         self.ui.blur();
         self.ui.reset_marquees();
@@ -42,13 +43,13 @@ impl App {
 
     /// Карандаш показан, когда на экране вкладка, виджеты которой можно настраивать.
     pub(crate) fn pencil_visible(&self) -> bool {
-        self.expanded && !self.settings_open && self.tabs.editable(self.normal_id())
+        self.expanded && !self.settings_open && !self.notifications_open && self.tabs.editable(self.normal_id())
     }
 
-    /// Центр карандаша — левее шестерёнки настроек в ряду вкладок.
+    /// Центр карандаша — левее колокольчика и шестерёнки в ряду вкладок.
     pub(crate) fn pencil_center(&self) -> (f32, f32) {
         let (gx, gy) = self.gear_center();
-        (gx - 24.0, gy)
+        (gx - 48.0, gy)
     }
 
     /// Включает или выключает режим правки текущей вкладки; остров подстраивает высоту под полосу кнопок.
@@ -73,7 +74,13 @@ impl App {
             self.toggle_settings();
             return true;
         }
-        // Карандаш справа (левее шестерёнки): режим правки виджетов (только на вкладках с виджетами).
+        // Колокольчик уведомлений — справа от карандаша и слева от шестерёнки.
+        let (bx, by) = self.bell_center();
+        if (x - bx).hypot(y - by) <= GEAR_R + 3.0 {
+            self.toggle_notifications();
+            return true;
+        }
+        // Карандаш слева от колокольчика: режим правки виджетов (только на вкладках с виджетами).
         if self.pencil_visible() {
             let (ex, ey) = self.pencil_center();
             if (x - ex).hypot(y - ey) <= GEAR_R + 3.0 {
@@ -86,7 +93,7 @@ impl App {
         }
         for (i, (tx, tw)) in self.tab_rects().iter().enumerate() {
             if x >= *tx && x <= tx + tw {
-                if i != self.tab || self.settings_open {
+                if i != self.tab || self.settings_open || self.notifications_open {
                     self.switch_tab(i);
                     self.retarget();
                 }
@@ -105,7 +112,7 @@ impl App {
             return false;
         }
         // Фокус у острова только ради уведомления о таймере: Esc закрывает его, остальное не нужно.
-        if self.live.alert() && self.ui.focus == Some(NOTICE_FOCUS) {
+        if self.live.steals_focus() && self.ui.focus == Some(NOTICE_FOCUS) {
             if vk != VK_ESCAPE.0 as u32 {
                 return false;
             }
@@ -236,15 +243,21 @@ mod tests {
         let cx = win_w / 2.0;
         let gx = cx + half - 16.0;
         let gy = TAB_TOP + TAB_H / 2.0;
-        let ex = gx - 24.0;
+        let bx = gx - 24.0;
+        let by = gy;
+        let ex = gx - 48.0;
         let ey = gy;
 
         // Хитбоксы кнопок радиуса GEAR_R + 3.0:
         let hit_r = GEAR_R + 3.0;
         let gear_left = gx - hit_r;
+        let bell_right = bx + hit_r;
+        let bell_left = bx - hit_r;
         let pencil_right = ex + hit_r;
         let pencil_left = ex - hit_r;
-        assert!(pencil_right <= gear_left, "хитбоксы карандаша и шестерёнки не должны перекрываться");
+        assert!(bell_right <= gear_left, "хитбоксы колокольчика и шестерёнки не должны перекрываться");
+        assert!(pencil_right <= bell_left, "хитбоксы карандаша и колокольчика не должны перекрываться");
+        assert_eq!(by, gy, "колокольчик и шестерёнка на одной высоте");
         assert_eq!(ey, gy, "карандаш и шестерёнка на одной высоте");
 
         // Ряд вкладок при минимальной ширине острова:

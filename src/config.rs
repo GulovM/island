@@ -150,6 +150,7 @@ free_layout = 0
 # мини-плеер при воспроизведении музыки и короткие уведомления (таймер, громкость, зарядка)
 live_media = 1
 live_toasts = 1
+popup_notifications = 1
 
 # API-ключи для вкладок (пока не используются)
 [keys]
@@ -321,6 +322,8 @@ pub struct Config {
     pub live_media: bool,
     /// Короткие уведомления в свёрнутой форме (таймер, громкость, зарядка).
     pub live_toasts: bool,
+    /// Всплывающие уведомления приложений и календаря в чёлке.
+    pub popup_notifications: bool,
 }
 
 impl Default for Config {
@@ -363,6 +366,7 @@ impl Default for Config {
             quick_hotkey: String::new(),
             live_media: true,
             live_toasts: true,
+            popup_notifications: true,
         }
     }
 }
@@ -472,6 +476,7 @@ fn save_updates(cfg: &Config) -> Vec<(&'static str, String)> {
         ("auto_update", (cfg.auto_update as u8).to_string()),
         ("free_layout", (cfg.free_layout as u8).to_string()),
         ("hide_on_screenshot", (cfg.hide_on_screenshot as u8).to_string()),
+        ("popup_notifications", (cfg.popup_notifications as u8).to_string()),
     ];
     updates.to_vec()
 }
@@ -723,6 +728,7 @@ fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
         "auto_update",
         "free_layout",
         "hide_on_screenshot",
+        "popup_notifications",
     ];
     if tmpl.filter(|k| appearance.contains(&k.as_str())).all(|k| present(&k)) {
         return;
@@ -815,6 +821,7 @@ pub fn parse(text: &str) -> Config {
             ("", "collapsed_height", Value::Num(v)) => cfg.collapsed.1 = v.clamp(8.0, 60.0) as f32,
             ("", "live_media", Value::Num(v)) => cfg.live_media = v != 0.0,
             ("", "live_toasts", Value::Num(v)) => cfg.live_toasts = v != 0.0,
+            ("", "popup_notifications", Value::Num(v)) => cfg.popup_notifications = v != 0.0,
             ("", "tabs", Value::List(l)) => cfg.tabs = l,
             ("", "custom_tabs", Value::List(l)) => {
                 for c in l.iter().filter_map(|s| CustomTab::decode(s)) {
@@ -1018,11 +1025,11 @@ gmail = \"https://mail.google.com\"
 
     #[test]
     fn live_flags() {
-        assert!(Config::default().live_media && Config::default().live_toasts);
-        let c = parse("live_media = 0\nlive_toasts = false\n");
-        assert!(!c.live_media && !c.live_toasts);
+        assert!(Config::default().live_media && Config::default().live_toasts && Config::default().popup_notifications);
+        let c = parse("live_media = 0\nlive_toasts = false\npopup_notifications = 0\n");
+        assert!(!c.live_media && !c.live_toasts && !c.popup_notifications);
         let t = parse(DEFAULT_TEMPLATE);
-        assert!(t.live_media && t.live_toasts);
+        assert!(t.live_media && t.live_toasts && t.popup_notifications);
     }
 
     #[test]

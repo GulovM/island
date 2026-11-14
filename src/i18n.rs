@@ -451,6 +451,11 @@ const TABLE: &[(&str, &str)] = &[
     ("В аккаунте iCloud не найдено календарей", "No calendars found in iCloud account"),
     ("Авторизация отменена или истекло время ожидания", "Authorization cancelled or timed out"),
     ("Ключи Google OAuth не вшиты в эту сборку", "Google OAuth keys are not embedded in this build"),
+    // Уведомления
+    ("УВЕДОМЛЕНИЯ", "NOTIFICATIONS"),
+    ("Всплывающие уведомления", "Popup notifications"),
+    ("В Windows включён режим «Не беспокоить»", "Windows Do Not Disturb is active"),
+    ("Выключаются при режиме «Не беспокоить»", "Automatically paused when Do Not Disturb is on"),
 ];
 
 #[cfg(test)]

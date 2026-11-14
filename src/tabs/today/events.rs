@@ -15,6 +15,7 @@ const SEEN_FILE: &str = "events_seen.txt";
 /// Что показать в уведомлении о событии.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
+    pub cal_id: String,
     pub title: String,
     /// Короткая подпись справа: «Сейчас», «10 мин».
     pub tag: String,
@@ -22,13 +23,14 @@ pub struct Notice {
 
 fn notice_of(due: &[Due]) -> Option<Notice> {
     let last = due.last()?;
+    let cal_id = format!("{}:{}:{:?}", last.id, last.at, last.kind);
     let title = if due.len() > 1 { format!("{} (+{})", last.title, due.len() - 1) } else { last.title.clone() };
     let tag = match last.kind {
         DueKind::Started => crate::i18n::pick("Сейчас", "Now").to_string(),
         DueKind::Soon(m) if m >= 60 && m % 60 == 0 => format!("{} {}", m / 60, crate::i18n::pick("ч", "h")),
         DueKind::Soon(m) => format!("{m} {}", crate::i18n::pick("мин", "min")),
     };
-    Some(Notice { title, tag })
+    Some(Notice { cal_id, title, tag })
 }
 
 impl Today {
@@ -105,19 +107,40 @@ impl Today {
     /// Напоминание, время которого наступило. `ready` — экран включён и компьютер разблокирован:
     /// иначе ничего не показываем и не отмечаем проверенным. Пропущенное за последние сутки
     /// показывается при следующей проверке.
-    pub fn take_due(&mut self, ready: bool) -> Option<Notice> {
+    pub fn take_due(&mut self, ready: bool, with_sound: bool) -> Option<Notice> {
         if !ready {
             return None;
         }
         let now = online::now_local_minutes();
         let from = self.seen_min.max(now - online::MISSED_WINDOW);
-        let due = online::due_reminders(&self.local, online::utc_offset_minutes(), from, now);
+        let offset = online::utc_offset_minutes();
+        let mut due = online::due_reminders(&self.local, offset, from, now);
+        // Приближающиеся (за 10 мин) и начавшиеся события из подключённых календарей.
+        let today = now.div_euclid(1440);
+        if let Some(day_list) = online::events_by_day(&self.online.cal, today, 1, offset).into_iter().next() {
+            for (idx, ev) in day_list.into_iter().enumerate() {
+                if ev.local_id.is_some() {
+                    continue;
+                }
+                let Some(m) = ev.minute else { continue };
+                let ev_min = today * 1440 + m;
+                let id = 1_000_000 + idx as u64;
+                if ev_min > from && ev_min <= now {
+                    due.push(Due { id, title: ev.title.clone(), start: ev_min, all_day: false, kind: DueKind::Started, at: ev_min });
+                } else if ev_min - 10 > from && ev_min - 10 <= now {
+                    due.push(Due { id, title: ev.title, start: ev_min, all_day: false, kind: DueKind::Soon(10), at: ev_min - 10 });
+                }
+            }
+            due.sort_by_key(|d| (d.at, d.start));
+        }
         if now > self.seen_min {
             self.seen_min = now;
             write_lines(SEEN_FILE, &[now.to_string()]);
         }
         let notice = notice_of(&due)?;
-        play_ding();
+        if with_sound {
+            play_ding();
+        }
         Some(notice)
     }
 }

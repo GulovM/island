@@ -20,10 +20,7 @@ impl App {
         let Some(g) = &self.gfx else { return Ok(()) };
         let t0 = Instant::now();
         let s = self.scale;
-        let (bw, bh) = self.body_size();
-        let aw = bw.max(1.0);
-        let ah = bh.max(1.0);
-        let x0 = (self.win_w as f32 - aw) / 2.0;
+        let (x0, y0, aw, ah, ear, r_top, r_bot) = self.body_geometry();
         let open = self.open.value.clamp(0.0, 1.0);
         let accent = self.accent();
         let collapsed_h = self.collapsed().1;
@@ -33,11 +30,6 @@ impl App {
         g.dc.BeginDraw();
         g.dc.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
 
-        // «Ушки» уменьшаются вместе с высотой, чтобы в полоске их не было.
-        let ear = (EAR * s * (ah / (collapsed_h * s)).min(1.0)).min(ah);
-        let ear = if ear < 0.5 { 0.0 } else { ear };
-        // Скругление только снизу: из настроек, в свёрнутом виде чуть меньше (0,72 → 1 при раскрытии).
-        let r = (self.cfg.corner_radius * (0.72 + 0.28 * open) * s).min(aw / 2.0).min(ah - ear).max(0.0);
         // По мере сжатия в полоску цвет уходит от фона к чистому чёрному.
         let thin = ((collapsed_h * s - ah) / ((collapsed_h - STRIP_H) * s)).clamp(0.0, 1.0);
         let k = 1.0 - thin;
@@ -47,12 +39,12 @@ impl App {
         let base_h = collapsed_h * s;
         // Эталон раскрытия — самая маленькая вкладка: размер текущей менялся бы при смене вкладки,
         // и содержимое с размытием мигали бы на каждом переключении.
-        let content_h = (0..=tabs::SETTINGS).map(|t| tabs.island_size(t).1).fold(f32::MAX, f32::min) * s;
+        let content_h = (0..=tabs::NOTIFICATIONS).map(|t| tabs.island_size(t).1).fold(f32::MAX, f32::min) * s;
         let span_h = (content_h - base_h).max(1.0);
         let h_prog = ((ah - base_h) / span_h).clamp(0.0, 1.0);
 
         let base_w = self.collapsed().0 * s;
-        let content_w = (0..=tabs::SETTINGS).map(|t| tabs.island_size(t).0).fold(f32::MAX, f32::min).max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT) * s;
+        let content_w = (0..=tabs::NOTIFICATIONS).map(|t| tabs.island_size(t).0).fold(f32::MAX, f32::min).max(self.tab_row_width() + TAB_SIDE_LEFT + TAB_SIDE_RIGHT) * s;
         let span_w = (content_w - base_w).max(1.0);
         let w_prog = ((aw - base_w) / span_w).clamp(0.0, 1.0);
 
@@ -61,7 +53,9 @@ impl App {
         let raw_prog = h_prog.min(w_prog);
         const EXPAND_THRESHOLD: f32 = 0.08;
         const CONTENT_FADE_START: f32 = 0.4;
-        let p = if raw_prog > EXPAND_THRESHOLD {
+        let p = if !self.expanded && self.open.value < 0.005 {
+            0.0
+        } else if raw_prog > EXPAND_THRESHOLD {
             ((raw_prog - EXPAND_THRESHOLD) / (1.0 - EXPAND_THRESHOLD)).clamp(0.0, 1.0)
         } else {
             0.0
@@ -87,10 +81,19 @@ impl App {
             k,
         );
 
-        self.apply_blur(g, x0, aw, ah, ear, r, real && p > 0.001 && k > 0.01, !theme::is_light([pal.bg.r, pal.bg.g, pal.bg.b]));
+        self.apply_blur(g, x0, y0, aw, ah, ear, r_top, r_bot, real && p > 0.001 && k > 0.01, !theme::is_light([pal.bg.r, pal.bg.g, pal.bg.b]));
 
         // Тело острова рисуется по BodyLayers (тинт материала или фона)
-        let body = self.body_path(g, x0, aw, ah, ear, r, false)?;
+        let body = self.body_path(g, x0, y0, aw, ah, ear, r_top, r_bot, false)?;
+
+        // Мягкая тень под отдельной плавающей капсулой-уведомлением.
+        let detach = (y0 / (live::CAPSULE_TOP_Y * s).max(1.0)).clamp(0.0, 1.0);
+        if detach > 0.01 && p < 0.05 {
+            for (width, alpha) in [(7.0, 0.08), (3.5, 0.16)] {
+                g.brush.SetColor(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: alpha * detach * (1.0 - p) });
+                g.dc.DrawGeometry(&body, &g.brush, width * s, None);
+            }
+        }
 
         // Мягкое оранжевое свечение вокруг свёрнутого острова при активном таймере.
         if self.live.timer().is_some() {
@@ -114,6 +117,24 @@ impl App {
         });
         g.dc.FillGeometry(&body, &g.brush, None);
 
+        // Тонкая кромка плавающей капсулы, чтобы её контур читался и на тёмных обоях.
+        if detach > 0.01 && p < 0.05 {
+            let half = 0.5 * s;
+            let cap_rim = self.body_path(
+                g,
+                x0 + half,
+                y0 + half,
+                (aw - 2.0 * half).max(1.0),
+                (ah - 2.0 * half).max(1.0),
+                0.0,
+                crate::ui::inner_radius(r_top, half),
+                crate::ui::inner_radius(r_bot, half),
+                false,
+            )?;
+            g.brush.SetColor(&D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 0.14 * detach * (1.0 - p) });
+            g.dc.DrawGeometry(&cap_rim, &g.brush, 1.0 * s, None);
+        }
+
         // Осветление сверху (sheen)
         if layers.sheen.alpha > 0.005 {
             let top_color = D2D1_COLOR_F {
@@ -124,7 +145,7 @@ impl App {
             };
             let bot_color = D2D1_COLOR_F { a: 0.0, ..top_color };
             let sheen_h = ah * layers.sheen.height_fraction;
-            if let Some(br) = gradient_brush(g, (0.0, 0.0), (0.0, sheen_h), &[(0.0, top_color), (1.0, bot_color)]) {
+            if let Some(br) = gradient_brush(g, (0.0, y0), (0.0, y0 + sheen_h), &[(0.0, top_color), (1.0, bot_color)]) {
                 g.dc.FillGeometry(&body, &br, None);
             }
         }
@@ -132,27 +153,49 @@ impl App {
         // Зеркальная кромка (rim): блик слева-сверху и мягкая дуга справа-снизу
         if layers.rim.hi_alpha > 0.005 || layers.rim.lo_alpha > 0.005 {
             let half = (layers.rim.width * 0.5) * s;
-            let rim = self.body_path(g, x0 + half, aw - 2.0 * half, ah - half, ear, crate::ui::inner_radius(r, half), true)?;
+            let top_in = if y0 > 0.5 { half } else { 0.0 };
+            let rim = self.body_path(
+                g,
+                x0 + half,
+                y0 + top_in,
+                aw - 2.0 * half,
+                ah - half - top_in,
+                ear,
+                crate::ui::inner_radius(r_top, half),
+                crate::ui::inner_radius(r_bot, half),
+                true,
+            )?;
             let stops = [
                 (0.00, D2D1_COLOR_F { r: layers.rim.hi_color[0], g: layers.rim.hi_color[1], b: layers.rim.hi_color[2], a: layers.rim.hi_alpha }),
                 (0.35, D2D1_COLOR_F { r: layers.rim.mid_color[0], g: layers.rim.mid_color[1], b: layers.rim.mid_color[2], a: layers.rim.mid_alpha }),
                 (0.65, D2D1_COLOR_F { r: layers.rim.mid_color[0], g: layers.rim.mid_color[1], b: layers.rim.mid_color[2], a: layers.rim.mid_alpha }),
                 (1.00, D2D1_COLOR_F { r: layers.rim.lo_color[0], g: layers.rim.lo_color[1], b: layers.rim.lo_color[2], a: layers.rim.lo_alpha }),
             ];
-            if let Some(br) = gradient_brush(g, (x0, 0.0), (x0 + aw, ah), &stops) {
+            if let Some(br) = gradient_brush(g, (x0, y0), (x0 + aw, y0 + ah), &stops) {
                 g.dc.DrawGeometry(&rim, &br, 2.0 * half, None);
             }
 
             // Тонкая внутренняя подсветка по верхней половине (подобрано).
             if layers.rim.inner_highlight_alpha > 0.005 {
                 let inner_inset = half + 0.8 * s; // подобрано
-                if let Ok(inner_rim) = self.body_path(g, x0 + inner_inset, aw - 2.0 * inner_inset, ah - inner_inset, ear, crate::ui::inner_radius(r, inner_inset), true) {
+                let top_in2 = if y0 > 0.5 { inner_inset } else { 0.0 };
+                if let Ok(inner_rim) = self.body_path(
+                    g,
+                    x0 + inner_inset,
+                    y0 + top_in2,
+                    aw - 2.0 * inner_inset,
+                    ah - inner_inset - top_in2,
+                    ear,
+                    crate::ui::inner_radius(r_top, inner_inset),
+                    crate::ui::inner_radius(r_bot, inner_inset),
+                    true,
+                ) {
                     let inner_stops = [
                         (0.00, D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: layers.rim.inner_highlight_alpha }),
                         (0.50, D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 0.0 }),
                         (1.00, D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 0.0 }),
                     ];
-                    if let Some(ibr) = gradient_brush(g, (x0, 0.0), (x0, ah * 0.6), &inner_stops) {
+                    if let Some(ibr) = gradient_brush(g, (x0, y0), (x0, y0 + ah * 0.6), &inner_stops) {
                         g.dc.DrawGeometry(&inner_rim, &ibr, 1.0 * s, None);
                     }
                 }
@@ -167,7 +210,7 @@ impl App {
             c.a = 0.12 * glow;
             g.brush.SetColor(&c);
             g.dc.FillGeometry(&body, &g.brush, None);
-            let outline = self.body_path(g, x0, aw, ah, ear, r, true)?;
+            let outline = self.body_path(g, x0, y0, aw, ah, ear, r_top, r_bot, true)?;
             for (width, alpha) in [(9.0, 0.07), (6.0, 0.12), (3.5, 0.24), (1.6, 0.95)] {
                 c.a = alpha * glow;
                 g.brush.SetColor(&c);
@@ -202,21 +245,24 @@ impl App {
                 continue;
             }
             let (fw, fh) = match slot {
-                Slot::Toast => live::TOAST,
+                Slot::Toast => match self.live.display_toast() {
+                    Some(live::Toast::Notice) => live::TOAST_NOTICE,
+                    _ => live::TOAST,
+                },
                 Slot::Face => self.idle_pill_size(),
                 Slot::Drop => DROP_PILL,
             };
             let fw = fw.max(self.collapsed().0);
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
             g.dc.PushAxisAlignedClip(
-                &D2D_RECT_F { left: x0, top: 0.0, right: x0 + aw, bottom: ah },
+                &D2D_RECT_F { left: x0, top: y0, right: x0 + aw, bottom: y0 + ah },
                 D2D1_ANTIALIAS_MODE_ALIASED,
             );
             g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
             let cv = Canvas { g, alpha, accent };
-            let r = ui::Rect::new(centre - fw / 2.0, 0.0, fw, fh);
+            let r = ui::Rect::new(centre - fw / 2.0, y0 / s, fw, fh);
             match slot {
-                Slot::Toast => self.live.draw_toast(&cv, r, cursor),
+                Slot::Toast => self.live.draw_toast(ui, &cv, r, cursor),
                 Slot::Face => {
                     let label = self.live.timer().map(|t| t.label());
                     let wave = if self.cfg.live_media && self.live.wave_alpha() > 0.004 {
@@ -238,15 +284,15 @@ impl App {
             if a > 0.01 {
                 g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
                 g.dc.PushAxisAlignedClip(
-                    &D2D_RECT_F { left: x0, top: 0.0, right: x0 + aw, bottom: ah },
+                    &D2D_RECT_F { left: x0, top: y0, right: x0 + aw, bottom: y0 + ah },
                     D2D1_ANTIALIAS_MODE_ALIASED,
                 );
                 g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
                 let cv = Canvas { g, alpha: a * self.live.timer_pulse(), accent };
                 // Скругления тела по краям не задеваем: полоска начинается чуть правее левого угла.
-                let inset = r / s * 0.6;
+                let inset = r_bot / s * 0.6;
                 let full = aw / s - 2.0 * inset;
-                cv.rr(ui::Rect::new(x0 / s + inset, 0.0, full * self.live.timer_frac(), ah / s), ah / s / 2.0, status_orange());
+                cv.rr(ui::Rect::new(x0 / s + inset, y0 / s, full * self.live.timer_frac(), ah / s), ah / s / 2.0, status_orange());
                 g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
                 g.dc.PopAxisAlignedClip();
             }
@@ -370,7 +416,7 @@ impl App {
             for (i, (tx, tw)) in rects.iter().enumerate() {
                 let (px, pw) = (tx * s, tw * s);
                 let (py, ph) = (TAB_TOP * s, TAB_H * s);
-                let active = !self.settings_open && i == self.tab;
+                let active = !self.settings_open && !self.notifications_open && i == self.tab;
                 let hot = cursor.0 >= *tx && cursor.0 <= tx + tw && cursor.1 >= TAB_TOP && cursor.1 <= TAB_TOP + TAB_H;
                 let hv = ui.hover_amount(0xF000 + i as u32, hot && self.expanded);
                 if !active && hv > 0.01 {
@@ -429,9 +475,24 @@ impl App {
             let gcol = if self.settings_open { ui::readable(accent, 45.0) } else { ui::mix(ui::dim(), ui::txt(), gv) };
             gcv.glyph(ui::icon::SETTINGS, ui::Rect::new(gx - GEAR_R, gy - GEAR_R, 2.0 * GEAR_R, 2.0 * GEAR_R), false, gcol);
 
-            // Карандаш справа (левее шестерёнки): правка виджетов. Появляется только на вкладках с сеткой, в режиме правки залит акцентом.
+            // Колокольчик уведомлений (справа от карандаша, слева от шестерёнки).
+            let (bx, by) = self.bell_center();
+            let bell_hot = self.expanded && (cursor.0 - bx).hypot(cursor.1 - by) <= GEAR_R + 3.0;
+            let bv = ui.hover_amount(0xF105, bell_hot);
+            let bcv = Canvas { g, alpha: content_p, accent };
+            g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
+            if self.notifications_open {
+                bcv.circle(bx, by, GEAR_R, D2D1_COLOR_F { a: 0.26, ..accent });
+            }
+            let bcol = if self.notifications_open { ui::readable(accent, 45.0) } else { ui::mix(ui::dim(), ui::txt(), bv) };
+            bcv.glyph(ui::icon::RINGER, ui::Rect::new(bx - 7.5, by - 7.5, 15.0, 15.0), false, bcol);
+            if tabs.unread_notifications() > 0 && !self.notifications_open {
+                bcv.circle(bx + GEAR_R * 0.65, by - GEAR_R * 0.65, 2.8, accent);
+            }
+
+            // Карандаш слева от колокольчика: правка виджетов. Появляется только на вкладках с сеткой, в режиме правки залит акцентом.
             let cur = self.normal_id();
-            let pv = ui.presence(0xF102, self.expanded && !self.settings_open && tabs.editable(cur));
+            let pv = ui.presence(0xF102, self.expanded && !self.settings_open && !self.notifications_open && tabs.editable(cur));
             if pv > 0.01 {
                 let (ex, ey) = self.pencil_center();
                 let ev = ui.presence(0xF103, tabs.editing(cur));
@@ -458,11 +519,12 @@ impl App {
             // скруглённые углы полупрозрачного тела; без стекла — только при большом радиусе (> 16 px).
             let content_clip = D2D_RECT_F {
                 left: x0 + 6.0 * s,
-                top: 31.0 * s,
+                top: y0 + 31.0 * s,
                 right: x0 + aw - 6.0 * s,
-                bottom: (ah - 4.0 * s).max(31.0 * s),
+                bottom: (y0 + ah - 4.0 * s).max(y0 + 31.0 * s),
             };
-            let mask = if (self.cfg.glass && r > 0.0) || r > 16.0 * s {
+            let mask_r = r_top.max(r_bot);
+            let mask = if (self.cfg.glass && mask_r > 0.0) || mask_r > 16.0 * s {
                 // Границы слоя совпадают с клипом содержимого ниже: вне его ничего не рисуется.
                 let params = D2D1_LAYER_PARAMETERS1 {
                     contentBounds: content_clip,
@@ -533,12 +595,12 @@ impl App {
     /// с главным окном (позиция и размер), ставится сразу за `self.hwnd`.
     /// Старый путь (Windows 10, accent blur-behind): форма вырезается `SetWindowRgn`.
     #[allow(clippy::too_many_arguments)]
-    unsafe fn apply_blur(&self, g: &Gfx, x0: f32, aw: f32, ah: f32, ear: f32, r: f32, on: bool, dark: bool) {
+    unsafe fn apply_blur(&self, g: &Gfx, x0: f32, y0: f32, aw: f32, ah: f32, ear: f32, r_top: f32, r_bot: f32, on: bool, dark: bool) {
         if let Some(bd) = &self.backdrop {
             // ---- Новый путь: Composition HostBackdropBrush ----
             // Ключ формы: округлённые параметры контура, чтобы не дёргать WinRT на каждый кадр.
             let round = |v: f32| (v * 4.0).round() as i32;
-            let shape_key = (round(x0), round(aw), round(ah), round(ear), round(r));
+            let shape_key = (round(x0), round(y0), round(aw), round(ah), round(ear), round(r_top), round(r_bot));
             let key = (self.win_x, self.win_y, self.win_w, self.win_h, 0);
             let prev = self.blur_key.get();
             let pos_changed = key != prev;
@@ -560,7 +622,7 @@ impl App {
             if pos_changed || self.glass_shape.get() != shape_key {
                 self.glass_shape.set(shape_key);
                 if let Ok(geo) = self
-                    .body_path(g, x0, aw, ah, ear, r, false)
+                    .body_path(g, x0, y0, aw, ah, ear, r_top, r_bot, false)
                     .and_then(|p| p.cast::<windows::Win32::Graphics::Direct2D::ID2D1Geometry>())
                 {
                     let _ = bd.set_shape(&geo, self.win_w as f32, self.win_h as f32);
@@ -594,7 +656,7 @@ impl App {
             }
         } else {
             // ---- Старый путь: accent blur-behind + SetWindowRgn (Windows 10) ----
-            let shape = crate::glass::body_outline(x0, aw, ah, ear, r, 1.0);
+            let shape = crate::glass::body_outline_capsule(x0, y0, aw, ah, ear, r_top, r_bot, 1.0);
             let bs = crate::glass::BlurShape::from_outline(&shape);
             let (gx, gy) = (self.win_x + bs.left, self.win_y + bs.top);
             let valid = on && bs.points.len() >= 3 && bs.width > 0 && bs.height > 0;
@@ -636,24 +698,53 @@ impl App {
         let _ = ShowWindow(self.glass_wnd, SW_HIDE);
     }
 
-    /// Контур чёлки: плоский верх на уровне края экрана, вогнутые «ушки» по бокам,
-    /// скруглённые нижние углы.
-    /// `outline` — открытый контур без верхней грани (для свечения): сверху остров упирается в край экрана.
+    /// Контур чёлки или плавающей капсулы-островка (`y0 > 0`).
+    /// `outline` — открытый контур без верхней грани (когда чёлка прижата к краю экрана).
     #[allow(clippy::too_many_arguments)]
-    pub(crate) unsafe fn body_path(&self, g: &Gfx, x0: f32, aw: f32, ah: f32, ear: f32, r: f32, outline: bool) -> Result<ID2D1PathGeometry1> {
+    pub(crate) unsafe fn body_path(
+        &self,
+        g: &Gfx,
+        x0: f32,
+        y0: f32,
+        aw: f32,
+        ah: f32,
+        ear: f32,
+        r_top: f32,
+        r_bot: f32,
+        outline: bool,
+    ) -> Result<ID2D1PathGeometry1> {
         // Тот же контур (точные значения) берётся из кэша: в кадре тело и подложка делят один путь,
         // а когда форма не меняется (наведение, прокрутка, мини-плеер), путь не строится заново.
-        let key = [x0.to_bits(), aw.to_bits(), ah.to_bits(), ear.to_bits(), r.to_bits(), outline as u32];
+        let key = [
+            x0.to_bits(),
+            y0.to_bits(),
+            aw.to_bits(),
+            ah.to_bits(),
+            ear.to_bits(),
+            r_top.to_bits(),
+            r_bot.to_bits(),
+            outline as u32,
+        ];
         if let Some(geo) = g.paths.borrow_mut().get(&key) {
             return Ok(geo);
         }
-        let geo = Self::build_body_path(g, x0, aw, ah, ear, r, outline)?;
+        let geo = Self::build_body_path(g, x0, y0, aw, ah, ear, r_top, r_bot, outline)?;
         g.paths.borrow_mut().put(key, geo.clone());
         Ok(geo)
     }
 
     #[allow(clippy::too_many_arguments)]
-    unsafe fn build_body_path(g: &Gfx, x0: f32, aw: f32, ah: f32, ear: f32, r: f32, outline: bool) -> Result<ID2D1PathGeometry1> {
+    unsafe fn build_body_path(
+        g: &Gfx,
+        x0: f32,
+        y0: f32,
+        aw: f32,
+        ah: f32,
+        ear: f32,
+        r_top: f32,
+        r_bot: f32,
+        outline: bool,
+    ) -> Result<ID2D1PathGeometry1> {
         let pt = |x: f32, y: f32| Vector2 { X: x, Y: y };
         let arc = |x: f32, y: f32, radius: f32, dir: D2D1_SWEEP_DIRECTION| D2D1_ARC_SEGMENT {
             point: pt(x, y),
@@ -664,23 +755,48 @@ impl App {
         };
         let geo = g.d2d.CreatePathGeometry()?;
         let sink = geo.Open()?;
-        sink.BeginFigure(pt(x0 - ear, 0.0), if outline { D2D1_FIGURE_BEGIN_HOLLOW } else { D2D1_FIGURE_BEGIN_FILLED });
-        if ear > 0.0 {
-            sink.AddArc(&arc(x0, ear, ear, D2D1_SWEEP_DIRECTION_CLOCKWISE));
+        let floating = y0 > 0.5 || r_top > 0.5;
+        let rt = if ear > 0.0 { 0.0 } else { r_top.min(aw / 2.0).min(ah / 2.0).max(0.0) };
+        let rb = r_bot.min(aw / 2.0).min((ah - rt).max(0.0)).max(0.0);
+
+        if floating {
+            let begin = if outline { D2D1_FIGURE_BEGIN_HOLLOW } else { D2D1_FIGURE_BEGIN_FILLED };
+            sink.BeginFigure(pt(x0, y0 + rt), begin);
+            if rt > 0.0 {
+                sink.AddArc(&arc(x0 + rt, y0, rt, D2D1_SWEEP_DIRECTION_CLOCKWISE));
+            }
+            sink.AddLine(pt(x0 + aw - rt, y0));
+            if rt > 0.0 {
+                sink.AddArc(&arc(x0 + aw, y0 + rt, rt, D2D1_SWEEP_DIRECTION_CLOCKWISE));
+            }
+            sink.AddLine(pt(x0 + aw, y0 + ah - rb));
+            if rb > 0.0 {
+                sink.AddArc(&arc(x0 + aw - rb, y0 + ah, rb, D2D1_SWEEP_DIRECTION_CLOCKWISE));
+            }
+            sink.AddLine(pt(x0 + rb, y0 + ah));
+            if rb > 0.0 {
+                sink.AddArc(&arc(x0, y0 + ah - rb, rb, D2D1_SWEEP_DIRECTION_CLOCKWISE));
+            }
+            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+        } else {
+            sink.BeginFigure(pt(x0 - ear, y0), if outline { D2D1_FIGURE_BEGIN_HOLLOW } else { D2D1_FIGURE_BEGIN_FILLED });
+            if ear > 0.0 {
+                sink.AddArc(&arc(x0, y0 + ear, ear, D2D1_SWEEP_DIRECTION_CLOCKWISE));
+            }
+            sink.AddLine(pt(x0, y0 + ah - rb));
+            if rb > 0.0 {
+                sink.AddArc(&arc(x0 + rb, y0 + ah, rb, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE));
+            }
+            sink.AddLine(pt(x0 + aw - rb, y0 + ah));
+            if rb > 0.0 {
+                sink.AddArc(&arc(x0 + aw, y0 + ah - rb, rb, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE));
+            }
+            sink.AddLine(pt(x0 + aw, y0 + ear));
+            if ear > 0.0 {
+                sink.AddArc(&arc(x0 + aw + ear, y0, ear, D2D1_SWEEP_DIRECTION_CLOCKWISE));
+            }
+            sink.EndFigure(if outline { D2D1_FIGURE_END_OPEN } else { D2D1_FIGURE_END_CLOSED });
         }
-        sink.AddLine(pt(x0, ah - r));
-        if r > 0.0 {
-            sink.AddArc(&arc(x0 + r, ah, r, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE));
-        }
-        sink.AddLine(pt(x0 + aw - r, ah));
-        if r > 0.0 {
-            sink.AddArc(&arc(x0 + aw, ah - r, r, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE));
-        }
-        sink.AddLine(pt(x0 + aw, ear));
-        if ear > 0.0 {
-            sink.AddArc(&arc(x0 + aw + ear, 0.0, ear, D2D1_SWEEP_DIRECTION_CLOCKWISE));
-        }
-        sink.EndFigure(if outline { D2D1_FIGURE_END_OPEN } else { D2D1_FIGURE_END_CLOSED });
         sink.Close()?;
         Ok(geo)
     }

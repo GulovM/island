@@ -81,6 +81,8 @@ pub struct State {
     pub apps_all: bool,
     /// Последняя версия приложения, для которой пользователь видел раздел «Что нового».
     pub last_seen_version: String,
+    /// Нужно ли вернуть всплывающие уведомления при выключении режима «Не беспокоить».
+    pub dnd_restore_popups: bool,
     pub timer: TimerState,
     pub weather: WeatherState,
     pub speed: SpeedState,
@@ -98,6 +100,7 @@ impl Default for State {
             apps_grid: false,
             apps_all: false,
             last_seen_version: String::new(),
+            dnd_restore_popups: false,
             timer: TimerState::default(),
             weather: WeatherState::default(),
             speed: SpeedState::default(),
@@ -145,6 +148,7 @@ pub fn serialize(state: &State) -> String {
         "last_seen_version = \"{}\"\n",
         state.last_seen_version.replace('\\', "\\\\").replace('"', "\\\"")
     ));
+    out.push_str(&format!("dnd_restore_popups = {}\n", state.dnd_restore_popups as u8));
 
     out.push_str("\n[timer]\n");
     out.push_str(&format!("duration = {}\n", state.timer.duration));
@@ -226,6 +230,9 @@ pub fn parse(text: &str) -> State {
             }
             ("", "last_seen_version") => {
                 state.last_seen_version = unquote(val);
+            }
+            ("", "dnd_restore_popups") => {
+                state.dnd_restore_popups = val == "1" || val.eq_ignore_ascii_case("true");
             }
             ("timer", "duration") => {
                 if let Ok(d) = val.parse::<u64>() {
@@ -396,6 +403,21 @@ pub fn set_last_tab(name: &str) {
     update(|s| s.last_tab = name.to_string());
 }
 
+/// Запоминает, нужно ли вернуть всплывающие уведомления после выключения «Не беспокоить».
+pub fn set_dnd_restore_popups(restore: bool) {
+    update(|s| s.dnd_restore_popups = restore);
+}
+
+/// Нужно ли восстановить всплывающие уведомления после выключения «Не беспокоить».
+pub fn dnd_restore_popups() -> bool {
+    let Ok(mut g) = STORE.lock() else { return false };
+    if g.is_none() {
+        let state = read_state_from_disk();
+        *g = Some(StateStore { state, dirty: false });
+    }
+    g.as_ref().is_some_and(|s| s.state.dnd_restore_popups)
+}
+
 /// Запоминает паузу записи буфера обмена.
 pub fn set_clipboard_paused(paused: bool) {
     update(|s| s.clipboard_paused = paused);
@@ -491,6 +513,7 @@ mod tests {
             apps_grid: true,
             apps_all: true,
             last_seen_version: "1.2.0".to_string(),
+            dnd_restore_popups: true,
             timer: TimerState {
                 duration: 600,
                 left: 450,

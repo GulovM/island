@@ -2,16 +2,22 @@
 //! эквалайзера в `Face`) и короткие уведомления (таймер, громкость, зарядка). Никаких своих таймеров
 //! в простое: данные приходят событиями (медиасессия, громкость, питание).
 
+use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use crate::anim::{Spring, FADE_SPRING};
-use crate::bg::{Media, Snapshot};
-use crate::ui::{collapsed_chip_bg, collapsed_dim, collapsed_txt, icon, status_green, status_orange, status_red, Canvas, Rect};
+use crate::bg::{Media, Snapshot, NOTIF_ICON_PX};
+use crate::tabs::notifications::PopupNotice;
+use crate::ui::{collapsed_chip_bg, collapsed_dim, collapsed_txt, icon, status_green, status_orange, status_red, Canvas, Rect, Ui, WHITE};
 
 /// Размеры формы уведомления (логические пиксели). Ширина не меньше ширины свёрнутого острова.
 pub const TOAST: (f32, f32) = (232.0, 36.0);
+/// Плавающая капсула-островок для всплывающего уведомления (приложение + текст).
+pub const TOAST_NOTICE: (f32, f32) = (316.0, 50.0);
+/// Отступ плавающей капсулы уведомления от верхнего края экрана (логические пиксели).
+pub const CAPSULE_TOP_Y: f32 = 8.0;
 /// Заряд, ниже которого (и без питания от сети) показывается предупреждение.
 const LOW_PCT: u8 = 20;
 
@@ -56,6 +62,8 @@ pub enum Toast {
     Timer,
     /// Наступило событие календаря; название и подпись лежат в `Live::event`.
     Event,
+    /// Входящее системное уведомление; заголовок, текст и иконка в `Live::notice`.
+    Notice,
     Volume { level: f32, muted: bool },
     Brightness { level: f32 },
     Charging { on: bool, percent: u8 },
@@ -69,12 +77,33 @@ impl Toast {
         matches!(self, Toast::Timer | Toast::Event)
     }
 
+    /// Уведомление, которое должно показаться даже если чёлка свёрнута в полоску.
+    pub fn emerges_from_strip(&self) -> bool {
+        matches!(self, Toast::Timer | Toast::Event | Toast::Notice)
+    }
+
+    /// Нужно ли передавать клавиатурный фокус острову (только для сигнала таймера).
+    pub fn steals_focus(&self) -> bool {
+        matches!(self, Toast::Timer)
+    }
+
+    /// Относится к настройке «Всплывающие уведомления».
+    pub fn is_popup_notif(&self) -> bool {
+        matches!(self, Toast::Notice | Toast::Event)
+    }
+
+    /// Показывается в виде отдельной плавающей капсулы-островка, отрываясь от верхней кромки.
+    pub fn is_capsule(&self) -> bool {
+        matches!(self, Toast::Notice | Toast::Event)
+    }
+
     /// Сколько уведомление остаётся на экране.
     pub fn lifetime(&self) -> Duration {
         Duration::from_millis(match self {
             // Минимум; пока звучит сигнал, остров ждёт его конца (см. `ToastTimer`).
             Toast::Timer => 4000,
             Toast::Event => 6000,
+            Toast::Notice => 2500,
             Toast::Volume { .. } | Toast::Brightness { .. } => 1700,
             Toast::Charging { .. } => 3000,
             Toast::LowBattery(_) => 5000,
@@ -103,6 +132,8 @@ pub struct Live {
     shown: Option<Toast>,
     /// Текст уведомления о событии календаря.
     event: Option<(String, String)>,
+    /// Входящее системное уведомление для всплывающего баннера.
+    notice: Option<PopupNotice>,
     wave_a: Spring,
     toast_a: Spring,
     rev: u64,
@@ -125,6 +156,7 @@ impl Live {
             toast: None,
             shown: None,
             event: None,
+            notice: None,
             wave_a: Spring::unit(0.0, FADE_SPRING.0, FADE_SPRING.1),
             toast_a: Spring::unit(0.0, 260.0, 30.0),
             rev: 0,
@@ -229,10 +261,36 @@ impl Live {
         self.show(Toast::Event);
     }
 
-    /// Показано заметное уведомление (окончание таймера, событие календаря): остров ради него выходит
-    /// из полоски, не раскрывается от наведения и закрывается по ×, Esc или таймауту.
+    /// Входящее системное уведомление в чёлке (на 1,5 секунды, без перехвата фокуса).
+    pub fn show_notice(&mut self, notice: PopupNotice) {
+        self.notice = Some(notice);
+        self.show(Toast::Notice);
+    }
+
+    /// Показано заметное уведомление (окончание таймера, событие календаря): не раскрывается от наведения
+    /// и закрывается по ×, Esc или таймауту.
     pub fn alert(&self) -> bool {
         self.toast.is_some_and(|t| t.is_alert())
+    }
+
+    /// Остров должен выехать из полоски ради текущего тоста.
+    pub fn emerges_from_strip(&self) -> bool {
+        self.toast.is_some_and(|t| t.emerges_from_strip())
+    }
+
+    /// Нужен ли клавиатурный фокус для активного тоста.
+    pub fn steals_focus(&self) -> bool {
+        self.toast.is_some_and(|t| t.steals_focus())
+    }
+
+    /// Остров должен плавно перейти в плавающую капсулу ради активного уведомления.
+    pub fn capsule_active(&self) -> bool {
+        self.toast.is_some_and(|t| t.is_capsule())
+    }
+
+    /// Текущий (или гаснущий) тип тоста для выбора габаритов свёрнутой чёлки.
+    pub fn display_toast(&self) -> Option<Toast> {
+        self.toast.or(self.shown)
     }
 
     pub fn clear_toast(&mut self) -> bool {
@@ -322,15 +380,59 @@ impl Live {
     }
 
     /// Уведомление: значок слева, текст и значение справа. `cursor` — для подсветки ×.
-    pub unsafe fn draw_toast(&self, cv: &Canvas, r: Rect, cursor: (f32, f32)) {
+    pub unsafe fn draw_toast(&self, ui: &mut Ui, cv: &Canvas, r: Rect, cursor: (f32, f32)) {
         let Some(t) = self.shown else { return };
         let f = &cv.g.fonts;
-        let cy = r.y + r.h / 2.0 - 1.0;
-        let ic = Rect::new(r.x + 12.0, cy - 9.0, 18.0, 18.0);
-        let tx = r.x + 38.0;
-        let right = r.right() - 14.0;
+        let cy = r.y + r.h / 2.0 - 0.5;
+        let pad_x = if t.is_capsule() { 15.0 } else { 12.0 };
+        let ic = Rect::new(r.x + pad_x, cy - 9.0, 18.0, 18.0);
+        let tx = r.x + pad_x + 26.0;
+        let right = r.right() - if t.is_capsule() { 16.0 } else { 14.0 };
         let value = |s: &str| cv.text(s, Rect::new(right - 40.0, cy - 8.0, 40.0, 16.0), &f.body_r, collapsed_txt());
         match t {
+            Toast::Notice => {
+                if let Some(n) = &self.notice {
+                    let ir = Rect::new(r.x + 12.0, r.cy() - 15.0, 30.0, 30.0);
+                    let tile_rad = if n.is_calendar { ir.h / 2.0 } else { 10.0 };
+                    let mut painted_icon = false;
+                    if let Some(px) = &n.icon {
+                        let mut hs = std::collections::hash_map::DefaultHasher::new();
+                        n.app_name.hash(&mut hs);
+                        let key = (0x4Eu64 << 56) | (hs.finish() >> 8);
+                        if let Some(bmp) = ui.cache.get(&cv.g.dc, key, NOTIF_ICON_PX, NOTIF_ICON_PX, || px.as_ref().clone()) {
+                            cv.rr(ir, tile_rad, D2D1_COLOR_F { a: 0.14, ..WHITE });
+                            cv.bitmap(&bmp, ir.inset(3.0), 1.0);
+                            painted_icon = true;
+                        }
+                    }
+                    if !painted_icon {
+                        cv.rr(ir, tile_rad, D2D1_COLOR_F { a: 0.24, ..cv.accent });
+                        if n.is_calendar {
+                            cv.symbol(icon::CALENDAR, ir, 14.0, cv.accent);
+                        } else {
+                            let ch = n.app_name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "W".into());
+                            cv.text(&ch, ir, &f.body_b, WHITE);
+                        }
+                    }
+
+                    let ntx = ir.right() + 10.0;
+                    let ntw = (r.right() - 18.0 - ntx).max(40.0);
+                    cv.circle(ntx + 3.0, r.cy() - 9.0, 2.5, cv.accent);
+                    cv.text(&n.app_name, Rect::new(ntx + 9.0, r.cy() - 16.0, (ntw - 9.0).max(20.0), 14.0), &f.small_b, collapsed_dim());
+
+                    let clean_title = n.title.replace(['\r', '\n'], " ");
+                    let clean_body = n.body.replace(['\r', '\n'], " ");
+                    let msg = if clean_title.is_empty() {
+                        clean_body
+                    } else if clean_body.is_empty() {
+                        clean_title
+                    } else {
+                        format!("{clean_title} — {clean_body}")
+                    };
+                    let clip_msg = cv.wrap_clip(&msg, &f.body, ntw, 1);
+                    cv.text(&clip_msg, Rect::new(ntx, r.cy() + 1.0, ntw, 17.0), &f.body, collapsed_txt());
+                }
+            }
             Toast::Timer => {
                 cv.glyph(icon::CLOCK, ic, false, cv.accent);
                 cv.text(&crate::i18n::tr("Таймер завершён"), Rect::new(tx, cy - 8.0, Self::close_rect(r).x - tx, 16.0), &f.body, collapsed_txt());
@@ -514,6 +616,12 @@ mod tests {
     #[test]
     fn toast_lifetimes_are_sane() {
         assert!(Toast::Volume { level: 0.5, muted: false }.lifetime() < Toast::Timer.lifetime());
+        assert_eq!(Toast::Notice.lifetime(), Duration::from_millis(2500));
+        assert!(Toast::Notice.emerges_from_strip());
+        assert!(!Toast::Notice.steals_focus());
+        assert!(Toast::Event.emerges_from_strip());
+        assert!(!Toast::Event.steals_focus());
+        assert!(Toast::Timer.steals_focus());
     }
 
     #[test]

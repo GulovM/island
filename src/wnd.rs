@@ -63,8 +63,10 @@ pub(crate) enum Ev {
     ToastTimer,
     /// Секундный тик мини-плеера.
     LiveTick,
-    /// Правый клик по острову.
-    RightClick,
+    /// Правый клик по острову (координаты клиента в пикселях окна).
+    RightClick(i32, i32),
+    /// Истекло 1,5 с после ухода курсора с карточки уведомления с открытым меню ПКМ.
+    NotifMenuTimer,
     /// Началась новая минута: обновить часы на свёрнутом острове.
     FaceTick,
     /// Часовой тик: пора ли суточная проверка обновлений.
@@ -240,7 +242,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             LRESULT(0)
         }
         WM_RBUTTONUP => {
-            push(Ev::RightClick);
+            push(Ev::RightClick(lp.0 as i16 as i32, (lp.0 >> 16) as i16 as i32));
             LRESULT(0)
         }
         WM_MOUSEWHEEL => {
@@ -291,6 +293,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_TIMER if wp.0 == LIVE_TIMER => {
             push(Ev::LiveTick);
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == NOTIF_MENU_TIMER => {
+            push(Ev::NotifMenuTimer);
             LRESULT(0)
         }
         WM_TIMER if wp.0 == UPDATE_TIMER => {

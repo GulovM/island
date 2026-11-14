@@ -22,6 +22,7 @@ pub mod custom;
 pub mod grid;
 pub mod layout;
 mod legacy;
+pub mod notifications;
 pub mod power;
 pub mod settings;
 pub mod stats;
@@ -38,8 +39,10 @@ pub const WALLPAPER: usize = 5;
 pub const POWER: usize = 6;
 /// Страница настроек: не вкладка ряда, а отдельный вид острова (шестерёнка); номер идёт после вкладок.
 pub const SETTINGS: usize = 7;
+/// Вкладка уведомлений: открывается по иконке колокольчика рядом с шестерёнкой.
+pub const NOTIFICATIONS: usize = 8;
 /// Номер первой собственной вкладки; остальные идут следом в порядке `Config::custom`.
-pub const CUSTOM_BASE: usize = SETTINGS + 1;
+pub const CUSTOM_BASE: usize = NOTIFICATIONS + 1;
 
 /// Верх области содержимого под рядом вкладок и боковое поле.
 pub const TOP: f32 = 38.0;
@@ -66,6 +69,8 @@ pub enum Action {
     Layout(usize, String),
     /// Режим правки закончился: пересчитать высоту острова.
     Resize,
+    /// Управление таймером автоскрытия меню правой кнопки мыши на уведомлении (1,5 с после ухода).
+    NotifMenuLeave(bool),
 }
 
 /// Описание виджетов вкладки для сетки (у остальных вкладок сетки нет).
@@ -149,6 +154,7 @@ pub struct Tabs {
     apps: apps::Apps,
     wall: wallpaper::Wall,
     pub settings: settings::Settings,
+    pub notif: notifications::Notifications,
     pub actions: Vec<Action>,
     /// Сетки виджетов вкладок Controls, Today, Stats (индекс = номер вкладки).
     grids: [grid::Grid; 3],
@@ -174,6 +180,7 @@ impl Default for Tabs {
             apps: Default::default(),
             wall: Default::default(),
             settings: Default::default(),
+            notif: Default::default(),
             actions: Default::default(),
             grids,
             custom: Vec::new(),
@@ -186,12 +193,13 @@ impl Default for Tabs {
 
 /// Фиксированные размеры вкладок без сетки и страницы настроек: (ширина, высота).
 /// Для вкладок с сеткой (Controls, Today, Stats) размеры вычисляются из `TabSpec`.
-const NON_GRID_SIZES: [(f32, f32); 5] = [
+const NON_GRID_SIZES: [(f32, f32); 6] = [
     (590.0, 328.0), // CLIPBOARD
     (480.0, 420.0), // APPS
     (560.0, 236.0), // WALLPAPER
     (420.0, 112.0), // POWER
     (600.0, 476.0), // SETTINGS
+    (580.0, 380.0), // NOTIFICATIONS
 ];
 
 impl Tabs {
@@ -333,7 +341,7 @@ impl Tabs {
                 let win = self.grids[tab].window();
                 (win.island_w(), win.island_h(0.0))
             }
-            CLIPBOARD..=SETTINGS => NON_GRID_SIZES[tab - CLIPBOARD],
+            CLIPBOARD..=NOTIFICATIONS => NON_GRID_SIZES[tab - CLIPBOARD],
             _ => match self.grid(tab) {
                 Some(g) => (g.window().island_w(), g.window().island_h(0.0)),
                 None => (400.0, 200.0),
@@ -356,6 +364,7 @@ impl Tabs {
             WALLPAPER => self.wall.draw(ui, cv, w, h),
             POWER => self.power.draw(ui, cv, w),
             SETTINGS => self.settings.draw(ui, cv, w, h),
+            NOTIFICATIONS => self.notif.draw(ui, cv, w, h, act),
             _ => self.draw_custom(tab, ui, cv, w, h),
         }
         // Кольцо клавиатурного фокуса — одна точка для всех вкладок сразу, после того как они
@@ -478,6 +487,10 @@ impl Tabs {
             WALLPAPER => self.wall.show(),
             TODAY => self.today.show(),
             CLIPBOARD => self.clip.show(),
+            NOTIFICATIONS => {
+                self.notif.show();
+                false
+            }
             _ => owners.iter().fold(false, |dirty, o| {
                 dirty
                     | match o {
@@ -515,6 +528,31 @@ impl Tabs {
         if tab == CLIPBOARD {
             self.clip.hide();
         }
+        if tab == NOTIFICATIONS {
+            self.notif.hide();
+        }
+    }
+
+    pub fn sync_notifications(
+        &mut self,
+        list: &[crate::bg::SysNotif],
+        rev: u64,
+        access: crate::bg::NotifAccess,
+        dnd: bool,
+    ) -> Vec<notifications::PopupNotice> {
+        self.notif.sync_snapshot(list, rev, access, dnd)
+    }
+
+    pub fn unread_notifications(&self) -> usize {
+        self.notif.unread_count()
+    }
+
+    pub fn notif_right_click(&mut self, mx: f32, my: f32) -> (bool, bool) {
+        self.notif.on_right_click(mx, my)
+    }
+
+    pub fn notif_menu_timeout(&mut self) -> bool {
+        self.notif.on_menu_leave_timeout()
     }
 
     /// Нужен ли секундный опрос, пока вкладка на экране.
@@ -570,8 +608,16 @@ impl Tabs {
     }
 
     /// Напоминание о событии календаря, время которого наступило (`ready` — экран включён, ПК разблокирован).
-    pub fn take_event_notice(&mut self, ready: bool) -> Option<today::Notice> {
-        self.today.take_due(ready)
+    /// Возвращает само уведомление и флаг `popup` (ложь при беззвучном режиме календаря).
+    pub fn take_event_notice(&mut self, ready: bool) -> Option<(today::Notice, bool)> {
+        let rule = self.notif.rule_of(notifications::CALENDAR_APP_ID);
+        let with_sound = rule == notifications::AppRule::Normal;
+        let n = self.today.take_due(ready, with_sound)?;
+        if rule == notifications::AppRule::Disabled {
+            return None;
+        }
+        self.notif.push_calendar(&n.cal_id, &n.title, &n.tag);
+        Some((n, rule == notifications::AppRule::Normal))
     }
 
     pub fn alarm(&mut self) -> bool {
