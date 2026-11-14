@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Privacy Policy — Island</title>
-<meta name="description" content="Privacy policy for Island, a dynamic island for Windows 10 and 11.">
+<title>Privacy Policy — Kite Island</title>
+<meta name="description" content="Privacy policy for Kite Island, a dynamic island for Windows 10 and 11.">
 <style>
   :root {
     color-scheme: light dark;
@@ -60,63 +60,64 @@
 <main>
   <p class="lang-switch">English · <a href="#ru">Русская версия</a></p>
 
-  <h1>Privacy Policy — Island</h1>
-  <p class="meta">Last updated: 2026-11-10</p>
+  <h1>Privacy Policy — Kite Island</h1>
+  <p class="meta">Last updated: 2026-11-14</p>
 
-  <p>Island is a desktop program for Windows 10 and Windows 11 that shows a dynamic island at the top of the screen. It shows the calendar, weather, timer, system status and media playback. This policy explains which data the program uses, where it is stored, and how it is shared.</p>
+  <p>Kite Island is a desktop program for Windows 10 and Windows 11 that shows a dynamic island at the top of the screen. It shows quick controls, notifications, calendar, weather, timer, system status and media playback. This policy explains which data the program uses, where it is stored, and how it is shared.</p>
 
   <p>Contact: gulovmuhsin121@gmail.com</p>
 
   <h2>1. Summary</h2>
   <ul>
-    <li>Island runs on your computer. It has no server that receives your personal data.</li>
+    <li>Kite Island runs on your computer. It has no server that receives your personal data.</li>
     <li>The developer does not collect, sell, rent, or share your personal data.</li>
     <li>The program does not use your data for advertising or any commercial purpose.</li>
-    <li>Google account data (Google Calendar) is used only to show your events inside Island on your computer.</li>
+    <li>Google account data (Google Calendar) is used only to show your events inside Kite Island on your computer and, when you explicitly enable "Add to Google Calendar" for an event you create or edit, to create, update, or delete that event in your Google Calendar.</li>
   </ul>
 
   <h2>2. Data we request</h2>
   <table>
     <thead><tr><th>Source</th><th>Data</th><th>Why</th></tr></thead>
     <tbody>
-      <tr><td>Google (OAuth, optional)</td><td>Read-only access to your Google Calendar (scope <code>https://www.googleapis.com/auth/calendar.readonly</code>): calendar list and event titles, times and locations</td><td>To show your upcoming events in Island</td></tr>
-      <tr><td>Apple iCloud (optional)</td><td>Your calendars and events, through the CalDAV protocol, using your Apple ID and an app-specific password you create</td><td>To show your upcoming events in Island</td></tr>
+      <tr><td>Google (OAuth 2.0 + PKCE, optional)</td><td>Access to your Google Calendar (<code>calendar.readonly</code> and <code>calendar.events</code> scopes) via <code>accounts.google.com</code>, <code>oauth2.googleapis.com</code>, Calendar API <code>www.googleapis.com/calendar/v3/</code>, and CalDAV endpoint <code>apidata.googleusercontent.com/caldav/v2/</code>: calendar list and event titles, times and locations, plus creating/updating/deleting events that you choose to save to Google Calendar</td><td>To show your upcoming events in Kite Island and sync events you explicitly write back</td></tr>
+      <tr><td>Apple iCloud (CalDAV, optional)</td><td>Your calendars and events via <code>caldav.icloud.com</code> (and regional <code>p*-caldav.icloud.com</code> servers), using your Apple ID and an app-specific password you create (including creating/updating/deleting events you choose to save to iCloud)</td><td>To show your upcoming events in Kite Island and sync events you explicitly write back</td></tr>
       <tr><td>Calendar links (optional)</td><td>Calendar feeds in ICS format that you add yourself</td><td>To show events from other calendar services</td></tr>
       <tr><td>Your location, approximated by IP address</td><td>Public IP address sent to IP-geolocation services</td><td>To find the city for the weather widget</td></tr>
       <tr><td>Weather services</td><td>City coordinates</td><td>To show the weather forecast</td></tr>
-      <tr><td>GitHub</td><td>Request for the latest release (IP address and program version)</td><td>To check for program updates</td></tr>
+      <tr><td>GitHub</td><td>Request for the latest release at <code>api.github.com/repos/GulovM/island/releases/latest</code> (IP address, program version, and reading the release <code>body</code> changelog notes)</td><td>To check for program updates and display "What's new" release notes</td></tr>
       <tr><td>Speed test service</td><td>Test data transfer</td><td>To run the speed test you start yourself</td></tr>
     </tbody>
   </table>
-  <p>Island reads the media information that Windows exposes for the current media session (track title, artist, playback state). It does not record or store that information beyond the current session.</p>
+  <p>On your computer, Kite Island also reads the media information (<code>SMTC</code> / audio meter) that Windows exposes for the current media session and, if you grant access in Windows, Windows system notifications (<code>UserNotificationListener</code>) so you can view them in the Notification Center and popup capsules. Notification contents, app rules (<code>notif_rules.txt</code>) and read state (<code>notif_read.txt</code>) stay strictly local on your device and are never sent over the network.</p>
 
   <h2>3. How data is used</h2>
   <ul>
-    <li>Calendar events are used only to draw the calendar, the upcoming event notification, and the event list inside Island.</li>
+    <li>Calendar events are used only to draw the calendar, the upcoming event notification, the event list, and (when you opt in per event) to write or delete that event in your connected Google or iCloud calendar.</li>
+    <li>Google OAuth 2.0 uses a public desktop <code>client_id</code> / <code>client_secret</code> pair with PKCE (<code>S256</code>) and a temporary local loopback listener (<code>127.0.0.1</code>).</li>
     <li>Data from Google APIs is used only to provide the features described above. It is not used to develop advertising, to build user profiles, or to train AI models.</li>
     <li>Application use of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements.</li>
   </ul>
 
   <h2>4. Where data is stored</h2>
   <ul>
-    <li>Data is stored only on your computer, in the Island data folder under your Windows user profile.</li>
-    <li>Access tokens, app-specific passwords and calendar links are encrypted with Windows DPAPI (<code>CryptProtectData</code>). A protected file cannot be opened by another Windows account or on another computer.</li>
-    <li>Calendar event caches are stored locally as well, so that the calendar works offline.</li>
+    <li>Data is stored only on your computer, in the Kite Island data folder (<code>%APPDATA%\island</code>) under your Windows user profile.</li>
+    <li>OAuth tokens and Apple app-specific passwords (<code>%APPDATA%\island\cal_accounts.bin</code>), clipboard history/Quick Access (<code>clipboard.txt</code>, <code>quick.txt</code>), and calendar links and event caches (<code>%APPDATA%\island\calendar_cache_*.ics</code>) are encrypted with Windows DPAPI (<code>CryptProtectData</code>). A protected file cannot be opened by another Windows account or on another computer.</li>
+    <li>Calendar event caches and pending sync items (<code>events.txt</code>, <code>events_sync.txt</code>), as well as notification preferences (<code>notif_rules.txt</code>, <code>notif_read.txt</code>) and app icon caches, are stored locally so features work offline.</li>
     <li>The developer does not receive copies of this data.</li>
   </ul>
 
   <h2>5. Sharing with third parties</h2>
-  <p>Island sends data only to the services listed in section 2, and only for the features you use. Your data is not sold, shared or transferred to any other third party. Google and Apple receive requests from your computer exactly as they would from any other calendar app.</p>
+  <p>Kite Island sends data only to the services listed in section 2, and only for the features you use. Your data is not sold, shared or transferred to any other third party. Google and Apple receive requests from your computer exactly as they would from any other calendar app.</p>
 
   <h2>6. Your choices and deletion</h2>
   <ul>
-    <li>You choose whether to connect Google, Apple iCloud or any calendar link. You can disconnect any account in the program settings. Disconnecting deletes the stored tokens, passwords and caches from your computer.</li>
+    <li>You choose whether to connect Google, Apple iCloud, any calendar link, or Windows notification access. You can disconnect any calendar account in the program settings (disconnecting deletes stored tokens, passwords and caches from your computer) and disable Windows notification access in Windows Privacy settings.</li>
     <li>You can also remove access at any time at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a> (Google) or in your Apple ID settings (Apple).</li>
-    <li>To delete all Island data, remove the Island data folder under your Windows user profile and uninstall the program.</li>
+    <li>To delete all Kite Island data, remove <code>%APPDATA%\island</code> under your Windows user profile and uninstall the program.</li>
   </ul>
 
   <h2>7. Children</h2>
-  <p>Island is not directed to children under 13 and does not knowingly collect data from them.</p>
+  <p>Kite Island is not directed to children under 13 and does not knowingly collect data from them.</p>
 
   <h2>8. Changes to this policy</h2>
   <p>This policy may change. The date at the top shows the last update. Changes are published on this page and in the project repository.</p>
@@ -124,63 +125,64 @@
   <hr>
 
   <div id="ru">
-  <h1>Политика конфиденциальности — Island</h1>
-  <p class="meta">Дата обновления: 2026-11-10</p>
+  <h1>Политика конфиденциальности — Kite Island</h1>
+  <p class="meta">Дата обновления: 2026-11-14</p>
 
-  <p>Island — программа для Windows 10 и Windows 11, которая показывает «остров» (динамическое окно) вверху экрана: календарь, погоду, таймер, состояние системы и воспроизведение музыки. Этот документ описывает, какие данные использует программа, где они хранятся и кому передаются.</p>
+  <p>Kite Island — программа для Windows 10 и Windows 11, которая показывает «остров» (динамическое окно) вверху экрана: быстрые переключатели, уведомления, календарь, погоду, таймер, состояние системы и воспроизведение музыки. Этот документ описывает, какие данные использует программа, где они хранятся и кому передаются.</p>
 
   <p>Контакт: gulovmuhsin121@gmail.com</p>
 
   <h2>1. Кратко</h2>
   <ul>
-    <li>Island работает на вашем компьютере. Нет сервера, который получает ваши персональные данные.</li>
+    <li>Kite Island работает на вашем компьютере. Нет сервера, который получает ваши персональные данные.</li>
     <li>Разработчик не собирает, не продаёт, не сдаёт в аренду и не передаёт персональные данные.</li>
     <li>Данные не используются для рекламы или других коммерческих целей.</li>
-    <li>Данные аккаунта Google (Google Календарь) используются только для показа ваших событий внутри Island на вашем компьютере.</li>
+    <li>Данные аккаунта Google (Google Календарь) используются только для показа ваших событий внутри Kite Island на вашем компьютере и — если вы сами включите переключатель «Записать в …» при создании или правке события — для записи, обновления или удаления этого события в вашем Google Календаре.</li>
   </ul>
 
   <h2>2. Какие данные запрашиваются</h2>
   <table>
     <thead><tr><th>Источник</th><th>Данные</th><th>Зачем</th></tr></thead>
     <tbody>
-      <tr><td>Google (OAuth, по желанию)</td><td>Доступ только на чтение Google Календаря (область <code>calendar.readonly</code>): список календарей, названия, время и места событий</td><td>Показ ближайших событий в Island</td></tr>
-      <tr><td>Apple iCloud (по желанию)</td><td>Календари и события по протоколу CalDAV, вход по Apple ID и паролю приложения, который вы создаёте сами</td><td>Показ ближайших событий в Island</td></tr>
+      <tr><td>Google (OAuth 2.0 + PKCE, по желанию)</td><td>Доступ к Google Календарю (области <code>calendar.readonly</code> и <code>calendar.events</code>) через <code>accounts.google.com</code>, <code>oauth2.googleapis.com</code>, Calendar API <code>www.googleapis.com/calendar/v3/</code> и CalDAV-сервер <code>apidata.googleusercontent.com/caldav/v2/</code>: список календарей, названия, время и места событий, а также запись/правка/удаление событий, которые вы сами сохраняете в Google Календарь</td><td>Показ ближайших событий в Kite Island и синхронизация событий, которые вы записываете в календарь</td></tr>
+      <tr><td>Apple iCloud (CalDAV, по желанию)</td><td>Календари и события по протоколу CalDAV через <code>caldav.icloud.com</code> (и региональные серверы <code>p*-caldav.icloud.com</code>), вход по Apple ID и паролю приложения, который вы создаёте сами (включая запись/правку/удаление событий по вашему выбору)</td><td>Показ ближайших событий в Kite Island и синхронизация событий, которые вы записываете в календарь</td></tr>
       <tr><td>Ссылки на календари (по желанию)</td><td>Ленты календарей в формате ICS, которые вы добавляете сами</td><td>Показ событий из других календарных сервисов</td></tr>
       <tr><td>Местоположение по IP-адресу</td><td>Публичный IP-адрес, отправляемый сервисам определения местоположения</td><td>Определение города для виджета погоды</td></tr>
       <tr><td>Сервисы погоды</td><td>Координаты города</td><td>Прогноз погоды</td></tr>
-      <tr><td>GitHub</td><td>Запрос последней версии программы (IP-адрес и версия программы)</td><td>Проверка обновлений</td></tr>
+      <tr><td>GitHub</td><td>Запрос последней версии программы к <code>api.github.com/repos/GulovM/island/releases/latest</code> (IP-адрес, версия программы и чтение поля <code>body</code> со списком изменений)</td><td>Проверка обновлений и показ раздела «Что нового»</td></tr>
       <tr><td>Сервис проверки скорости</td><td>Тестовая передача данных</td><td>Тест скорости, который вы запускаете сами</td></tr>
     </tbody>
   </table>
-  <p>Island читает сведения о воспроизведении, которые Windows отдаёт для текущей медиасессии (название трека, исполнитель, состояние воспроизведения). Эти сведения не записываются и не сохраняются дольше текущей сессии.</p>
+  <p>На вашем компьютере Kite Island также читает сведения о воспроизведении, которые Windows отдаёт для текущей медиасессии (<code>SMTC</code> и уровень звука для визуализации волн), а при вашем разрешении в Windows — системные уведомления (<code>UserNotificationListener</code>) для показа во вкладке уведомлений и всплывающих капсулах. Содержимое уведомлений, правила по приложениям (<code>notif_rules.txt</code>) и отметки о прочтении (<code>notif_read.txt</code>) остаются исключительно на вашем компьютере и никогда не передаются по сети.</p>
 
   <h2>3. Как используются данные</h2>
   <ul>
-    <li>События календаря используются только для показа календаря, уведомлений о ближайшем событии и списка событий в Island.</li>
+    <li>События календаря используются только для показа календаря, уведомлений о ближайшем событии, списка событий и (при явном выборе переключателя на событии) записи или удаления этого события в подключённом календаре Google или iCloud.</li>
+    <li>Для авторизации Google OAuth 2.0 используются публичные ключи настольного приложения (<code>client_id</code> / <code>client_secret</code>) вместе с механизмом PKCE (<code>S256</code>) и временным локальным сокетом (<code>127.0.0.1</code>).</li>
     <li>Данные из API Google используются только для работы описанных функций. Они не используются для разработки рекламы, построения профилей пользователей и обучения моделей ИИ.</li>
     <li>Использование полученных от API Google данных соответствует Политике пользовательских данных сервисов API Google, включая требования Limited Use.</li>
   </ul>
 
   <h2>4. Где хранятся данные</h2>
   <ul>
-    <li>Данные хранятся только на вашем компьютере, в папке данных Island в профиле пользователя Windows.</li>
-    <li>Токены доступа, пароли приложений и ссылки на календари шифруются через Windows DPAPI (<code>CryptProtectData</code>). Защищённый файл не открывается другой учётной записью Windows и на другом компьютере.</li>
-    <li>Кэш событий календаря также хранится локально, чтобы календарь работал без сети.</li>
+    <li>Данные хранятся только на вашем компьютере, в папке данных Kite Island (<code>%APPDATA%\island</code>) в профиле пользователя Windows.</li>
+    <li>Токены OAuth и пароли приложений Apple (<code>%APPDATA%\island\cal_accounts.bin</code>), история буфера и «Быстрый доступ» (<code>clipboard.txt</code>, <code>quick.txt</code>), а также ссылки на календари и кэш событий (<code>%APPDATA%\island\calendar_cache_*.ics</code>) шифруются через Windows DPAPI (<code>CryptProtectData</code>). Защищённый файл не открывается другой учётной записью Windows и на другом компьютере.</li>
+    <li>Кэш событий, очередь отложенной записи в календарь (<code>events.txt</code>, <code>events_sync.txt</code>), правила уведомлений (<code>notif_rules.txt</code>, <code>notif_read.txt</code>) и кэш иконок приложений также хранятся локально на вашем компьютере.</li>
     <li>Разработчик не получает копий этих данных.</li>
   </ul>
 
   <h2>5. Передача третьим лицам</h2>
-  <p>Island отправляет данные только сервисам из раздела 2 и только для тех функций, которыми вы пользуетесь. Данные не продаются, не передаются и не сдаются другим третьим лицам. Google и Apple получают запросы с вашего компьютера так же, как от любого другого календарного приложения.</p>
+  <p>Kite Island отправляет данные только сервисам из раздела 2 и только для тех функций, которыми вы пользуетесь. Данные не продаются, не передаются и не сдаются другим третьим лицам. Google и Apple получают запросы с вашего компьютера так же, как от любого другого календарного приложения.</p>
 
   <h2>6. Ваш выбор и удаление данных</h2>
   <ul>
-    <li>Вы сами решаете, подключать ли Google, Apple iCloud или ссылку на календарь. Любой аккаунт можно отключить в настройках программы. При отключении токены, пароли и кэш удаляются с вашего компьютера.</li>
+    <li>Вы сами решаете, подключать ли Google, Apple iCloud, ссылку на календарь или доступ к уведомлениям Windows. Любой аккаунт календаря можно отключить в настройках программы (при отключении токены, пароли и кэш удаляются с вашего компьютера), а доступ к уведомлениям — в параметрах конфиденциальности Windows.</li>
     <li>Доступ можно отозвать в любой момент: <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a> (Google) или в настройках Apple ID (Apple).</li>
-    <li>Чтобы удалить все данные Island, удалите папку данных Island в профиле пользователя Windows и удалите программу.</li>
+    <li>Чтобы удалить все данные Kite Island, удалите папку <code>%APPDATA%\island</code> в профиле пользователя Windows и удалите программу.</li>
   </ul>
 
   <h2>7. Дети</h2>
-  <p>Island не предназначен для детей младше 13 лет и сознательно не собирает их данные.</p>
+  <p>Kite Island не предназначен для детей младше 13 лет и сознательно не собирает их данные.</p>
 
   <h2>8. Изменения политики</h2>
   <p>Политика может меняться. Дата вверху показывает последнее обновление. Изменения публикуются на этой странице и в репозитории проекта.</p>
