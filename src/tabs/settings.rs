@@ -17,7 +17,7 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use crate::anim::Spring;
 use crate::config::{Config, DEFAULT_RADIUS, DEFAULT_SCALE, MAX_RADIUS, MAX_SCALE, MIN_SCALE, Material};
 use crate::theme::{self, PaletteStyle, Rgb};
-use crate::ui::{chip_bg, dim, icon, ink, inset, txt, Canvas, Rect, Submit, Ui, WHITE};
+use crate::ui::{card, chip_bg, dim, fg, icon, ink, inset, mix, txt, Canvas, Rect, Submit, Ui, WHITE};
 
 use super::{id, PAD, SETTINGS, TOP};
 
@@ -53,13 +53,12 @@ const N_PALETTE_STYLE: u32 = 27;
 const N_SECTION: u32 = 30;
 /// Занимает пять номеров подряд (33–37) — по числу `MATERIALS`.
 const N_MATERIAL: u32 = 33;
-/// Три группы по номеру вкладки (+0..6): переключатель, «вверх», «вниз».
-/// Строки списка вкладок нумеруются номером вкладки; на каждую группу отведено `TAB_SLOTS` номеров.
+/// Группы по номеру вкладки (+0..): переключатель, перетаскивание, переименование, удаление.
+/// На каждую группу отведено `TAB_SLOTS` номеров.
 const TAB_SLOTS: u32 = 2000;
 const N_SWITCH: u32 = 1000;
-const N_UP: u32 = N_SWITCH + TAB_SLOTS;
-const N_DOWN: u32 = N_UP + TAB_SLOTS;
-const N_EDIT: u32 = N_DOWN + TAB_SLOTS;
+const N_DRAG: u32 = N_SWITCH + TAB_SLOTS;
+const N_EDIT: u32 = N_DRAG + TAB_SLOTS;
 const N_DEL: u32 = N_EDIT + TAB_SLOTS;
 const N_NAME: u32 = 120;
 const N_CREATE: u32 = 121;
@@ -164,6 +163,21 @@ enum Target {
     Bg,
 }
 
+/// Состояние перетаскивания строки вкладки мышью.
+#[derive(Clone, Copy, Debug)]
+struct TabDrag {
+    /// Номер перетаскиваемой вкладки (индекс в `rows`).
+    tab: usize,
+    /// Координаты мыши в момент нажатия.
+    press_pos: (f32, f32),
+    /// Смещение курсора от верхнего края строки в момент нажатия.
+    grab_y: f32,
+    /// Движение превысило порог гистерезиса: жест стал перетаскиванием, а не кликом.
+    live: bool,
+    /// Целевая позиция в списке `order`.
+    target: usize,
+}
+
 pub struct Settings {
     /// Рабочая копия настроек; наружу уходит через `take_change`.
     cfg: Config,
@@ -181,6 +195,7 @@ pub struct Settings {
     /// Положение строки списка вкладок по номеру вкладки.
     rows: Vec<Spring>,
     rows_ready: bool,
+    tab_drag: Option<TabDrag>,
     /// Собственная вкладка (позиция в `Config::custom`), чьё название сейчас правят в форме справа.
     renaming: Option<usize>,
     /// Собственная вкладка, у которой нажата корзина и ждёт подтверждения.
@@ -203,6 +218,7 @@ impl Default for Settings {
             autostart: false,
             rows: Vec::new(),
             rows_ready: false,
+            tab_drag: None,
             renaming: None,
             confirm_del: None,
             section: Section::Look,
@@ -245,6 +261,7 @@ impl Settings {
         self.glow = false;
         self.autostart = crate::sys::autostart_enabled();
         self.rows_ready = false;
+        self.tab_drag = None;
         self.hsv = theme::rgb_to_hsv(self.current());
         self.transparency_cache = None;
         crate::update::mark_notes_seen();
@@ -266,6 +283,7 @@ impl Settings {
         if !self.changed {
             self.cfg = cfg.clone();
             self.rows_ready = false;
+            self.tab_drag = None;
         }
     }
 
@@ -340,9 +358,13 @@ impl Settings {
         self.changed = true;
     }
 
-    fn move_tab(&mut self, pos: usize, to: usize) {
+    fn move_tab(&mut self, from: usize, to: usize) {
         let mut order = self.order();
-        order.swap(pos, to);
+        if from >= order.len() || to >= order.len() || from == to {
+            return;
+        }
+        let tab = order.remove(from);
+        order.insert(to, tab);
         self.cfg.tabs = order.iter().map(|&i| self.cfg.tab_key(i)).collect();
         self.changed = true;
     }
@@ -383,6 +405,7 @@ impl Settings {
         self.renaming = None;
         self.confirm_del = None;
         self.rows_ready = false;
+        self.tab_drag = None;
         self.changed = true;
     }
 
@@ -426,6 +449,7 @@ impl Settings {
                 self.section = *sec;
                 // Строки вкладок встают на место без анимации из старых позиций.
                 self.rows_ready = false;
+                self.tab_drag = None;
                 self.renaming = None;
                 self.confirm_del = None;
             }
@@ -781,14 +805,108 @@ impl Settings {
             self.rows_ready = true;
         }
         let view = Rect::new(rc.x + 4.0, y + 16.0, rc.w - 8.0, (rc.bottom() - y - 22.0).max(0.0));
-        let off = ui.scroll_begin(cv, id(SETTINGS, N_SCROLL), view, order.len() as f32 * ROW_PITCH);
-        let mut action: Option<(usize, i32)> = None;
+        let scroll_id = id(SETTINGS, N_SCROLL);
+        let off = ui.scroll_begin(cv, scroll_id, view, order.len() as f32 * ROW_PITCH);
+
+        let mut dropped: Option<(usize, usize)> = None;
+        if let Some(mut d) = self.tab_drag.take() {
+            if let Some(cur_pos) = order.iter().position(|&t| t == d.tab) {
+                if order.len() > 1 {
+                    let drag_id = id(SETTINGS, N_DRAG + d.tab as u32);
+                    let ptr = ui.pointer();
+                    if ui.is_dragging(drag_id) {
+                        if !d.live && (ptr.0 - d.press_pos.0).hypot(ptr.1 - d.press_pos.1) > 4.0 {
+                            d.live = true;
+                        }
+                        if d.live {
+                            const SCROLL_ZONE: f32 = 16.0;
+                            const SCROLL_SPEED: f32 = 3.0;
+                            if ptr.1 < view.y + SCROLL_ZONE {
+                                ui.scroll_jump(scroll_id, (off - SCROLL_SPEED).max(0.0));
+                            } else if ptr.1 > view.bottom() - SCROLL_ZONE {
+                                ui.scroll_jump(scroll_id, off + SCROLL_SPEED);
+                            }
+
+                            let max_y = ((order.len() - 1) as f32 * ROW_PITCH).max(0.0);
+                            let drag_y = (ptr.1 - d.grab_y - view.y + off).clamp(0.0, max_y);
+                            self.rows[d.tab].value = drag_y;
+                            self.rows[d.tab].target = drag_y;
+                            self.rows[d.tab].snap();
+
+                            let drag_cy = drag_y + ROW_H / 2.0;
+                            let mut target_slot = 0;
+                            let mut acc = 0.0f32;
+                            for (k, _) in order.iter().filter(|&&t| t != d.tab).enumerate() {
+                                let mid = acc + ROW_H / 2.0;
+                                if drag_cy > mid {
+                                    target_slot = k + 1;
+                                }
+                                acc += ROW_PITCH;
+                            }
+                            d.target = target_slot;
+
+                            let mut virt = order.clone();
+                            virt.remove(cur_pos);
+                            virt.insert(d.target, d.tab);
+                            for (pos, &t) in virt.iter().enumerate() {
+                                if t != d.tab {
+                                    self.rows[t].target = pos as f32 * ROW_PITCH;
+                                }
+                            }
+                        }
+                        self.tab_drag = Some(d);
+                    } else if d.live {
+                        let target_slot = d.target.min(order.len() - 1);
+                        dropped = Some((cur_pos, target_slot));
+                        let mut virt = order.clone();
+                        virt.remove(cur_pos);
+                        virt.insert(target_slot, d.tab);
+                        for (pos, &t) in virt.iter().enumerate() {
+                            self.rows[t].target = pos as f32 * ROW_PITCH;
+                        }
+                    }
+                }
+            }
+        }
+
+        let live_drag_tab = self
+            .tab_drag
+            .as_ref()
+            .filter(|d| d.live)
+            .map(|d| d.tab)
+            .or_else(|| dropped.map(|(from, _)| order[from]));
+        if live_drag_tab.is_none() {
+            for (pos, &tab) in order.iter().enumerate() {
+                self.rows[tab].target = pos as f32 * ROW_PITCH;
+            }
+        }
+
+        let mut draw_order = order.clone();
+        if let Some(drag_tab) = live_drag_tab {
+            if let Some(p) = draw_order.iter().position(|&t| t == drag_tab) {
+                draw_order.remove(p);
+                draw_order.push(drag_tab);
+            }
+        }
+
         let mut edit: Option<usize> = None;
         let mut del: Option<usize> = None;
-        for (pos, &tab) in order.iter().enumerate() {
-            self.rows[tab].target = pos as f32 * ROW_PITCH;
+        for &tab in &draw_order {
+            let is_dragged = live_drag_tab == Some(tab);
+            let drag_id = id(SETTINGS, N_DRAG + tab as u32);
+            let hv = ui.hover_of(drag_id);
             let r = Rect::new(x, view.y + self.rows[tab].value - off, iw - 6.0, ROW_H);
-            cv.rr(r, 6.0, inset());
+            if is_dragged {
+                cv.rr(r, 6.0, mix(card(), fg(), 0.12));
+                cv.rr_line(r, 6.0, mix(fg(), cv.accent, 0.45), 1.2);
+            } else {
+                let bg = if hv > 0.001 && live_drag_tab.is_none() {
+                    mix(inset(), fg(), 0.035 * hv)
+                } else {
+                    inset()
+                };
+                cv.rr(r, 6.0, bg);
+            }
             let hidden = self.hidden(tab);
             let mut on = !hidden;
             // Последняя видимая вкладка не выключается, а сверх лимита включить нельзя.
@@ -797,27 +915,9 @@ impl Settings {
                 self.set_hidden(tab, !on);
             }
             let custom = tab.checked_sub(crate::tabs::CUSTOM_BASE);
-            let label_w = r.w - 92.0 - if custom.is_some() { 42.0 } else { 0.0 };
-            cv.text(&self.cfg.tab_label(tab), Rect::new(r.x + 44.0, r.y, label_w, r.h), &f.body, if hidden { dim() } else { txt() });
-            let up = Rect::new(r.right() - 44.0, r.y + 1.5, 18.0, 18.0);
-            let down = Rect::new(r.right() - 23.0, r.y + 1.5, 18.0, 18.0);
-            if pos > 0 {
-                if ui.icon_button(cv, id(SETTINGS, N_UP + tab as u32), up, icon::UP, false, crate::i18n::pick("Переместить выше", "Move up")) {
-                    action = Some((pos, -1));
-                }
-            } else {
-                cv.glyph(icon::UP, up, false, D2D1_COLOR_F { a: 0.25, ..dim() });
-            }
-            if pos + 1 < order.len() {
-                if ui.icon_button(cv, id(SETTINGS, N_DOWN + tab as u32), down, icon::DOWN, false, crate::i18n::pick("Переместить ниже", "Move down")) {
-                    action = Some((pos, 1));
-                }
-            } else {
-                cv.glyph(icon::DOWN, down, false, D2D1_COLOR_F { a: 0.25, ..dim() });
-            }
             if let Some(k) = custom {
-                let pencil = Rect::new(r.right() - 86.0, r.y + 1.5, 18.0, 18.0);
-                let bin = Rect::new(r.right() - 65.0, r.y + 1.5, 18.0, 18.0);
+                let pencil = Rect::new(r.right() - 64.0, r.y + 1.5, 18.0, 18.0);
+                let bin = Rect::new(r.right() - 43.0, r.y + 1.5, 18.0, 18.0);
                 if ui.icon_button(cv, id(SETTINGS, N_EDIT + tab as u32), pencil, icon::EDIT, self.renaming == Some(k), crate::i18n::pick("Переименовать", "Rename")) {
                     edit = Some(k);
                 }
@@ -836,10 +936,38 @@ impl Settings {
                     }
                 }
             }
+            let label_w = r.w - 72.0 - if custom.is_some() { 44.0 } else { 0.0 };
+            cv.text(&self.cfg.tab_label(tab), Rect::new(r.x + 44.0, r.y, label_w, r.h), &f.body, if hidden { dim() } else { txt() });
+            if order.len() > 1 {
+                let gx = r.right() - 15.0;
+                let gy = r.y + (r.h - 10.0) * 0.5;
+                let grip_c = if is_dragged {
+                    cv.accent
+                } else {
+                    D2D1_COLOR_F { a: 0.45 + 0.4 * hv, ..dim() }
+                };
+                for row in 0..3 {
+                    for col in 0..2 {
+                        cv.rr(Rect::new(gx + col as f32 * 4.0, gy + row as f32 * 4.0, 2.0, 2.0), 1.0, grip_c);
+                    }
+                }
+            }
+            ui.click_area(drag_id, r);
+            if order.len() > 1 && self.tab_drag.is_none() && ui.is_dragging(drag_id) {
+                self.tab_drag = Some(TabDrag {
+                    tab,
+                    press_pos: ui.pointer(),
+                    grab_y: ui.pointer().1 - r.y,
+                    live: false,
+                    target: order.iter().position(|&t| t == tab).unwrap_or(0),
+                });
+            }
         }
-        ui.scroll_end(cv, id(SETTINGS, N_SCROLL));
-        if let Some((pos, d)) = action {
-            self.move_tab(pos, (pos as i32 + d) as usize);
+        ui.scroll_end(cv, scroll_id);
+        if let Some((from, to)) = dropped {
+            if from != to {
+                self.move_tab(from, to);
+            }
         }
         if let Some(k) = edit {
             self.renaming = Some(k);
@@ -1066,6 +1194,11 @@ mod tests {
         assert!(s.take_change().is_none(), "изменение отдаётся один раз");
         c.hidden_tabs.clear();
         assert_eq!(c.ordered_tabs()[0], crate::tabs::TODAY);
+
+        s.move_tab(0, 3);
+        assert_eq!(&s.cfg.tabs[..4], &["Controls", "Stats", "Clipboard", "Today"]);
+        s.move_tab(3, 1);
+        assert_eq!(&s.cfg.tabs[..4], &["Controls", "Today", "Stats", "Clipboard"]);
     }
 
     #[test]
@@ -1190,8 +1323,7 @@ mod tests {
             (N_SECTION, SECTIONS.len() as u32),
             (N_MATERIAL, MATERIALS.len() as u32),
             (N_SWITCH, tabs),
-            (N_UP, tabs),
-            (N_DOWN, tabs),
+            (N_DRAG, tabs),
             (N_EDIT, tabs),
             (N_DEL, tabs),
             (N_NAME, 1),
