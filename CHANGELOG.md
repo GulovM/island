@@ -4,6 +4,28 @@
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-11-14
+
+### RU
+
+- Добавлен центр уведомлений Windows (иконка колокольчика рядом с шестерёнкой): просмотр системных уведомлений и напоминаний календаря, отметка «Прочитано», очистка, правила для приложений по правому клику (обычные, беззвучные, отключены), общий дисковый кэш иконок и всплывающая капсула под чёлкой (`Всплывающие уведомления` в Настройках → Система).
+- По левому и правому краям свёрнутой чёлки при воспроизведении музыки анимируются живые стерео-аудиоволны (WASAPI), а в стиле macOS активный таймер получил оранжевую окантовку.
+- Левый и правый значки свёрнутого острова настраиваются в Настройках → Система (`layout`, `wifi` / режим полёта, `bluetooth` с индикацией подключения, `battery` или пусто).
+- Вкладка «Сегодня»: добавлены уровни важности задач, скрываемое поле добавления и удаление слов по `Ctrl+Backspace` / `Fn+Backspace`; переработан UX/UI календаря и читаемость кнопок `+`.
+- Вкладка «Управления»: обновлён дизайн и размеры (`1×1`, `1×2`) виджета батареи, цвета батареи в стиле macOS, ползунки в стиле Windows и исправлено определение состояния Wi-Fi и Bluetooth.
+- Настройки вкладок: порядок вкладок теперь меняется перетаскиванием мышью вместо кнопок со стрелками.
+- Стекло и контраст: исправлено размытие подложки в Windows 11, учёт прозрачности переднего плана и стекла в APCA, а бюджет памяти и документация приведены к фактическим замерам (до ~55 МБ в пике).
+
+### EN
+
+- Added a Windows Notification Center (bell icon next to Settings): system notifications and calendar reminders, mark-read and clear-all actions, per-app right-click rules (Normal, Silent, Disabled), shared disk icon caching, and a floating capsule popup (`Popup notifications` in Settings → System).
+- Added live stereo audio waves along the left and right edges of the collapsed notch during playback (WASAPI) and an orange border for the active timer badge in macOS style.
+- Left and right collapsed notch slots are now configurable in Settings → System (`layout`, `wifi` / airplane mode, `bluetooth` with connected-device state, `battery`, or `none`).
+- Today tab: added task importance levels, an auto-hiding add-task field, and `Ctrl+Backspace` / `Fn+Backspace` word deletion; redesigned calendar UX/UI and `+` button contrast.
+- Controls tab: redesigned Battery widget (`1×1`, `1×2`), added macOS battery colours and Windows-style sliders, and fixed Wi-Fi and Bluetooth status detection.
+- Tab settings: tab order is now changed by mouse drag-and-drop instead of arrow buttons.
+- Glass and contrast: fixed Windows 11 backdrop blur, factored foreground and glass opacity into APCA contrast checks, and updated memory budgets and documentation to match measured usage (up to ~55 MB peak).
+
 ## [1.5.0] — 2026-11-13
 
 ### RU
@@ -386,7 +408,13 @@
 - Установщик (Inno Setup, установка без прав администратора) и portable-архив, `SHA256SUMS.txt`.
 - Лицензия MIT.
 
-[Unreleased]: https://github.com/GulovM/island/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/GulovM/island/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/GulovM/island/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/GulovM/island/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/GulovM/island/compare/v1.3.1...v1.4.0
+[1.3.1]: https://github.com/GulovM/island/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/GulovM/island/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/GulovM/island/compare/v1.0.0...v1.2.0
 [1.0.0]: https://github.com/GulovM/island/compare/v0.7.0...v1.0.0
 [0.7.0]: https://github.com/GulovM/island/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/GulovM/island/compare/v0.5.2...v0.6.0
