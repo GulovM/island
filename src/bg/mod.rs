@@ -66,6 +66,7 @@ pub struct Snapshot {
 mod audio_policy;
 mod bluetooth;
 mod devices;
+mod meter;
 mod media;
 mod net;
 pub mod notif;
@@ -74,6 +75,7 @@ mod wifi;
 mod winrt;
 
 pub use devices::{list, status, DevItem, ListKind};
+pub use meter::AudioMeter;
 pub use media::{Media, Timeline, ART};
 pub use net::{net_status, NetStatus};
 pub use notif::{Access as NotifAccess, SysNotif, ICON_PX as NOTIF_ICON_PX};

@@ -133,11 +133,11 @@ impl App {
         (self.tab_w(id) * self.scale, self.tab_h(id) * self.scale)
     }
 
+    /// Размер свёрнутой капсулы: расширяется на ширину плашки активного таймера.
     pub(crate) fn idle_pill_size(&self) -> (f32, f32) {
         let (w, h) = self.collapsed();
         let timer = !self.expanded && !self.stripped() && !self.hidden && self.live.timer().is_some();
-        let playing = !self.expanded && !self.stripped() && !self.hidden && self.cfg.live_media && self.live.playing();
-        let extra = if timer { face::TIMER_SLOT_W } else { 0.0 } + if playing { face::WAVE_SLOT_W } else { 0.0 };
+        let extra = if timer { face::TIMER_SLOT_W } else { 0.0 };
         (w + extra, h)
     }
 
@@ -451,8 +451,15 @@ impl App {
         let r = ((win_w + cw) / 2.0).max((win_w + tw) / 2.0);
         let t = cur_y0.min(target_y0);
         let b = (cur_y0 + ch).max(target_y0 + th);
-        // «Ушки» выходят за тело острова с обеих сторон.
-        let ears = cur_ear.max(if target_y0 == 0.0 { EAR * self.scale } else { 0.0 });
+        // «Ушки» и боковые аудиоволны выходят за тело свёрнутой чёлки с обеих сторон.
+        let wave_ears = if !self.expanded && !self.stripped() && !self.hidden && target_y0 == 0.0 && self.live.wave_alpha() > 0.004 {
+            crate::render::WAVE_EDGE_REACH * self.scale
+        } else {
+            0.0
+        };
+        let ears = cur_ear
+            .max(if target_y0 == 0.0 { EAR * self.scale } else { 0.0 })
+            .max(wave_ears);
         // Допуск нужен только раскрытому острову, чтобы край не «дрожал»; свёрнутый — без запаса.
         let slop = if self.expanded { HIT_SLOP * self.scale } else { 0.0 };
         (

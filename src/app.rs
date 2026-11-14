@@ -8,8 +8,10 @@ use super::*;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum LiveTick {
     Off,
-    /// ~30 кадров в секунду: эквалайзер мини-плеера и мигание паузы таймера.
+    /// ~15 кадров в секунду: мигание паузы таймера.
     Frames,
+    /// ~30 кадров в секунду: боковые волны под системный звук на обычной свёрнутой чёлке.
+    Wave,
     /// Раз в секунду, по смене цифры таймера.
     Seconds,
 }
@@ -619,11 +621,20 @@ impl App {
         } else {
             0.0
         };
-        // Часы, раскладка, Wi-Fi и эквалайзер — только когда свёрнутому острову больше нечего показывать.
+        // Часы, раскладка, Wi-Fi и таймер — только когда свёрнутому острову больше нечего показывать.
         let idle = form == live::Form::Idle && !self.expanded && !self.stripped() && !self.hidden;
-        let wave_on = idle && self.cfg.live_media && self.live.playing();
-        self.live.set_wave_active(wave_on);
-        self.face.set_visible(idle, self.live.timer().is_some(), wave_on);
+        self.live.set_wave_active(self.collapsed_wave_on());
+        self.face.set_visible(idle, self.live.timer().is_some());
+    }
+
+    /// Активны ли боковые музыкальные волны (строго только в обычной свёрнутой чёлке).
+    pub(crate) fn collapsed_wave_on(&self) -> bool {
+        self.cfg.live_media
+            && self.live.playing()
+            && !self.expanded
+            && !self.stripped()
+            && !self.hidden
+            && self.live_form() == live::Form::Idle
     }
 
     /// Наводит каплю на выбранную вкладку; при свёрнутом острове или смене набора вкладок — без анимации.
@@ -859,16 +870,17 @@ mod tests {
         app.live.sync_media(&snap);
         app.retarget();
 
-        // Свёрнутая капсула расширяется на WAVE_SLOT_W, лицо и волна активны даже при idle_face = false
+        // Свёрнутая чёлка не расширяется под эквалайзер, лицо скрыто при idle_face = false, но активны боковые волны
         assert_eq!(app.live_form(), live::Form::Idle);
-        assert_eq!(app.idle_pill_size().0, base_w + face::WAVE_SLOT_W);
-        assert!(app.face.visible());
+        assert_eq!(app.idle_pill_size().0, base_w);
+        assert!(!app.face.visible());
+        assert!(app.collapsed_wave_on());
         while app.live.animating() {
             app.live.step(0.05);
         }
         assert!(app.live.wave_alpha() > 0.99);
 
-        // При активном таймере добавляется также TIMER_SLOT_W
+        // При активном таймере добавляется только TIMER_SLOT_W, лицо показывает плашку таймера
         app.live.set_timer(Some(live::TimerView {
             frac: 0.5,
             secs: 60,
@@ -876,11 +888,30 @@ mod tests {
             next_ms: 1000,
         }));
         app.retarget();
-        assert_eq!(app.idle_pill_size().0, base_w + face::TIMER_SLOT_W + face::WAVE_SLOT_W);
+        assert_eq!(app.idle_pill_size().0, base_w + face::TIMER_SLOT_W);
+        assert!(app.face.visible());
 
-        // При разворачивании острова капсула и волна гаснут
+        // В режиме полоски боковые волны отключаются и гаснут
+        app.cfg.always_strip = true;
+        app.retarget();
+        assert!(!app.collapsed_wave_on());
+        while app.live.animating() {
+            app.live.step(0.05);
+        }
+        assert!(app.live.wave_alpha() < 0.01);
+
+        // В обычной чёлке волны возвращаются, а при разворачивании острова — снова гаснут
+        app.cfg.always_strip = false;
+        app.retarget();
+        assert!(app.collapsed_wave_on());
+        while app.live.animating() {
+            app.live.step(0.05);
+        }
+        assert!(app.live.wave_alpha() > 0.99);
+
         app.expanded = true;
         app.retarget();
+        assert!(!app.collapsed_wave_on());
         assert!(!app.face.visible());
         while app.live.animating() {
             app.live.step(0.05);

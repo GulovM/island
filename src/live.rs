@@ -134,6 +134,13 @@ pub struct Live {
     /// Входящее системное уведомление для всплывающего баннера.
     notice: Option<PopupNotice>,
     wave_a: Spring,
+    /// Измеритель пиков системного аудио и сглаженная огибающая по каналам `[L, R]`.
+    wave_meter: crate::bg::AudioMeter,
+    wave_audio_dev: Option<String>,
+    wave_lvl: [f32; 2],
+    wave_flux: [f32; 2],
+    wave_agc: f32,
+    wave_phase: f32,
     toast_a: Spring,
     rev: u64,
     ac: Option<bool>,
@@ -143,7 +150,7 @@ pub struct Live {
     /// Таймер Today для свёрнутой формы и плавная доля полоски.
     timer: Option<TimerView>,
     timer_frac: Spring,
-    /// Начало отсчёта анимации эквалайзера.
+    /// Начало отсчёта анимации.
     t0: Instant,
 }
 
@@ -157,6 +164,12 @@ impl Live {
             event: None,
             notice: None,
             wave_a: Spring::unit(0.0, FADE_SPRING.0, FADE_SPRING.1),
+            wave_meter: crate::bg::AudioMeter::new(),
+            wave_audio_dev: None,
+            wave_lvl: [0.0; 2],
+            wave_flux: [0.0; 2],
+            wave_agc: 0.25,
+            wave_phase: 0.0,
             toast_a: Spring::unit(0.0, 260.0, 30.0),
             rev: 0,
             ac: None,
@@ -230,6 +243,10 @@ impl Live {
             return false;
         }
         self.rev = snap.rev;
+        if snap.audio != self.wave_audio_dev {
+            self.wave_audio_dev = snap.audio.clone();
+            self.wave_meter.invalidate();
+        }
         let old = self.media.take();
         // Свёрнутый остров показывает то, что звучит, а не источник, выбранный стрелками в карточке.
         let mut new = snap.live_media.clone();
@@ -332,23 +349,89 @@ impl Live {
         }
     }
 
-    /// Выставляет целевую прозрачность волны эквалайзера в свёрнутой чёлке.
+    /// Выставляет целевую прозрачность боковых волн в обычной свёрнутой чёлке.
     pub fn set_wave_active(&mut self, active: bool) {
         self.wave_a.target = if active { 1.0 } else { 0.0 };
+        if !active {
+            self.wave_meter.reset();
+        }
     }
 
     pub fn wave_alpha(&self) -> f32 {
         self.wave_a.value.clamp(0.0, 1.0)
     }
 
-    pub fn wave_phase(&self) -> f32 {
-        self.t0.elapsed().as_secs_f32()
+    /// Возвращает `(alpha, lvl [L, R], flux [L, R], phase)`, если волны видны.
+    pub fn wave_state(&self) -> Option<(f32, [f32; 2], [f32; 2], f32)> {
+        let a = self.wave_alpha();
+        (a > 0.004).then_some((a, self.wave_lvl, self.wave_flux, self.wave_phase))
+    }
+
+    /// Обновляет сглаженные уровни, всплеск фронта и фазу волн по стерео-пикам `[L, R]`.
+    pub fn feed_wave_peaks(&mut self, raw_l: f32, raw_r: f32, dt: f32) {
+        if dt <= 0.0 {
+            return;
+        }
+        const MIN_AGC: f32 = 0.08;
+        let l = if raw_l.is_finite() { raw_l.clamp(0.0, 1.0) } else { 0.0 };
+        let r = if raw_r.is_finite() { raw_r.clamp(0.0, 1.0) } else { 0.0 };
+        let raw_max = l.max(r);
+        if raw_max > self.wave_agc {
+            let k = 1.0 - (-dt / 0.08).exp();
+            self.wave_agc += (raw_max - self.wave_agc) * k;
+        } else {
+            let k = 1.0 - (-dt / 3.5).exp();
+            self.wave_agc += (raw_max.max(MIN_AGC) - self.wave_agc) * k;
+        }
+        let denom = self.wave_agc.max(MIN_AGC);
+        let norm = |v: f32| if v <= 0.002 { 0.0 } else { (v / denom).clamp(0.0, 1.0).powf(0.75) };
+        let nl = norm(l);
+        let nr = norm(r);
+        let targets = [nl * 0.84 + nr * 0.16, nr * 0.84 + nl * 0.16];
+
+        let flux_decay = (-dt / 0.14).exp();
+        for (i, target) in targets.into_iter().enumerate() {
+            let cur = self.wave_lvl[i];
+            let onset = (target - cur).max(0.0);
+            let tau = if target > cur { 0.035 } else { 0.16 };
+            let k = 1.0 - (-dt / tau).exp();
+            self.wave_lvl[i] = (cur + (target - cur) * k).clamp(0.0, 1.0);
+            self.wave_flux[i] = (self.wave_flux[i] * flux_decay).max((onset * 2.2).clamp(0.0, 1.0));
+        }
+
+        let avg_l = 0.5 * (self.wave_lvl[0] + self.wave_lvl[1]);
+        let avg_f = 0.5 * (self.wave_flux[0] + self.wave_flux[1]);
+        self.wave_phase = (self.wave_phase + dt * (1.6 + 4.5 * avg_l + 2.8 * avg_f)) % 1000.0;
     }
 
     pub fn step(&mut self, dt: f32) {
         self.wave_a.step(dt);
         self.toast_a.step(dt);
         self.timer_frac.step(dt);
+        if self.wave_a.target > 0.5 {
+            #[cfg(not(test))]
+            {
+                let [rl, rr] = unsafe { self.wave_meter.sample() };
+                self.feed_wave_peaks(rl, rr, dt);
+            }
+            #[cfg(test)]
+            {
+                let avg_l = 0.5 * (self.wave_lvl[0] + self.wave_lvl[1]);
+                self.wave_phase = (self.wave_phase + dt * (1.6 + 4.5 * avg_l)) % 1000.0;
+            }
+        } else {
+            self.wave_meter.reset();
+            let decay = (-dt / 0.12).exp();
+            for i in 0..2 {
+                self.wave_lvl[i] *= decay;
+                self.wave_flux[i] *= decay;
+            }
+            if self.wave_a.value <= 0.001 {
+                self.wave_lvl = [0.0; 2];
+                self.wave_flux = [0.0; 2];
+                self.wave_agc = 0.25;
+            }
+        }
         if self.timer_frac.settled() {
             self.timer_frac.snap();
         }
@@ -630,5 +713,40 @@ mod tests {
         assert!(l.alert());
         l.clear_toast();
         assert!(!l.alert(), "после закрытия остров возвращается в прежнее состояние");
+    }
+
+    #[test]
+    fn wave_envelope_reacts_to_stereo_peaks_and_resets_when_disabled() {
+        let mut l = Live::new(true);
+        l.set_wave_active(true);
+        for _ in 0..5 {
+            l.feed_wave_peaks(0.8, 0.1, 0.033);
+            l.step(0.033);
+        }
+        let Some((_a, lvl, flux, phase)) = l.wave_state().or_else(|| {
+            for _ in 0..20 {
+                l.step(0.033);
+            }
+            l.wave_state()
+        }) else {
+            panic!("wave_state должен появиться после активации");
+        };
+        assert!(lvl[0] > lvl[1], "левый пик должен давать более сильную волну слева: {lvl:?}");
+        assert!(flux[0] >= 0.0 && phase > 0.0);
+
+        // Тишина уводит амплитуду обратно к нулю без фантомного усиления шума.
+        for _ in 0..40 {
+            l.feed_wave_peaks(0.0, 0.0, 0.033);
+        }
+        assert!(l.wave_lvl[0] < 0.05 && l.wave_lvl[1] < 0.05);
+
+        // Выключение волны затухает к 0 и сбрасывает огибающую.
+        l.feed_wave_peaks(0.9, 0.9, 0.033);
+        l.set_wave_active(false);
+        for _ in 0..40 {
+            l.step(0.033);
+        }
+        assert!(l.wave_state().is_none());
+        assert_eq!(l.wave_lvl, [0.0, 0.0]);
     }
 }

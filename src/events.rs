@@ -273,8 +273,7 @@ impl App {
                         SetTimer(Some(self.hwnd), LIVE_TIMER, t.next_ms, None);
                     }
                 }
-                let wave_on = self.cfg.live_media && self.live.playing() && !self.expanded && !self.stripped() && !self.hidden;
-                wave_on || self.live.timer().is_some()
+                self.collapsed_wave_on() || self.live.timer().is_some()
             }
             Ev::RightClick(px, py) => {
                 if self.expanded && self.notifications_open && (py as f32 / self.scale) > TAB_TOP + TAB_H {
@@ -443,8 +442,10 @@ impl App {
         // Тик нужен, только пока на острове виден эквалайзер музыки или таймер: кадры ~15 в секунду для
         // эквалайзера и мигания паузы, иначе — раз в секунду по смене цифры.
         let timer_shown = !self.expanded && !self.hidden && self.live.timer().is_some();
-        let wave_shown = self.cfg.live_media && self.live.playing() && !self.expanded && !self.stripped() && !self.hidden;
-        let tick = if wave_shown || timer_shown && self.live.timer().is_some_and(|t| t.paused) {
+        let wave_shown = self.collapsed_wave_on();
+        let tick = if wave_shown {
+            LiveTick::Wave
+        } else if timer_shown && self.live.timer().is_some_and(|t| t.paused) {
             LiveTick::Frames
         } else if timer_shown {
             LiveTick::Seconds
@@ -454,6 +455,9 @@ impl App {
         if tick != self.live_tick_on {
             self.live_tick_on = tick;
             match tick {
+                LiveTick::Wave => {
+                    SetTimer(Some(self.hwnd), LIVE_TIMER, WAVE_TICK_MS, None);
+                }
                 LiveTick::Frames => {
                     SetTimer(Some(self.hwnd), LIVE_TIMER, LIVE_TICK_MS, None);
                 }

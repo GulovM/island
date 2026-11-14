@@ -1,6 +1,9 @@
 use super::*;
 use crate::ui::status_orange;
 
+/// Максимальный горизонтальный вылет аудиоволн за боковые края чёлки (логические пиксели).
+pub(crate) const WAVE_EDGE_REACH: f32 = 18.0;
+
 impl App {
     /// Тулкит и состояние вкладок на время кадра выносятся из `self`, чтобы рисовать с `&self`.
     pub(crate) unsafe fn render(&mut self) -> Result<()> {
@@ -95,9 +98,10 @@ impl App {
             }
         }
 
-        // Мягкое оранжевое свечение вокруг свёрнутого острова при активном таймере.
+        // Мягкое оранжевое свечение вокруг свёрнутого острова при активном таймере
+        // (работает одинаково в стиле Windows и macOS).
         if self.live.timer().is_some() {
-            let op_frac = if self.cfg.glass { (opacity / 100.0).clamp(0.0, 1.0) } else { 1.0 };
+            let op_frac = timer_glow_opacity(pal.style, material, self.cfg.glass, opacity);
             let glow_a = op_frac * self.live.timer_pulse() * (1.0 - open).max(0.0);
             if glow_a > 0.005 {
                 let mut c = status_orange();
@@ -106,6 +110,14 @@ impl App {
                     g.brush.SetColor(&c);
                     g.dc.DrawGeometry(&body, &g.brush, width * s, None);
                 }
+            }
+        }
+
+        // Живые боковые аудиоволны (строго только в обычной свёрнутой чёлке, оба стиля).
+        let wave_vis = (1.0 - open).max(0.0) * k * (1.0 - detach).clamp(0.0, 1.0);
+        if wave_vis > 0.004 && !self.expanded && !self.stripped() && !self.hidden {
+            if let Some((wa, lvl, flux, phase)) = self.live.wave_state() {
+                self.draw_edge_waves(g, &pal, x0, y0, aw, ah, ear, r_bot, s, wa * wave_vis, lvl, flux, phase)?;
             }
         }
 
@@ -265,12 +277,7 @@ impl App {
                 Slot::Toast => self.live.draw_toast(ui, &cv, r, cursor),
                 Slot::Face => {
                     let label = self.live.timer().map(|t| t.label());
-                    let wave = if self.cfg.live_media && self.live.wave_alpha() > 0.004 {
-                        Some((self.live.wave_alpha(), self.live.wave_phase()))
-                    } else {
-                        None
-                    };
-                    self.face.draw(&cv, r, label.as_deref().map(|l| (l, self.live.timer_pulse())), wave);
+                    self.face.draw(&cv, r, label.as_deref().map(|l| (l, self.live.timer_pulse())));
                 }
                 Slot::Drop => self.draw_drop_pill(&cv, r),
             }
@@ -800,6 +807,237 @@ impl App {
         sink.Close()?;
         Ok(geo)
     }
+
+    /// Рисует слева и справа от обычной свёрнутой чёлки многослойные аудиоволны,
+    /// повторяющие профиль её краёв и откликающиеся на стерео-уровни звука.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn draw_edge_waves(
+        &self,
+        g: &Gfx,
+        pal: &theme::Palette,
+        x0: f32,
+        y0: f32,
+        aw: f32,
+        ah: f32,
+        ear: f32,
+        r_bot: f32,
+        s: f32,
+        vis: f32,
+        lvl: [f32; 2],
+        flux: [f32; 2],
+        phase: f32,
+    ) -> Result<()> {
+        if vis <= 0.004 || ah <= 4.0 * s {
+            return Ok(());
+        }
+        let round_style: Option<ID2D1StrokeStyle> = g.round.cast().ok();
+        let sides = [(0usize, -1.0f32), (1usize, 1.0f32)];
+        for (ch, dir) in sides {
+            let energy = (0.72 * lvl[ch] + 0.35 * flux[ch]).clamp(0.0, 1.0);
+
+            // Внутренний слой: мягкая цветная подсветка от самой кромки чёлки до первого гребня.
+            let pts0 = edge_wave_points(x0, y0, aw, ah, ear, r_bot, s, dir, 0, lvl[ch], flux[ch], phase);
+            if let Ok(fill_geo) = wave_fill_path(g, x0, y0, aw, ah, ear, r_bot, s, dir, &pts0) {
+                let mut fill_col = pal.accent;
+                fill_col.a = (0.11 + 0.24 * energy) * vis;
+                g.brush.SetColor(&fill_col);
+                g.dc.FillGeometry(&fill_geo, &g.brush, None);
+            }
+
+            // Три концентрических гребня волн: ближний яркий и два расходящихся в такт звуку.
+            for layer in 0..3usize {
+                let pts = if layer == 0 {
+                    pts0.clone()
+                } else {
+                    edge_wave_points(x0, y0, aw, ah, ear, r_bot, s, dir, layer, lvl[ch], flux[ch], phase)
+                };
+                let (width, core_a, glow_a, hi_k) = match layer {
+                    0 => (1.55 * s, (0.32 + 0.56 * energy) * vis, (0.10 + 0.16 * energy) * vis, 0.18 * energy + 0.22 * flux[ch]),
+                    1 => (1.20 * s, (0.14 + 0.52 * lvl[ch] + 0.24 * flux[ch]) * vis, 0.10 * energy * vis, 0.24 * flux[ch]),
+                    _ => {
+                        let outer_k = ((lvl[ch] + flux[ch] * 0.6 - 0.10) / 0.90).clamp(0.0, 1.0);
+                        (0.95 * s, 0.50 * outer_k * vis, 0.0, 0.12 * flux[ch])
+                    }
+                };
+                if core_a <= 0.01 {
+                    continue;
+                }
+                let Ok(stroke_geo) = wave_stroke_path(g, &pts) else { continue };
+                if glow_a > 0.008 {
+                    let mut gc = pal.accent;
+                    gc.a = glow_a;
+                    g.brush.SetColor(&gc);
+                    g.dc.DrawGeometry(&stroke_geo, &g.brush, width * 2.1, round_style.as_ref());
+                }
+                let mut cc = mix_highlight(pal.accent, hi_k);
+                cc.a = core_a.min(0.95);
+                g.brush.SetColor(&cc);
+                g.dc.DrawGeometry(&stroke_geo, &g.brush, width, round_style.as_ref());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Прозрачность оранжевой окантовки таймера для обоих стилей палитры (Windows и macOS).
+pub(crate) fn timer_glow_opacity(style: theme::PaletteStyle, material: crate::ios::Material, glass: bool, opacity: f32) -> f32 {
+    if !glass {
+        return 1.0;
+    }
+    match style {
+        theme::PaletteStyle::Windows => (opacity / 100.0).clamp(0.45, 1.0),
+        theme::PaletteStyle::Ios => match material {
+            crate::ios::Material::Ultrathin => 0.72,
+            crate::ios::Material::Thin => 0.80,
+            crate::ios::Material::Regular => 0.88,
+            crate::ios::Material::Thick => 0.94,
+            crate::ios::Material::Chrome => 1.0,
+        },
+    }
+}
+
+#[inline]
+fn mix_highlight(c: D2D1_COLOR_F, k: f32) -> D2D1_COLOR_F {
+    let k = k.clamp(0.0, 0.55);
+    D2D1_COLOR_F {
+        r: c.r + (1.0 - c.r) * k,
+        g: c.g + (1.0 - c.g) * k,
+        b: c.b + (1.0 - c.b) * k,
+        a: c.a,
+    }
+}
+
+/// X-координата внешней кромки чёлки (левой при `dir < 0`, правой при `dir > 0`) на относительной высоте `y_rel`.
+#[inline]
+fn notch_side_x(y_rel: f32, x0: f32, aw: f32, ah: f32, ear: f32, r_bot: f32, dir: f32) -> f32 {
+    let left_x = if ear > 0.0 && y_rel < ear {
+        let dy = ear - y_rel;
+        let dx = (ear * ear - dy * dy).max(0.0).sqrt();
+        (x0 - ear) + dx
+    } else if r_bot > 0.0 && y_rel > ah - r_bot {
+        let dy = y_rel - (ah - r_bot);
+        let dx = (r_bot * r_bot - dy * dy).max(0.0).sqrt();
+        (x0 + r_bot) - dx
+    } else {
+        x0
+    };
+    if dir < 0.0 {
+        left_x
+    } else {
+        x0 + aw + (x0 - left_x)
+    }
+}
+
+/// Вычисляет сглаженные контрольные точки одной боковой волны (`(x, y)` в пикселях окна).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn edge_wave_points(
+    x0: f32,
+    y0: f32,
+    aw: f32,
+    ah: f32,
+    ear: f32,
+    r_bot: f32,
+    s: f32,
+    dir: f32,
+    layer: usize,
+    lvl: f32,
+    flux: f32,
+    phase: f32,
+) -> Vec<(f32, f32)> {
+    const STEPS: usize = 16;
+    let energy = (0.72 * lvl + 0.35 * flux).clamp(0.0, 1.0);
+    let max_reach = (1.6 + 10.8 * lvl + 4.1 * flux).min(WAVE_EDGE_REACH - 1.5) * s;
+    let scale_k = match layer {
+        0 => 0.52,
+        1 => 0.78,
+        _ => 1.0,
+    };
+    let side_seed = if dir < 0.0 { 0.0 } else { 1.35 };
+    let lf = layer as f32;
+    let freq1 = 1.0 + 0.35 * lf;
+    let freq2 = 2.1 + 0.4 * lf;
+    let mod_depth = 0.20 + 0.80 * energy;
+
+    let mut pts = Vec::with_capacity(STEPS + 1);
+    for i in 0..=STEPS {
+        let u = i as f32 / STEPS as f32;
+        let t = 0.10 + 0.82 * u;
+        let y_rel = t * ah;
+        let y = y0 + y_rel;
+        let bx = notch_side_x(y_rel, x0, aw, ah, ear, r_bot, dir);
+        let env = (std::f32::consts::PI * u).sin().powf(0.8);
+        let w1 = (u * std::f32::consts::TAU * freq1 - phase * (1.15 + 0.25 * lf) + side_seed + lf * 0.95).sin();
+        let w2 = (u * std::f32::consts::TAU * freq2 + phase * 1.85 - side_seed * 0.6).cos();
+        let shape = (0.64 + mod_depth * (0.24 * w1 + 0.12 * w2)).clamp(0.18, 1.0);
+        let disp = (max_reach * scale_k * env * shape).max(0.4 * s);
+        pts.push((bx + dir * disp, y));
+    }
+    pts
+}
+
+#[inline]
+fn d2d_pt(x: f32, y: f32) -> Vector2 {
+    Vector2 { X: x, Y: y }
+}
+
+unsafe fn add_smooth_wave_points(sink: &ID2D1GeometrySink, pts: &[(f32, f32)]) {
+    if pts.len() < 2 {
+        return;
+    }
+    let first_mid = ((pts[0].0 + pts[1].0) * 0.5, (pts[0].1 + pts[1].1) * 0.5);
+    sink.AddLine(d2d_pt(first_mid.0, first_mid.1));
+    for i in 1..pts.len() - 1 {
+        let mid = ((pts[i].0 + pts[i + 1].0) * 0.5, (pts[i].1 + pts[i + 1].1) * 0.5);
+        sink.AddQuadraticBezier(&D2D1_QUADRATIC_BEZIER_SEGMENT {
+            point1: d2d_pt(pts[i].0, pts[i].1),
+            point2: d2d_pt(mid.0, mid.1),
+        });
+    }
+    let last = pts[pts.len() - 1];
+    sink.AddLine(d2d_pt(last.0, last.1));
+}
+
+unsafe fn wave_stroke_path(g: &Gfx, pts: &[(f32, f32)]) -> Result<ID2D1PathGeometry1> {
+    let geo = g.d2d.CreatePathGeometry()?;
+    let sink = geo.Open()?;
+    if let Some(&(x, y)) = pts.first() {
+        sink.BeginFigure(d2d_pt(x, y), D2D1_FIGURE_BEGIN_HOLLOW);
+        add_smooth_wave_points(&sink, pts);
+        sink.EndFigure(D2D1_FIGURE_END_OPEN);
+    }
+    sink.Close()?;
+    Ok(geo)
+}
+
+#[allow(clippy::too_many_arguments)]
+unsafe fn wave_fill_path(
+    g: &Gfx,
+    x0: f32,
+    y0: f32,
+    aw: f32,
+    ah: f32,
+    ear: f32,
+    r_bot: f32,
+    s: f32,
+    dir: f32,
+    pts: &[(f32, f32)],
+) -> Result<ID2D1PathGeometry1> {
+    let geo = g.d2d.CreatePathGeometry()?;
+    let sink = geo.Open()?;
+    if pts.len() >= 2 {
+        let inset = -dir * 1.5 * s;
+        let first_y = pts[0].1;
+        let first_inner_x = notch_side_x(first_y - y0, x0, aw, ah, ear, r_bot, dir) + inset;
+        sink.BeginFigure(d2d_pt(first_inner_x, first_y), D2D1_FIGURE_BEGIN_FILLED);
+        sink.AddLine(d2d_pt(pts[0].0, pts[0].1));
+        add_smooth_wave_points(&sink, pts);
+        let last_y = pts[pts.len() - 1].1;
+        let last_inner_x = notch_side_x(last_y - y0, x0, aw, ah, ear, r_bot, dir) + inset;
+        sink.AddLine(d2d_pt(last_inner_x, last_y));
+        sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+    }
+    sink.Close()?;
+    Ok(geo)
 }
 
 /// Линейный градиент между двумя точками (физические пиксели окна); цвета уже с нужной прозрачностью.
@@ -818,4 +1056,54 @@ unsafe fn pill_shadow_mask(g: &Gfx, pill: &D2D1_ROUNDED_RECT, outer: &D2D1_ROUND
         .ok()?;
     sink.Close().ok()?;
     mask.cast().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timer_glow_visible_in_both_windows_and_macos_styles() {
+        use crate::ios::Material;
+        use theme::PaletteStyle::{Ios, Windows};
+
+        // В macOS свечение таймера должно быть видно при любом материале и выключенном/включённом стекле.
+        for mat in [Material::Ultrathin, Material::Thin, Material::Regular, Material::Thick, Material::Chrome] {
+            let a = timer_glow_opacity(Ios, mat, true, 0.0);
+            assert!(a > 0.6, "в macOS с материалом {mat:?} оранжевая полоска должна быть видна: {a}");
+        }
+        assert_eq!(timer_glow_opacity(Ios, Material::Regular, false, 0.0), 1.0);
+
+        // В Windows учитывается ползунок прозрачности с нижней страховкой видимости.
+        assert!((timer_glow_opacity(Windows, Material::Regular, true, 80.0) - 0.8).abs() < 1e-5);
+        assert!(timer_glow_opacity(Windows, Material::Regular, true, 0.0) >= 0.45);
+        assert_eq!(timer_glow_opacity(Windows, Material::Regular, false, 0.0), 1.0);
+    }
+
+    #[test]
+    fn edge_wave_points_stay_within_margin_and_scale_with_level() {
+        let x0 = 200.0;
+        let y0 = 0.0;
+        let aw = 180.0;
+        let ah = 24.0;
+        let ear = 8.0;
+        let r_bot = 8.0;
+        let s = 1.5;
+
+        let quiet_l = edge_wave_points(x0, y0, aw, ah, ear, r_bot, s, -1.0, 2, 0.0, 0.0, 0.5);
+        let loud_l = edge_wave_points(x0, y0, aw, ah, ear, r_bot, s, -1.0, 2, 0.9, 0.8, 0.5);
+        let loud_r = edge_wave_points(x0, y0, aw, ah, ear, r_bot, s, 1.0, 2, 0.9, 0.8, 0.5);
+
+        let max_ext_l_quiet = quiet_l.iter().map(|&(x, _)| x0 - x).fold(0.0f32, f32::max);
+        let max_ext_l_loud = loud_l.iter().map(|&(x, _)| x0 - x).fold(0.0f32, f32::max);
+        let max_ext_r_loud = loud_r.iter().map(|&(x, _)| x - (x0 + aw)).fold(0.0f32, f32::max);
+
+        assert!(max_ext_l_loud > max_ext_l_quiet * 3.0, "громкий звук должен сильнее раздвигать волны: {max_ext_l_quiet} vs {max_ext_l_loud}");
+        assert!(max_ext_l_loud <= WAVE_EDGE_REACH * s);
+        assert!(max_ext_r_loud <= WAVE_EDGE_REACH * s);
+
+        for &(_, y) in loud_l.iter().chain(loud_r.iter()) {
+            assert!(y > y0 && y < y0 + ah, "волна должна оставаться по вертикали внутри краёв чёлки: y={y}");
+        }
+    }
 }

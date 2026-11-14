@@ -15,10 +15,6 @@ use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, icon, status_oran
 
 /// Дополнительная ширина свёрнутой чёлки под плашку активного таймера (логические пиксели).
 pub const TIMER_SLOT_W: f32 = 44.0;
-/// Дополнительная ширина свёрнутой чёлки под 4 столбика волны эквалайзера (логические пиксели).
-pub const WAVE_SLOT_W: f32 = 28.0;
-/// Визуальная ширина 4 столбиков волны (3 * 4.5 + 2.5).
-const WAVE_W: f32 = 16.0;
 
 pub struct Face {
     enabled: bool,
@@ -110,9 +106,9 @@ impl Face {
     }
 
     /// Нужно ли показывать лицо (остров свёрнут, ничто не закрывает).
-    /// `timer` / `playing` — на острове есть таймер или волна музыки: они показываются, даже если лицо выключено в настройках.
-    pub fn set_visible(&mut self, v: bool, timer: bool, playing: bool) {
-        self.visible = v && (self.enabled || timer || playing);
+    /// `timer` — на острове есть таймер: плашка показывается, даже если лицо выключено в настройках.
+    pub fn set_visible(&mut self, v: bool, timer: bool) {
+        self.visible = v && (self.enabled || timer);
         self.alpha.target = if self.visible { 1.0 } else { 0.0 };
     }
 
@@ -269,34 +265,18 @@ impl Face {
     }
 
     /// Рисует лицо внутри свёрнутого острова `r` (логические пиксели).
-    /// При активном таймере и/или музыке отображаются левый значок, время, плашка остатка таймера,
-    /// волна эквалайзера и правый значок. Если `self.enabled == false`, рисуются только `timer` и/или `wave`.
-    pub unsafe fn draw(&self, cv: &Canvas, r: Rect, timer: Option<(&str, f32)>, wave: Option<(f32, f32)>) {
+    /// При активном таймере отображаются левый значок, время, плашка остатка таймера и правый значок.
+    /// Если `self.enabled == false`, рисуется только `timer`.
+    pub unsafe fn draw(&self, cv: &Canvas, r: Rect, timer: Option<(&str, f32)>) {
         let f = &cv.g.fonts;
         let pill_h = 14.0;
         if !self.enabled {
-            match (timer, wave) {
-                (Some((label, pulse)), Some((wa, wp))) => {
-                    let pill_w = cv.text_w(label, &f.small_c) + 8.0;
-                    let gap = 10.0;
-                    let x0 = r.cx() - (pill_w + gap + WAVE_W) / 2.0;
-                    let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
-                    let pill_r = Rect::new(x0, r.cy() - pill_h / 2.0, pill_w, pill_h);
-                    t.rr(pill_r, pill_h / 2.0, status_orange());
-                    t.text(label, pill_r, &f.small_c, WHITE);
-                    self.draw_wave(cv, pill_r.right() + gap, r.cy(), wa, wp);
-                }
-                (Some((label, pulse)), None) => {
-                    let pill_w = cv.text_w(label, &f.small_c) + 8.0;
-                    let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
-                    let pill_r = Rect::new(r.cx() - pill_w / 2.0, r.cy() - pill_h / 2.0, pill_w, pill_h);
-                    t.rr(pill_r, pill_h / 2.0, status_orange());
-                    t.text(label, pill_r, &f.small_c, WHITE);
-                }
-                (None, Some((wa, wp))) => {
-                    self.draw_wave(cv, r.cx() - WAVE_W / 2.0, r.cy(), wa, wp);
-                }
-                (None, None) => {}
+            if let Some((label, pulse)) = timer {
+                let pill_w = cv.text_w(label, &f.small_c) + 8.0;
+                let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
+                let pill_r = Rect::new(r.cx() - pill_w / 2.0, r.cy() - pill_h / 2.0, pill_w, pill_h);
+                t.rr(pill_r, pill_h / 2.0, status_orange());
+                t.text(label, pill_r, &f.small_c, WHITE);
             }
             return;
         }
@@ -305,48 +285,27 @@ impl Face {
         let left_w = self.slot_w(cv, self.left);
         let right_w = self.slot_w(cv, self.right);
         self.draw_slot(cv, self.left, r.x + pad, left_w, r);
-        match (timer, wave) {
-            (None, None) => {
+        match timer {
+            None => {
                 cv.text(&self.time, Rect::new(r.x, r.y, r.w, r.h - 1.0), &f.body_c, collapsed_txt());
             }
-            _ => {
+            Some((label, pulse)) => {
                 let time_w = cv.text_w(&self.time, &f.body_b);
-                let pill_w = timer.map_or(0.0, |(label, _)| cv.text_w(label, &f.small_c) + 8.0);
-                let wave_w = if wave.is_some() { WAVE_W } else { 0.0 };
-                let gaps = 2 + usize::from(timer.is_some()) + usize::from(wave.is_some());
-
+                let pill_w = cv.text_w(label, &f.small_c) + 8.0;
                 let available = (r.right() - pad - right_w) - (r.x + pad);
-                let gap = (available - (left_w + time_w + pill_w + wave_w)) / gaps as f32;
+                let gap = (available - (left_w + time_w + pill_w)) / 3.0;
 
                 let mut x = r.x + pad + left_w + gap;
                 cv.text(&self.time, Rect::new(x, r.y, time_w + 1.0, r.h - 1.0), &f.body_b, collapsed_txt());
                 x += time_w + gap;
 
-                if let Some((label, pulse)) = timer {
-                    let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
-                    let pill_r = Rect::new(x, r.cy() - pill_h / 2.0, pill_w, pill_h);
-                    t.rr(pill_r, pill_h / 2.0, status_orange());
-                    t.text(label, pill_r, &f.small_c, WHITE);
-                    x += pill_w + gap;
-                }
-
-                if let Some((wa, wp)) = wave {
-                    self.draw_wave(cv, x, r.cy(), wa, wp);
-                }
+                let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
+                let pill_r = Rect::new(x, r.cy() - pill_h / 2.0, pill_w, pill_h);
+                t.rr(pill_r, pill_h / 2.0, status_orange());
+                t.text(label, pill_r, &f.small_c, WHITE);
             }
         }
         self.draw_slot(cv, self.right, r.right() - pad - right_w, right_w, r);
-    }
-
-    /// 4 скруглённых столбика эквалайзера шириной 2.5 px с шагом 4.5 px, окрашенных в `cv.accent`.
-    unsafe fn draw_wave(&self, cv: &Canvas, wx: f32, cy: f32, wave_alpha: f32, phase: f32) {
-        let wcv = Canvas { g: cv.g, alpha: cv.alpha * wave_alpha.clamp(0.0, 1.0), accent: cv.accent };
-        for (i, &(p, freq)) in [(0.0f32, 0.9f32), (0.8, 1.3), (1.7, 0.7), (2.5, 1.1)].iter().enumerate() {
-            let k = 0.5 + 0.5 * (phase * freq * std::f32::consts::TAU + p).sin();
-            let h = 3.0 + 9.0 * k;
-            let bx = wx + i as f32 * 4.5;
-            wcv.rr(Rect::new(bx, cy - h / 2.0, 2.5, h), 1.25, cv.accent);
-        }
     }
 
     /// Значок Wi-Fi: точка и три дуги, нарисованные примитивами (глифов в шрифте может не быть).
@@ -487,23 +446,21 @@ mod tests {
     #[test]
     fn hidden_face_fades_out() {
         let mut f = Face::new(true, CollapsedIcon::Layout, CollapsedIcon::Wifi);
-        f.set_visible(true, false, false);
+        f.set_visible(true, false);
         for _ in 0..120 {
             f.step(1.0 / 60.0);
         }
         assert!((f.alpha() - 1.0).abs() < 0.01 && !f.animating());
-        f.set_visible(false, false, false);
+        f.set_visible(false, false);
         for _ in 0..120 {
             f.step(1.0 / 60.0);
         }
         assert_eq!(f.alpha(), 0.0);
-        // Выключенное в настройках лицо не показывается, кроме случая, когда на острове идёт таймер или играет музыка.
+        // Выключенное в настройках лицо не показывается, кроме случая, когда на острове идёт таймер.
         let mut off = Face::new(false, CollapsedIcon::Layout, CollapsedIcon::Wifi);
-        off.set_visible(true, false, false);
+        off.set_visible(true, false);
         assert!(!off.visible());
-        off.set_visible(true, true, false);
-        assert!(off.visible());
-        off.set_visible(true, false, true);
+        off.set_visible(true, true);
         assert!(off.visible());
     }
 
@@ -606,16 +563,6 @@ mod tests {
                 assert!((gap1 - gap2).abs() < 0.5, "Зазоры 1 и 2 не равны: {gap1} vs {gap2} для метки {label}");
                 assert!((gap2 - gap3).abs() < 0.5, "Зазоры 2 и 3 не равны: {gap2} vs {gap3} для метки {label}");
                 assert!((gap1 - gap3).abs() < 0.5, "Зазоры 1 и 3 не равны: {gap1} vs {gap3} для метки {label}");
-
-                // Проверяем 5-элементную компоновку при одновременном таймере и волне эквалайзера
-                let r_w_both = 180.0 + TIMER_SLOT_W + WAVE_SLOT_W;
-                let pad_b = (r_w_both * 0.09).clamp(8.0, 16.0);
-                let wifi_left_b = (r_w_both - pad_b - 5.5) - 5.7;
-                let avail_b = (r_w_both - pad_b - wifi_w) - pad_b;
-                let gap_b = (avail_b - (lang_w + time_w + timer_w + WAVE_W)) / 4.0;
-                assert!(gap_b > 4.0, "Недостаточный зазор при таймере + волне: {gap_b} для {label}");
-                let wave_right = pad_b + lang_w + gap_b + time_w + gap_b + timer_w + gap_b + WAVE_W;
-                assert!(wave_right < wifi_left_b, "Волна ({wave_right}) наезжает на Wi-Fi ({wifi_left_b})");
             }
         }
     }
