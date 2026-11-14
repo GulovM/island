@@ -1,5 +1,6 @@
 //! Управление беспроводной сетью Wi-Fi: поиск сетей, подключение по профилю и WPA.
 
+use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::Instant;
 
 use windows::core::PCWSTR;
@@ -10,7 +11,26 @@ use super::devices::{set_status, store_list, DevItem, ListKind};
 use super::{send, Cmd};
 use crate::log;
 
-/// Открывает первый Wi-Fi-адаптер и вызывает `f(handle, guid)`.
+/// Снимок состояния Wi-Fi через Win32 WLAN API: включено ли радио и к какой сети подключено.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct WifiStatus {
+    pub(super) radio_on: bool,
+    pub(super) radio_known: bool,
+    pub(super) ssid: Option<String>,
+}
+
+/// Выбирает предпочтительный Wi-Fi-интерфейс (подключённый, иначе готовый, иначе первый).
+unsafe fn pick_interface(list: &WLAN_INTERFACE_INFO_LIST) -> Option<windows::core::GUID> {
+    let items = std::slice::from_raw_parts(list.InterfaceInfo.as_ptr(), list.dwNumberOfItems as usize);
+    items
+        .iter()
+        .find(|it| it.isState == wlan_interface_state_connected)
+        .or_else(|| items.iter().find(|it| it.isState != wlan_interface_state_not_ready))
+        .or_else(|| items.first())
+        .map(|it| it.InterfaceGuid)
+}
+
+/// Открывает первый (или активный) Wi-Fi-адаптер и вызывает `f(handle, guid)`.
 unsafe fn with_wlan<T>(f: impl FnOnce(HANDLE, &windows::core::GUID) -> T) -> Option<T> {
     let (mut ver, mut h) = (0u32, HANDLE::default());
     if WlanOpenHandle(2, None, &mut ver, &mut h) != 0 {
@@ -19,8 +39,7 @@ unsafe fn with_wlan<T>(f: impl FnOnce(HANDLE, &windows::core::GUID) -> T) -> Opt
     let mut out = None;
     let mut list: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
     if WlanEnumInterfaces(h, None, &mut list) == 0 && !list.is_null() {
-        if (*list).dwNumberOfItems > 0 {
-            let guid = (*list).InterfaceInfo[0].InterfaceGuid;
+        if let Some(guid) = pick_interface(&*list) {
             out = Some(f(h, &guid));
         }
         WlanFreeMemory(list as *const std::ffi::c_void);
@@ -234,14 +253,79 @@ pub(super) fn wifi_disconnect() {
         std::thread::sleep(std::time::Duration::from_millis(600));
         store_list(ListKind::Wifi, wifi_networks(false));
         send(Cmd::Net);
+        send(Cmd::Refresh);
     });
     if let Err(e) = spawned {
         log::error(&format!("не удалось запустить поток отключения Wi-Fi: {e}"));
     }
 }
 
-/// Имя сети Wi-Fi, к которой подключён первый беспроводной адаптер.
-pub(super) unsafe fn wifi_ssid() -> Option<String> {
+/// Подписка на события WLAN (подключение, отключение, смена радио, появление/удаление адаптера).
+pub(super) unsafe fn watch_wlan() {
+    static WLAN_HANDLE: AtomicIsize = AtomicIsize::new(0);
+    unsafe extern "system" fn on_wlan(data: *mut L2_NOTIFICATION_DATA, _ctx: *mut std::ffi::c_void) {
+        if data.is_null() {
+            return;
+        }
+        let d = &*data;
+        let code = d.NotificationCode as i32;
+        let changed = match d.NotificationSource {
+            WLAN_NOTIFICATION_SOURCE_ACM => matches!(
+                WLAN_NOTIFICATION_ACM(code),
+                c if c == wlan_notification_acm_connection_complete
+                    || c == wlan_notification_acm_disconnected
+                    || c == wlan_notification_acm_interface_arrival
+                    || c == wlan_notification_acm_interface_removal
+                    || c == wlan_notification_acm_operational_state_change
+                    || c == wlan_notification_acm_autoconf_enabled
+                    || c == wlan_notification_acm_autoconf_disabled
+            ),
+            WLAN_NOTIFICATION_SOURCE_MSM => code == wlan_notification_msm_radio_state_change.0,
+            _ => false,
+        };
+        if changed {
+            send(Cmd::Net);
+            send(Cmd::Radios);
+        }
+    }
+
+    if WLAN_HANDLE.load(Ordering::Relaxed) != 0 {
+        return;
+    }
+    let (mut ver, mut h) = (0u32, HANDLE::default());
+    if WlanOpenHandle(2, None, &mut ver, &mut h) != 0 {
+        return;
+    }
+    let src = WLAN_NOTIFICATION_SOURCES(WLAN_NOTIFICATION_SOURCE_ACM.0 | WLAN_NOTIFICATION_SOURCE_MSM.0);
+    let r = WlanRegisterNotification(h, src, true, Some(on_wlan), None, None, None);
+    if r != 0 {
+        log::error(&format!("WlanRegisterNotification вернул {r}"));
+        let _ = WlanCloseHandle(h, None);
+        return;
+    }
+    // Хэндл подписки живёт до конца процесса.
+    WLAN_HANDLE.store(h.0 as isize, Ordering::Relaxed);
+}
+
+/// Проверяет, включён ли хотя бы один PHY в `WLAN_RADIO_STATE` (программно и аппаратно).
+pub(crate) fn phy_radio_on(rs: &WLAN_RADIO_STATE) -> (bool, bool) {
+    let n = (rs.dwNumberOfPhys as usize).min(rs.PhyRadioState.len());
+    let mut known = false;
+    let mut on = false;
+    for phy in &rs.PhyRadioState[..n] {
+        if phy.dot11SoftwareRadioState != dot11_radio_state_unknown || phy.dot11HardwareRadioState != dot11_radio_state_unknown {
+            known = true;
+        }
+        if phy.dot11SoftwareRadioState == dot11_radio_state_on && phy.dot11HardwareRadioState == dot11_radio_state_on {
+            on = true;
+        }
+    }
+    (known, on)
+}
+
+/// Синхронно читает состояние Wi-Fi по всем адаптерам через Win32 WLAN API (< 1 мс).
+/// `None` — служба WLAN недоступна или адаптеров Wi-Fi нет (тогда остаётся WinRT `Radio`).
+pub(super) unsafe fn wifi_status() -> Option<WifiStatus> {
     use std::ffi::c_void;
     let (mut ver, mut h) = (0u32, HANDLE::default());
     if WlanOpenHandle(2, None, &mut ver, &mut h) != 0 {
@@ -251,26 +335,52 @@ pub(super) unsafe fn wifi_ssid() -> Option<String> {
     let mut list: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
     if WlanEnumInterfaces(h, None, &mut list) == 0 && !list.is_null() {
         let items = std::slice::from_raw_parts((*list).InterfaceInfo.as_ptr(), (*list).dwNumberOfItems as usize);
-        for it in items {
-            if it.isState != wlan_interface_state_connected {
-                continue;
+        if !items.is_empty() {
+            let mut st = WifiStatus::default();
+            for it in items {
+                let (mut size, mut data) = (0u32, std::ptr::null_mut::<c_void>());
+                if WlanQueryInterface(h, &it.InterfaceGuid, wlan_intf_opcode_radio_state, None, &mut size, &mut data, None) == 0
+                    && !data.is_null()
+                {
+                    if size as usize >= std::mem::size_of::<WLAN_RADIO_STATE>() {
+                        let (known, on) = phy_radio_on(&*(data as *const WLAN_RADIO_STATE));
+                        st.radio_known |= known;
+                        st.radio_on |= on;
+                    }
+                    WlanFreeMemory(data);
+                }
+                if st.ssid.is_none() && it.isState == wlan_interface_state_connected {
+                    let (mut size, mut data) = (0u32, std::ptr::null_mut::<c_void>());
+                    if WlanQueryInterface(h, &it.InterfaceGuid, wlan_intf_opcode_current_connection, None, &mut size, &mut data, None) == 0
+                        && !data.is_null()
+                    {
+                        if size as usize >= std::mem::size_of::<WLAN_CONNECTION_ATTRIBUTES>() {
+                            let attr = &*(data as *const WLAN_CONNECTION_ATTRIBUTES);
+                            if attr.isState == wlan_interface_state_connected {
+                                let ssid = &attr.wlanAssociationAttributes.dot11Ssid;
+                                let n = (ssid.uSSIDLength as usize).min(32);
+                                if n > 0 {
+                                    st.ssid = Some(String::from_utf8_lossy(&ssid.ucSSID[..n]).into_owned());
+                                }
+                                st.radio_known = true;
+                                st.radio_on = true;
+                            }
+                        }
+                        WlanFreeMemory(data);
+                    }
+                }
             }
-            let (mut size, mut data) = (0u32, std::ptr::null_mut::<c_void>());
-            if WlanQueryInterface(h, &it.InterfaceGuid, wlan_intf_opcode_current_connection, None, &mut size, &mut data, None) == 0
-                && !data.is_null()
-            {
-                let attr = &*(data as *const WLAN_CONNECTION_ATTRIBUTES);
-                let ssid = &attr.wlanAssociationAttributes.dot11Ssid;
-                let n = (ssid.uSSIDLength as usize).min(32);
-                out = Some(String::from_utf8_lossy(&ssid.ucSSID[..n]).into_owned());
-                WlanFreeMemory(data);
-            }
-            break;
+            out = Some(st);
         }
         WlanFreeMemory(list as *const c_void);
     }
     let _ = WlanCloseHandle(h, None);
     out
+}
+
+/// Имя сети Wi-Fi, к которой подключён беспроводной адаптер.
+pub(super) unsafe fn wifi_ssid() -> Option<String> {
+    wifi_status().and_then(|s| s.ssid)
 }
 
 #[cfg(test)]
@@ -299,5 +409,28 @@ mod tests {
         let open = profile_xml("Free", "open|none", "");
         assert!(open.contains("<authentication>open</authentication><encryption>none</encryption>"));
         assert!(!open.contains("sharedKey"));
+    }
+
+    #[test]
+    fn phy_radio_on_requires_both_software_and_hardware() {
+        use windows::Win32::NetworkManagement::WiFi::{dot11_radio_state_off, WLAN_PHY_RADIO_STATE};
+
+        let mut rs = WLAN_RADIO_STATE::default();
+        assert_eq!(phy_radio_on(&rs), (false, false));
+
+        rs.dwNumberOfPhys = 1;
+        rs.PhyRadioState[0] = WLAN_PHY_RADIO_STATE {
+            dwPhyIndex: 0,
+            dot11SoftwareRadioState: dot11_radio_state_unknown,
+            dot11HardwareRadioState: dot11_radio_state_unknown,
+        };
+        assert_eq!(phy_radio_on(&rs), (false, false));
+
+        rs.PhyRadioState[0].dot11SoftwareRadioState = dot11_radio_state_on;
+        rs.PhyRadioState[0].dot11HardwareRadioState = dot11_radio_state_off;
+        assert_eq!(phy_radio_on(&rs), (true, false));
+
+        rs.PhyRadioState[0].dot11HardwareRadioState = dot11_radio_state_on;
+        assert_eq!(phy_radio_on(&rs), (true, true));
     }
 }

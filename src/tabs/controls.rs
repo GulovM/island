@@ -18,6 +18,8 @@ use super::{id, CONTROLS};
 
 /// Сколько после перетаскивания слайдера не принимать громкость из снимка (иначе ползунок дёргается).
 const HOLD: Duration = Duration::from_millis(250);
+/// Сколько после клика по плитке радио удерживать выбранное состояние, пока Windows переключает драйвер.
+const RADIO_HOLD: Duration = Duration::from_millis(2000);
 
 // Номера виджетов в `SPEC` (они же биты маски недоступных виджетов).
 const WIFI: usize = 0;
@@ -191,6 +193,9 @@ pub struct Controls {
     hold_until: Option<Instant>,
     brightness: f32,
     bright_hold: Option<Instant>,
+    wifi_hold: Option<(bool, Instant)>,
+    bt_hold: Option<(bool, Instant)>,
+    airplane_hold: Option<(bool, Instant)>,
     rev: u64,
     media: Option<Media>,
     /// Защита от возврата ползунка трека назад сразу после перемотки.
@@ -311,14 +316,17 @@ impl Controls {
 
     /// Забирает свежий снимок фонового потока. `true` — что-то изменилось.
     pub fn sync(&mut self) -> bool {
-        let s = bg::snapshot();
+        self.sync_from(bg::snapshot())
+    }
+
+    fn sync_from(&mut self, s: bg::Snapshot) -> bool {
         if s.rev == self.rev {
             return false;
         }
         self.rev = s.rev;
-        self.wifi = s.wifi.unwrap_or(false);
-        self.bluetooth = s.bluetooth.unwrap_or(false);
-        self.airplane = s.airplane.unwrap_or(false);
+        Self::sync_radio(&mut self.wifi, s.wifi, &mut self.wifi_hold);
+        Self::sync_radio(&mut self.bluetooth, s.bluetooth, &mut self.bt_hold);
+        Self::sync_radio(&mut self.airplane, s.airplane, &mut self.airplane_hold);
         self.muted = s.muted;
         let holding = self.hold_until.is_some_and(|t| Instant::now() < t);
         if let (Some(v), false) = (s.volume, holding) {
@@ -352,12 +360,29 @@ impl Controls {
             }
             (new, _) => new,
         };
-        self.ssid = s.ssid;
+        self.ssid = s.ssid.filter(|id| !id.is_empty());
+        if self.ssid.is_some() && self.wifi_hold.is_none() {
+            self.wifi = true;
+        }
         self.audio = s.audio;
         if let Some(kind) = self.open {
             self.list = bg::list(kind);
         }
         true
+    }
+
+    fn sync_radio(dst: &mut bool, incoming: Option<bool>, hold: &mut Option<(bool, Instant)>) {
+        if let Some((expected, until)) = *hold {
+            if incoming == Some(expected) || Instant::now() >= until {
+                *hold = None;
+            } else {
+                *dst = expected;
+                return;
+            }
+        }
+        if let Some(v) = incoming {
+            *dst = v;
+        }
     }
 
     /// Рисует вкладку: виджеты по сетке, а поверх них — выпадающий список устройств. `h` — высота
@@ -453,9 +478,10 @@ impl Controls {
         let r = it.rect;
         match it.idx {
             WIFI => {
-                let sub = if self.wifi { self.ssid.clone().unwrap_or_else(|| "Вкл".into()) } else { "Выкл".into() };
+                let sub = if self.wifi { self.ssid.as_deref().filter(|s| !s.is_empty()).unwrap_or("Вкл").to_owned() } else { "Выкл".into() };
                 let hit = ui.tile_wide(cv, id(CONTROLS, 0), r, icon::WIFI, "Wi-Fi", &sub, &mut self.wifi, Chevron::Divided, hue(SysColor::Blue, cv.accent));
                 if hit.toggled {
+                    self.wifi_hold = Some((self.wifi, Instant::now() + RADIO_HOLD));
                     bg::send(Cmd::Wifi(self.wifi));
                 }
                 if hit.chevron {
@@ -465,6 +491,7 @@ impl Controls {
             BLUETOOTH => {
                 let hit = ui.tile_wide(cv, id(CONTROLS, 1), r, icon::BLUETOOTH, "Bluetooth", state(self.bluetooth), &mut self.bluetooth, Chevron::Divided, hue(SysColor::Blue, cv.accent));
                 if hit.toggled {
+                    self.bt_hold = Some((self.bluetooth, Instant::now() + RADIO_HOLD));
                     bg::send(Cmd::Bluetooth(self.bluetooth));
                 }
                 if hit.chevron {
@@ -503,6 +530,7 @@ impl Controls {
             AIRPLANE => {
                 let hit = ui.tile_wide(cv, id(CONTROLS, 5), r, icon::AIRPLANE, "Режим полёта", state(self.airplane), &mut self.airplane, Chevron::None, hue(SysColor::Orange, cv.accent));
                 if hit.toggled {
+                    self.airplane_hold = Some((self.airplane, Instant::now() + RADIO_HOLD));
                     bg::send(Cmd::Airplane(self.airplane));
                 }
             }
@@ -1188,5 +1216,73 @@ mod tests {
         let low = Controls::tiles_low(&grid);
         assert_eq!(low, 104.0);
         assert_eq!(controls_overlay_rows(low), 5);
+    }
+
+    #[test]
+    fn sync_from_preserves_radios_on_none_and_holds_user_toggle() {
+        let mut c = Controls::default();
+
+        // Первый снимок: Wi-Fi включён и подключён, Bluetooth включён.
+        c.sync_from(bg::Snapshot {
+            rev: 1,
+            wifi: Some(true),
+            bluetooth: Some(true),
+            airplane: Some(false),
+            ssid: Some("Office".into()),
+            ..Default::default()
+        });
+        assert!(c.wifi);
+        assert!(c.bluetooth);
+        assert!(!c.airplane);
+        assert_eq!(c.ssid.as_deref(), Some("Office"));
+
+        // Сбой опроса (None) не должен сбрасывать текущее состояние в false.
+        c.sync_from(bg::Snapshot {
+            rev: 2,
+            wifi: None,
+            bluetooth: None,
+            airplane: None,
+            ssid: Some("Office".into()),
+            ..Default::default()
+        });
+        assert!(c.wifi);
+        assert!(c.bluetooth);
+
+        // Даже если wifi=Some(false) из рассинхрона, наличие SSID удерживает wifi=true вне hold.
+        c.sync_from(bg::Snapshot {
+            rev: 3,
+            wifi: Some(false),
+            bluetooth: Some(true),
+            airplane: Some(false),
+            ssid: Some("Office".into()),
+            ..Default::default()
+        });
+        assert!(c.wifi);
+
+        // Пользователь переключил Wi-Fi в выкл: hold защищает от устаревшего снимка.
+        c.wifi = false;
+        c.wifi_hold = Some((false, Instant::now() + RADIO_HOLD));
+        c.sync_from(bg::Snapshot {
+            rev: 4,
+            wifi: Some(true),
+            bluetooth: Some(true),
+            airplane: Some(false),
+            ssid: Some("Office".into()),
+            ..Default::default()
+        });
+        assert!(!c.wifi);
+        assert!(c.wifi_hold.is_some());
+
+        // Подтверждение от системы снимает hold.
+        c.sync_from(bg::Snapshot {
+            rev: 5,
+            wifi: Some(false),
+            bluetooth: Some(true),
+            airplane: Some(false),
+            ssid: None,
+            ..Default::default()
+        });
+        assert!(!c.wifi);
+        assert!(c.wifi_hold.is_none());
     }
 }

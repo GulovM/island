@@ -678,6 +678,7 @@ impl App {
 
     /// Пробуждение или разблокировка: графика могла умереть, окружение — измениться.
     pub(crate) unsafe fn on_resume(&mut self) -> bool {
+        crate::bg::send(crate::bg::Cmd::Refresh);
         let mut changed = self.refresh_environment();
         changed |= self.check_sys_colors();
         if self.gfx.as_ref().is_some_and(|g| g.removed()) {

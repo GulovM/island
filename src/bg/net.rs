@@ -60,11 +60,17 @@ pub(super) unsafe fn refresh_net() {
                 if WlanQueryInterface(h, &it.InterfaceGuid, wlan_intf_opcode_current_connection, None, &mut size, &mut data, None) == 0
                     && !data.is_null()
                 {
-                    let attr = &*(data as *const WLAN_CONNECTION_ATTRIBUTES);
-                    st.wifi_connected = true;
-                    st.quality = attr.wlanAssociationAttributes.wlanSignalQuality.min(100) as u8;
+                    if size as usize >= std::mem::size_of::<WLAN_CONNECTION_ATTRIBUTES>() {
+                        let attr = &*(data as *const WLAN_CONNECTION_ATTRIBUTES);
+                        if attr.isState == wlan_interface_state_connected {
+                            st.wifi_connected = true;
+                            st.quality = attr.wlanAssociationAttributes.wlanSignalQuality.min(100) as u8;
+                        }
+                    }
                     WlanFreeMemory(data);
-                    break;
+                    if st.wifi_connected {
+                        break;
+                    }
                 }
             }
             WlanFreeMemory(list as *const std::ffi::c_void);
