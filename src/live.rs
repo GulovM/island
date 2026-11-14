@@ -2,7 +2,6 @@
 //! эквалайзера в `Face`) и короткие уведомления (таймер, громкость, зарядка). Никаких своих таймеров
 //! в простое: данные приходят событиями (медиасессия, громкость, питание).
 
-use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
@@ -396,9 +395,7 @@ impl Live {
                     let tile_rad = if n.is_calendar { ir.h / 2.0 } else { 10.0 };
                     let mut painted_icon = false;
                     if let Some(px) = &n.icon {
-                        let mut hs = std::collections::hash_map::DefaultHasher::new();
-                        n.app_name.hash(&mut hs);
-                        let key = (0x4Eu64 << 56) | (hs.finish() >> 8);
+                        let key = crate::icons::bitmap_key(b'N', &n.app_id, &n.app_name);
                         if let Some(bmp) = ui.cache.get(&cv.g.dc, key, NOTIF_ICON_PX, NOTIF_ICON_PX, || px.as_ref().clone()) {
                             cv.rr(ir, tile_rad, D2D1_COLOR_F { a: 0.14, ..WHITE });
                             cv.bitmap(&bmp, ir.inset(3.0), 1.0);

@@ -9,6 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::config::Config;
 use crate::icons;
@@ -39,7 +40,7 @@ struct Entry {
     last: u64,
     fav: bool,
     /// Иконка `icons::SIZE_PX`² BGRA premultiplied (когда загрузится).
-    icon: Option<Vec<u8>>,
+    icon: Option<Arc<Vec<u8>>>,
 }
 
 #[derive(Default)]
@@ -103,13 +104,21 @@ impl Apps {
         self.save();
     }
 
-    pub fn show(&mut self) -> bool {
-        if self.indexed {
-            return false;
+    /// Предзагрузка индекса и иконок при старте островка (до открытия вкладки Apps).
+    pub fn preload(&mut self) {
+        if !self.indexed {
+            self.indexed = true;
+            self.build_index();
         }
-        self.indexed = true;
-        self.build_index();
-        true
+    }
+
+    /// Показывает вкладку: если предзагрузка ещё не шла — строит индекс, иначе забирает готовые иконки.
+    pub fn show(&mut self) -> bool {
+        if !self.indexed {
+            self.preload();
+            return true;
+        }
+        self.sync()
     }
 
     fn build_index(&mut self) {
@@ -664,7 +673,7 @@ unsafe fn paint_icon(ui: &mut Ui, cv: &Canvas, e: &Entry, tile: Rect) -> bool {
         e.path.hash(&mut hs);
         (0x41u64 << 56) | (hs.finish() >> 8)
     };
-    match ui.cache.get(&cv.g.dc, key, icons::SIZE_PX, icons::SIZE_PX, || px.clone()) {
+    match ui.cache.get(&cv.g.dc, key, icons::SIZE_PX, icons::SIZE_PX, || px.as_ref().clone()) {
         Some(bmp) => {
             cv.bitmap(&bmp, tile, 1.0);
             true

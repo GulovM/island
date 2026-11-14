@@ -2,9 +2,9 @@
 //! через WinRT (`UserNotificationListener` и `ToastNotificationManagerForUser`).
 //! Работает событийно на фоновом потоке: в простое 0% CPU.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use windows::core::{IInspectable, HSTRING};
 use windows::ApplicationModel::AppInfo;
 use windows::Foundation::{Size, TypedEventHandler};
 use windows::Storage::Streams::{DataReader, IRandomAccessStreamWithContentType};
@@ -15,22 +15,14 @@ use windows::UI::Notifications::{
     KnownNotificationBindings, NotificationKinds, ToastNotificationManager,
     ToastNotificationManagerForUser, ToastNotificationMode, UserNotification,
 };
-use windows::Win32::Graphics::Imaging::{
-    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICImagingFactory,
-    WICBitmapDitherTypeNone, WICBitmapInterpolationModeFant, WICBitmapPaletteTypeCustom,
-    WICDecodeMetadataCacheOnDemand,
-};
-use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
-use windows::core::IInspectable;
 
 use super::winrt::wait;
 use super::{send, Cmd};
 
 /// Размер кэшированной иконки приложения (в пикселях, premultiplied BGRA).
-pub const ICON_PX: u32 = 40;
+pub const ICON_PX: u32 = crate::icons::SIZE_PX;
 /// 100-наносекундных тиков между 1601-01-01 (WinRT DateTime) и 1970-01-01 (Unix epoch).
 const UNIX_EPOCH_100NS: i64 = 116_444_736_000_000_000;
-const ICON_CACHE_CAP: usize = 64;
 const MAX_NOTIFS: usize = 100;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -64,10 +56,7 @@ pub struct SysNotif {
     pub icon: Option<Arc<Vec<u8>>>,
 }
 
-type IconCache = HashMap<String, Option<Arc<Vec<u8>>>>;
-
 static WATCH_INIT: Mutex<Option<WatchState>> = Mutex::new(None);
-static ICON_CACHE: Mutex<Option<IconCache>> = Mutex::new(None);
 
 struct WatchState {
     _listener: Option<UserNotificationListener>,
@@ -189,8 +178,13 @@ unsafe fn extract_notif(un: &UserNotification) -> Option<SysNotif> {
         .and_then(|d| d.DisplayName().ok())
         .map(|s| s.to_string())
         .unwrap_or_default();
+    if app_name.starts_with('@') {
+        if let Some(resolved) = crate::icons::resolve_indirect(&app_name) {
+            app_name = resolved;
+        }
+    }
     if app_name.trim().is_empty() {
-        app_name = fallback_app_name(&app_id);
+        app_name = crate::icons::reg_app_name(&app_id).unwrap_or_else(|| fallback_app_name(&app_id));
     }
 
     let (title, body) = extract_texts(un);
@@ -198,7 +192,9 @@ unsafe fn extract_notif(un: &UserNotification) -> Option<SysNotif> {
         return None;
     }
 
-    let icon = app_info.as_ref().and_then(|info| cached_logo(&app_id, info));
+    let icon = crate::icons::resolve_notif_icon(&app_id, &app_name, || {
+        read_logo_bytes(&app_id, app_info.as_ref())
+    });
 
     Some(SysNotif { id, app_id, app_name, title, body, time_secs, icon })
 }
@@ -234,70 +230,39 @@ unsafe fn extract_texts(un: &UserNotification) -> (String, String) {
     (title, body)
 }
 
-unsafe fn cached_logo(app_id: &str, info: &AppInfo) -> Option<Arc<Vec<u8>>> {
-    if let Ok(guard) = ICON_CACHE.lock() {
-        if let Some(map) = guard.as_ref() {
-            if let Some(cached) = map.get(app_id) {
-                return cached.clone();
-            }
-        }
-    }
-    let decoded = read_logo(info).map(Arc::new);
-    if let Ok(mut guard) = ICON_CACHE.lock() {
-        let map = guard.get_or_insert_with(HashMap::new);
-        if map.len() >= ICON_CACHE_CAP {
-            map.clear();
-        }
-        map.insert(app_id.to_string(), decoded.clone());
-    }
-    decoded
-}
-
-unsafe fn read_logo(info: &AppInfo) -> Option<Vec<u8>> {
+unsafe fn read_logo_bytes(app_id: &str, info: Option<&AppInfo>) -> Option<Vec<u8>> {
+    let owned = if info.is_none() && app_id.contains('!') {
+        AppInfo::GetFromAppUserModelId(&HSTRING::from(app_id)).ok()
+    } else {
+        None
+    };
+    let info = info.or(owned.as_ref())?;
     let disp = info.DisplayInfo().ok()?;
     let logo_ref = disp
         .GetLogo(Size { Width: ICON_PX as f32, Height: ICON_PX as f32 })
         .ok()?;
     let stream: IRandomAccessStreamWithContentType = wait(logo_ref.OpenReadAsync()).ok()?;
-    let size = stream.Size().ok()? as u32;
-    if size == 0 || size > 4 << 20 {
+    let size = stream.Size().ok()?;
+    if size == 0 || size > (4 << 20) {
         return None;
     }
+    let size = size as u32;
     let reader = DataReader::CreateDataReader(&stream).ok()?;
-    wait(reader.LoadAsync(size)).ok()?;
-    let mut bytes = vec![0u8; size as usize];
-    reader.ReadBytes(&mut bytes).ok()?;
-
-    let factory: IWICImagingFactory =
-        CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).ok()?;
-    let ws = factory.CreateStream().ok()?;
-    ws.InitializeFromMemory(&bytes).ok()?;
-    let dec = factory
-        .CreateDecoderFromStream(&ws, std::ptr::null(), WICDecodeMetadataCacheOnDemand)
-        .ok()?;
-    let frame = dec.GetFrame(0).ok()?;
-    let (mut w, mut h) = (0u32, 0u32);
-    frame.GetSize(&mut w, &mut h).ok()?;
-    if w == 0 || h == 0 {
+    let mut loaded = 0u32;
+    while loaded < size {
+        let chunk = wait(reader.LoadAsync(size - loaded)).ok()?;
+        if chunk == 0 {
+            break;
+        }
+        loaded = loaded.saturating_add(chunk);
+    }
+    let avail = reader.UnconsumedBufferLength().ok()? as usize;
+    if avail == 0 {
         return None;
     }
-    let scaler = factory.CreateBitmapScaler().ok()?;
-    scaler
-        .Initialize(&frame, ICON_PX, ICON_PX, WICBitmapInterpolationModeFant)
-        .ok()?;
-    let conv = factory.CreateFormatConverter().ok()?;
-    conv.Initialize(
-        &scaler,
-        &GUID_WICPixelFormat32bppPBGRA,
-        WICBitmapDitherTypeNone,
-        None,
-        0.0,
-        WICBitmapPaletteTypeCustom,
-    )
-    .ok()?;
-    let mut buf = vec![0u8; (ICON_PX * ICON_PX * 4) as usize];
-    conv.CopyPixels(std::ptr::null(), ICON_PX * 4, &mut buf).ok()?;
-    Some(buf)
+    let mut bytes = vec![0u8; avail];
+    reader.ReadBytes(&mut bytes).ok()?;
+    Some(bytes)
 }
 
 fn fallback_app_name(aumid: &str) -> String {

@@ -102,11 +102,12 @@ impl ProcSampler {
         let mut app_icons = HashMap::new();
         for (name, _) in top_ram.iter().chain(&top_cpu) {
             let Some(path) = paths.get(name) else { continue };
-            let icon = self.icons.entry(path.clone()).or_insert_with(|| icons::path_icon(path).map(Arc::new));
+            let icon = self.icons.entry(path.clone()).or_insert_with(|| unsafe { icons::exe_icon(path, Some(name)) });
             if let Some(px) = icon {
                 app_icons.insert(name.clone(), px.clone());
             }
         }
+        icons::flush_cache();
         Procs { top_ram, top_cpu, app_icons }
     }
 }

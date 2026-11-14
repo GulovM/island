@@ -5,7 +5,6 @@
 //! Оформление адаптировано под оба режима темы — Windows (Fluent) и macOS (Liquid Glass).
 
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
@@ -104,6 +103,7 @@ pub struct NotifItem {
 /// Всплывающее уведомление для показа в свёрнутой чёлке.
 #[derive(Clone, Debug)]
 pub struct PopupNotice {
+    pub app_id: String,
     pub app_name: String,
     pub title: String,
     pub body: String,
@@ -295,6 +295,7 @@ impl Notifications {
             }
             if self.initial_sync_done && is_new && rule == AppRule::Normal {
                 popups.push(PopupNotice {
+                    app_id: n.app_id.clone(),
                     app_name: n.app_name.clone(),
                     title: n.title.clone(),
                     body: n.body.clone(),
@@ -980,9 +981,7 @@ unsafe fn paint_app_icon(ui: &mut Ui, cv: &Canvas, item: &NotifItem, tile: Rect,
         return;
     }
     if let Some(px) = &item.icon {
-        let mut hs = std::collections::hash_map::DefaultHasher::new();
-        item.app_id.hash(&mut hs);
-        let key = (0x4Eu64 << 56) | (hs.finish() >> 8);
+        let key = crate::icons::bitmap_key(b'N', &item.app_id, &item.app_name);
         if let Some(bmp) = ui.cache.get(&cv.g.dc, key, NOTIF_ICON_PX, NOTIF_ICON_PX, || px.as_ref().clone()) {
             let bg_tile = Rect::new(tile.x, tile.y, tile.w, tile.h);
             cv.rr(bg_tile, rad, mix(card(), fg(), 0.05));

@@ -215,6 +215,7 @@ impl Tabs {
         self.wall.load(state.wallpaper_filter);
         self.apps.configure(cfg);
         self.apps.load(state.apps_grid, state.apps_all);
+        self.apps.preload();
         self.wall.configure(cfg);
         for (tab, g) in self.grids.iter_mut().enumerate() {
             g.set_compact(!cfg.free_layout);
