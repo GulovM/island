@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.6.1] — 2026-11-14
+
+### RU
+
+- Уведомления: нажатие «Очистить» (и закрытие отдельного уведомления по `×`) теперь фиксирует ключи как прочитанные, чтобы старые уведомления не возвращались при приходе новых; история прочитанных увеличена до 2000 записей.
+- Уведомления: счётчик непрочитанных и буква-заглушка иконки приложения теперь используют контрастный цвет (`on_color`) вместо цвета фона, плашка «Не беспокоить» не наезжает на правые кнопки, а в списке «Приложения» появилась прокрутка.
+
+### EN
+
+- Notifications: clicking "Clear" (and dismissing individual items with `×`) now marks keys as read so cleared notifications do not reappear when new ones arrive; read history limit raised to 2000 entries.
+- Notifications: unread badge count and fallback app letter icon now use contrasting foreground color (`on_color`), the "Do Not Disturb" pill no longer overlaps header chips, and the "Apps" rules list supports scrolling.
+
 ## [1.6.0] — 2026-11-14
 
 ### RU
