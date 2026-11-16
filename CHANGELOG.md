@@ -4,18 +4,22 @@
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-11-16
+
 ### RU
 
 - Возвращён мини-плеер на свёрнутом острове (обложка, название, исполнитель, прогресс трека и линия таймера, с периодическим и мгновенным при смене раскладки показом времени и значков); вместо полосатого эквалайзера используются живые боковые аудиоволны (WASAPI), добавлен переключатель «Мини-плеер на свёрнутом острове» в Настройках → Система (`collapsed_player`).
 - Вкладка «Управление»: добавлен виджет «Не беспокоить» для стилей Windows и macOS (в лотке редактирования сетки).
-- Уведомления: автоматическое скрытие системных баннеров Windows (`ShowBanner`) при включённых всплывающих уведомлениях (с резервным копированием и восстановлением), синхронизация прочтения с Центром уведомлений Windows, убрана лишняя кнопка «Очистить» (оставлена «Прочитать все»), форматирование заголовков мессенджеров, акцентный счётчик непрочитанных без подложки и поддержка цветных эмодзи.
+- Уведомления: нажатие на всплывающее уведомление открывает отправившее его приложение (фокусирует окно или поднимает из трея/запускает мессенджеры, соцсети, браузеры и UWP-приложения) и помечает уведомление прочитанным; правый клик по капсуле скрывает её.
+- Уведомления: автоматическое скрытие системных баннеров Windows (`ShowBanner`) при включённых всплывающих уведомлениях (с резервным копированием и восстановлением), синхронизация прочтения с Центром уведомлений Windows, убрана лишняя кнопка «Очистить» (оставлена «Прочитать все»), форматирование заголовков мессенджеров, выровненный акцентный счётчик непрочитанных без подложки и поддержка цветных эмодзи.
 - Настройки → Система: убрана подложка у чипов значков чёлки и добавлены разделители между параметрами.
 
 ### EN
 
 - Restored the collapsed mini-player (album art, title, artist, track progress and timer line, with periodic and keyboard-layout-triggered face peek), using live WASAPI stereo edge waves instead of the old bar equalizer, and added a toggle in Settings → System (`collapsed_player`).
 - Controls tab: added the "Do Not Disturb" widget for Windows and macOS styles (available in the edit-mode widget tray).
-- Notifications: automatic suppression of native Windows banners (`ShowBanner`) while popup notifications are enabled (with backup and restore), read-state sync with Windows Notification Center, removed the redundant "Clear" button in favor of "Mark all read", messenger title formatting, accent-styled unread count without backdrop, and color emoji support.
+- Notifications: clicking a popup notification opens or focuses the sending application (bringing windows to the front or waking messengers, social apps, browsers, and UWP apps from tray) and marks it as read; right-clicking dismisses the capsule.
+- Notifications: automatic suppression of native Windows banners (`ShowBanner`) while popup notifications are enabled (with backup and restore), read-state sync with Windows Notification Center, removed the redundant "Clear" button in favor of "Mark all read", messenger title formatting, baseline-aligned accent unread count without backdrop, and color emoji support.
 - Settings → System: removed card backdrop on collapsed notch icon chips and added dividers between options.
 
 ## [1.6.1] — 2026-11-14
@@ -434,7 +438,9 @@
 - Установщик (Inno Setup, установка без прав администратора) и portable-архив, `SHA256SUMS.txt`.
 - Лицензия MIT.
 
-[Unreleased]: https://github.com/GulovM/island/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/GulovM/island/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/GulovM/island/compare/v1.6.1...v1.7.0
+[1.6.1]: https://github.com/GulovM/island/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/GulovM/island/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/GulovM/island/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/GulovM/island/compare/v1.3.1...v1.4.0
