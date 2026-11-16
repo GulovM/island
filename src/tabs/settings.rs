@@ -46,6 +46,7 @@ const N_TODO_CLEAN: u32 = 110;
 const N_FREE_LAYOUT: u32 = 111;
 const N_HIDE_SHOT: u32 = 112;
 const N_POPUP_NOTIFS: u32 = 113;
+const N_COLLAPSED_PLAYER: u32 = 114;
 const N_COLLAPSED: u32 = 115;
 /// Занимает два номера подряд (27–28) — по числу `PALETTE_STYLES`.
 const N_PALETTE_STYLE: u32 = 27;
@@ -1139,6 +1140,17 @@ impl Settings {
         y += 13.0;
         param_divider(cv, x, iw, &mut y);
 
+        cv.text("Мини-плеер на свёрнутом острове", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut mini = self.cfg.collapsed_player;
+        if ui.switch(cv, id(SETTINGS, N_COLLAPSED_PLAYER), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut mini, true) {
+            self.cfg.collapsed_player = mini;
+            self.changed = true;
+        }
+        y += 18.0;
+        cv.text("Выкл.: остаются только боковые волны", Rect::new(x, y, iw, 13.0), &f.small, dim());
+        y += 13.0;
+        param_divider(cv, x, iw, &mut y);
+
         cv.text("Над окнами на весь экран — полоска", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
         let mut strip = self.cfg.strip_over_maximized;
         if ui.switch(cv, id(SETTINGS, N_STRIP), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut strip, true) {
@@ -1432,6 +1444,7 @@ mod tests {
             (N_FREE_LAYOUT, 1),
             (N_HIDE_SHOT, 1),
             (N_POPUP_NOTIFS, 1),
+            (N_COLLAPSED_PLAYER, 1),
             (N_COLLAPSED, 2),
             (N_PALETTE_STYLE, PALETTE_STYLES.len() as u32),
             (N_SECTION, SECTIONS.len() as u32),

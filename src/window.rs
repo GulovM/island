@@ -155,6 +155,7 @@ impl App {
             (collapsed.0, STRIP_H)
         } else {
             match self.live_form() {
+                live::Form::Mini => (live::MINI.0.max(collapsed.0), live::MINI.1.max(collapsed.1)),
                 live::Form::Toast => {
                     let ts = self.toast_size();
                     (ts.0.max(collapsed.0), ts.1.max(collapsed.1))
@@ -686,6 +687,7 @@ impl App {
             && should_poll_lang(self.expanded, self.hidden, self.stripped(), self.cfg.idle_face, self.live.timer().is_some())
             && self.face.poll_lang()
         {
+            self.trigger_peek();
             changed = true;
         }
         if game != self.hidden {

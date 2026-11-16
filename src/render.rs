@@ -113,7 +113,7 @@ impl App {
             }
         }
 
-        // Живые боковые аудиоволны (строго только в обычной свёрнутой чёлке, оба стиля).
+        // Живые боковые аудиоволны (в обычной свёрнутой чёлке и мини-плеере, оба стиля).
         let wave_vis = (1.0 - open).max(0.0) * k * (1.0 - detach).clamp(0.0, 1.0);
         if wave_vis > 0.004 && !self.expanded && !self.stripped() && !self.hidden {
             if let Some((wa, lvl, flux, phase)) = self.live.wave_state() {
@@ -240,14 +240,16 @@ impl App {
         // чтобы содержимое не «сплющивалось» вместе с высотой острова.
         let live_open = 1.0 - open;
         let centre = self.win_w as f32 / s / 2.0;
-        // Что рисуем в свёрнутом виде: уведомление или «лицо» (раскладка, время, Wi-Fi, эквалайзер).
+        // Что рисуем в свёрнутом виде: мини-плеер, уведомление или «лицо» (раскладка, время, Wi-Fi).
         #[derive(PartialEq)]
         enum Slot {
+            Mini,
             Toast,
             Face,
             Drop,
         }
         for (alpha, slot) in [
+            (self.live.mini_alpha(), Slot::Mini),
             (self.live.toast_alpha(), Slot::Toast),
             (self.face.alpha(), Slot::Face),
             (self.drag_a.value.clamp(0.0, 1.0), Slot::Drop),
@@ -257,11 +259,18 @@ impl App {
                 continue;
             }
             let (fw, fh) = match slot {
+                Slot::Mini => live::MINI,
                 Slot::Toast => match self.live.display_toast() {
                     Some(live::Toast::Notice) => live::TOAST_NOTICE,
                     _ => live::TOAST,
                 },
-                Slot::Face => self.idle_pill_size(),
+                Slot::Face => {
+                    if self.live_form() == live::Form::Mini {
+                        (live::MINI.0.max(self.collapsed().0), live::MINI.1.max(self.collapsed().1))
+                    } else {
+                        self.idle_pill_size()
+                    }
+                }
                 Slot::Drop => DROP_PILL,
             };
             let fw = fw.max(self.collapsed().0);
@@ -274,6 +283,7 @@ impl App {
             let cv = Canvas { g, alpha, accent };
             let r = ui::Rect::new(centre - fw / 2.0, y0 / s, fw, fh);
             match slot {
+                Slot::Mini => self.live.draw_mini(ui, &cv, r),
                 Slot::Toast => self.live.draw_toast(ui, &cv, r, cursor),
                 Slot::Face => {
                     let label = self.live.timer().map(|t| t.label());

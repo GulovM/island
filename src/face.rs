@@ -120,6 +120,19 @@ impl Face {
         !self.alpha.settled()
     }
 
+    pub fn settled(&self) -> bool {
+        self.alpha.settled()
+    }
+
+    pub fn set_alpha_target(&mut self, target: f32) {
+        self.alpha.target = target;
+    }
+
+    /// Меняет жёсткость и затухание пружины прозрачности (медленный peek).
+    pub fn tune_alpha(&mut self, (stiffness, damping): (f32, f32)) {
+        self.alpha.tune(stiffness, damping);
+    }
+
     pub fn alpha(&self) -> f32 {
         self.alpha.value.clamp(0.0, 1.0)
     }

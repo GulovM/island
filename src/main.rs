@@ -15,6 +15,7 @@ mod i18n;
 mod ios;
 mod log;
 mod online;
+mod peek;
 mod perf;
 mod sys;
 mod theme;

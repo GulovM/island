@@ -273,7 +273,7 @@ impl App {
                         SetTimer(Some(self.hwnd), LIVE_TIMER, t.next_ms, None);
                     }
                 }
-                self.collapsed_wave_on() || self.live.timer().is_some()
+                self.collapsed_wave_on() || self.live_form() == live::Form::Mini || self.live.timer().is_some()
             }
             Ev::RightClick(px, py) => {
                 if self.expanded && self.notifications_open && (py as f32 / self.scale) > TAB_TOP + TAB_H {
@@ -439,11 +439,12 @@ impl App {
         }
         dirty |= timer_changed && !self.expanded;
 
-        // Тик нужен, только пока на острове виден эквалайзер музыки или таймер: кадры ~15 в секунду для
-        // эквалайзера и мигания паузы, иначе — раз в секунду по смене цифры.
+        // Тик нужен, только пока на острове видны боковые волны, играющий мини-плеер или таймер:
+        // ~30 fps для волн и прогресса плеера, ~15 fps для мигания паузы, иначе — раз в секунду по смене цифры.
         let timer_shown = !self.expanded && !self.hidden && self.live.timer().is_some();
         let wave_shown = self.collapsed_wave_on();
-        let tick = if wave_shown {
+        let mini_shown = self.live_form() == live::Form::Mini && self.live.playing();
+        let tick = if wave_shown || mini_shown {
             LiveTick::Wave
         } else if timer_shown && self.live.timer().is_some_and(|t| t.paused) {
             LiveTick::Frames

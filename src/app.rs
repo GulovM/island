@@ -129,8 +129,10 @@ pub struct App {
     pub(crate) pill_sig: (usize, i32, i32),
     /// Направление сдвига при смене вкладки: +1 — новая справа.
     pub(crate) tab_dir: f32,
-    /// Индикатор в свёрнутой форме: эквалайзер и уведомления.
+    /// Индикатор в свёрнутой форме: мини-плеер, боковые аудиоволны и уведомления.
     pub(crate) live: live::Live,
+    /// Периодический и мгновенный peek лица во время мини-плеера.
+    pub(crate) peek: peek::Peek,
     /// Включён ли секундный/кадровый тик свёрнутого острова.
     pub(crate) live_tick_on: LiveTick,
     /// Режим «полоска над развёрнутыми окнами» (по умолчанию выключен).
@@ -283,7 +285,8 @@ impl App {
                 pill_a: Spring::unit(1.0, 420.0, 30.0),
                 pill_sig: (0, 0, 0),
                 tab_dir: 1.0,
-                live: live::Live::new(cfg.live_media),
+                live: live::Live::new(cfg.live_media, cfg.collapsed_player),
+                peek: peek::Peek::new(),
                 live_tick_on: LiveTick::Off,
                 kbd: false,
                 prev_fg: HWND(std::ptr::null_mut()),
@@ -510,6 +513,7 @@ impl App {
         self.cfg.hidden_tabs = new.hidden_tabs;
         self.cfg.strip_over_maximized = new.strip_over_maximized;
         self.cfg.always_strip = new.always_strip;
+        self.cfg.collapsed_player = new.collapsed_player;
         self.cfg.idle_face = new.idle_face;
         self.cfg.collapsed_left = new.collapsed_left;
         self.cfg.collapsed_right = new.collapsed_right;
@@ -543,6 +547,7 @@ impl App {
         self.tab = self.order.iter().position(|&i| i == current).unwrap_or(0);
         self.face.set_enabled(self.cfg.idle_face);
         self.face.set_slots(self.cfg.collapsed_left, self.cfg.collapsed_right);
+        self.live.set_player_enabled(self.cfg.collapsed_player);
         self.apply_theme();
         self.retarget();
         self.save_pending = true;
@@ -584,8 +589,10 @@ impl App {
         self.apply_monitor(self.mon, true);
         self.face.set_enabled(self.cfg.idle_face);
         self.face.set_slots(self.cfg.collapsed_left, self.cfg.collapsed_right);
+        self.live.set_player_enabled(self.cfg.collapsed_player);
         self.apply_theme();
         self.live.set_media_enabled(self.cfg.live_media);
+        self.live.set_player_enabled(self.cfg.collapsed_player);
         self.tabs.apply_config(&self.cfg);
         self.register_hotkey();
         start_env_timer(self.hwnd, self.cfg.env_poll_ms);
@@ -631,16 +638,97 @@ impl App {
         let idle = form == live::Form::Idle && !self.expanded && !self.stripped() && !self.hidden;
         self.live.set_wave_active(self.collapsed_wave_on());
         self.face.set_visible(idle, self.live.timer().is_some());
+        self.apply_peek_targets();
     }
 
-    /// Активны ли боковые музыкальные волны (строго только в обычной свёрнутой чёлке).
+    /// Подходит ли текущее состояние острова для peek лица (свёрнут, играет музыка в мини-плеере,
+    /// и лицо включено в настройках либо активен таймер Today).
+    pub(crate) fn can_peek(&self) -> bool {
+        self.live_form() == live::Form::Mini
+            && self.live.playing()
+            && (self.cfg.idle_face || self.live.timer().is_some())
+    }
+
+    /// Выставляет целевые альфы и обновляет данные лица при входе или продолжении peek.
+    fn enter_peek_targets(&mut self) {
+        self.face.refresh_all();
+        self.set_peek_fade(true);
+        self.live.set_mini_target(0.0);
+        self.face.set_alpha_target(1.0);
+    }
+
+    /// Переключает пружины прозрачности лица и мини-плеера между медленным peek и обычным проявлением.
+    fn set_peek_fade(&mut self, slow: bool) {
+        self.face.tune_alpha(if slow { peek::PEEK_FADE_SPRING } else { anim::FADE_SPRING });
+        self.live.tune_mini(if slow { peek::PEEK_FADE_SPRING } else { anim::FADE_SPRING });
+    }
+
+    /// Запускает мгновенный или периодический peek лица на свёрнутом острове.
+    pub(crate) fn trigger_peek(&mut self) {
+        if !self.can_peek() {
+            return;
+        }
+        if !self.peek.is_showing() {
+            self.peek.trigger();
+        }
+        self.enter_peek_targets();
+    }
+
+    /// Применяет целевые альфы активного peek поверх обычного retarget.
+    pub(crate) fn apply_peek_targets(&mut self) {
+        if !self.can_peek() {
+            if self.peek.needs_reset() {
+                self.peek.cancel();
+                self.set_peek_fade(false);
+            }
+            return;
+        }
+        if let Some((mini_target, face_target)) = self.peek.target_alphas() {
+            self.live.set_mini_target(mini_target);
+            self.face.set_alpha_target(face_target);
+        }
+    }
+
+    /// Продвигает состояние peek на шаг времени `dt`.
+    pub(crate) fn step_peek(&mut self, dt: f32) {
+        if !self.can_peek() {
+            if self.peek.needs_reset() {
+                self.peek.cancel();
+                self.set_peek_fade(false);
+                self.retarget();
+            }
+            return;
+        }
+
+        // SAFETY: оконный поток, вызов GetCursorPos безопасен.
+        let paused = unsafe { self.cursor_inside() } || self.ui.holds_pointer();
+        let face_settled = self.face.settled() && self.face.alpha() > 0.95;
+        let mini_settled = self.live.mini_settled() && self.live.mini_alpha() > 0.95;
+
+        match self.peek.step(dt, paused, face_settled, mini_settled) {
+            peek::PeekTransition::Start => {
+                self.enter_peek_targets();
+            }
+            peek::PeekTransition::FadeOut => {
+                self.live.set_mini_target(1.0);
+                self.face.set_alpha_target(0.0);
+            }
+            peek::PeekTransition::Finish => {
+                self.set_peek_fade(false);
+                self.retarget();
+            }
+            peek::PeekTransition::None => {}
+        }
+    }
+
+    /// Активны ли боковые музыкальные волны (в обычной свёрнутой чёлке и мини-плеере).
     pub(crate) fn collapsed_wave_on(&self) -> bool {
         self.cfg.live_media
             && self.live.playing()
             && !self.expanded
             && !self.stripped()
             && !self.hidden
-            && self.live_form() == live::Form::Idle
+            && matches!(self.live_form(), live::Form::Idle | live::Form::Mini)
     }
 
     /// Наводит каплю на выбранную вкладку; при свёрнутом острове или смене набора вкладок — без анимации.
@@ -668,6 +756,7 @@ impl App {
             || !self.drag_a.settled()
             || self.face.animating()
             || self.live.animating()
+            || self.peek.animating()
             || self.ui.animating()
             || (self.expanded && self.tabs.animating())
     }
@@ -683,6 +772,7 @@ impl App {
         self.tabs.step(dt);
         self.live.step(dt);
         self.face.step(dt);
+        self.step_peek(dt);
         self.glow.step(dt);
         if self.glow.settled() {
             self.glow.snap();
@@ -818,7 +908,8 @@ mod tests {
                 pill_a: Spring::unit(1.0, 420.0, 30.0),
                 pill_sig: (0, 0, 0),
                 tab_dir: 1.0,
-                live: live::Live::new(cfg.live_media),
+                live: live::Live::new(cfg.live_media, cfg.collapsed_player),
+                peek: peek::Peek::new(),
                 live_tick_on: LiveTick::Off,
                 kbd: false,
                 prev_fg: HWND(std::ptr::null_mut()),
@@ -834,6 +925,7 @@ mod tests {
     fn test_idle_pill_size_and_wave_visibility() {
         let mut cfg = Config::default();
         cfg.idle_face = false;
+        cfg.collapsed_player = false;
         let mut app = App::for_test(cfg);
         let base_w = app.collapsed().0;
 
@@ -876,7 +968,7 @@ mod tests {
         app.live.sync_media(&snap);
         app.retarget();
 
-        // Свёрнутая чёлка не расширяется под эквалайзер, лицо скрыто при idle_face = false, но активны боковые волны
+        // При collapsed_player = false свёрнутая чёлка остаётся в Idle, лицо скрыто при idle_face = false, но активны боковые волны
         assert_eq!(app.live_form(), live::Form::Idle);
         assert_eq!(app.idle_pill_size().0, base_w);
         assert!(!app.face.visible());
@@ -885,6 +977,26 @@ mod tests {
             app.live.step(0.05);
         }
         assert!(app.live.wave_alpha() > 0.99);
+
+        // При включении мини-плеера остров переходит в Form::Mini с боковыми волнами
+        app.cfg.collapsed_player = true;
+        app.live.set_player_enabled(true);
+        app.retarget();
+        assert_eq!(app.live_form(), live::Form::Mini);
+        assert_eq!(app.collapsed_target(), (live::MINI.0, live::MINI.1));
+        assert!(app.collapsed_wave_on());
+        while app.live.animating() {
+            app.live.step(0.05);
+        }
+        assert!(app.live.mini_alpha() > 0.99);
+        assert!(app.live.wave_alpha() > 0.99);
+
+        // Выключение мини-плеера возвращает обычную чёлку с боковыми волнами
+        app.cfg.collapsed_player = false;
+        app.live.set_player_enabled(false);
+        app.retarget();
+        assert_eq!(app.live_form(), live::Form::Idle);
+        assert!(app.collapsed_wave_on());
 
         // При активном таймере добавляется только TIMER_SLOT_W, лицо показывает плашку таймера
         app.live.set_timer(Some(live::TimerView {
@@ -923,5 +1035,139 @@ mod tests {
             app.live.step(0.05);
         }
         assert!(app.live.wave_alpha() < 0.01);
+    }
+
+    fn playing_snapshot() -> bg::Snapshot {
+        let track = bg::Media {
+            title: "Track".into(),
+            artist: "Artist".into(),
+            playing: true,
+            pos: 0.0,
+            dur: 100.0,
+            at: Instant::now(),
+            rate: 1.0,
+            art: None,
+            key: 1,
+            can_seek: true,
+            min_seek: 0.0,
+            max_seek: 100.0,
+            source_name: "Spotify".into(),
+            session_count: 1,
+        };
+        bg::Snapshot {
+            media: Some(track.clone()),
+            live_media: Some(track),
+            rev: 1,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_can_peek_idle_face_and_timer() {
+        let mut cfg = Config::default();
+        cfg.idle_face = false;
+        let mut app = App::for_test(cfg);
+
+        app.live.sync_media(&playing_snapshot());
+        assert_eq!(app.live_form(), live::Form::Mini);
+        assert!(app.live.playing());
+
+        assert!(!app.cfg.idle_face);
+        assert!(app.live.timer().is_none());
+        assert!(!app.can_peek(), "при выключенном лице и без таймера peek запрещён");
+        assert!(
+            !crate::window::should_poll_lang(app.expanded, app.hidden, app.stripped(), app.cfg.idle_face, app.live.timer().is_some()),
+            "опрос раскладки заблокирован и не триггерит лишний repaint"
+        );
+
+        app.live.set_timer(Some(live::TimerView {
+            frac: 0.5,
+            secs: 60,
+            paused: false,
+            next_ms: 1000,
+        }));
+        assert!(app.can_peek(), "активный таймер разрешает peek лица");
+
+        app.live.set_timer(None);
+        app.cfg.idle_face = true;
+        assert!(app.can_peek(), "включённое в настройках лицо разрешает peek");
+
+        app.expanded = true;
+        assert!(!app.can_peek(), "на развёрнутом острове peek запрещён");
+    }
+
+    #[test]
+    fn test_repeated_trigger_peek_does_not_extend_hold() {
+        let cfg = Config::default();
+        let mut app = App::for_test(cfg);
+        app.live.sync_media(&playing_snapshot());
+        assert!(app.can_peek());
+
+        app.trigger_peek();
+        assert_eq!(app.peek.phase(), peek::PeekPhase::In);
+
+        app.face.set_alpha_target(1.0);
+        while !app.face.settled() {
+            app.face.step(0.05);
+        }
+        app.live.set_mini_target(0.0);
+        while !app.live.mini_settled() {
+            app.live.step(0.05);
+        }
+
+        app.step_peek(0.05);
+        assert_eq!(app.peek.phase(), peek::PeekPhase::Hold);
+
+        app.step_peek(0.5);
+        assert_eq!(app.peek.phase(), peek::PeekPhase::Hold);
+        let rem_before = app.peek.hold_remaining();
+        assert!(rem_before < peek::PEEK_HOLD_SECS);
+
+        app.trigger_peek();
+        assert_eq!(app.peek.phase(), peek::PeekPhase::Hold);
+        assert_eq!(app.peek.hold_remaining(), rem_before);
+
+        app.step_peek(rem_before + 0.05);
+        assert_eq!(app.peek.phase(), peek::PeekPhase::Out);
+    }
+
+    #[test]
+    fn test_trigger_peek_during_out_restarts_in() {
+        let mut app = App::for_test(Config::default());
+        app.live.sync_media(&playing_snapshot());
+        assert!(app.can_peek());
+
+        app.trigger_peek();
+        assert_eq!(app.peek.phase(), peek::PeekPhase::In);
+
+        app.face.set_alpha_target(1.0);
+        while !app.face.settled() {
+            app.face.step(0.05);
+        }
+        app.live.set_mini_target(0.0);
+        while !app.live.mini_settled() {
+            app.live.step(0.05);
+        }
+
+        app.step_peek(0.05);
+        assert_eq!(app.peek.phase(), peek::PeekPhase::Hold);
+
+        let rem = app.peek.hold_remaining();
+        app.step_peek(rem + 0.05);
+        assert_eq!(app.peek.phase(), peek::PeekPhase::Out);
+        assert_eq!(app.peek.target_alphas(), Some((1.0, 0.0)));
+
+        app.trigger_peek();
+        assert_eq!(app.peek.phase(), peek::PeekPhase::In);
+        assert_eq!(app.peek.target_alphas(), Some((0.0, 1.0)));
+
+        while !app.face.settled() {
+            app.face.step(0.05);
+        }
+        while !app.live.mini_settled() {
+            app.live.step(0.05);
+        }
+        assert!((app.face.alpha() - 1.0).abs() < 1e-3);
+        assert!((app.live.mini_alpha() - 0.0).abs() < 1e-3);
     }
 }
