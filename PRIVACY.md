@@ -1,6 +1,6 @@
 # Privacy Policy — Kite Island
 
-Last updated: 2026-11-14
+Last updated: 2026-11-16
 
 Kite Island is a desktop program for Windows 10 and Windows 11 that shows a dynamic island at the top of the screen. It displays quick controls, notifications, calendar, weather, timer, system status and media playback. This policy explains which data the program uses, where it is stored, and how it is shared.
 
@@ -38,7 +38,7 @@ On your computer, Kite Island also reads the media information (`SMTC` / audio m
 
 - Data is stored only on your computer, in the Kite Island data folder (`%APPDATA%\island`) under your Windows user profile.
 - OAuth tokens and Apple app-specific passwords (`%APPDATA%\island\cal_accounts.bin`), clipboard history/Quick Access (`clipboard.txt`, `quick.txt`), and calendar links and event caches (`%APPDATA%\island\calendar_cache_*.ics`) are encrypted with Windows DPAPI (`CryptProtectData`). A protected file cannot be opened by another Windows account or on another computer.
-- Calendar event caches and pending calendar sync items (`events.txt`, `events_sync.txt`), as well as notification preferences (`notif_rules.txt`, `notif_read.txt`) and app icon caches, are stored locally so features work offline and recover cleanly.
+- Calendar event caches and pending calendar sync items (`events.txt`, `events_sync.txt`), as well as notification preferences (`notif_rules.txt`, `notif_read.txt`), Windows banner suppression backup (`win_banners_backup.txt`), and app icon caches, are stored locally so features work offline and recover cleanly.
 - The developer does not receive copies of this data.
 
 ## 5. Sharing with third parties
@@ -63,7 +63,7 @@ This policy may change. The date at the top shows the last update. Changes are p
 
 # Политика конфиденциальности — Kite Island (русская версия)
 
-Дата обновления: 2026-11-14
+Дата обновления: 2026-11-16
 
 Kite Island — программа для Windows 10 и Windows 11, которая показывает «остров» (динамическое окно) вверху экрана: быстрые переключатели, уведомления, календарь, погоду, таймер, состояние системы и воспроизведение музыки. Этот документ описывает, какие данные использует программа, где они хранятся и кому передаются.
 
@@ -101,7 +101,7 @@ Kite Island — программа для Windows 10 и Windows 11, котора
 
 - Данные хранятся только на вашем компьютере, в папке данных Kite Island (`%APPDATA%\island`) в профиле пользователя Windows.
 - Токены OAuth и пароли приложений Apple (`%APPDATA%\island\cal_accounts.bin`), история буфера и «Быстрый доступ» (`clipboard.txt`, `quick.txt`), а также ссылки на календари и кэш событий (`%APPDATA%\island\calendar_cache_*.ics`) шифруются через Windows DPAPI (`CryptProtectData`). Защищённый файл не открывается другой учётной записью Windows и на другом компьютере.
-- Кэш событий, очередь отложенной записи в календарь (`events.txt`, `events_sync.txt`), правила уведомлений (`notif_rules.txt`, `notif_read.txt`) и кэш иконок приложений также хранятся локально на вашем компьютере.
+- Кэш событий, очередь отложенной записи в календарь (`events.txt`, `events_sync.txt`), правила уведомлений (`notif_rules.txt`, `notif_read.txt`), резервная копия настроек системных баннеров Windows (`win_banners_backup.txt`) и кэш иконок приложений также хранятся локально на вашем компьютере.
 - Разработчик не получает копий этих данных.
 
 ## 5. Передача третьим лицам
