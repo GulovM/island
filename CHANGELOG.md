@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+### RU
+
+- Возвращён мини-плеер на свёрнутом острове (обложка, название, исполнитель, прогресс трека и линия таймера, с периодическим и мгновенным при смене раскладки показом времени и значков); вместо полосатого эквалайзера используются живые боковые аудиоволны (WASAPI), добавлен переключатель «Мини-плеер на свёрнутом острове» в Настройках → Система (`collapsed_player`).
+- Вкладка «Управление»: добавлен виджет «Не беспокоить» для стилей Windows и macOS (в лотке редактирования сетки).
+- Уведомления: автоматическое скрытие системных баннеров Windows (`ShowBanner`) при включённых всплывающих уведомлениях (с резервным копированием и восстановлением), синхронизация прочтения с Центром уведомлений Windows, убрана лишняя кнопка «Очистить» (оставлена «Прочитать все»), форматирование заголовков мессенджеров, акцентный счётчик непрочитанных без подложки и поддержка цветных эмодзи.
+- Настройки → Система: убрана подложка у чипов значков чёлки и добавлены разделители между параметрами.
+
+### EN
+
+- Restored the collapsed mini-player (album art, title, artist, track progress and timer line, with periodic and keyboard-layout-triggered face peek), using live WASAPI stereo edge waves instead of the old bar equalizer, and added a toggle in Settings → System (`collapsed_player`).
+- Controls tab: added the "Do Not Disturb" widget for Windows and macOS styles (available in the edit-mode widget tray).
+- Notifications: automatic suppression of native Windows banners (`ShowBanner`) while popup notifications are enabled (with backup and restore), read-state sync with Windows Notification Center, removed the redundant "Clear" button in favor of "Mark all read", messenger title formatting, accent-styled unread count without backdrop, and color emoji support.
+- Settings → System: removed card backdrop on collapsed notch icon chips and added dividers between options.
+
+## [1.6.1] — 2026-11-14
+
+### RU
+
+- Уведомления: нажатие «Очистить» (и закрытие отдельного уведомления по `×`) теперь фиксирует ключи как прочитанные, чтобы старые уведомления не возвращались при приходе новых; история прочитанных увеличена до 2000 записей.
+- Уведомления: счётчик непрочитанных и буква-заглушка иконки приложения теперь используют контрастный цвет (`on_color`) вместо цвета фона, плашка «Не беспокоить» не наезжает на правые кнопки, а в списке «Приложения» появилась прокрутка.
+
+### EN
+
+- Notifications: clicking "Clear" (and dismissing individual items with `×`) now marks keys as read so cleared notifications do not reappear when new ones arrive; read history limit raised to 2000 entries.
+- Notifications: unread badge count and fallback app letter icon now use contrasting foreground color (`on_color`), the "Do Not Disturb" pill no longer overlaps header chips, and the "Apps" rules list supports scrolling.
+
 ## [1.6.0] — 2026-11-14
 
 ### RU

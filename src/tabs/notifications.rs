@@ -14,25 +14,25 @@ use crate::ios::SysColor;
 use crate::sys;
 use crate::ui::{
     bare, card, card_radius, chip_bg, dim, fg, hue, icon, ink, is_ios_palette, mix,
-    press_scale, txt, Align, Canvas, Rect, Ui, RED, WHITE,
+    press_scale, txt, Align, Canvas, Rect, Ui, RED,
 };
 
 use super::{escape, id, read_lines, unescape, write_lines, Action, NOTIFICATIONS, PAD, TOP};
 
 const RULES_FILE: &str = "notif_rules.txt";
 const READ_FILE: &str = "notif_read.txt";
-const MAX_READ_HISTORY: usize = 200;
+const MAX_READ_HISTORY: usize = 2000;
 const MAX_CAL_ITEMS: usize = 30;
 
 pub const CALENDAR_APP_ID: &str = "island.calendar";
 
 const N_BTN_APPS: u32 = 1;
 const N_BTN_READ_ALL: u32 = 2;
-const N_BTN_CLEAR: u32 = 3;
 const N_BTN_ALLOW: u32 = 4;
 const N_BTN_WIN_PRIVACY: u32 = 5;
 const N_SCROLL: u32 = 6;
 const N_BTN_APPS_WIN_CFG: u32 = 7;
+const N_APPS_SCROLL: u32 = 8;
 
 const BASE_CARD: u32 = 1000;
 const BASE_READ: u32 = 2000;
@@ -470,32 +470,18 @@ impl Notifications {
         let title_w = cv.text_w(title, &f.title) + 2.0;
         cv.text(title, Rect::new(x, TOP, title_w, 22.0), &f.title, txt());
 
-        let mut lx = x + title_w + 8.0;
+        let mut lx = x + title_w + 6.0;
         let unread = self.unread_count();
         if unread > 0 {
             let badge = unread.to_string();
-            let bw = cv.text_w(&badge, &f.title) + 2.0;
-            cv.text(&badge, Rect::new(lx, TOP, bw, 22.0), &f.title, txt());
-            lx += bw + 8.0;
+            let bw = cv.digits_w(&badge, 11.0, crate::ui::weight::EMPHASIZED) + 2.0;
+            let badge_col = crate::ui::readable(cv.accent, 45.0);
+            cv.digits(&badge, lx, bw, TOP + 11.2, 11.0, crate::ui::weight::EMPHASIZED, Align::Leading, badge_col);
+            lx += bw + 6.0;
         }
 
-        if self.dnd_active {
-            let dnd_lbl = crate::i18n::pick("Не беспокоить", "Do Not Disturb");
-            let dw = cv.text_w(dnd_lbl, &f.small_c) + 22.0;
-            if lx + dw < w - PAD - 120.0 {
-                let dr = Rect::new(lx, TOP + 2.0, dw, 18.0);
-                let pill_col = if ios {
-                    D2D1_COLOR_F { a: 0.18, ..hue(SysColor::Indigo, cv.accent) }
-                } else {
-                    chip_bg()
-                };
-                cv.rr(dr, if ios { 9.0 } else { 5.0 }, pill_col);
-                cv.symbol(icon::MOON, Rect::new(dr.x + 5.0, dr.y + 3.0, 12.0, 12.0), 10.0, txt());
-                cv.text(dnd_lbl, Rect::new(dr.x + 17.0, dr.y, dw - 21.0, 18.0), &f.small_c, txt());
-            }
-        }
-
-        // Правые чипы шапки: Приложения (если есть правила), Прочитать все, Очистить.
+        // Правые чипы шапки: Приложения (если есть правила), Прочитать все.
+        // Рисуем их до плашки «Не беспокоить», чтобы точно знать границу `rx`.
         let mut rx = w - PAD;
         if self.manage_apps {
             let back_lbl = crate::i18n::pick("Назад", "Back");
@@ -505,17 +491,6 @@ impl Notifications {
                 self.manage_apps = false;
             }
         } else {
-            if !self.items.is_empty() {
-                let clr_lbl = crate::i18n::pick("Очистить", "Clear");
-                let cw = cv.chip_w(clr_lbl);
-                rx -= cw;
-                if ui.chip(cv, id(NOTIFICATIONS, N_BTN_CLEAR), Rect::new(rx, TOP + 1.0, cw, 20.0), clr_lbl, false) {
-                    self.mark_all_read_mem();
-                    self.save_read();
-                    crate::bg::send(crate::bg::Cmd::NotifClearAll);
-                }
-                rx -= 6.0;
-            }
             if unread > 0 {
                 let ra_lbl = crate::i18n::pick("Прочитать все", "Mark all read");
                 let rw = cv.chip_w(ra_lbl);
@@ -533,6 +508,22 @@ impl Notifications {
                     self.manage_apps = true;
                     self.context_menu = None;
                 }
+            }
+        }
+
+        if self.dnd_active {
+            let dnd_lbl = crate::i18n::pick("Не беспокоить", "Do Not Disturb");
+            let dw = cv.text_w(dnd_lbl, &f.small_c) + 22.0;
+            if lx + dw + 8.0 <= rx {
+                let dr = Rect::new(lx, TOP + 2.0, dw, 18.0);
+                let pill_col = if ios {
+                    D2D1_COLOR_F { a: 0.18, ..hue(SysColor::Indigo, cv.accent) }
+                } else {
+                    chip_bg()
+                };
+                cv.rr(dr, if ios { 9.0 } else { 5.0 }, pill_col);
+                cv.symbol(icon::MOON, Rect::new(dr.x + 5.0, dr.y + 3.0, 12.0, 12.0), 10.0, txt());
+                cv.text(dnd_lbl, Rect::new(dr.x + 17.0, dr.y, dw - 21.0, 18.0), &f.small_c, txt());
             }
         }
 
@@ -795,11 +786,7 @@ impl Notifications {
             self.mark_key_read(&k);
         }
         if let Some((k, src)) = dismiss_item {
-            self.items.retain(|it| it.key != k);
-            self.cal_items.retain(|it| it.key != k);
-            if self.context_menu.as_deref() == Some(k.as_str()) {
-                self.context_menu = None;
-            }
+            self.mark_key_read(&k);
             if let NotifSource::Win(win_id) = src {
                 crate::bg::send(crate::bg::Cmd::NotifRemove(win_id));
             }
@@ -846,13 +833,20 @@ impl Notifications {
             let _ = sys::open("ms-settings:notifications");
         }
 
-        let mut y = view.y + 24.0;
+        let list_view = Rect::new(view.x, view.y + 24.0, view.w, (view.h - 24.0).max(20.0));
+        let total_h = (self.rules.len() as f32 * 42.0 - 6.0).max(0.0);
+        let sid = id(NOTIFICATIONS, N_APPS_SCROLL);
+        let off = ui.scroll_begin(cv, sid, list_view, total_h);
+        let list_w = if total_h > list_view.h { list_view.w - 10.0 } else { list_view.w };
+
+        let mut y = list_view.y - off;
         let mut change: Option<(usize, AppRule)> = None;
         for (i, r) in self.rules.iter().enumerate() {
-            if y + 40.0 > view.bottom() {
-                break;
+            let row = Rect::new(list_view.x, y, list_w, 36.0);
+            y += 42.0;
+            if row.bottom() < list_view.y - 10.0 || row.y > list_view.bottom() + 10.0 {
+                continue;
             }
-            let row = Rect::new(view.x, y, view.w, 36.0);
             cv.rr(row, rad, card());
             if !ios {
                 cv.rr_line(row, rad, crate::ui::hairline(), 1.0);
@@ -881,6 +875,7 @@ impl Notifications {
             }
             y += 42.0;
         }
+        ui.scroll_end(cv, sid);
         if let Some((idx, next_rule)) = change {
             let (id_s, name_s) = (self.rules[idx].app_id.clone(), self.rules[idx].app_name.clone());
             self.set_rule(&id_s, &name_s, next_rule);
@@ -1033,7 +1028,7 @@ unsafe fn paint_app_icon(ui: &mut Ui, cv: &Canvas, item: &NotifItem, tile: Rect,
         .unwrap_or_else(|| "W".to_string());
     let bg = D2D1_COLOR_F { a: 0.24, ..cv.accent };
     cv.rr(tile, rad, bg);
-    cv.text(&ch, tile, &cv.g.fonts.body_b, WHITE);
+    cv.text(&ch, tile, &cv.g.fonts.body_b, crate::ui::on_color(bg));
 }
 
 #[cfg(test)]
@@ -1170,5 +1165,54 @@ mod tests {
             split_display_fields("Снимок экрана сохранён", "", false),
             (String::new(), "Снимок экрана сохранён".into())
         );
+    }
+
+    #[test]
+    fn clear_prevents_old_notifications_from_reappearing_on_new_arrival() {
+        let mut n = Notifications::default();
+        n.loaded = true;
+        n.initial_sync_done = true;
+
+        let old1 = SysNotif {
+            id: 101,
+            app_id: "app.one".into(),
+            app_name: "One".into(),
+            title: "Old 1".into(),
+            body: "Body 1".into(),
+            time_secs: 300,
+            icon: None,
+        };
+        let old2 = SysNotif {
+            id: 102,
+            app_id: "app.two".into(),
+            app_name: "Two".into(),
+            title: "Old 2".into(),
+            body: "Body 2".into(),
+            time_secs: 301,
+            icon: None,
+        };
+
+        let _ = n.sync_snapshot(&[old1.clone(), old2.clone()], 1, NotifAccess::Allowed, false);
+        assert_eq!(n.unread_count(), 2);
+
+        // Очистка помечает текущие уведомления прочитанными и убирает их из списка.
+        n.mark_all_read_mem();
+        assert_eq!(n.unread_count(), 0);
+
+        // Приходит новое уведомление, а Windows всё ещё возвращает старые в снимке.
+        let fresh = SysNotif {
+            id: 103,
+            app_id: "app.three".into(),
+            app_name: "Three".into(),
+            title: "New".into(),
+            body: "Fresh body".into(),
+            time_secs: 302,
+            icon: None,
+        };
+        let popups = n.sync_snapshot(&[old1, old2, fresh], 2, NotifAccess::Allowed, false);
+        assert_eq!(popups.len(), 1);
+        assert_eq!(popups[0].title, "New");
+        assert_eq!(n.unread_count(), 1);
+        assert_eq!(n.items[0].title, "New");
     }
 }

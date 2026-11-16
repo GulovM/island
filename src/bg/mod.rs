@@ -123,8 +123,6 @@ pub enum Cmd {
     NotifRemove(u32),
     /// Удалить несколько уведомлений по их id в Windows.
     NotifRemoveMany(Vec<u32>),
-    /// Очистить все уведомления в Windows.
-    NotifClearAll,
     /// Обновить статус режима «Не беспокоить» (по событию WinRT).
     DndRefresh,
     /// Переключить системный режим «Не беспокоить».
@@ -242,7 +240,6 @@ pub fn start(hwnd: HWND) {
                         | Cmd::NotifRequestAccess
                         | Cmd::NotifRemove(_)
                         | Cmd::NotifRemoveMany(_)
-                        | Cmd::NotifClearAll
                         | Cmd::DndRefresh
                         | Cmd::Dnd(_)
                 )
@@ -258,7 +255,6 @@ pub fn start(hwnd: HWND) {
                             | Cmd::NotifRequestAccess
                             | Cmd::NotifRemove(_)
                             | Cmd::NotifRemoveMany(_)
-                            | Cmd::NotifClearAll
                     )
                 });
             let explicit_dnd = full || batch.iter().any(|c| matches!(c, Cmd::DndRefresh | Cmd::Dnd(_)));
@@ -388,7 +384,6 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
                 notif::remove_notification(id);
             }
         }
-        Cmd::NotifClearAll => notif::clear_notifications(),
         Cmd::Dnd(on) => {
             if notif::set_dnd(on) {
                 pending.dnd = Some((on, std::time::Instant::now() + std::time::Duration::from_millis(1500)));

@@ -142,13 +142,6 @@ pub unsafe fn remove_notification(id: u32) {
     }
 }
 
-/// Очищает все уведомления в центре уведомлений Windows.
-pub unsafe fn clear_notifications() {
-    if let Ok(l) = UserNotificationListener::Current() {
-        let _ = l.ClearNotifications();
-    }
-}
-
 /// Проверяет, включён ли в Windows режим «Не беспокоить» (`PriorityOnly` или `AlarmsOnly`).
 pub unsafe fn poll_dnd() -> Option<bool> {
     let mgr = ToastNotificationManager::GetDefault().ok()?;
