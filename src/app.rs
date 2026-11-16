@@ -517,6 +517,12 @@ impl App {
         self.cfg.free_layout = new.free_layout;
         self.cfg.hide_on_screenshot = new.hide_on_screenshot;
         self.cfg.popup_notifications = new.popup_notifications;
+        // DND временно выключает всплывающие уведомления (dnd_restore_popups = true), не затрагивая
+        // подавление баннеров Windows и его бэкап: откатываем только при ручном выключении опции.
+        let want_banners = self.cfg.popup_notifications || crate::state::dnd_restore_popups();
+        if want_banners != sys::notif_banners_active() {
+            sys::set_notif_banners_suppressed(want_banners);
+        }
         self.tabs.set_compact(!self.cfg.free_layout);
         self.cfg.auto_update = new.auto_update;
         if self.cfg.language != new.language {

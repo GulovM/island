@@ -1213,10 +1213,21 @@ impl Settings {
             crate::state::set_dnd_restore_popups(false);
             self.changed = true;
         }
-        if crate::bg::snapshot().dnd_active {
+        let show_reboot = (self.cfg.popup_notifications || crate::state::dnd_restore_popups())
+            && crate::sys::notif_banners_need_reboot();
+        let show_dnd = crate::bg::snapshot().dnd_active;
+        if show_reboot || show_dnd {
             y += 18.0;
-            cv.text("В Windows включён режим «Не беспокоить»", Rect::new(x, y, iw, 13.0), &f.small, dim());
-            y += 22.0;
+            if show_reboot {
+                let warn = crate::ui::readable(crate::ui::status_yellow(), 45.0);
+                cv.text("Требуется перезагрузка", Rect::new(x, y, iw, 13.0), &f.small, warn);
+                y += 16.0;
+            }
+            if show_dnd {
+                cv.text("В Windows включён режим «Не беспокоить»", Rect::new(x, y, iw, 13.0), &f.small, dim());
+                y += 16.0;
+            }
+            y += 6.0;
         } else {
             y += 28.0;
         }

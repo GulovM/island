@@ -454,6 +454,7 @@ const TABLE: &[(&str, &str)] = &[
     // Уведомления
     ("УВЕДОМЛЕНИЯ", "NOTIFICATIONS"),
     ("Всплывающие уведомления", "Popup notifications"),
+    ("Требуется перезагрузка", "Restart required"),
     ("В Windows включён режим «Не беспокоить»", "Windows Do Not Disturb is active"),
 ];
 
@@ -549,6 +550,9 @@ mod tests {
             "Установить",
             "Установка…",
             "Повторить",
+            "Всплывающие уведомления",
+            "Требуется перезагрузка",
+            "В Windows включён режим «Не беспокоить»",
         ];
         let cyrillic = |s: &str| s.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c));
         for k in keys {

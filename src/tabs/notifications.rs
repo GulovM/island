@@ -189,7 +189,7 @@ impl Notifications {
             .map_or(AppRule::Normal, |r| r.rule)
     }
 
-    pub fn set_rule(&mut self, app_id: &str, app_name: &str, rule: AppRule) {
+    fn set_rule_mem(&mut self, app_id: &str, app_name: &str, rule: AppRule) {
         self.ensure_loaded();
         if let Some(pos) = self.rules.iter().position(|r| r.app_id.eq_ignore_ascii_case(app_id)) {
             if rule == AppRule::Normal {
@@ -211,6 +211,10 @@ impl Notifications {
             self.items.retain(|it| !it.app_id.eq_ignore_ascii_case(app_id));
             self.cal_items.retain(|it| !it.app_id.eq_ignore_ascii_case(app_id));
         }
+    }
+
+    pub fn set_rule(&mut self, app_id: &str, app_name: &str, rule: AppRule) {
+        self.set_rule_mem(app_id, app_name, rule);
         self.save_rules();
     }
 
@@ -227,8 +231,15 @@ impl Notifications {
     }
 
     fn mark_key_read(&mut self, key: &str) {
+        let win_id = self.items.iter().find(|it| it.key == key).and_then(|it| match it.source {
+            NotifSource::Win(id) => Some(id),
+            NotifSource::Cal(_) => None,
+        });
         self.mark_key_read_mem(key);
         self.save_read();
+        if let Some(id) = win_id {
+            crate::bg::send(crate::bg::Cmd::NotifRemove(id));
+        }
     }
 
     fn mark_all_read_mem(&mut self) {
@@ -244,8 +255,19 @@ impl Notifications {
     }
 
     fn mark_all_read(&mut self) {
+        let win_ids: Vec<u32> = self
+            .items
+            .iter()
+            .filter_map(|it| match it.source {
+                NotifSource::Win(id) => Some(id),
+                NotifSource::Cal(_) => None,
+            })
+            .collect();
         self.mark_all_read_mem();
         self.save_read();
+        if !win_ids.is_empty() {
+            crate::bg::send(crate::bg::Cmd::NotifRemoveMany(win_ids));
+        }
     }
 
     /// Число непрочитанных уведомлений для значка на иконке колокольчика.
@@ -472,9 +494,8 @@ impl Notifications {
                 let cw = cv.chip_w(clr_lbl);
                 rx -= cw;
                 if ui.chip(cv, id(NOTIFICATIONS, N_BTN_CLEAR), Rect::new(rx, TOP + 1.0, cw, 20.0), clr_lbl, false) {
-                    self.items.clear();
-                    self.cal_items.clear();
-                    self.context_menu = None;
+                    self.mark_all_read_mem();
+                    self.save_read();
                     crate::bg::send(crate::bg::Cmd::NotifClearAll);
                 }
                 rx -= 6.0;
@@ -1011,8 +1032,8 @@ mod tests {
         n.loaded = true;
         n.initial_sync_done = true;
 
-        n.set_rule("app.disabled", "DisabledApp", AppRule::Disabled);
-        n.set_rule("app.silent", "SilentApp", AppRule::Silent);
+        n.set_rule_mem("app.disabled", "DisabledApp", AppRule::Disabled);
+        n.set_rule_mem("app.silent", "SilentApp", AppRule::Silent);
 
         let batch = vec![
             SysNotif {

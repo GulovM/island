@@ -12,6 +12,7 @@ mod appearance;
 mod clipboard;
 mod energy_saver;
 mod night_light;
+mod notif_banners;
 mod paths;
 mod registry;
 mod seal;
@@ -28,6 +29,10 @@ pub use clipboard::{
 };
 pub use energy_saver::{energy_saver, set_energy_saver};
 pub use night_light::{night_light, set_night_light};
+pub use notif_banners::{
+    init_notif_banners, notif_banners_active, notif_banners_need_reboot, set_notif_banners_suppressed,
+    suppress_notif_banner,
+};
 pub use paths::{pictures_dir, windows_dir};
 pub use registry::{reg_str, windows_build_number};
 pub(crate) use uia::{handle_get_object, report_focus};

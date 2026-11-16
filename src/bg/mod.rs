@@ -121,6 +121,8 @@ pub enum Cmd {
     NotifRequestAccess,
     /// Удалить уведомление по его id в Windows.
     NotifRemove(u32),
+    /// Удалить несколько уведомлений по их id в Windows.
+    NotifRemoveMany(Vec<u32>),
     /// Очистить все уведомления в Windows.
     NotifClearAll,
     /// Обновить статус режима «Не беспокоить» (по событию WinRT).
@@ -237,6 +239,7 @@ pub fn start(hwnd: HWND) {
                         | Cmd::NotifRefresh
                         | Cmd::NotifRequestAccess
                         | Cmd::NotifRemove(_)
+                        | Cmd::NotifRemoveMany(_)
                         | Cmd::NotifClearAll
                         | Cmd::DndRefresh
                 )
@@ -248,7 +251,11 @@ pub fn start(hwnd: HWND) {
                 || batch.iter().any(|c| {
                     matches!(
                         c,
-                        Cmd::NotifRefresh | Cmd::NotifRequestAccess | Cmd::NotifRemove(_) | Cmd::NotifClearAll
+                        Cmd::NotifRefresh
+                            | Cmd::NotifRequestAccess
+                            | Cmd::NotifRemove(_)
+                            | Cmd::NotifRemoveMany(_)
+                            | Cmd::NotifClearAll
                     )
                 });
             let explicit_dnd = full || batch.iter().any(|c| matches!(c, Cmd::DndRefresh));
@@ -363,6 +370,11 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
             let _ = notif::request_access();
         }
         Cmd::NotifRemove(id) => notif::remove_notification(id),
+        Cmd::NotifRemoveMany(ids) => {
+            for id in ids {
+                notif::remove_notification(id);
+            }
+        }
         Cmd::NotifClearAll => notif::clear_notifications(),
         Cmd::Refresh => watch_volume(),
         Cmd::List(ListKind::Wifi) => store_list(ListKind::Wifi, wifi_networks(true)),
@@ -629,18 +641,27 @@ unsafe fn refresh_radios(access: &mut bool, pending: &mut PendingRadios) {
 
 unsafe fn refresh_notifs() -> bool {
     let (access, list) = notif::poll_notifications();
-    if let Ok(mut s) = SNAPSHOT.lock() {
+    let changed = if let Ok(mut s) = SNAPSHOT.lock() {
         let mut snap = s.clone().unwrap_or_default();
         if snap.notif_access != access || snap.notifications != list {
             snap.notif_access = access;
-            snap.notifications = list;
+            snap.notifications = list.clone();
             snap.notif_rev += 1;
             snap.rev += 1;
             *s = Some(snap);
-            return true;
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    if changed && crate::sys::notif_banners_active() {
+        for n in &list {
+            crate::sys::suppress_notif_banner(&n.app_id);
         }
     }
-    false
+    changed
 }
 
 unsafe fn refresh_dnd() -> bool {

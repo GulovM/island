@@ -205,6 +205,7 @@ fn run() -> Result<()> {
     i18n::set(i18n::from_config(&cfg.language));
     log::info("запуск");
     let state = state::load();
+    sys::init_notif_banners(cfg.popup_notifications || state.dnd_restore_popups);
     let now = sys::now_secs();
     let weather_fresh = state.weather.time > 0 && now.saturating_sub(state.weather.time) < 24 * 3600;
     if weather_fresh

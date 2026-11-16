@@ -11,6 +11,7 @@ pub const GREEN: D2D1_COLOR_F = rgb(0.61, 0.80, 0.40);
 pub const BAR_GREEN: D2D1_COLOR_F = rgb(0.55, 0.76, 0.29);
 pub const VIOLET: D2D1_COLOR_F = rgb(0.78, 0.61, 0.91);
 pub const ORANGE: D2D1_COLOR_F = rgb(0.95, 0.63, 0.14);
+pub const YELLOW: D2D1_COLOR_F = rgb(0.98, 0.80, 0.18);
 pub const PINK: D2D1_COLOR_F = rgb(0.91, 0.42, 0.60);
 pub const RED: D2D1_COLOR_F = rgb(0.93, 0.36, 0.33);
 pub const BLUE: D2D1_COLOR_F = rgb(0.38, 0.64, 1.0);
@@ -337,6 +338,13 @@ pub fn status_orange() -> D2D1_COLOR_F {
     status_color(crate::ios::SysColor::Orange, ORANGE)
 }
 
+/// Статусный жёлтый (предупреждение о перезагрузке в настройках):
+/// в стиле Windows — константа `YELLOW`,
+/// в стиле iOS — `ios::sys(Yellow, dark)`.
+pub fn status_yellow() -> D2D1_COLOR_F {
+    status_color(crate::ios::SysColor::Yellow, YELLOW)
+}
+
 /// Статусный розовый/красный (события календаря):
 /// в стиле Windows — константа `PINK`,
 /// в стиле iOS — `ios::sys(Red, dark)` (календарь в iOS красный).
@@ -468,6 +476,7 @@ mod tests {
         assert_eq!(status_teal(), TEAL);
         assert_eq!(status_cyan(), CYAN);
         assert_eq!(status_orange(), ORANGE);
+        assert_eq!(status_yellow(), YELLOW);
         assert_eq!(status_pink(), PINK);
         assert_eq!(status_red(), RED);
 
@@ -482,6 +491,7 @@ mod tests {
         assert_eq!(status_teal(), TEAL);
         assert_eq!(status_cyan(), CYAN);
         assert_eq!(status_orange(), ORANGE);
+        assert_eq!(status_yellow(), YELLOW);
         assert_eq!(status_pink(), PINK);
         assert_eq!(status_red(), RED);
 
@@ -497,6 +507,7 @@ mod tests {
         assert_eq!(status_teal(), to_d2d(crate::ios::SysColor::Teal));
         assert_eq!(status_cyan(), to_d2d(crate::ios::SysColor::Cyan));
         assert_eq!(status_orange(), to_d2d(crate::ios::SysColor::Orange));
+        assert_eq!(status_yellow(), to_d2d(crate::ios::SysColor::Yellow));
         assert_eq!(status_pink(), to_d2d(crate::ios::SysColor::Red));
         assert_eq!(status_red(), to_d2d(crate::ios::SysColor::Red));
 
@@ -512,6 +523,7 @@ mod tests {
         assert_eq!(status_teal(), to_d2d_l(crate::ios::SysColor::Teal));
         assert_eq!(status_cyan(), to_d2d_l(crate::ios::SysColor::Cyan));
         assert_eq!(status_orange(), to_d2d_l(crate::ios::SysColor::Orange));
+        assert_eq!(status_yellow(), to_d2d_l(crate::ios::SysColor::Yellow));
         assert_eq!(status_pink(), to_d2d_l(crate::ios::SysColor::Red));
         assert_eq!(status_red(), to_d2d_l(crate::ios::SysColor::Red));
 
