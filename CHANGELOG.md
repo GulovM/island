@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [1.7.1] — 2026-11-16
+
+### RU
+
+- Плеер: исправлено зависание кнопок управления и перемотки при воспроизведении из браузера (Chrome / YouTube и другие SMTC-источники) — устаревшие и пересозданные сессии автоматически обновляются, закрытые отсеиваются, а при сбое переподключается `GlobalSystemMediaTransportControlsSessionManager`.
+- Плеер: добавлены таймауты ожидания WinRT/SMTC-операций, пауза перед повтором загрузки сбойной обложки, флаг `KEYEVENTF_EXTENDEDKEY` для аппаратных медиаклавиш (`SendInput`), точный статус выполнения перемотки и отказ от лишнего фонового обновления радио и яркости при нажатии кнопок плеера.
+- Ввод и перемотка: при внешнем перехвате захвата мыши (`WM_CAPTURECHANGED`) сбрасывается зависшее состояние нажатия, а перемотка завершает отправку финальной позиции, даже если кнопку мыши отпустили за пределами полосы прогресса.
+
+### EN
+
+- Media player: fixed unresponsive transport buttons and seek bar during browser playback (Chrome / YouTube and other SMTC sources) by recovering stale or recreated sessions, filtering out closed sessions, and resetting `GlobalSystemMediaTransportControlsSessionManager` on failures.
+- Media player: added WinRT/SMTC wait timeouts, retry cooldown for failed album art fetches, `KEYEVENTF_EXTENDEDKEY` in `SendInput` media key fallback, accurate seek command outcome tracking, and skipped unrelated radio and brightness refreshes on media commands.
+- Input & seeking: reset stuck pressed state on external capture loss (`WM_CAPTURECHANGED`) and ensured final seek position is dispatched even when dragging and releasing outside the seek bar.
+
 ## [1.7.0] — 2026-11-16
 
 ### RU
@@ -438,7 +452,8 @@
 - Установщик (Inno Setup, установка без прав администратора) и portable-архив, `SHA256SUMS.txt`.
 - Лицензия MIT.
 
-[Unreleased]: https://github.com/GulovM/island/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/GulovM/island/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/GulovM/island/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/GulovM/island/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/GulovM/island/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/GulovM/island/compare/v1.5.0...v1.6.0
