@@ -80,6 +80,12 @@ impl Toast {
         matches!(self, Toast::Timer | Toast::Event)
     }
 
+    /// Уведомление, при наведении на которое свёрнутый остров не должен раскрываться,
+    /// чтобы пользователь успел нажать × или перейти в приложение.
+    pub fn blocks_hover_expand(&self) -> bool {
+        matches!(self, Toast::Timer | Toast::Event | Toast::Notice)
+    }
+
     /// Уведомление, которое должно показаться даже если чёлка свёрнута в полоску.
     pub fn emerges_from_strip(&self) -> bool {
         matches!(self, Toast::Timer | Toast::Event | Toast::Notice)
@@ -301,6 +307,21 @@ impl Live {
     /// и закрывается по ×, Esc или таймауту.
     pub fn alert(&self) -> bool {
         self.toast.is_some_and(|t| t.is_alert())
+    }
+
+    /// Наведение на активное уведомление не должно раскрывать остров.
+    pub fn blocks_hover_expand(&self) -> bool {
+        self.toast.is_some_and(|t| t.blocks_hover_expand())
+    }
+
+    /// Сейчас показано всплывающее системное уведомление (`Toast::Notice`).
+    pub fn is_notice(&self) -> bool {
+        matches!(self.toast, Some(Toast::Notice))
+    }
+
+    /// Данные активного всплывающего уведомления (если сейчас показано `Toast::Notice`).
+    pub fn notice(&self) -> Option<&PopupNotice> {
+        self.is_notice().then_some(self.notice.as_ref()).flatten()
     }
 
     /// Остров должен выехать из полоски ради текущего тоста.
@@ -552,6 +573,9 @@ impl Live {
         match t {
             Toast::Notice => {
                 if let Some(n) = &self.notice {
+                    if r.contains(cursor) {
+                        cv.rr(r, r.h / 2.0, D2D1_COLOR_F { a: 0.06, ..WHITE });
+                    }
                     let ir = Rect::new(r.x + 12.0, r.cy() - 15.0, 30.0, 30.0);
                     let tile_rad = if n.is_calendar { ir.h / 2.0 } else { 10.0 };
                     let mut painted_icon = false;
@@ -793,10 +817,36 @@ mod tests {
         let mut l = Live::new(true, true);
         l.show(Toast::Volume { level: 0.5, muted: false });
         assert!(!l.alert());
+        assert!(!l.blocks_hover_expand());
         l.show(Toast::Timer);
         assert!(l.alert());
+        assert!(l.blocks_hover_expand());
         l.clear_toast();
         assert!(!l.alert(), "после закрытия остров возвращается в прежнее состояние");
+        assert!(!l.blocks_hover_expand());
+    }
+
+    #[test]
+    fn notice_toast_blocks_hover_expand_and_exposes_notice_while_active() {
+        let mut l = Live::new(true, true);
+        l.show_notice(PopupNotice {
+            key: "win:42:100".into(),
+            win_id: Some(42),
+            app_id: "Telegram.TelegramDesktop".into(),
+            app_name: "Telegram Desktop".into(),
+            title: "Алексей".into(),
+            body: "Привет".into(),
+            icon: None,
+            is_calendar: false,
+        });
+        assert!(l.is_notice());
+        assert!(l.blocks_hover_expand());
+        assert!(!l.alert(), "уведомление не использует кнопку × таймера");
+        assert_eq!(l.notice().map(|n| n.app_id.as_str()), Some("Telegram.TelegramDesktop"));
+        assert!(l.clear_toast());
+        assert!(!l.is_notice());
+        assert!(!l.blocks_hover_expand());
+        assert!(l.notice().is_none());
     }
 
     #[test]

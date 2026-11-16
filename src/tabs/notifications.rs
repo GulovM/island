@@ -121,6 +121,8 @@ pub(crate) fn split_display_fields(title: &str, body: &str, single_line_msg: boo
 /// Всплывающее уведомление для показа в свёрнутой чёлке.
 #[derive(Clone, Debug)]
 pub struct PopupNotice {
+    pub key: String,
+    pub win_id: Option<u32>,
     pub app_id: String,
     pub app_name: String,
     pub title: String,
@@ -253,6 +255,12 @@ impl Notifications {
             NotifSource::Win(id) => Some(id),
             NotifSource::Cal(_) => None,
         });
+        self.mark_notice_read(key, win_id);
+    }
+
+    /// Помечает уведомление прочитанным по ключу и при необходимости убирает его из Центра уведомлений Windows.
+    pub fn mark_notice_read(&mut self, key: &str, win_id: Option<u32>) {
+        self.ensure_loaded();
         self.mark_key_read_mem(key);
         self.save_read();
         if let Some(id) = win_id {
@@ -335,6 +343,8 @@ impl Notifications {
             }
             if self.initial_sync_done && is_new && rule == AppRule::Normal {
                 popups.push(PopupNotice {
+                    key: key.clone(),
+                    win_id: Some(n.id),
                     app_id: n.app_id.clone(),
                     app_name: n.app_name.clone(),
                     title: n.title.clone(),
@@ -474,9 +484,15 @@ impl Notifications {
         let unread = self.unread_count();
         if unread > 0 {
             let badge = unread.to_string();
-            let bw = cv.digits_w(&badge, 11.0, crate::ui::weight::EMPHASIZED) + 2.0;
+            let df = f.display(11.0, crate::ui::weight::EMPHASIZED, Align::Leading);
+            let bw = cv.text_w(&badge, &df) + 2.0;
+            // Выравниваем число по базовой линии заголовка «Уведомления» (внутри поля высотой 22 px).
+            let dy = match (cv.line_metrics(title, &f.title), cv.line_metrics(&badge, &df)) {
+                (Some((th, tb)), Some((bh, bb))) => ((22.0 - th) / 2.0 + tb) - ((22.0 - bh) / 2.0 + bb),
+                _ => 0.7,
+            };
             let badge_col = crate::ui::readable(cv.accent, 45.0);
-            cv.digits(&badge, lx, bw, TOP + 11.2, 11.0, crate::ui::weight::EMPHASIZED, Align::Leading, badge_col);
+            cv.text(&badge, Rect::new(lx, TOP + dy, bw, 22.0), &df, badge_col);
             lx += bw + 6.0;
         }
 

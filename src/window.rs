@@ -238,6 +238,7 @@ impl App {
     /// у острова ради уведомления, уходит прежнему окну. `true` — что-то изменилось.
     pub(crate) unsafe fn dismiss_toast(&mut self) -> bool {
         let _ = KillTimer(Some(self.hwnd), TOAST_TIMER);
+        self.notice_pressed = false;
         let was = self.live.clear_toast();
         if self.ui.focus == Some(NOTICE_FOCUS) {
             self.ui.blur();
@@ -269,6 +270,38 @@ impl App {
         let x = live::Live::close_rect(self.toast_rect());
         let (px, py) = (px as f32 / self.scale, py as f32 / self.scale);
         px >= x.x - 4.0 && px < x.right() + 4.0 && py >= x.y - 4.0 && py < x.bottom() + 4.0
+    }
+
+    /// Клик (в пикселях окна) попал во всплывающее системное уведомление (`Toast::Notice`).
+    pub(crate) fn hits_toast_notice(&self, px: i32, py: i32) -> bool {
+        if !self.live.is_notice() || self.expanded {
+            return false;
+        }
+        let (lx, ly) = (px as f32 / self.scale, py as f32 / self.scale);
+        self.toast_rect().contains((lx, ly))
+    }
+
+    /// Курсор сейчас находится над прямоугольником активного тоста.
+    pub(crate) unsafe fn cursor_in_toast(&self) -> bool {
+        let mut p = POINT::default();
+        if GetCursorPos(&mut p).is_err() {
+            return false;
+        }
+        let (lx, ly) = ((p.x - self.win_x) as f32 / self.scale, (p.y - self.win_y) as f32 / self.scale);
+        self.toast_rect().contains((lx, ly))
+    }
+
+    /// Открывает приложение, отправившее всплывающее уведомление, и закрывает тост.
+    pub(crate) unsafe fn activate_toast_notice(&mut self) -> bool {
+        let Some(notice) = self.live.notice().cloned() else {
+            return false;
+        };
+        self.hover_suppress_until = Some(Instant::now() + std::time::Duration::from_millis(800));
+        self.dismiss_toast();
+        if !notice.is_calendar && sys::open_notification_app(&notice.app_id, &notice.app_name) {
+            self.tabs.mark_notif_read(&notice.key, notice.win_id);
+        }
+        true
     }
 
     pub(crate) unsafe fn set_expanded(&mut self, expanded: bool) {
@@ -550,9 +583,13 @@ impl App {
         if self.hidden {
             return false;
         }
-        // Над уведомлением о таймере остров не раскрывается: к × надо суметь дотянуться (кадр — на подсветку).
-        if self.live.alert() && !self.expanded {
+        // Над уведомлением (таймер, событие, всплывающее уведомление) остров не раскрывается:
+        // нужно успеть нажать × или открыть приложение (кадр — на подсветку).
+        if self.live.blocks_hover_expand() && !self.expanded {
             return true;
+        }
+        if !self.expanded && self.hover_suppress_until.is_some_and(|t| Instant::now() < t) {
+            return false;
         }
         let was_collapsed = !self.expanded;
         if was_collapsed {

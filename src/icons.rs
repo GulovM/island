@@ -53,7 +53,7 @@ const MAX_DISK_ENTRIES: usize = 512;
 const MAX_UNKNOWN_RAM: usize = 64;
 
 /// `System.AppUserModel.ID` (`{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}, 5`).
-const PKEY_APP_USER_MODEL_ID: PROPERTYKEY = PROPERTYKEY {
+pub(crate) const PKEY_APP_USER_MODEL_ID: PROPERTYKEY = PROPERTYKEY {
     fmtid: windows::core::GUID::from_u128(0x9f4c2855_9f79_4b39_a8d0_e1d42de1d5f3),
     pid: 5,
 };
@@ -73,6 +73,17 @@ pub enum Found {
     Dead(String),
 }
 
+/// Цель запуска и фокусировки приложения, собранная при индексации ярлыков и `AppsFolder`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AppLaunchTarget {
+    /// Путь к ярлыку `.lnk` в меню «Пуск».
+    pub path: Option<String>,
+    /// Целевой `.exe` ярлыка (если не является общим лаунчером вроде `Update.exe`).
+    pub exe: Option<String>,
+    /// Оригинальный AUMID из `shell:AppsFolder` или свойства ярлыка.
+    pub aumid: Option<String>,
+}
+
 struct CachedEntry {
     stamp: u64,
     last_used: u64,
@@ -89,6 +100,12 @@ struct IconStore {
     aliases: HashMap<String, String>,
     /// Зарегистрированные в `shell:AppsFolder` элементы: `aumid_lower` → оригинальный parsing-name.
     apps_folder: HashMap<String, String>,
+    /// Цели запуска по точному AUMID (`aumid_lower`).
+    launch_by_aumid: HashMap<String, AppLaunchTarget>,
+    /// Цели запуска по отображаемому имени ярлыка/приложения (`name_lower`).
+    launch_by_name: HashMap<String, AppLaunchTarget>,
+    /// Цели запуска по имени исполняемого файла без `.exe` (`stem_lower`).
+    launch_by_stem: HashMap<String, AppLaunchTarget>,
     /// Кэш иконок уведомлений без `app_id` (`windows.unknown`), на диск не пишется.
     unknown: HashMap<String, Arc<Vec<u8>>>,
     /// Неудачные поиски иконок уведомлений: ключ → `PRELOAD_GEN`, при котором была попытка.
@@ -186,6 +203,152 @@ fn is_generic_stem(stem: &str) -> bool {
             | "svchost"
             | "explorer"
     )
+}
+
+fn is_generic_app_token(tok: &str) -> bool {
+    is_generic_stem(tok)
+        || matches!(
+            tok,
+            "desktop" | "windows" | "microsoft" | "client" | "portable" | "beta" | "canary" | "edition" | "app" | "browser"
+        )
+}
+
+fn merge_launch_target(dst: &mut AppLaunchTarget, src: &AppLaunchTarget) {
+    if dst.path.is_none() {
+        dst.path = src.path.clone();
+    }
+    if dst.exe.is_none() {
+        dst.exe = src.exe.clone();
+    }
+    if dst.aumid.is_none() {
+        dst.aumid = src.aumid.clone();
+    }
+}
+
+fn register_launch_target(
+    s: &mut IconStore,
+    name: Option<&str>,
+    aumid: Option<&str>,
+    stem: Option<&str>,
+    target: AppLaunchTarget,
+) {
+    if let Some(id) = aumid.map(str::trim).filter(|id| !id.is_empty()) {
+        let entry = s.launch_by_aumid.entry(id.to_lowercase()).or_default();
+        merge_launch_target(entry, &target);
+    }
+    if let Some(n) = name.map(str::trim).filter(|n| !n.is_empty()) {
+        let entry = s.launch_by_name.entry(n.to_lowercase()).or_default();
+        merge_launch_target(entry, &target);
+    }
+    if let Some(st) = stem.map(str::trim).filter(|st| !st.is_empty()) {
+        let low = st.to_lowercase();
+        if !is_generic_stem(&low) {
+            let entry = s.launch_by_stem.entry(low).or_default();
+            merge_launch_target(entry, &target);
+        }
+    }
+}
+
+/// Извлекает вероятные имена процесса/приложения (без `.exe`) из `app_id` и `app_name`.
+pub(crate) fn app_candidate_stems(app_id: &str, app_name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut push = |raw: &str| {
+        let s = raw.trim().to_lowercase();
+        if !s.is_empty() && !out.contains(&s) {
+            out.push(s);
+        }
+    };
+
+    let nlow = app_name.trim().to_lowercase();
+    if !nlow.is_empty() {
+        if !is_generic_app_token(&nlow) {
+            push(&nlow);
+        }
+        for tok in nlow.split(|c: char| !c.is_alphanumeric()) {
+            let min_ok = tok.chars().count() >= 4 || tok == "vk";
+            if min_ok && !is_generic_app_token(tok) {
+                push(tok);
+            }
+        }
+    }
+
+    if !app_id.is_empty() && app_id != "windows.unknown" {
+        let before_bang = app_id.split('!').next().unwrap_or(app_id);
+        let base = before_bang.rsplit(['\\', '/']).next().unwrap_or(before_bang);
+        let base_no_ext = base.strip_suffix(".exe").or_else(|| base.strip_suffix(".EXE")).unwrap_or(base);
+        let prefix = base_no_ext.split("._").next().unwrap_or(base_no_ext);
+        for tok in prefix.split(['.', '-', '_']) {
+            let low = tok.trim().to_lowercase();
+            let trimmed = low.strip_suffix("toast").unwrap_or(&low);
+            let is_hex_hash = trimmed.len() >= 16 && trimmed.chars().all(|c| c.is_ascii_hexdigit());
+            let min_ok = trimmed.chars().count() >= 3 || trimmed == "vk";
+            if min_ok && !is_hex_hash && !is_generic_app_token(trimmed) {
+                push(trimmed);
+            }
+        }
+        let low_id = app_id.to_lowercase();
+        if low_id.contains("yandex") || nlow.contains("яндекс") || nlow.contains("yandex") {
+            push("browser");
+        }
+        if low_id.contains("vk") || nlow.contains("вк") {
+            push("vk");
+            push("vkmessenger");
+        }
+        if low_id.contains("teams") || nlow.contains("teams") {
+            push("ms-teams");
+            push("teams");
+        }
+    }
+
+    out
+}
+
+/// Подбирает сохранённые пути запуска (`.lnk`, `.exe`, `shell:AppsFolder\<AUMID>`) для приложения уведомления.
+pub fn launch_target(app_id: &str, app_name: &str) -> AppLaunchTarget {
+    let Ok(s) = store().lock() else { return AppLaunchTarget::default() };
+    launch_target_in(&s, app_id, app_name)
+}
+
+fn launch_target_in(s: &IconStore, app_id: &str, app_name: &str) -> AppLaunchTarget {
+    let mut out = AppLaunchTarget::default();
+    if !app_id.is_empty() && app_id != "windows.unknown" {
+        let id_low = app_id.trim().to_lowercase();
+        if let Some(t) = s.launch_by_aumid.get(&id_low) {
+            merge_launch_target(&mut out, t);
+        }
+        if out.aumid.is_none() {
+            if let Some(af) = s.apps_folder.get(&id_low) {
+                out.aumid = Some(af.clone());
+            }
+        }
+        // Для PWA из Chrome/Edge (`Chrome._crx_...`) не подставляем общий ярлык браузера,
+        // если у приложения есть собственный ярлык/AUMID (или их ещё нет в индексе — пусть
+        // сначала сработает поиск окна/процесса).
+        let is_crx_pwa = id_low.starts_with("chrome._crx_") || id_low.starts_with("msedge._crx_");
+        if is_crx_pwa && (out.path.is_some() || out.aumid.is_some()) {
+            return out;
+        }
+    }
+
+    let name_low = app_name.trim().to_lowercase();
+    if !name_low.is_empty() {
+        if let Some(t) = s.launch_by_name.get(&name_low) {
+            merge_launch_target(&mut out, t);
+        }
+        if let Some(t) = s.launch_by_stem.get(&name_low) {
+            merge_launch_target(&mut out, t);
+        }
+    }
+
+    for cand in app_candidate_stems(app_id, app_name) {
+        if let Some(t) = s.launch_by_stem.get(&cand) {
+            merge_launch_target(&mut out, t);
+        }
+        if let Some(t) = s.launch_by_name.get(&cand) {
+            merge_launch_target(&mut out, t);
+        }
+    }
+    out
 }
 
 fn register_aliases(
@@ -369,6 +532,34 @@ pub fn request(paths: Vec<String>) -> u32 {
                     }
                 }),
             };
+
+            if !dead && lower.ends_with(".lnk") {
+                let name = Path::new(&p).file_stem().and_then(|s| s.to_str());
+                let exe_stem = target
+                    .as_deref()
+                    .and_then(|t| Path::new(t).file_stem().and_then(|s| s.to_str()));
+                let exe = target.as_deref().filter(|t| {
+                    let is_exe = t.to_ascii_lowercase().ends_with(".exe");
+                    let stem_ok = Path::new(t)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .is_some_and(|st| !is_generic_stem(&st.to_lowercase()));
+                    is_exe && stem_ok
+                });
+                if let Ok(mut s) = store().lock() {
+                    register_launch_target(
+                        &mut s,
+                        name,
+                        lnk_aumid.as_deref(),
+                        exe_stem,
+                        AppLaunchTarget {
+                            path: Some(p.clone()),
+                            exe: exe.map(str::to_string),
+                            aumid: lnk_aumid.clone(),
+                        },
+                    );
+                }
+            }
 
             if let Some(px) = px {
                 let name = Path::new(&p).file_stem().and_then(|s| s.to_str());
@@ -950,6 +1141,13 @@ unsafe fn enumerate_apps_folder(gen: u32, push: &dyn Fn(Found)) {
         let name_low = name.trim().to_lowercase();
         if let Ok(mut s) = store().lock() {
             s.apps_folder.insert(parse.to_lowercase(), parse.clone());
+            register_launch_target(
+                &mut s,
+                Some(&name),
+                Some(&parse),
+                None,
+                AppLaunchTarget { path: None, exe: None, aumid: Some(parse.clone()) },
+            );
         }
         if !parse.contains('!') {
             if let Ok(mut s) = store().lock() {
@@ -1131,5 +1329,56 @@ mod tests {
         let u1 = bitmap_key(b'N', "windows.unknown", "AppA");
         let u2 = bitmap_key(b'N', "windows.unknown", "AppB");
         assert_ne!(u1, u2);
+    }
+
+    #[test]
+    fn launch_target_resolves_messengers_and_browsers() {
+        let mut s = IconStore::default();
+        register_launch_target(
+            &mut s,
+            Some("Telegram"),
+            Some("Telegram.TelegramDesktop.84a2f0c1"),
+            Some("Telegram"),
+            AppLaunchTarget {
+                path: Some(r"C:\Start\Telegram.lnk".into()),
+                exe: Some(r"C:\Apps\Telegram\Telegram.exe".into()),
+                aumid: Some("Telegram.TelegramDesktop.84a2f0c1".into()),
+            },
+        );
+        register_launch_target(
+            &mut s,
+            Some("Discord"),
+            Some("com.squirrel.Discord.Discord"),
+            Some("Update"),
+            AppLaunchTarget {
+                path: Some(r"C:\Start\Discord.lnk".into()),
+                exe: None,
+                aumid: Some("com.squirrel.Discord.Discord".into()),
+            },
+        );
+        s.apps_folder.insert(
+            "5319275a.whatsappdesktop_cv1g1gvanyjgm!app".into(),
+            "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App".into(),
+        );
+
+        let tg = launch_target_in(&s, "Telegram.TelegramDesktop.84a2f0c1", "Telegram Desktop");
+        assert_eq!(tg.path.as_deref(), Some(r"C:\Start\Telegram.lnk"));
+        assert_eq!(tg.exe.as_deref(), Some(r"C:\Apps\Telegram\Telegram.exe"));
+
+        // Даже если хэш AUMID отличается (переносная установка / обновление), находим по имени/токену.
+        let tg_alt = launch_target_in(&s, "Telegram.TelegramDesktop.deadbeefdeadbeef", "Telegram Desktop");
+        assert_eq!(tg_alt.path.as_deref(), Some(r"C:\Start\Telegram.lnk"));
+
+        let dc = launch_target_in(&s, "com.squirrel.Discord.Discord", "Discord");
+        assert_eq!(dc.path.as_deref(), Some(r"C:\Start\Discord.lnk"));
+        assert_eq!(dc.exe, None, "Update.exe не должен запоминаться как exe приложения");
+
+        let wa = launch_target_in(&s, "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App", "WhatsApp");
+        assert_eq!(wa.aumid.as_deref(), Some("5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"));
+
+        let cands = app_candidate_stems("FirefoxToast-308046B0AF4A39CB", "Mozilla Firefox");
+        assert!(cands.contains(&"firefox".to_string()));
+        let vk_cands = app_candidate_stems("com.vk.messenger", "VK Messenger");
+        assert!(vk_cands.contains(&"vk".to_string()));
     }
 }

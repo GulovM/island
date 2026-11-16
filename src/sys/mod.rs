@@ -40,7 +40,8 @@ pub(in crate::sys) use registry::{read_binary, read_dword};
 pub use seal::{is_sealed, seal, unseal};
 pub use shell::{
     autostart_enabled, foreground_lang, ime_set_position, lang_code, make_icon, monitor_count, open,
-    pick_folder, process_running, set_autostart, tray_add, tray_remove, tray_set_icon, trim_working_set,
+    open_notification_app, pick_folder, process_running, set_autostart, tray_add, tray_remove, tray_set_icon,
+    trim_working_set,
 };
 
 /// Состояние аккумулятора системы.

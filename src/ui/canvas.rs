@@ -267,6 +267,18 @@ impl Canvas<'_> {
         tr_s.chars().count() as f32 * 4.6
     }
 
+    /// Вертикальные метрики одной строки `(высота_строки, базовая_линия_от_верха)` для выравнивания по базовой линии.
+    pub unsafe fn line_metrics(&self, s: &str, f: &IDWriteTextFormat) -> Option<(f32, f32)> {
+        let l = self.g.fonts.layout(s, f, 10_000.0, 100.0)?;
+        let mut lm = [DWRITE_LINE_METRICS::default(); 1];
+        let mut n = 0u32;
+        if l.GetLineMetrics(Some(&mut lm), &mut n).is_ok() && n > 0 && lm[0].height > 0.0 {
+            Some((lm[0].height, lm[0].baseline))
+        } else {
+            None
+        }
+    }
+
     /// Ширина пилюльки (чипа) по тексту: измеренная ширина шрифтом `small_c` + постоянный отступ `CHIP_PAD`.
     pub unsafe fn chip_w(&self, label: &str) -> f32 {
         super::chip_width(self.text_w(label, &self.g.fonts.small_c))

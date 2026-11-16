@@ -37,14 +37,20 @@ impl App {
         match e {
             Ev::Move => self.on_move(),
             Ev::MouseLeft => {
+                self.hover_suppress_until = None;
+                let redraw = !self.expanded && self.live.is_notice();
                 self.check_hover();
-                false
+                redraw
             }
             Ev::LeaveTimer => self.on_leave_timer(),
             Ev::Down(x, y) => {
                 if self.hits_toast_close(x, y) {
                     self.tabs.stop_alarm();
                     self.dismiss_toast();
+                    return true;
+                }
+                if self.hits_toast_notice(x, y) {
+                    self.notice_pressed = true;
                     return true;
                 }
                 let switched = self.click(x, y);
@@ -60,12 +66,16 @@ impl App {
                 true
             }
             Ev::Up => {
+                let was_notice = std::mem::take(&mut self.notice_pressed);
                 let was = self.ui.down;
                 self.ui.down = false;
                 self.ui.released = was;
                 self.press_pos = None;
                 let _ = KillTimer(Some(self.hwnd), LONG_TIMER);
                 self.check_hover();
+                if was_notice && !self.expanded && self.live.is_notice() && self.cursor_in_toast() {
+                    return self.activate_toast_notice();
+                }
                 true
             }
             Ev::LongPress => {
@@ -264,6 +274,11 @@ impl App {
                     SetTimer(Some(self.hwnd), TOAST_TIMER, 400, None);
                     return false;
                 }
+                // Пока курсор на всплывающем уведомлении, не прячем его прямо под мышью.
+                if self.live.is_notice() && !self.expanded && self.cursor_in_toast() {
+                    SetTimer(Some(self.hwnd), TOAST_TIMER, 500, None);
+                    return false;
+                }
                 self.dismiss_toast()
             }
             Ev::LiveTick => {
@@ -276,6 +291,9 @@ impl App {
                 self.collapsed_wave_on() || self.live_form() == live::Form::Mini || self.live.timer().is_some()
             }
             Ev::RightClick(px, py) => {
+                if !self.expanded && self.hits_toast_notice(px, py) {
+                    return self.dismiss_toast();
+                }
                 if self.expanded && self.notifications_open && (py as f32 / self.scale) > TAB_TOP + TAB_H {
                     let half = self.body_size().0 / self.scale / 2.0;
                     let ox = self.win_w as f32 / self.scale / 2.0 - half;

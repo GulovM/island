@@ -144,6 +144,11 @@ pub struct App {
     pub(crate) high_surrogate: u32,
     /// Где нажали кнопку мыши (пиксели окна), пока ждём долгого нажатия.
     pub(crate) press_pos: Option<(i32, i32)>,
+    /// Нажата левая кнопка мыши поверх всплывающего уведомления (`Toast::Notice`).
+    pub(crate) notice_pressed: bool,
+    /// После нажатия на всплывающее уведомление кратко не раскрываем остров от наведения,
+    /// чтобы он не выпрыгнул поверх только что открытого приложения.
+    pub(crate) hover_suppress_until: Option<Instant>,
     /// Планировщик повторных проверок темы (гонка записи в реестр Windows/WE).
     pub(crate) color_retry: sys::ColorRetry,
 }
@@ -292,6 +297,8 @@ impl App {
                 prev_fg: HWND(std::ptr::null_mut()),
                 high_surrogate: 0,
                 press_pos: None,
+                notice_pressed: false,
+                hover_suppress_until: None,
                 color_retry: sys::ColorRetry::new(),
                 cfg,
             };
@@ -915,6 +922,8 @@ mod tests {
                 prev_fg: HWND(std::ptr::null_mut()),
                 high_surrogate: 0,
                 press_pos: None,
+                notice_pressed: false,
+                hover_suppress_until: None,
                 color_retry: sys::ColorRetry::new(),
                 cfg,
             }

@@ -556,6 +556,10 @@ impl Tabs {
         self.notif.on_menu_leave_timeout()
     }
 
+    pub fn mark_notif_read(&mut self, key: &str, win_id: Option<u32>) {
+        self.notif.mark_notice_read(key, win_id);
+    }
+
     /// Нужен ли секундный опрос, пока вкладка на экране.
     pub fn wants_poll(&self, tab: usize) -> bool {
         match tab {
