@@ -187,7 +187,7 @@ unsafe fn extract_notif(un: &UserNotification) -> Option<SysNotif> {
         app_name = crate::icons::reg_app_name(&app_id).unwrap_or_else(|| fallback_app_name(&app_id));
     }
 
-    let (title, body) = extract_texts(un);
+    let (title, body) = extract_texts(un, &app_id, &app_name);
     if title.is_empty() && body.is_empty() {
         return None;
     }
@@ -199,7 +199,7 @@ unsafe fn extract_notif(un: &UserNotification) -> Option<SysNotif> {
     Some(SysNotif { id, app_id, app_name, title, body, time_secs, icon })
 }
 
-unsafe fn extract_texts(un: &UserNotification) -> (String, String) {
+unsafe fn extract_texts(un: &UserNotification, app_id: &str, app_name: &str) -> (String, String) {
     let Ok(notif) = un.Notification() else { return (String::new(), String::new()) };
     let Ok(visual) = notif.Visual() else { return (String::new(), String::new()) };
 
@@ -216,18 +216,234 @@ unsafe fn extract_texts(un: &UserNotification) -> (String, String) {
     let Ok(elems) = binding.GetTextElements() else { return (String::new(), String::new()) };
 
     let mut lines: Vec<String> = Vec::new();
+    let mut attribution: Option<String> = None;
+    let placement_key = HSTRING::from("placement");
     for el in elems {
         if let Ok(t) = el.Text() {
             let clean = t.to_string().trim().to_string();
             if !clean.is_empty() {
-                lines.push(clean);
+                let is_attr = el
+                    .Hints()
+                    .ok()
+                    .and_then(|h| h.Lookup(&placement_key).ok())
+                    .is_some_and(|v| v.to_string().eq_ignore_ascii_case("attribution"));
+                if is_attr {
+                    attribution = Some(clean);
+                } else {
+                    lines.push(clean);
+                }
             }
         }
     }
-    let mut it = lines.into_iter();
-    let title = it.next().unwrap_or_default();
-    let body = it.collect::<Vec<_>>().join(" · ");
-    (title, body)
+    parse_notif_texts(app_id, app_name, &lines, attribution.as_deref())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Messenger {
+    Telegram,
+    Discord,
+    WhatsApp,
+    Vk,
+    Instagram,
+}
+
+fn has_word(haystack: &str, word: &str) -> bool {
+    let w = word.to_lowercase();
+    haystack
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|part| part == w)
+}
+
+fn detect_messenger(app_id: &str, app_name: &str, attribution: Option<&str>) -> Option<Messenger> {
+    let id = app_id.to_lowercase();
+    let name = app_name.to_lowercase();
+    let attr = attribution.unwrap_or("").to_lowercase();
+    let any_contains = |needle: &str| id.contains(needle) || name.contains(needle) || attr.contains(needle);
+
+    if any_contains("telegram")
+        || any_contains("unigram")
+        || any_contains("kotatogram")
+        || any_contains("ayugram")
+        || any_contains("64gram")
+    {
+        return Some(Messenger::Telegram);
+    }
+    if any_contains("discord") || any_contains("vesktop") || any_contains("armcord") {
+        return Some(Messenger::Discord);
+    }
+    if any_contains("whatsapp") {
+        return Some(Messenger::WhatsApp);
+    }
+    if any_contains("instagram") {
+        return Some(Messenger::Instagram);
+    }
+    if any_contains("vkontakte")
+        || any_contains("вконтакте")
+        || any_contains("vk messenger")
+        || any_contains("vk.com")
+        || any_contains("vkme")
+        || any_contains("com.vk")
+        || has_word(&id, "vk")
+        || has_word(&name, "vk")
+        || has_word(&name, "вк")
+        || has_word(&attr, "vk")
+    {
+        return Some(Messenger::Vk);
+    }
+    None
+}
+
+fn is_redundant_app_header(line: &str, app_name: &str, m: Messenger) -> bool {
+    let l = line.trim().to_lowercase();
+    if l == app_name.trim().to_lowercase() {
+        return true;
+    }
+    match m {
+        Messenger::Telegram => l == "telegram" || l == "telegram desktop",
+        Messenger::Discord => l == "discord",
+        Messenger::WhatsApp => l == "whatsapp",
+        Messenger::Vk => {
+            matches!(
+                l.as_str(),
+                "vk" | "vk messenger" | "vkontakte" | "вконтакте" | "вк" | "новое сообщение"
+            )
+        }
+        Messenger::Instagram => l == "instagram",
+    }
+}
+
+/// Разделяет префикс вида `"Отправитель: сообщение"` в тексте группового чата.
+fn split_sender_message(s: &str) -> Option<(&str, &str)> {
+    let (sender, msg) = s.split_once(": ")?;
+    let sender = sender.trim();
+    let msg = msg.trim();
+    if sender.is_empty() || msg.is_empty() || sender.chars().count() > 48 {
+        return None;
+    }
+    if sender.contains('\n') || sender.contains('\r') || sender.contains("://") {
+        return None;
+    }
+    if sender.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if sender.split_whitespace().count() > 4 {
+        return None;
+    }
+    let lower = sender.to_lowercase();
+    if matches!(
+        lower.as_str(),
+        "http" | "https" | "re" | "fw" | "fwd" | "note" | "error" | "warning" | "ошибка" | "важно" | "тема" | "ссылка"
+    ) {
+        return None;
+    }
+    Some((sender, msg))
+}
+
+/// Разбирает заголовок Discord вида `"Пользователь (#канал, Сервер)"` или `"Пользователь (#канал)"`.
+fn split_discord_channel_title(s: &str) -> Option<(String, String)> {
+    let trimmed = s.trim();
+    let stripped = trimmed.strip_suffix(')')?;
+    let (user, inside) = stripped.split_once(" (#")?;
+    let user = user.trim();
+    let inside = inside.trim();
+    if user.is_empty() || inside.is_empty() {
+        return None;
+    }
+    let group = if let Some((chan, srv)) = inside.split_once(", ") {
+        let chan = chan.trim();
+        let srv = srv.trim();
+        if srv.is_empty() {
+            format!("#{chan}")
+        } else {
+            format!("{srv} (#{chan})")
+        }
+    } else {
+        format!("#{inside}")
+    };
+    Some((user.to_string(), group))
+}
+
+fn format_group_user(group: &str, user: &str) -> String {
+    let g = group.trim();
+    let u = user.trim();
+    if g.is_empty() {
+        u.to_string()
+    } else if u.is_empty() || g.eq_ignore_ascii_case(u) {
+        g.to_string()
+    } else {
+        format!("{g}: {u}")
+    }
+}
+
+/// Разбирает текстовые элементы системного тоста в `(контекст_шапки, сообщение)`.
+/// Для поддерживаемых мессенджеров и соцсетей выделяет `<группа>: <пользователь>` или `<пользователь>`.
+fn parse_notif_texts(app_id: &str, app_name: &str, lines: &[String], attribution: Option<&str>) -> (String, String) {
+    if lines.is_empty() {
+        return (String::new(), String::new());
+    }
+    let Some(m) = detect_messenger(app_id, app_name, attribution) else {
+        let title = lines[0].clone();
+        let body = lines[1..].join(" · ");
+        return (title, body);
+    };
+
+    let work = if lines.len() >= 2 && is_redundant_app_header(&lines[0], app_name, m) {
+        &lines[1..]
+    } else {
+        lines
+    };
+
+    if work.len() >= 3 {
+        let group = &work[0];
+        let user = &work[1];
+        let msg = work[2..].join(" · ");
+        return (format_group_user(group, user), msg);
+    }
+
+    if work.len() == 1 {
+        if let Some((user, msg)) = split_sender_message(&work[0]) {
+            return (user.to_string(), msg.to_string());
+        }
+        return (work[0].clone(), String::new());
+    }
+
+    let head = work[0].trim();
+    let tail = work[1].trim();
+
+    match m {
+        Messenger::Discord => {
+            if let Some((user, group)) = split_discord_channel_title(head) {
+                let msg = tail
+                    .strip_prefix(&format!("{user}: "))
+                    .unwrap_or(tail)
+                    .trim()
+                    .to_string();
+                return (format_group_user(&group, &user), msg);
+            }
+            if let Some((user, msg)) = split_sender_message(tail) {
+                return (format_group_user(head, user), msg.to_string());
+            }
+        }
+        Messenger::WhatsApp => {
+            if let Some((user, group)) = head.split_once(" @ ") {
+                let (user, group) = (user.trim(), group.trim());
+                if !user.is_empty() && !group.is_empty() {
+                    return (format_group_user(group, user), tail.to_string());
+                }
+            }
+            if let Some((user, msg)) = split_sender_message(tail) {
+                return (format_group_user(head, user), msg.to_string());
+            }
+        }
+        Messenger::Telegram | Messenger::Vk | Messenger::Instagram => {
+            if let Some((user, msg)) = split_sender_message(tail) {
+                return (format_group_user(head, user), msg.to_string());
+            }
+        }
+    }
+
+    (head.to_string(), tail.to_string())
 }
 
 unsafe fn read_logo_bytes(app_id: &str, info: Option<&AppInfo>) -> Option<Vec<u8>> {
@@ -275,5 +491,86 @@ fn fallback_app_name(aumid: &str) -> String {
         "Windows".to_string()
     } else {
         last.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(list: &[&str]) -> Vec<String> {
+        list.iter().map(|x| (*x).to_string()).collect()
+    }
+
+    #[test]
+    fn parses_telegram_dm_and_group() {
+        assert_eq!(
+            parse_notif_texts("Telegram.TelegramDesktop", "Telegram Desktop", &s(&["Алексей", "Погнали в 18:00"]), None),
+            ("Алексей".into(), "Погнали в 18:00".into())
+        );
+        assert_eq!(
+            parse_notif_texts("Telegram.TelegramDesktop", "Telegram Desktop", &s(&["Frontend Team", "Мария: Залила фикс"]), None),
+            ("Frontend Team: Мария".into(), "Залила фикс".into())
+        );
+        assert_eq!(
+            parse_notif_texts("Telegram.Unigram", "Unigram", &s(&["Дизайн", "Олег", "Новый макет готов"]), None),
+            ("Дизайн: Олег".into(), "Новый макет готов".into())
+        );
+    }
+
+    #[test]
+    fn parses_discord_dm_and_channels() {
+        assert_eq!(
+            parse_notif_texts("com.squirrel.Discord.Discord", "Discord", &s(&["alice", "Глянь PR"]), None),
+            ("alice".into(), "Глянь PR".into())
+        );
+        assert_eq!(
+            parse_notif_texts("com.squirrel.Discord.Discord", "Discord", &s(&["alice (#dev, Island Server)", "Сборка прошла!"]), None),
+            ("Island Server (#dev): alice".into(), "Сборка прошла!".into())
+        );
+        assert_eq!(
+            parse_notif_texts("com.squirrel.Discord.Discord", "Discord", &s(&["alice (#general)", "Привет"]), None),
+            ("#general: alice".into(), "Привет".into())
+        );
+    }
+
+    #[test]
+    fn parses_whatsapp_vk_and_instagram() {
+        assert_eq!(
+            parse_notif_texts("5319275A.WhatsAppDesktop", "WhatsApp", &s(&["Иван @ Семья", "Купил хлеб"]), None),
+            ("Семья: Иван".into(), "Купил хлеб".into())
+        );
+        assert_eq!(
+            parse_notif_texts("5319275A.WhatsAppDesktop", "WhatsApp", &s(&["Семья", "Иван: Купил хлеб"]), None),
+            ("Семья: Иван".into(), "Купил хлеб".into())
+        );
+        assert_eq!(
+            parse_notif_texts("com.vk.messenger", "VK Messenger", &s(&["Универ 2026", "Дмитрий: Пара перенесена"]), None),
+            ("Универ 2026: Дмитрий".into(), "Пара перенесена".into())
+        );
+        assert_eq!(
+            parse_notif_texts("Chrome", "Google Chrome", &s(&["ВКонтакте", "Анна Иванова: Привет"]), Some("vk.com")),
+            ("Анна Иванова".into(), "Привет".into())
+        );
+        assert_eq!(
+            parse_notif_texts("Chrome", "Google Chrome", &s(&["Instagram", "ivan_dev: Посмотри рилс"]), Some("instagram.com")),
+            ("ivan_dev".into(), "Посмотри рилс".into())
+        );
+        assert_eq!(
+            parse_notif_texts("Instagram", "Instagram", &s(&["Друзья", "ivan_dev: Хаха"]), None),
+            ("Друзья: ivan_dev".into(), "Хаха".into())
+        );
+    }
+
+    #[test]
+    fn non_messenger_keeps_plain_title_and_body() {
+        assert_eq!(
+            parse_notif_texts("com.vulkan.VulkanApp", "Vulkan Monitor", &s(&["GPU Alert", "Temp: 82C"]), None),
+            ("GPU Alert".into(), "Temp: 82C".into())
+        );
+        assert_eq!(
+            parse_notif_texts("Telegram.TelegramDesktop", "Telegram Desktop", &s(&["Иван", "https://example.com"]), None),
+            ("Иван".into(), "https://example.com".into())
+        );
     }
 }

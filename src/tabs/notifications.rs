@@ -100,6 +100,24 @@ pub struct NotifItem {
     pub is_calendar: bool,
 }
 
+/// Готовит `(контекст_шапки, сообщение)` для показа уведомления в чёлке или центре.
+/// Если сообщение пустое, переносит заголовок в строку сообщения, чтобы тело карточки не пустовало.
+pub(crate) fn split_display_fields(title: &str, body: &str, single_line_msg: bool) -> (String, String) {
+    let clean_title = title.replace(['\r', '\n'], " ").trim().to_string();
+    let clean_body = if single_line_msg {
+        body.replace(['\r', '\n'], " ")
+    } else {
+        body.replace('\r', "")
+    }
+    .trim()
+    .to_string();
+    if clean_body.is_empty() && !clean_title.is_empty() {
+        (String::new(), clean_title)
+    } else {
+        (clean_title, clean_body)
+    }
+}
+
 /// Всплывающее уведомление для показа в свёрнутой чёлке.
 #[derive(Clone, Debug)]
 pub struct PopupNotice {
@@ -456,11 +474,9 @@ impl Notifications {
         let unread = self.unread_count();
         if unread > 0 {
             let badge = unread.to_string();
-            let bw = (cv.text_w(&badge, &f.small_c) + 12.0).max(20.0);
-            let br = Rect::new(lx, TOP + 2.0, bw, 18.0);
-            cv.rr(br, if ios { 9.0 } else { 5.0 }, cv.accent);
-            cv.text(&badge, br, &f.small_c, crate::ui::readable(cv.accent, 45.0));
-            lx += bw + 6.0;
+            let bw = cv.text_w(&badge, &f.title) + 2.0;
+            cv.text(&badge, Rect::new(lx, TOP, bw, 22.0), &f.title, txt());
+            lx += bw + 8.0;
         }
 
         if self.dnd_active {
@@ -553,25 +569,20 @@ impl Notifications {
         for (i, item) in self.items.iter().enumerate() {
             let menu_open = self.context_menu.as_deref() == Some(item.key.as_str());
             let show_read_btn = !menu_open;
-            let title_line = if item.title.is_empty() {
-                item.app_name.as_str()
-            } else {
-                item.title.as_str()
-            };
-            let title_clip = cv.wrap_clip(title_line, &f.body_b, text_col_w, 1).into_owned();
-            let body_clip = if item.body.is_empty() {
+            let (meta_context, msg_text) = split_display_fields(&item.title, &item.body, false);
+            let msg_clip = if msg_text.is_empty() {
                 String::new()
             } else {
-                cv.wrap_clip(&item.body, &f.small, text_col_w, 2).into_owned()
+                cv.wrap_clip(&msg_text, &f.wrap_l, text_col_w, 2).into_owned()
             };
-            let body_lines = if body_clip.is_empty() {
-                0
-            } else if body_clip.contains('\n') || cv.text_w(&body_clip, &f.small) > text_col_w {
-                2
+            let msg_h = if msg_clip.is_empty() {
+                0.0
             } else {
-                1
+                let (lines, lh) = cv.wrapped(&msg_clip, &f.wrap_l, text_col_w);
+                lines.min(2) as f32 * lh.max(13.0) + 2.0
             };
-            let mut ch = 10.0 + 15.0 + 18.0 + body_lines as f32 * 14.0 + 8.0;
+            let content_h = (17.0 + if msg_h > 0.0 { msg_h + 2.0 } else { 0.0 }).max(32.0);
+            let mut ch = 10.0 + content_h + 6.0;
             if show_read_btn {
                 ch += 28.0;
             } else if menu_open {
@@ -579,9 +590,9 @@ impl Notifications {
             }
             total_h += ch + if i + 1 < self.items.len() { 8.0 } else { 0.0 };
             layouts.push(CardLayout {
-                title_clip,
-                body_clip,
-                body_lines,
+                meta_context,
+                msg_clip,
+                msg_h,
                 h: ch,
                 menu_open,
                 show_read_btn,
@@ -662,19 +673,24 @@ impl Notifications {
                 .find(|r| r.app_id.eq_ignore_ascii_case(&item.app_id))
                 .map_or(AppRule::Normal, |r| r.rule);
 
-            // Верхняя строка: приложение · время · индикаторы справа.
+            // Верхняя строка: приложение · группа:пользователь / заголовок · время · индикаторы справа.
             let when = if item.time_secs > 0 {
                 super::ago(sys::now_secs(), item.time_secs)
             } else {
                 String::new()
             };
-            let meta = if when.is_empty() {
-                item.app_name.clone()
-            } else {
-                format!("{} · {}", item.app_name, when)
-            };
-            let meta_w = (tw - 44.0).max(40.0);
-            cv.text(&meta, Rect::new(tx, iy, meta_w, 14.0), &f.small_b, bare());
+            let mut parts: Vec<&str> = Vec::with_capacity(3);
+            parts.push(&item.app_name);
+            if !lay.meta_context.is_empty() {
+                parts.push(&lay.meta_context);
+            }
+            if !when.is_empty() {
+                parts.push(&when);
+            }
+            let meta = parts.join(" · ");
+            let meta_w = (tw - 48.0).max(40.0);
+            let meta_clip = cv.wrap_clip(&meta, &f.small_b, meta_w, 1);
+            cv.text(&meta_clip, Rect::new(tx, iy, meta_w, 14.0), &f.small_b, bare());
 
             let mut rx_ind = card_r.right() - 10.0;
             if card_hot || lay.menu_open {
@@ -697,11 +713,9 @@ impl Notifications {
                 cv.symbol(icon::MUTE, Rect::new(rx_ind - 14.0, iy, 13.0, 13.0), 10.5, dim());
             }
 
-            // Заголовок и текст сообщения.
-            cv.text(&lay.title_clip, Rect::new(tx, iy + 16.0, tw, 17.0), &f.body_b, txt());
-            if lay.body_lines > 0 {
-                let bh = lay.body_lines as f32 * 14.0 + 2.0;
-                cv.text(&lay.body_clip, Rect::new(tx, iy + 34.0, tw, bh), &f.small, dim());
+            // Текст сообщения.
+            if lay.msg_h > 0.0 {
+                cv.text(&lay.msg_clip, Rect::new(tx, iy + 17.0, tw, lay.msg_h), &f.wrap_l, txt());
             }
 
             // Подвал карточки: кнопка «Прочитано» ИЛИ 3 кнопки по правой кнопке мыши.
@@ -935,9 +949,9 @@ impl Notifications {
 }
 
 struct CardLayout {
-    title_clip: String,
-    body_clip: String,
-    body_lines: usize,
+    meta_context: String,
+    msg_clip: String,
+    msg_h: f32,
     h: f32,
     menu_open: bool,
     show_read_btn: bool,
@@ -1140,5 +1154,21 @@ mod tests {
         let _ = n.sync_snapshot(&batch, 3, NotifAccess::Allowed, false);
         let _ = n.push_calendar("ev1", "Meeting", "Soon");
         assert_eq!(n.unread_count(), 0);
+    }
+
+    #[test]
+    fn split_display_fields_normalizes_and_falls_back_when_body_empty() {
+        assert_eq!(
+            split_display_fields("Группа: Иван\n", "Первая\nвторая", true),
+            ("Группа: Иван".into(), "Первая вторая".into())
+        );
+        assert_eq!(
+            split_display_fields("Группа: Иван", "Первая\r\nвторая", false),
+            ("Группа: Иван".into(), "Первая\nвторая".into())
+        );
+        assert_eq!(
+            split_display_fields("Снимок экрана сохранён", "", false),
+            (String::new(), "Снимок экрана сохранён".into())
+        );
     }
 }

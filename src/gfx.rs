@@ -305,9 +305,10 @@ impl Gfx {
     }
 
     pub(crate) unsafe fn draw_text(&self, s: &str, x: f32, y: f32, w: f32, h: f32, color: D2D1_COLOR_F) {
+        let opts = D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT;
         self.brush.SetColor(&color);
         if let Some(layout) = self.fonts.layout(s, &self.text, w, h) {
-            self.dc.DrawTextLayout(Vector2 { X: x, Y: y }, &layout, &self.brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+            self.dc.DrawTextLayout(Vector2 { X: x, Y: y }, &layout, &self.brush, opts);
             return;
         }
         sys::with_utf16(s, |wide| {
@@ -316,7 +317,7 @@ impl Gfx {
                 &self.text,
                 &D2D_RECT_F { left: x, top: y, right: x + w, bottom: y + h },
                 &self.brush,
-                D2D1_DRAW_TEXT_OPTIONS_NONE,
+                opts,
                 DWRITE_MEASURING_MODE_NATURAL,
             );
         });

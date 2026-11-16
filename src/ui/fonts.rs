@@ -279,8 +279,20 @@ pub(super) fn ellipsize_units(s: &str, units: usize) -> String {
     for _ in 0..3 {
         out.pop();
     }
-    while out.ends_with(char::is_whitespace) {
-        out.pop();
+    loop {
+        while out.ends_with(char::is_whitespace) || out.ends_with('\u{200D}') {
+            out.pop();
+        }
+        let ri_tail = out
+            .chars()
+            .rev()
+            .take_while(|&c| ('\u{1F1E6}'..='\u{1F1FF}').contains(&c))
+            .count();
+        if ri_tail % 2 == 1 {
+            out.pop();
+            continue;
+        }
+        break;
     }
     out.push('…');
     out
@@ -522,6 +534,9 @@ mod tests {
         // Символ вне BMP занимает две единицы.
         assert_eq!(ellipsize_units("😀😀😀😀😀", 6), "…");
         assert_eq!(ellipsize_units("слово слово слово", 12), "слово сло…");
+        // Не оставляем оборванный ZWJ или половину флага перед многоточием.
+        assert_eq!(ellipsize_units("Чат 👨‍👩‍👧", 10), "Чат 👨…");
+        assert_eq!(ellipsize_units("🇷🇺ab", 6), "…");
     }
 
     #[test]

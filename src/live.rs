@@ -497,18 +497,17 @@ impl Live {
 
                     let ntx = ir.right() + 10.0;
                     let ntw = (r.right() - 18.0 - ntx).max(40.0);
-                    cv.circle(ntx + 3.0, r.cy() - 9.0, 2.5, cv.accent);
-                    cv.text(&n.app_name, Rect::new(ntx + 9.0, r.cy() - 16.0, (ntw - 9.0).max(20.0), 14.0), &f.small_b, collapsed_dim());
-
-                    let clean_title = n.title.replace(['\r', '\n'], " ");
-                    let clean_body = n.body.replace(['\r', '\n'], " ");
-                    let msg = if clean_title.is_empty() {
-                        clean_body
-                    } else if clean_body.is_empty() {
-                        clean_title
+                    let (meta_ctx, msg) = crate::tabs::notifications::split_display_fields(&n.title, &n.body, true);
+                    let meta = if meta_ctx.is_empty() {
+                        n.app_name.clone()
                     } else {
-                        format!("{clean_title} — {clean_body}")
+                        format!("{} · {}", n.app_name, meta_ctx)
                     };
+                    let meta_w = (ntw - 9.0).max(20.0);
+                    let clip_meta = cv.wrap_clip(&meta, &f.small_b, meta_w, 1);
+                    cv.circle(ntx + 3.0, r.cy() - 9.0, 2.5, cv.accent);
+                    cv.text(&clip_meta, Rect::new(ntx + 9.0, r.cy() - 16.0, meta_w, 14.0), &f.small_b, collapsed_dim());
+
                     let clip_msg = cv.wrap_clip(&msg, &f.body, ntw, 1);
                     cv.text(&clip_msg, Rect::new(ntx, r.cy() + 1.0, ntw, 17.0), &f.body, collapsed_txt());
                 }

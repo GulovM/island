@@ -138,9 +138,10 @@ impl Canvas<'_> {
         if s.is_empty() {
             return;
         }
+        let opts = D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT;
         self.g.brush.SetColor(&self.col(c));
         if let Some(layout) = self.g.fonts.layout(s, f, r.w, r.h) {
-            self.g.dc.DrawTextLayout(pt(r.x, r.y), &layout, &self.g.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            self.g.dc.DrawTextLayout(pt(r.x, r.y), &layout, &self.g.brush, opts);
             return;
         }
         crate::sys::with_utf16(s, |wide| {
@@ -149,7 +150,7 @@ impl Canvas<'_> {
                 f,
                 &r.d2d(),
                 &self.g.brush,
-                D2D1_DRAW_TEXT_OPTIONS_CLIP,
+                opts,
                 DWRITE_MEASURING_MODE_NATURAL,
             );
         });
@@ -217,7 +218,12 @@ impl Canvas<'_> {
             // Раскладка общая из кэша: признак ставится явно при каждой отрисовке.
             let range = DWRITE_TEXT_RANGE { startPosition: 0, length: s.encode_utf16().count() as u32 };
             let _ = layout.SetStrikethrough(strike, range);
-            self.g.dc.DrawTextLayout(pt(r.x, r.y), &layout, &self.g.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            self.g.dc.DrawTextLayout(
+                pt(r.x, r.y),
+                &layout,
+                &self.g.brush,
+                D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
+            );
         }
     }
 
