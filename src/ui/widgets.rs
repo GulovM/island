@@ -156,23 +156,26 @@ impl Ui {
         };
         cv.rr(rect, 10.0, fill);
         cv.hairline(rect, 10.0);
+        // Содержимое привязано к `r`, а не к сжатому при нажатии `rect`: иначе во время клика
+        // ширина `tw` уменьшается на 1.6 px и заголовки вплотную к краю («Не беспокоить») скачут
+        // между кеглями `body`/`small_b` или дёргают бегущую строку.
         // Бейдж: у узкой плитки по центру свободного места, у широкой слева.
         // Плитка без стрелки считает центр так, будто стрелка есть: значки в ряду стоят ровно.
         let ref_w = if chevron == Chevron::None { (16.0 + 8.0 * full) * (full * 3.0).min(1.0) } else { chev_w };
-        let centered = rect.x + (rect.w - ref_w) / 2.0;
-        let (bx, by) = (centered + (rect.x + 19.0 - centered) * full, rect.cy());
+        let centered = r.x + (r.w - ref_w) / 2.0;
+        let (bx, by) = (centered + (r.x + 19.0 - centered) * full, r.cy());
         cv.circle(bx, by, 11.0, badge);
         cv.glyph_matched(glyph, Rect::new(bx - 11.0, by - 11.0, 22.0, 22.0), mark);
         // Текст слева, сразу за бейджем (как плитки Пункта управления iOS): заголовок полужирный,
         // подпись обычным начертанием — иерархия держится весом, а не только цветом.
         if full > 0.02 {
             let tcv = Canvas { g: cv.g, alpha: cv.alpha * full, accent: cv.accent };
-            let tx = rect.x + 40.0;
-            let tw = (rect.w - 40.0 - chev_w - 4.0).max(10.0);
+            let tx = r.x + 40.0;
+            let tw = (r.w - 40.0 - chev_w - 4.0).max(10.0);
             let fonts = &cv.g.fonts;
             let tf = if cv.text_w(title, &fonts.body) > tw { &fonts.small_b } else { &fonts.body };
             let title_w = cv.text_w(title, tf);
-            let title_r = Rect::new(tx, rect.cy() - 12.0, tw, 13.0);
+            let title_r = Rect::new(tx, r.cy() - 12.0, tw, 13.0);
             // Не влезший заголовок один раз прокручивается, потом стоит с многоточием.
             match if title_w > tw { self.marquee_offset(id, title_w, tw) } else { None } {
                 Some(off) => {
@@ -182,18 +185,18 @@ impl Ui {
                 }
                 None => tcv.text(title, title_r, tf, fg),
             }
-            tcv.text(sub, Rect::new(tx, rect.cy() + 1.0, tw, 11.0), &fonts.small, sub_c);
+            tcv.text(sub, Rect::new(tx, r.cy() + 1.0, tw, 11.0), &fonts.small, sub_c);
         }
         if chevron != Chevron::None {
             // В узкой плитке черта зажата между значком и стрелкой: она проявляется вместе с текстом.
             if chevron == Chevron::Divided && full > 0.02 {
                 let mut c = fg;
                 c.a = 0.22 * full;
-                cv.rr(Rect::new(chev.x, rect.y + 8.0, 1.0, rect.h - 16.0), 0.5, c);
+                cv.rr(Rect::new(chev.x, r.y + 8.0, 1.0, r.h - 16.0), 0.5, c);
             }
             let mut c = fg;
             c.a = 0.75 + 0.25 * chev_hv;
-            cv.glyph(icon::DOWN, Rect::new(chev.x, rect.y, chev_w - 2.0, rect.h), false, c);
+            cv.glyph(icon::DOWN, Rect::new(chev.x, r.y, chev_w - 2.0, r.h), false, c);
         }
         hit
     }

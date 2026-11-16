@@ -34,6 +34,7 @@ const AIRPLANE: usize = 8;
 const SAVER: usize = 9;
 /// Перенесена со «Статистики»: там широкая карточка раздвигала сетку до 12 колонок.
 const BATTERY: usize = 10;
+const DND: usize = 11;
 
 /// Высота выпадающего списка устройств.
 const LIST_H: f32 = 116.0;
@@ -71,6 +72,7 @@ pub static SPEC: TabSpec = TabSpec {
         Spec { key: "airplane", title: "Режим полёта", sizes: &TILE, size: 1, col: 0, row: HIDDEN },
         Spec { key: "saver", title: "Энергосбережение", sizes: &TILE, size: 1, col: 0, row: HIDDEN },
         Spec { key: "battery", title: "Батарея", sizes: &BATTERY_SIZES, size: 0, col: 0, row: HIDDEN },
+        Spec { key: "dnd", title: "Не беспокоить", sizes: &TILE, size: 1, col: 0, row: HIDDEN },
     ],
 };
 
@@ -188,6 +190,8 @@ pub struct Controls {
     dark: bool,
     /// Ночной свет; `None` — запись в реестре незнакомая, переключать нельзя (плитка открывает Параметры).
     night: Option<bool>,
+    /// Режим «Не беспокоить» (Focus Assist / Do Not Disturb).
+    dnd: bool,
     muted: bool,
     volume: f32,
     hold_until: Option<Instant>,
@@ -196,6 +200,7 @@ pub struct Controls {
     wifi_hold: Option<(bool, Instant)>,
     bt_hold: Option<(bool, Instant)>,
     airplane_hold: Option<(bool, Instant)>,
+    dnd_hold: Option<(bool, Instant)>,
     rev: u64,
     media: Option<Media>,
     /// Защита от возврата ползунка трека назад сразу после перемотки.
@@ -327,6 +332,7 @@ impl Controls {
         Self::sync_radio(&mut self.wifi, s.wifi, &mut self.wifi_hold);
         Self::sync_radio(&mut self.bluetooth, s.bluetooth, &mut self.bt_hold);
         Self::sync_radio(&mut self.airplane, s.airplane, &mut self.airplane_hold);
+        Self::sync_radio(&mut self.dnd, Some(s.dnd_active), &mut self.dnd_hold);
         self.muted = s.muted;
         let holding = self.hold_until.is_some_and(|t| Instant::now() < t);
         if let (Some(v), false) = (s.volume, holding) {
@@ -553,6 +559,13 @@ impl Controls {
                     let dark = self.dark;
                     // Рассылка WM_SETTINGCHANGE может занять время — не в потоке интерфейса.
                     std::thread::spawn(move || sys::set_dark_mode(dark));
+                }
+            }
+            DND => {
+                let hit = ui.tile_wide(cv, id(CONTROLS, 7), r, icon::DND, "Не беспокоить", state(self.dnd), &mut self.dnd, Chevron::None, hue(SysColor::Indigo, cv.accent));
+                if hit.toggled {
+                    self.dnd_hold = Some((self.dnd, Instant::now() + RADIO_HOLD));
+                    bg::send(Cmd::Dnd(self.dnd));
                 }
             }
             VOLUME => {
@@ -1044,6 +1057,7 @@ impl Controls {
         self.bluetooth = false;
         self.dark = false;
         self.night = Some(true);
+        self.dnd = true;
         self.volume = 0.62;
         self.brightness = 0.8;
         self.audio = Some("Наушники AirPods".into());
@@ -1284,5 +1298,29 @@ mod tests {
         });
         assert!(!c.wifi);
         assert!(c.wifi_hold.is_none());
+    }
+
+    #[test]
+    fn dnd_spec_matches_tile_sizes_and_sync_holds_toggle() {
+        let dnd_spec = &SPEC.specs[DND];
+        assert_eq!(dnd_spec.key, "dnd");
+        assert_eq!(dnd_spec.sizes, &TILE);
+        assert_eq!(dnd_spec.size, 1);
+
+        let mut c = Controls::default();
+        c.sync_from(bg::Snapshot { rev: 1, dnd_active: false, ..Default::default() });
+        assert!(!c.dnd);
+
+        // Пользователь включил «Не беспокоить»: hold защищает от устаревшего снимка.
+        c.dnd = true;
+        c.dnd_hold = Some((true, Instant::now() + RADIO_HOLD));
+        c.sync_from(bg::Snapshot { rev: 2, dnd_active: false, ..Default::default() });
+        assert!(c.dnd);
+        assert!(c.dnd_hold.is_some());
+
+        // Подтверждение от системы снимает hold.
+        c.sync_from(bg::Snapshot { rev: 3, dnd_active: true, ..Default::default() });
+        assert!(c.dnd);
+        assert!(c.dnd_hold.is_none());
     }
 }

@@ -127,6 +127,8 @@ pub enum Cmd {
     NotifClearAll,
     /// Обновить статус режима «Не беспокоить» (по событию WinRT).
     DndRefresh,
+    /// Переключить системный режим «Не беспокоить».
+    Dnd(bool),
     /// Режим полёта: выключить все радио или вернуть те, что были включены.
     Airplane(bool),
     Volume(f32),
@@ -184,7 +186,7 @@ pub fn start(hwnd: HWND) {
             notif::init();
             refresh(true, &mut radio_access, &mut pending);
             refresh_notifs();
-            refresh_dnd();
+            refresh_dnd(&mut pending.dnd);
             net::refresh_net();
             crate::sys::trim_working_set();
             notify();
@@ -206,7 +208,7 @@ pub fn start(hwnd: HWND) {
                     let mut changed = false;
                     unsafe {
                         changed |= refresh_notifs();
-                        changed |= refresh_dnd();
+                        changed |= refresh_dnd(&mut pending.dnd);
                     }
                     if changed {
                         notify();
@@ -242,6 +244,7 @@ pub fn start(hwnd: HWND) {
                         | Cmd::NotifRemoveMany(_)
                         | Cmd::NotifClearAll
                         | Cmd::DndRefresh
+                        | Cmd::Dnd(_)
                 )
             });
             let wants_media = batch.iter().any(|c| matches!(c, Cmd::Media | Cmd::PrevSession | Cmd::NextSession | Cmd::ResetSession));
@@ -258,7 +261,7 @@ pub fn start(hwnd: HWND) {
                             | Cmd::NotifClearAll
                     )
                 });
-            let explicit_dnd = full || batch.iter().any(|c| matches!(c, Cmd::DndRefresh));
+            let explicit_dnd = full || batch.iter().any(|c| matches!(c, Cmd::DndRefresh | Cmd::Dnd(_)));
             let periodic_notif = last_notif_poll.elapsed() >= std::time::Duration::from_millis(900);
             let last_volume = batch.iter().rposition(|c| matches!(c, Cmd::Volume(_)));
             let last_bright = batch.iter().rposition(|c| matches!(c, Cmd::Brightness(_)));
@@ -294,7 +297,7 @@ pub fn start(hwnd: HWND) {
             }
             let mut dnd_changed = false;
             if explicit_dnd || periodic_notif {
-                dnd_changed |= unsafe { refresh_dnd() };
+                dnd_changed |= unsafe { refresh_dnd(&mut pending.dnd) };
             }
             let mut bt_conn_changed = false;
             if wants_bt_conn && !needs_refresh && !wants_radios {
@@ -339,6 +342,7 @@ struct PendingRadios {
     wifi: Option<(bool, std::time::Instant)>,
     bluetooth: Option<(bool, std::time::Instant)>,
     airplane: Option<(bool, std::time::Instant)>,
+    dnd: Option<(bool, std::time::Instant)>,
 }
 
 impl PendingRadios {
@@ -363,6 +367,15 @@ fn schedule_radio_recheck() {
     });
 }
 
+fn schedule_dnd_recheck() {
+    let _ = std::thread::Builder::new().name("island-dnd-recheck".into()).spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        send(Cmd::DndRefresh);
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        send(Cmd::DndRefresh);
+    });
+}
+
 unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
     match cmd {
         Cmd::Tick | Cmd::Media | Cmd::Net | Cmd::Radios | Cmd::BtConn | Cmd::NotifRefresh | Cmd::DndRefresh => {}
@@ -376,6 +389,14 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
             }
         }
         Cmd::NotifClearAll => notif::clear_notifications(),
+        Cmd::Dnd(on) => {
+            if notif::set_dnd(on) {
+                pending.dnd = Some((on, std::time::Instant::now() + std::time::Duration::from_millis(1500)));
+                schedule_dnd_recheck();
+            } else {
+                pending.dnd = None;
+            }
+        }
         Cmd::Refresh => watch_volume(),
         Cmd::List(ListKind::Wifi) => store_list(ListKind::Wifi, wifi_networks(true)),
         Cmd::List(ListKind::Bluetooth) => store_list(ListKind::Bluetooth, bluetooth_devices()),
@@ -664,8 +685,9 @@ unsafe fn refresh_notifs() -> bool {
     changed
 }
 
-unsafe fn refresh_dnd() -> bool {
-    if let Some(dnd) = notif::poll_dnd() {
+unsafe fn refresh_dnd(pending_dnd: &mut Option<(bool, std::time::Instant)>) -> bool {
+    let actual = notif::poll_dnd();
+    if let Some(dnd) = PendingRadios::resolve(pending_dnd, actual) {
         if let Ok(mut s) = SNAPSHOT.lock() {
             let mut snap = s.clone().unwrap_or_default();
             if snap.dnd_active != dnd {

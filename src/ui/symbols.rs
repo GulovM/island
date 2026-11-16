@@ -290,6 +290,14 @@ fn arrow_clockwise() -> Vec<Part> {
     vec![Part::Stroke(arc(cx, cy, r, 42.0, end - 4.0), W), Part::Fill(head.clone()), Part::Stroke(head, 1.0)]
 }
 
+/// Колокол уведомлений (для `RINGER` и перечёркнутого `DND`).
+fn bell() -> Vec<Part> {
+    vec![
+        Part::Fill(svg("M12 3 C8.5 3 6.5 5.7 6.5 9 V12.6 L5 15.3 Q4.4 16.6 5.9 16.6 H18.1 Q19.6 16.6 19 15.3 L17.5 12.6 V9 C17.5 5.7 15.5 3 12 3 Z")),
+        Part::Fill(svg("M9.4 18 H14.6 A2.6 2.6 0 0 1 9.4 18 Z")),
+    ]
+}
+
 /// Части значка по коду глифа (`icon::*`); `None` — значка нет, рисуется шрифтом.
 fn parts(code: u32) -> Option<Vec<Part>> {
     use Part::*;
@@ -468,10 +476,14 @@ fn parts(code: u32) -> Option<Vec<Part>> {
             Stroke(line((13.9, 6.6), (17.4, 10.1)), 1.9),
         ],
         // bell.fill
-        0xEA8F => vec![
-            Fill(svg("M12 3 C8.5 3 6.5 5.7 6.5 9 V12.6 L5 15.3 Q4.4 16.6 5.9 16.6 H18.1 Q19.6 16.6 19 15.3 L17.5 12.6 V9 C17.5 5.7 15.5 3 12 3 Z")),
-            Fill(svg("M9.4 18 H14.6 A2.6 2.6 0 0 1 9.4 18 Z")),
-        ],
+        0xEA8F => bell(),
+        // bell.slash.fill («Не беспокоить»)
+        0xE7ED => {
+            let mut v = bell();
+            v.push(CutStroke(line((4.2, 4.2), (19.8, 19.8)), 4.4));
+            v.push(Stroke(line((4.2, 4.2), (19.8, 19.8)), 2.1));
+            v
+        }
         // circle.lefthalf.filled (тёмная тема)
         0xE793 => vec![Stroke(circle(12.0, 12.0, 8.6), W), Fill(svg("M12 3.4 A8.6 8.6 0 0 0 12 20.6 Z"))],
         // cloud.fill
@@ -697,7 +709,7 @@ mod tests {
             WIFI, BLUETOOTH, BRIGHTNESS, MOON, SETTINGS, LOCK, SEARCH, VOLUME, MUTE, VOLUME1, VOLUME2, VOLUME3, PLAY,
             PLAY_SOLID, PAUSE, POWER, RESTART, COPY, LINK, PICTURE, PIN, DELETE, ADD, CHECK, CLOCK, CALENDAR, FOLDER,
             APPS, PREV, NEXT, REWIND, FAST_FORWARD, MUSIC, CLOSE, PASTE, LEFT, RIGHT, STAR, REFRESH, DOWN, UP, EDIT,
-            STAR_FILL, SETTINGS_GEAR, RINGER, SPEAKER, CONTRAST, SUN, CLOUD, FORWARD, TEXT_DOC, BOLT, AIRPLANE, BATTERY,
+            STAR_FILL, SETTINGS_GEAR, RINGER, DND, SPEAKER, CONTRAST, SUN, CLOUD, FORWARD, TEXT_DOC, BOLT, AIRPLANE, BATTERY,
             FLAG, FLAG_FILL, KEYBOARD, NONE,
         ] {
             assert!(parts(code_of(g).unwrap()).is_some(), "нет значка для U+{:04X}", code_of(g).unwrap());

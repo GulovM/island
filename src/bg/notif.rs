@@ -156,6 +156,45 @@ pub unsafe fn poll_dnd() -> Option<bool> {
     Some(mode != ToastNotificationMode::Unrestricted)
 }
 
+#[allow(non_snake_case, dead_code)]
+mod qh {
+    use windows::core::{HRESULT, PCWSTR, PWSTR};
+
+    /// Внутренний COM-интерфейс Focus Assist / Quiet Hours Windows 10/11 (`UserSelectedProfile`).
+    #[windows::core::interface("6bff4732-81ec-4ffb-ae67-b6c1bc29631f")]
+    pub unsafe trait IQuietHoursSettings: windows::core::IUnknown {
+        pub unsafe fn get_UserSelectedProfile(&self, profile_id: *mut PWSTR) -> HRESULT;
+        pub unsafe fn put_UserSelectedProfile(&self, profile_id: PCWSTR) -> HRESULT;
+    }
+}
+
+/// Включает (`PriorityOnly`) или выключает (`Unrestricted`) системный режим «Не беспокоить».
+pub unsafe fn set_dnd(on: bool) -> bool {
+    use windows::core::{w, GUID};
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_LOCAL_SERVER};
+    use qh::IQuietHoursSettings;
+
+    const CLSID_QUIET_HOURS_SETTINGS: GUID = GUID::from_u128(0xf53321fa_34f8_4b7f_b9a3_361877cb94cf);
+    let settings = match CoCreateInstance::<_, IQuietHoursSettings>(&CLSID_QUIET_HOURS_SETTINGS, None, CLSCTX_LOCAL_SERVER) {
+        Ok(s) => s,
+        Err(e) => {
+            crate::log::error(&format!("не удалось получить IQuietHoursSettings: {e}"));
+            return false;
+        }
+    };
+    let profile = if on {
+        w!("Microsoft.QuietHoursProfile.PriorityOnly")
+    } else {
+        w!("Microsoft.QuietHoursProfile.Unrestricted")
+    };
+    let hr = settings.put_UserSelectedProfile(profile);
+    if hr.is_err() {
+        crate::log::error(&format!("не удалось переключить «Не беспокоить»: 0x{:08X}", hr.0 as u32));
+        return false;
+    }
+    true
+}
+
 unsafe fn extract_notif(un: &UserNotification) -> Option<SysNotif> {
     let id = un.Id().ok()?;
     let time_secs = un

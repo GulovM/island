@@ -47,6 +47,7 @@ pub mod icon {
     pub const STAR_FILL: &str = "\u{E735}";
     pub const SETTINGS_GEAR: &str = "\u{E713}";
     pub const RINGER: &str = "\u{EA8F}";
+    pub const DND: &str = "\u{E7ED}";
     pub const SPEAKER: &str = "\u{E7F5}";
     pub const CONTRAST: &str = "\u{E793}";
     pub const SUN: &str = "\u{E706}";
