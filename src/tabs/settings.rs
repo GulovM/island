@@ -30,7 +30,6 @@ const N_HUE: u32 = 5;
 const N_HEX: u32 = 6;
 const N_RADIUS: u32 = 7;
 const N_AUTOSTART: u32 = 8;
-const N_FACE: u32 = 9;
 const N_RESET: u32 = 10;
 const N_SCALE: u32 = 11;
 const N_STRIP: u32 = 12;
@@ -257,6 +256,15 @@ fn split(r: Rect) -> (Rect, Rect) {
     let lc = Rect::new(r.x, r.y, LEFT_W, r.h);
     let rx = lc.right() + 10.0;
     (lc, Rect::new(rx, r.y, r.right() - rx, r.h))
+}
+
+/// Тонкий горизонтальный разделитель между параметрами в разделе «Система».
+unsafe fn param_divider(cv: &Canvas, x: f32, w: f32, y: &mut f32) {
+    *y += 6.0;
+    let c = theme::get().hairline;
+    let line_col = D2D1_COLOR_F { a: c.a.max(0.09), ..c };
+    cv.rr(Rect::new(x, *y, w, 1.0), 0.5, line_col);
+    *y += 7.0;
 }
 
 fn col(c: Rgb) -> D2D1_COLOR_F {
@@ -1068,31 +1076,18 @@ impl Settings {
             }
             self.autostart = crate::sys::autostart_enabled();
         }
-        y += 24.0;
-        cv.text("Время и значки на свёрнутом острове", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
-        let mut face = self.cfg.idle_face;
-        if ui.switch(cv, id(SETTINGS, N_FACE), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut face, true) {
-            self.cfg.idle_face = face;
-            self.changed = true;
-        }
-        y += 23.0;
-        let (box_pad_x, box_pad_y, row_gap) = (8.0, 7.0, 6.0);
-        let box_h = box_pad_y * 2.0 + 20.0 + row_gap + 22.0;
-        let box_r = Rect::new(x, y, iw, box_h);
-        cv.rr(box_r, 9.0, inset());
-        cv.rr_line(box_r, 9.0, D2D1_COLOR_F { a: 0.14, ..fg() }, 1.0);
+        y += 20.0;
+        param_divider(cv, x, iw, &mut y);
 
-        let ix = box_r.x + box_pad_x;
-        let mut iy = box_r.y + box_pad_y;
         let ctrl_w = 166.0;
-        let ctrl_x = box_r.right() - box_pad_x - ctrl_w;
-        cv.text("Сторона", Rect::new(ix, iy, ctrl_x - ix - 6.0, 20.0), &f.body, txt());
+        let ctrl_x = lc.right() - 10.0 - ctrl_w;
+        cv.text("Сторона", Rect::new(x, y, ctrl_x - x - 6.0, 20.0), &f.body, txt());
         let mut right = self.face_side == FaceSide::Right;
-        if ui.segmented(cv, id(SETTINGS, N_FACE_SIDE), Rect::new(ctrl_x, iy, ctrl_w, 20.0), ["Слева", "Справа"], &mut right) {
+        if ui.segmented(cv, id(SETTINGS, N_FACE_SIDE), Rect::new(ctrl_x, y, ctrl_w, 20.0), ["Слева", "Справа"], &mut right) {
             self.face_side = if right { FaceSide::Right } else { FaceSide::Left };
         }
-        iy += 20.0 + row_gap;
-        cv.text("Значок", Rect::new(ix, iy, ctrl_x - ix - 6.0, 22.0), &f.body, txt());
+        y += 26.0;
+        cv.text("Значок", Rect::new(x, y, ctrl_x - x - 6.0, 22.0), &f.body, txt());
         let (current, other) = if right {
             (self.cfg.collapsed_right, self.cfg.collapsed_left)
         } else {
@@ -1101,7 +1096,7 @@ impl Settings {
         let gap = 4.0;
         let bw = (ctrl_w - gap * (CollapsedIcon::ALL.len() - 1) as f32) / CollapsedIcon::ALL.len() as f32;
         for (k, &opt) in CollapsedIcon::ALL.iter().enumerate() {
-            let r = Rect::new(ctrl_x + k as f32 * (bw + gap), iy, bw, 22.0);
+            let r = Rect::new(ctrl_x + k as f32 * (bw + gap), y, bw, 22.0);
             let enabled = opt == CollapsedIcon::None || opt != other;
             let selected = current == opt;
             let tip = if enabled {
@@ -1120,10 +1115,13 @@ impl Settings {
                 } else {
                     self.cfg.collapsed_left = opt;
                 }
+                self.cfg.idle_face = true;
                 self.changed = true;
             }
         }
-        y = box_r.bottom() + 8.0;
+        y += 22.0;
+        param_divider(cv, x, iw, &mut y);
+
         // Режим свёрнутого острова: «Авто» — чёлка (полоска только над окнами на весь экран), «Полоска» — всегда.
         cv.text("Свёрнутый остров", Rect::new(x, y, 130.0, 18.0), &f.body, txt());
         let modes = [("Авто", false), ("Всегда полоска", true)];
@@ -1138,7 +1136,9 @@ impl Settings {
         }
         y += 18.0;
         cv.text("Авто: чёлка с плеером и временем, полоска — над окнами на весь экран", Rect::new(x, y, iw, 13.0), &f.small, dim());
-        y += 22.0;
+        y += 13.0;
+        param_divider(cv, x, iw, &mut y);
+
         cv.text("Над окнами на весь экран — полоска", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
         let mut strip = self.cfg.strip_over_maximized;
         if ui.switch(cv, id(SETTINGS, N_STRIP), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut strip, true) {
@@ -1147,14 +1147,18 @@ impl Settings {
         }
         y += 18.0;
         cv.text("Наведите на верхний край, чтобы раскрыть", Rect::new(x, y, iw, 13.0), &f.small, dim());
-        y += 24.0;
+        y += 13.0;
+        param_divider(cv, x, iw, &mut y);
+
         cv.text("Убирать выполненные задачи в новый день", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
         let mut clean = self.cfg.todo_clean_done;
         if ui.switch(cv, id(SETTINGS, N_TODO_CLEAN), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut clean, true) {
             self.cfg.todo_clean_done = clean;
             self.changed = true;
         }
-        y += 24.0;
+        y += 20.0;
+        param_divider(cv, x, iw, &mut y);
+
         // Свободная раскладка: по умолчанию виджеты сами уплотняются, как в Пункте управления iOS.
         cv.text("Свободная раскладка виджетов", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
         let mut free = self.cfg.free_layout;
@@ -1164,7 +1168,9 @@ impl Settings {
         }
         y += 18.0;
         cv.text("Выкл.: виджеты сами заполняют пустоты", Rect::new(x, y, iw, 13.0), &f.small, dim());
-        y += 24.0;
+        y += 13.0;
+        param_divider(cv, x, iw, &mut y);
+
         // По PrtSc и Win+Shift+S остров прячется, чтобы не попасть в кадр; выкл. — виден на скриншотах.
         cv.text("Прятать остров при скриншоте", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
         let mut hide = self.cfg.hide_on_screenshot;
@@ -1172,7 +1178,8 @@ impl Settings {
             self.cfg.hide_on_screenshot = hide;
             self.changed = true;
         }
-        y += 24.0;
+        y += 20.0;
+        param_divider(cv, x, iw, &mut y);
 
         // Язык интерфейса: применяется сразу.
         cv.text("Язык", Rect::new(x, y, 80.0, 18.0), &f.body, txt());
@@ -1221,16 +1228,17 @@ impl Settings {
             if show_reboot {
                 let warn = crate::ui::readable(crate::ui::status_yellow(), 45.0);
                 cv.text("Требуется перезагрузка", Rect::new(x, y, iw, 13.0), &f.small, warn);
-                y += 16.0;
+                y += 15.0;
             }
             if show_dnd {
                 cv.text("В Windows включён режим «Не беспокоить»", Rect::new(x, y, iw, 13.0), &f.small, dim());
-                y += 16.0;
+                y += 15.0;
             }
-            y += 6.0;
         } else {
-            y += 28.0;
+            y += 20.0;
         }
+        param_divider(cv, x, iw, &mut y);
+        y += 2.0;
 
         cv.text("ОБНОВЛЕНИЯ", Rect::new(x, y, iw, 11.0), &f.caps, dim());
         y += 17.0;
@@ -1242,7 +1250,8 @@ impl Settings {
             self.cfg.auto_update = au;
             self.changed = true;
         }
-        y += 28.0;
+        y += 20.0;
+        param_divider(cv, x, iw, &mut y);
         self.update_row(ui, cv, x, y, iw);
         y += 30.0;
 
@@ -1409,7 +1418,6 @@ mod tests {
             (N_HEX, 1),
             (N_RADIUS, 1),
             (N_AUTOSTART, 1),
-            (N_FACE, 1),
             (N_RESET, 1),
             (N_SCALE, 1),
             (N_STRIP, 1),
