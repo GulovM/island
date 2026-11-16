@@ -78,6 +78,15 @@ impl App {
                 }
                 true
             }
+            Ev::CaptureLost => {
+                self.notice_pressed = false;
+                self.ui.down = false;
+                self.ui.pressed = false;
+                self.press_pos = None;
+                let _ = KillTimer(Some(self.hwnd), LONG_TIMER);
+                self.check_hover();
+                true
+            }
             Ev::LongPress => {
                 let _ = KillTimer(Some(self.hwnd), LONG_TIMER);
                 let Some((px, py)) = self.press_pos.take() else { return false };

@@ -371,6 +371,10 @@ impl Ui {
         self.drag == Some(id) && self.down
     }
 
+    pub fn is_drag_released(&self, id: u32) -> bool {
+        self.drag == Some(id) && self.released
+    }
+
     /// Курсор в координатах текущего слоя (как у `Rect` виджетов этого слоя).
     pub fn pointer(&self) -> (f32, f32) {
         self.mouse
@@ -468,5 +472,26 @@ mod tests {
 
         assert!(!ui.is_field(1));
         assert!(ui.is_field(2));
+    }
+
+    #[test]
+    fn is_drag_released_fires_even_outside_widget_rect() {
+        let mut ui = Ui::default();
+        ui.begin_frame((5.0, 5.0), true);
+        ui.begin_content(0.0, true);
+        ui.pressed = true;
+        ui.down = true;
+        let _ = ui.interact(1, R);
+        ui.end_frame();
+
+        ui.begin_frame((100.0, 100.0), true);
+        ui.begin_content(0.0, true);
+        ui.down = false;
+        ui.released = true;
+        let (_, clicked) = ui.interact(1, R);
+        assert!(!clicked);
+        assert!(ui.is_drag_released(1));
+        ui.end_frame();
+        assert!(!ui.is_drag_released(1));
     }
 }

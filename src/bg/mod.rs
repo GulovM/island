@@ -233,6 +233,10 @@ pub fn start(hwnd: HWND) {
                         | Cmd::Radios
                         | Cmd::BtConn
                         | Cmd::Media
+                        | Cmd::PlayPause
+                        | Cmd::Next
+                        | Cmd::Prev
+                        | Cmd::Seek(_)
                         | Cmd::PrevSession
                         | Cmd::NextSession
                         | Cmd::ResetSession
@@ -244,7 +248,19 @@ pub fn start(hwnd: HWND) {
                         | Cmd::Dnd(_)
                 )
             });
-            let wants_media = batch.iter().any(|c| matches!(c, Cmd::Media | Cmd::PrevSession | Cmd::NextSession | Cmd::ResetSession));
+            let wants_media = batch.iter().any(|c| {
+                matches!(
+                    c,
+                    Cmd::Media
+                        | Cmd::PlayPause
+                        | Cmd::Next
+                        | Cmd::Prev
+                        | Cmd::Seek(_)
+                        | Cmd::PrevSession
+                        | Cmd::NextSession
+                        | Cmd::ResetSession
+                )
+            });
             let wants_net = batch.iter().any(|c| matches!(c, Cmd::Net | Cmd::Radios));
             let wants_bt_conn = batch.iter().any(|c| matches!(c, Cmd::BtConn));
             let explicit_notif = full

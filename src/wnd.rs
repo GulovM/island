@@ -14,6 +14,8 @@ pub(crate) enum Ev {
     /// Левая кнопка нажата / отпущена (координаты клиентской области).
     Down(i32, i32),
     Up,
+    /// Захват мыши потерян извне (например, перехвачен другим окном без `WM_LBUTTONUP`).
+    CaptureLost,
     /// Колесо мыши, сырое значение `WHEEL_DELTA` (120 на «ступеньку»).
     Wheel(i32),
     /// Символ из `WM_CHAR` и код клавиши из `WM_KEYDOWN` (с флагом расширенной клавиши из `lParam`).
@@ -99,6 +101,7 @@ thread_local! {
     pub(crate) static EVENTS: RefCell<Vec<Ev>> = const { RefCell::new(Vec::new()) };
     pub(crate) static MAIN_WND: Cell<HWND> = const { Cell::new(HWND(std::ptr::null_mut())) };
     pub(crate) static TASKBAR_MSG: Cell<u32> = const { Cell::new(0) };
+    static CAPTURING: Cell<bool> = const { Cell::new(false) };
 }
 
 pub(crate) fn push(e: Ev) {
@@ -232,13 +235,21 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             let x = (lp.0 & 0xffff) as i16 as i32;
             let y = ((lp.0 >> 16) & 0xffff) as i16 as i32;
             // Захват мыши: перетаскивание ползунка и выделение текста за пределами острова.
+            CAPTURING.with(|c| c.set(true));
             SetCapture(hwnd);
             push(Ev::Down(x, y));
             LRESULT(0)
         }
         WM_LBUTTONUP => {
+            CAPTURING.with(|c| c.set(false));
             let _ = ReleaseCapture();
             push(Ev::Up);
+            LRESULT(0)
+        }
+        WM_CAPTURECHANGED => {
+            if CAPTURING.with(|c| c.replace(false)) {
+                push(Ev::CaptureLost);
+            }
             LRESULT(0)
         }
         WM_RBUTTONUP => {

@@ -1008,13 +1008,13 @@ impl Controls {
         let hit = Rect::new(bar.x, bar.cy() - 7.0, bar.w, 14.0);
         let (hover, clicked) = ui.click_area(id, hit);
         let dragging = ui.is_dragging(id);
+        let drag_released = ui.is_drag_released(id);
         let hv = ui.hover_of(id);
 
         let mut frac = tl.frac();
-        if dragging || clicked {
+        if dragging || clicked || drag_released {
             let target = tl.seek_to(ui.pointer().0, bar.x, bar.w);
-            let final_drop = dragging && ui.released;
-            let force = clicked || final_drop;
+            let force = clicked || drag_released;
             self.apply_seek(target, force);
             if tl.dur > 0.0 {
                 frac = (target / tl.dur).clamp(0.0, 1.0);
