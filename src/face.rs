@@ -11,13 +11,16 @@ use crate::anim::{Spring, FADE_SPRING};
 use crate::bg::{self, NetStatus, Snapshot};
 use crate::config::CollapsedIcon;
 use crate::sys::{battery_status, BatteryStatus};
-use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, icon, status_orange, Canvas, Rect, BLUE, WHITE};
+use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, icon, status_orange, weight, Align, Canvas, Rect, BLUE, WHITE};
 
 /// Дополнительная ширина свёрнутой чёлки под плашку активного таймера (логические пиксели).
 pub const TIMER_SLOT_W: f32 = 44.0;
+/// Кегль времени в свёрнутой чёлке: на 3 px крупнее боковых значков (9 px).
+pub const TIME_SIZE: f32 = 12.0;
 
 pub struct Face {
     enabled: bool,
+    show_time: bool,
     visible: bool,
     alpha: Spring,
     left: CollapsedIcon,
@@ -72,9 +75,10 @@ pub fn signal_level(n: NetStatus) -> u8 {
 }
 
 impl Face {
-    pub fn new(enabled: bool, left: CollapsedIcon, right: CollapsedIcon) -> Self {
+    pub fn new(enabled: bool, show_time: bool, left: CollapsedIcon, right: CollapsedIcon) -> Self {
         let mut f = Face {
             enabled,
+            show_time,
             visible: false,
             alpha: Spring::unit(0.0, FADE_SPRING.0, FADE_SPRING.1),
             left,
@@ -94,6 +98,10 @@ impl Face {
 
     pub fn set_enabled(&mut self, on: bool) {
         self.enabled = on;
+    }
+
+    pub fn set_show_time(&mut self, on: bool) {
+        self.show_time = on;
     }
 
     pub fn set_slots(&mut self, left: CollapsedIcon, right: CollapsedIcon) {
@@ -298,22 +306,34 @@ impl Face {
         let left_w = self.slot_w(cv, self.left);
         let right_w = self.slot_w(cv, self.right);
         self.draw_slot(cv, self.left, r.x + pad, left_w, r);
-        match timer {
-            None => {
-                cv.text(&self.time, Rect::new(r.x, r.y, r.w, r.h - 1.0), &f.body_c, collapsed_txt());
+        match (self.show_time, timer) {
+            (true, None) => {
+                cv.digits(&self.time, r.x, r.w, r.cy(), TIME_SIZE, weight::EMPHASIZED, Align::Center, collapsed_txt());
             }
-            Some((label, pulse)) => {
-                let time_w = cv.text_w(&self.time, &f.body_b);
+            (false, None) => {}
+            (true, Some((label, pulse))) => {
+                let time_w = cv.digits_w(&self.time, TIME_SIZE, weight::EMPHASIZED);
                 let pill_w = cv.text_w(label, &f.small_c) + 8.0;
                 let available = (r.right() - pad - right_w) - (r.x + pad);
                 let gap = (available - (left_w + time_w + pill_w)) / 3.0;
 
                 let mut x = r.x + pad + left_w + gap;
-                cv.text(&self.time, Rect::new(x, r.y, time_w + 1.0, r.h - 1.0), &f.body_b, collapsed_txt());
+                cv.digits(&self.time, x, time_w + 1.0, r.cy(), TIME_SIZE, weight::EMPHASIZED, Align::Leading, collapsed_txt());
                 x += time_w + gap;
 
                 let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
                 let pill_r = Rect::new(x, r.cy() - pill_h / 2.0, pill_w, pill_h);
+                t.rr(pill_r, pill_h / 2.0, status_orange());
+                t.text(label, pill_r, &f.small_c, WHITE);
+            }
+            (false, Some((label, pulse))) => {
+                let pill_w = cv.text_w(label, &f.small_c) + 8.0;
+                let avail_l = r.x + pad + left_w;
+                let avail_r = r.right() - pad - right_w;
+                let pill_x = ((avail_l + avail_r) / 2.0 - pill_w / 2.0).max(avail_l);
+
+                let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
+                let pill_r = Rect::new(pill_x, r.cy() - pill_h / 2.0, pill_w, pill_h);
                 t.rr(pill_r, pill_h / 2.0, status_orange());
                 t.text(label, pill_r, &f.small_c, WHITE);
             }
@@ -458,7 +478,7 @@ mod tests {
 
     #[test]
     fn hidden_face_fades_out() {
-        let mut f = Face::new(true, CollapsedIcon::Layout, CollapsedIcon::Wifi);
+        let mut f = Face::new(true, true, CollapsedIcon::Layout, CollapsedIcon::Wifi);
         f.set_visible(true, false);
         for _ in 0..120 {
             f.step(1.0 / 60.0);
@@ -470,7 +490,7 @@ mod tests {
         }
         assert_eq!(f.alpha(), 0.0);
         // Выключенное в настройках лицо не показывается, кроме случая, когда на острове идёт таймер.
-        let mut off = Face::new(false, CollapsedIcon::Layout, CollapsedIcon::Wifi);
+        let mut off = Face::new(false, true, CollapsedIcon::Layout, CollapsedIcon::Wifi);
         off.set_visible(true, false);
         assert!(!off.visible());
         off.set_visible(true, true);
@@ -479,7 +499,7 @@ mod tests {
 
     #[test]
     fn poll_lang_idempotence() {
-        let mut f = Face::new(true, CollapsedIcon::Layout, CollapsedIcon::Wifi);
+        let mut f = Face::new(true, true, CollapsedIcon::Layout, CollapsedIcon::Wifi);
         // Если раскладка уже определена, повторный вызов без изменений не должен приводить к перерисовке.
         if !f.lang_text.is_empty() {
             assert!(!f.poll_lang());
@@ -493,7 +513,7 @@ mod tests {
         assert_eq!(bluetooth_icon_state(Some(true), false), BtIconState::OnIdle);
         assert_eq!(bluetooth_icon_state(Some(true), true), BtIconState::Connected);
 
-        let mut f = Face::new(true, CollapsedIcon::Bluetooth, CollapsedIcon::Wifi);
+        let mut f = Face::new(true, true, CollapsedIcon::Bluetooth, CollapsedIcon::Wifi);
         assert!(!f.uses_layout());
         f.set_slots(CollapsedIcon::Layout, CollapsedIcon::Battery);
         assert!(f.uses_layout());
@@ -529,20 +549,23 @@ mod tests {
             assert!(m_ukr.widthIncludingTrailingWhitespace < 34.0);
             assert!(m_www.widthIncludingTrailingWhitespace < 34.0);
 
-            // Проверяем, что кегль lang_text (body_b) равен кеглю таймера (body_c) — ровно 9pt
+            // Проверяем, что кегль lang_text (body_b) равен кеглю таймера (body_c) — ровно 9pt,
+            // а кегль часов на свёрнутой чёлке — ровно на 3 px крупнее (12pt).
             assert!((fonts.body_b.GetFontSize() - 9.0).abs() < 1e-4);
             assert!((fonts.body_c.GetFontSize() - 9.0).abs() < 1e-4);
+            assert!((TIME_SIZE - (fonts.body_b.GetFontSize() + 3.0)).abs() < 1e-4);
 
             // Проверяем 4-элементную компоновку свёрнутого острова: раскладка, время, плашка таймера, Wi-Fi
             let r_w = 180.0f32;
             let pad = (r_w * 0.09).clamp(8.0, 16.0); // 16.0
             let lang_w = m_ukr.widthIncludingTrailingWhitespace;
 
-            // Время часов ("14:05")
-            let layout_time = fonts.layout("14:05", &fonts.body_b, 100.0, 20.0).expect("layout failed");
+            // Время часов ("14:05") в крупном формате TIME_SIZE (12pt)
+            let time_fmt = fonts.display(TIME_SIZE, weight::EMPHASIZED, Align::Leading);
+            let layout_time = fonts.layout("14:05", &time_fmt, 100.0, 20.0).expect("layout failed");
             let mut m_time = DWRITE_TEXT_METRICS::default();
             layout_time.GetMetrics(&mut m_time).unwrap();
-            let time_w = m_time.widthIncludingTrailingWhitespace;
+            let time_w = m_time.widthIncludingTrailingWhitespace.ceil();
 
             // Wi-Fi: визуальная ширина иконки 11.4px, край дуги радиусом 7.2px со штрихом 1.2px под 45°
             let wifi_w = 11.4f32;

@@ -570,29 +570,35 @@ impl Notifications {
         }
 
         // ---------- Лента карточек уведомлений ----------
-        let text_col_w = (view.w - 64.0).max(160.0);
+        let meta_fmt = f.ui_at(13.0, crate::ui::weight::EMPHASIZED, false);
+        let body_fmt = f.ui_at(13.0, crate::ui::weight::PARAGRAPH, true);
+        let r_lbl = crate::i18n::pick("Прочитано", "Read");
+        let read_btn_w = cv.text_w(r_lbl, &f.small_c) + 30.0;
         let mut layouts: Vec<CardLayout> = Vec::with_capacity(self.items.len());
         let mut total_h = 0.0f32;
         for (i, item) in self.items.iter().enumerate() {
             let menu_open = self.context_menu.as_deref() == Some(item.key.as_str());
             let show_read_btn = !menu_open;
+            let text_col_w = if show_read_btn {
+                (view.w - 82.0 - read_btn_w).max(120.0)
+            } else {
+                (view.w - 74.0).max(160.0)
+            };
             let (meta_context, msg_text) = split_display_fields(&item.title, &item.body, false);
             let msg_clip = if msg_text.is_empty() {
                 String::new()
             } else {
-                cv.wrap_clip(&msg_text, &f.wrap_l, text_col_w, 2).into_owned()
+                cv.wrap_clip(&msg_text, &body_fmt, text_col_w, 2).into_owned()
             };
             let msg_h = if msg_clip.is_empty() {
                 0.0
             } else {
-                let (lines, lh) = cv.wrapped(&msg_clip, &f.wrap_l, text_col_w);
-                lines.min(2) as f32 * lh.max(13.0) + 2.0
+                let (lines, lh) = cv.wrapped(&msg_clip, &body_fmt, text_col_w);
+                lines.min(2) as f32 * lh.max(18.0) + 2.0
             };
-            let content_h = (17.0 + if msg_h > 0.0 { msg_h + 2.0 } else { 0.0 }).max(32.0);
-            let mut ch = 10.0 + content_h + 6.0;
-            if show_read_btn {
-                ch += 28.0;
-            } else if menu_open {
+            let content_h = (20.0 + if msg_h > 0.0 { msg_h + 2.0 } else { 0.0 }).max(38.0);
+            let mut ch = 10.0 + content_h + 10.0;
+            if menu_open {
                 ch += 36.0;
             }
             total_h += ch + if i + 1 < self.items.len() { 8.0 } else { 0.0 };
@@ -696,12 +702,12 @@ impl Notifications {
             }
             let meta = parts.join(" · ");
             let meta_w = (tw - 48.0).max(40.0);
-            let meta_clip = cv.wrap_clip(&meta, &f.small_b, meta_w, 1);
-            cv.text(&meta_clip, Rect::new(tx, iy, meta_w, 14.0), &f.small_b, bare());
+            let meta_clip = cv.wrap_clip(&meta, &meta_fmt, meta_w, 1);
+            cv.text(&meta_clip, Rect::new(tx, iy, meta_w, 18.0), &meta_fmt, bare());
 
             let mut rx_ind = card_r.right() - 10.0;
             if card_hot || lay.menu_open {
-                let dis_r = Rect::new(rx_ind - 16.0, iy - 1.0, 16.0, 16.0);
+                let dis_r = Rect::new(rx_ind - 16.0, iy + 1.0, 16.0, 16.0);
                 if ui.icon_button(
                     cv,
                     id(NOTIFICATIONS, BASE_DISMISS + i as u32),
@@ -714,23 +720,26 @@ impl Notifications {
                 }
                 rx_ind -= 20.0;
             }
-            cv.circle(rx_ind - 4.0, iy + 7.0, 3.5, cv.accent);
+            cv.circle(rx_ind - 4.0, iy + 9.0, 3.5, cv.accent);
             rx_ind -= 14.0;
             if rule == AppRule::Silent {
-                cv.symbol(icon::MUTE, Rect::new(rx_ind - 14.0, iy, 13.0, 13.0), 10.5, dim());
+                cv.symbol(icon::MUTE, Rect::new(rx_ind - 14.0, iy + 2.5, 13.0, 13.0), 10.5, dim());
             }
 
             // Текст сообщения.
             if lay.msg_h > 0.0 {
-                cv.text(&lay.msg_clip, Rect::new(tx, iy + 17.0, tw, lay.msg_h), &f.wrap_l, txt());
+                let msg_w = if lay.show_read_btn {
+                    (card_r.right() - 10.0 - read_btn_w - 10.0 - tx).max(80.0)
+                } else {
+                    tw
+                };
+                cv.text(&lay.msg_clip, Rect::new(tx, iy + 20.0, msg_w, lay.msg_h), &body_fmt, txt());
             }
 
-            // Подвал карточки: кнопка «Прочитано» ИЛИ 3 кнопки по правой кнопке мыши.
-            let footer_y = card_r.bottom() - if lay.menu_open { 31.0 } else { 28.0 };
+            // Кнопка «Прочитано» справа ИЛИ 3 кнопки по правой кнопке мыши внизу карточки.
             if lay.show_read_btn {
-                let r_lbl = crate::i18n::pick("Прочитано", "Read");
-                let rw = cv.text_w(r_lbl, &f.small_c) + 30.0;
-                let btn_r = Rect::new(tx, footer_y, rw, 22.0);
+                let btn_y = (iy + 18.0).max(card_r.bottom() - 32.0);
+                let btn_r = Rect::new(card_r.right() - 10.0 - read_btn_w, btn_y, read_btn_w, 22.0);
                 if notif_action_btn(
                     ui,
                     cv,
@@ -743,6 +752,7 @@ impl Notifications {
                     mark_read_key = Some(item.key.clone());
                 }
             } else if lay.menu_open {
+                let footer_y = card_r.bottom() - 31.0;
                 let div_y = footer_y - 5.0;
                 cv.rr(
                     Rect::new(tx, div_y, (card_r.right() - 10.0 - tx).max(1.0), 1.0),

@@ -25,6 +25,33 @@ impl App {
         }
     }
 
+    /// Переключает вкладку на соседнюю (`delta < 0` — влево, `delta > 0` — вправо) с закольцовкой;
+    /// если открыты настройки или уведомления, возвращает на текущую вкладку.
+    pub(crate) fn step_tab(&mut self, delta: isize) -> bool {
+        let n = self.order.len();
+        if n == 0 {
+            return false;
+        }
+        if self.settings_open || self.notifications_open {
+            let target = self.tab.min(n - 1);
+            self.switch_tab(target);
+            self.retarget();
+            return true;
+        }
+        if n == 1 {
+            return false;
+        }
+        let next = if delta < 0 {
+            if self.tab == 0 { n - 1 } else { self.tab - 1 }
+        } else {
+            (self.tab + 1) % n
+        };
+        self.switch_tab(next);
+        self.tab_dir = if delta > 0 { 1.0 } else { -1.0 };
+        self.retarget();
+        true
+    }
+
     pub(crate) fn tab_row_width(&self) -> f32 {
         self.order.iter().map(|&i| self.tab_widths[i]).sum::<f32>() + TAB_GAP * self.order.len().saturating_sub(1) as f32
     }
@@ -124,12 +151,22 @@ impl App {
             return self.record_key(vk);
         }
         let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
+        let alt = GetKeyState(VK_MENU.0 as i32) < 0;
         // AltGr (польская, немецкая и др. раскладки) приходит как Ctrl+Alt: это ввод символа, не шорткат.
-        let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0 && GetKeyState(VK_MENU.0 as i32) >= 0;
+        let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0 && !alt;
         // Фокус не на текстовом поле: Tab — клавиатурная навигация по виджетам (а не «следующий
         // фильтр», как у поля), Enter/Space на уже сфокусированном виджете — активация, как клик.
         // Пустой фокус (остров только открылся) — тоже сюда: первый Tab должен на что-то попасть.
         let field_focus = self.ui.focus.is_some_and(|id| self.ui.is_field(id));
+        if self.expanded
+            && !shift
+            && !ctrl
+            && !alt
+            && (vk == VK_LEFT.0 as u32 || vk == VK_RIGHT.0 as u32)
+            && (!field_focus || self.ui.focus.is_some_and(|id| self.ui.field_text(id).is_empty()))
+        {
+            return self.step_tab(if vk == VK_RIGHT.0 as u32 { 1 } else { -1 });
+        }
         if !field_focus {
             if vk == VK_TAB.0 as u32 {
                 self.ui.request_tab(shift);
@@ -270,5 +307,45 @@ mod tests {
         assert!((right_edge - last_tab_right - TAB_SIDE_RIGHT).abs() < 0.001, "правый отступ должен быть равен TAB_SIDE_RIGHT");
         assert!(last_tab_right <= pencil_left, "ряд вкладок не должен налезать на хитбокс карандаша");
         assert!(pencil_left - last_tab_right >= TAB_GAP, "зазор от вкладки до хитбокса карандаша не меньше TAB_GAP");
+    }
+
+    #[test]
+    fn step_tab_cycles_with_wrap_and_exits_overlays() {
+        let cfg = Config::default();
+        let mut app = App::for_test(cfg.clone());
+        app.order = vec![tabs::CONTROLS, tabs::TODAY, tabs::STATS];
+        app.tab_widths = vec![60.0; tabs::CUSTOM_BASE];
+        app.tab = 0;
+
+        // Влево с первой вкладки — переход на последнюю.
+        assert!(app.step_tab(-1));
+        assert_eq!(app.tab, 2);
+        assert_eq!(app.tab_dir, -1.0);
+
+        // Вправо с последней — возврат на первую.
+        assert!(app.step_tab(1));
+        assert_eq!(app.tab, 0);
+        assert_eq!(app.tab_dir, 1.0);
+
+        // Вправо и влево внутри ряда.
+        assert!(app.step_tab(1));
+        assert_eq!(app.tab, 1);
+        assert!(app.step_tab(-1));
+        assert_eq!(app.tab, 0);
+
+        // Из настроек или уведомлений стрелка возвращает на вкладку.
+        app.settings_open = true;
+        assert!(app.step_tab(-1));
+        assert!(!app.settings_open);
+        assert_eq!(app.tab, 0);
+
+        app.notifications_open = true;
+        assert!(app.step_tab(1));
+        assert!(!app.notifications_open);
+        assert_eq!(app.tab, 0);
+
+        // С одной вкладкой без оверлеев переключать некуда.
+        app.order = vec![tabs::CONTROLS];
+        assert!(!app.step_tab(1));
     }
 }

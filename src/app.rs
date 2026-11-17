@@ -266,7 +266,7 @@ impl App {
                 notifications_open: false,
                 dnd_known: None,
                 glow: Spring::unit(0.0, 220.0, 26.0),
-                face: face::Face::new(cfg.idle_face, cfg.collapsed_left, cfg.collapsed_right),
+                face: face::Face::new(cfg.idle_face, cfg.collapsed_time, cfg.collapsed_left, cfg.collapsed_right),
                 face_tick_on: false,
                 save_pending: false,
                 body: anim::Body::new((cfg.collapsed.0 * scale, cfg.collapsed.1 * scale)),
@@ -522,6 +522,7 @@ impl App {
         self.cfg.always_strip = new.always_strip;
         self.cfg.collapsed_player = new.collapsed_player;
         self.cfg.idle_face = new.idle_face;
+        self.cfg.collapsed_time = new.collapsed_time;
         self.cfg.collapsed_left = new.collapsed_left;
         self.cfg.collapsed_right = new.collapsed_right;
         self.cfg.todo_clean_done = new.todo_clean_done;
@@ -553,6 +554,7 @@ impl App {
         self.order = self.cfg.visible_tabs();
         self.tab = self.order.iter().position(|&i| i == current).unwrap_or(0);
         self.face.set_enabled(self.cfg.idle_face);
+        self.face.set_show_time(self.cfg.collapsed_time);
         self.face.set_slots(self.cfg.collapsed_left, self.cfg.collapsed_right);
         self.live.set_player_enabled(self.cfg.collapsed_player);
         self.apply_theme();
@@ -595,6 +597,7 @@ impl App {
         self.refresh_language();
         self.apply_monitor(self.mon, true);
         self.face.set_enabled(self.cfg.idle_face);
+        self.face.set_show_time(self.cfg.collapsed_time);
         self.face.set_slots(self.cfg.collapsed_left, self.cfg.collapsed_right);
         self.live.set_player_enabled(self.cfg.collapsed_player);
         self.apply_theme();
@@ -893,7 +896,7 @@ mod tests {
                 notifications_open: false,
                 dnd_known: None,
                 glow: Spring::unit(0.0, 220.0, 26.0),
-                face: face::Face::new(cfg.idle_face, cfg.collapsed_left, cfg.collapsed_right),
+                face: face::Face::new(cfg.idle_face, cfg.collapsed_time, cfg.collapsed_left, cfg.collapsed_right),
                 face_tick_on: false,
                 save_pending: false,
                 body: anim::Body::new((180.0, 24.0)),

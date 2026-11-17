@@ -98,10 +98,9 @@ impl Default for Fade {
     }
 }
 
-/// Аккумулятор и «всплеск» молнии при подключении питания.
+/// Аккумулятор и плавно доезжающий уровень заряда.
 struct BatteryState {
     status: Option<sys::BatteryStatus>,
-    bolt: Spring,
     /// Показываемый уровень заряда 0..1: плавно доезжает до реального (при показе вкладки заполняется с нуля).
     level: Spring,
 }
@@ -111,7 +110,6 @@ impl Default for BatteryState {
         // Опрос сразу: без него виджет считался бы недоступным до первого показа вкладки.
         let mut s = BatteryState {
             status: sys::battery_status(),
-            bolt: Spring::unit(0.0, 260.0, 12.0),
             level: Spring::unit(0.0, 70.0, 14.0),
         };
         s.aim_level();
@@ -123,11 +121,6 @@ impl BatteryState {
     /// Перечитывает состояние питания; `true` — что-то изменилось.
     fn poll(&mut self) -> bool {
         let next = sys::battery_status();
-        // Питание подключили: молния один раз «подпрыгивает».
-        if next.is_some_and(|b| b.ac_online) && self.status.is_some_and(|b| !b.ac_online) {
-            self.bolt.value = 1.0;
-            self.bolt.target = 0.0;
-        }
         let changed = next != self.status;
         self.status = next;
         self.aim_level();
@@ -274,12 +267,11 @@ impl Controls {
 
     pub fn step(&mut self, dt: f32) {
         self.list_t.0.step(dt);
-        self.battery.bolt.step(dt);
         self.battery.level.step(dt);
     }
 
     pub fn animating(&self) -> bool {
-        !self.list_t.0.settled() || !self.battery.bolt.settled() || !self.battery.level.settled()
+        !self.list_t.0.settled() || !self.battery.level.settled()
     }
 
     /// Открывает/закрывает список устройств по стрелке плитки.
@@ -612,8 +604,7 @@ impl Controls {
     }
 
     /// Батарея по макету: 1×1 (48×48) — кольцо заряда с процентом внутри, 2×1 (104×48) — подпись
-    /// («СЕТЬ» / «БАТАРЕЯ»), крупный процент слева и горизонтальный значок батареи справа
-    /// (с молнией при питании от сети).
+    /// («СЕТЬ» / «БАТАРЕЯ»), крупный процент слева и горизонтальный значок батареи справа.
     unsafe fn battery_card(&self, cv: &Canvas, r: Rect, size: usize) {
         use crate::ui::track;
         let f = &cv.g.fonts;
@@ -652,12 +643,8 @@ impl Controls {
         cv.digits(&big, tx, dw + 2.0, r.y + 32.5, num_sz, 600, Align::Leading, txt());
         cv.line("%", &f.small_b, tx + dw + 1.5, 16.0, r.y + 33.5, Align::Leading, dim());
 
-        // Горизонтальный значок батареи справа (при питании от сети — с местом под молнию справа от контакта).
-        let (bx, bw) = if b.ac_online {
-            (r.right() - 49.0, 26.0)
-        } else {
-            (r.right() - 40.0, 28.0)
-        };
+        // Горизонтальный значок батареи справа.
+        let (bx, bw) = (r.right() - 40.0, 28.0);
         let body = Rect::new(bx, r.cy() - 7.5, bw, 15.0);
         cv.rr(body, 4.5, track());
         let mut edge = dim();
@@ -677,13 +664,6 @@ impl Controls {
                 let top = D2D1_COLOR_F { a: 0.14, ..crate::theme::get().rim_hi };
                 cv.gradient_stops(fill, 2.8, &[(0.0, top), (0.65, D2D1_COLOR_F { a: 0.0, ..top })], false);
             }
-        }
-
-        if b.ac_online {
-            let k = 1.0 + 0.45 * self.battery.bolt.value.max(0.0);
-            let s = 11.5 * k;
-            let bolt_cx = body.right() + 11.0;
-            cv.symbol(icon::BOLT, Rect::new(bolt_cx - s / 2.0, body.cy() - s / 2.0, s, s), s, col);
         }
     }
 

@@ -154,6 +154,8 @@ pub struct Fonts {
     /// Основной шрифт интерфейса и сделанные по месту подписи caps_at по (кегль×4, вес, трекинг×100); выравнивание — по левому краю, остальное делает Canvas::line.
     ui_family: windows::core::PCWSTR,
     sized_caps: RefCell<HashMap<(u32, u32, i32), IDWriteTextFormat>>,
+    /// Сделанные по месту форматы основного шрифта по (кегль×4, вес, перенос по словам).
+    sized_ui: RefCell<HashMap<(u32, u32, bool), IDWriteTextFormat>>,
     /// Готовые раскладки текста: `DrawText` строит её заново при каждом вызове, а в кадре
     /// десятки строк, которые не меняются от кадра к кадру.
     layouts: RefCell<HashMap<u64, (String, IDWriteTextLayout)>>,
@@ -403,6 +405,7 @@ impl Fonts {
             sized: RefCell::new(HashMap::new()),
             ui_family: ui,
             sized_caps: RefCell::new(HashMap::new()),
+            sized_ui: RefCell::new(HashMap::new()),
             layouts: RefCell::new(HashMap::new()),
         })
     }
@@ -440,6 +443,27 @@ impl Fonts {
         let Ok(t) = fmt_var(&self.factory, self.ui_family, weight, size, false) else { return self.caps.clone() };
         self.register_tracking(&t, tracking * size);
         self.sized_caps.borrow_mut().insert(key, t.clone());
+        t
+    }
+
+    /// Основной шрифт интерфейса нужного кегля и веса (с переносом по словам или однострочный).
+    pub unsafe fn ui_at(&self, size: f32, weight: u32, wrap: bool) -> IDWriteTextFormat {
+        let key = ((size * 4.0).round() as u32, weight, wrap);
+        if let Some(t) = self.sized_ui.borrow().get(&key) {
+            return t.clone();
+        }
+        let made = fmt_var(&self.factory, self.ui_family, weight, size, false).and_then(|t| {
+            if wrap {
+                t.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
+                t.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
+            }
+            Ok(t)
+        });
+        let Ok(t) = made else {
+            return if wrap { self.wrap_l.clone() } else { self.small_b.clone() };
+        };
+        self.register_tracking(&t, ios::tracking_px(TextRole::Subheadline, size));
+        self.sized_ui.borrow_mut().insert(key, t.clone());
         t
     }
 
@@ -676,6 +700,23 @@ mod tests {
                 m_tracked.widthIncludingTrailingWhitespace,
                 m_normal.widthIncludingTrailingWhitespace
             );
+        }
+    }
+
+    #[test]
+    fn ui_at_scales_and_sets_wrapping() {
+        unsafe {
+            let factory: Result<IDWriteFactory> = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED);
+            let Ok(f) = factory else { return };
+            crate::theme::set_text_scale(1.0);
+            let Ok(fonts) = Fonts::new(&f) else { return };
+
+            let meta = fonts.ui_at(fonts.small_b.GetFontSize() + 5.0, weight::EMPHASIZED, false);
+            let body = fonts.ui_at(fonts.wrap_l.GetFontSize() + 5.0, weight::PARAGRAPH, true);
+            assert!((meta.GetFontSize() - 13.0).abs() < 1e-4);
+            assert!((body.GetFontSize() - 13.0).abs() < 1e-4);
+            assert_eq!(meta.GetWordWrapping(), DWRITE_WORD_WRAPPING_NO_WRAP);
+            assert_eq!(body.GetWordWrapping(), DWRITE_WORD_WRAPPING_WRAP);
         }
     }
 }

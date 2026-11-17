@@ -198,7 +198,7 @@ const NON_GRID_SIZES: [(f32, f32); 6] = [
     (480.0, 420.0), // APPS
     (560.0, 236.0), // WALLPAPER
     (420.0, 112.0), // POWER
-    (600.0, 476.0), // SETTINGS
+    (600.0, 504.0), // SETTINGS
     (580.0, 380.0), // NOTIFICATIONS
 ];
 
@@ -754,7 +754,7 @@ mod tests {
         assert_eq!(tabs.island_size(APPS), (480.0, 420.0));
         assert_eq!(tabs.island_size(WALLPAPER), (560.0, 236.0));
         assert_eq!(tabs.island_size(POWER), (420.0, 112.0));
-        assert_eq!(tabs.island_size(SETTINGS), (600.0, 476.0));
+        assert_eq!(tabs.island_size(SETTINGS), (600.0, 504.0));
     }
 
     #[test]

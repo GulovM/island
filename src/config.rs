@@ -73,8 +73,11 @@ collapsed_mode = "auto"
 # Скрытые вкладки (список имён из tabs ниже)
 hidden_tabs = []
 
-# 1 — в свёрнутом острове без музыки показывать время и значки слева и справа
+# 1 — в свёрнутом острове без музыки показывать значки слева и справа и время
 idle_face = 1
+
+# 1 — показывать время на свёрнутом острове; 0 — скрыть время (остаются боковые значки)
+collapsed_time = 1
 
 # Значки слева и справа на свёрнутом острове: "layout" (раскладка), "wifi", "bluetooth", "battery".
 collapsed_left = "layout"
@@ -286,6 +289,8 @@ pub struct Config {
     pub hidden_tabs: Vec<String>,
     /// Время и значки слева/справа на свёрнутом острове, когда музыка не играет.
     pub idle_face: bool,
+    /// Показывать ли время на свёрнутом острове (при выключении остаются боковые значки).
+    pub collapsed_time: bool,
     /// Значок слева на свёрнутом острове.
     pub collapsed_left: CollapsedIcon,
     /// Значок справа на свёрнутом острове.
@@ -349,6 +354,7 @@ impl Default for Config {
             language: "auto".to_string(),
             hidden_tabs: Vec::new(),
             idle_face: true,
+            collapsed_time: true,
             collapsed_left: CollapsedIcon::Layout,
             collapsed_right: CollapsedIcon::Wifi,
             todo_clean_done: false,
@@ -476,6 +482,7 @@ fn save_updates(cfg: &Config) -> Vec<(&'static str, String)> {
         ("hidden_tabs", fmt_list(&cfg.hidden_tabs)),
         ("custom_tabs", fmt_list(&cfg.custom.iter().map(CustomTab::encode).collect::<Vec<_>>())),
         ("idle_face", (cfg.idle_face as u8).to_string()),
+        ("collapsed_time", (cfg.collapsed_time as u8).to_string()),
         ("collapsed_left", fmt_str(cfg.collapsed_left.as_str())),
         ("collapsed_right", fmt_str(cfg.collapsed_right.as_str())),
         ("todo_clean_done", (cfg.todo_clean_done as u8).to_string()),
@@ -729,6 +736,7 @@ fn migrate(path: &std::path::Path, text: &str, cfg: &Config) {
         "hidden_tabs",
         "custom_tabs",
         "idle_face",
+        "collapsed_time",
         "collapsed_left",
         "collapsed_right",
         "todo_clean_done",
@@ -794,6 +802,7 @@ pub fn parse(text: &str) -> Config {
             },
             ("", "system_colors", Value::Num(v)) => cfg.system_colors = v != 0.0,
             ("", "idle_face", Value::Num(v)) => cfg.idle_face = v != 0.0,
+            ("", "collapsed_time", Value::Num(v)) => cfg.collapsed_time = v != 0.0,
             ("", "collapsed_left", Value::Str(s)) => cfg.collapsed_left = CollapsedIcon::parse(&s, CollapsedIcon::Layout),
             ("", "collapsed_right", Value::Str(s)) => cfg.collapsed_right = CollapsedIcon::parse(&s, CollapsedIcon::Wifi),
             // Автоподбор контраста APCA теперь всегда включён: старый ключ молча пропускаем.
@@ -1207,6 +1216,7 @@ gmail = \"https://mail.google.com\"
         c.hidden_tabs = vec!["Power".into(), "Wallpaper".into()];
         c.tabs = vec!["Apps".into(), "Controls".into()];
         c.idle_face = false;
+        c.collapsed_time = false;
         c.auto_update = true;
         let updates = [
             ("accent", fmt_str(&theme::to_hex(c.accent))),
@@ -1223,6 +1233,7 @@ gmail = \"https://mail.google.com\"
             ("tabs", fmt_list(&c.tabs)),
             ("hidden_tabs", fmt_list(&c.hidden_tabs)),
             ("idle_face", "0".to_string()),
+            ("collapsed_time", "0".to_string()),
             ("auto_update", "1".to_string()),
         ];
         let back = parse(&set_keys(DEFAULT_TEMPLATE, &updates));

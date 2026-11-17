@@ -48,6 +48,7 @@ const N_HIDE_SHOT: u32 = 112;
 const N_POPUP_NOTIFS: u32 = 113;
 const N_COLLAPSED_PLAYER: u32 = 114;
 const N_COLLAPSED: u32 = 115;
+const N_COLLAPSED_TIME: u32 = 117;
 /// Занимает два номера подряд (27–28) — по числу `PALETTE_STYLES`.
 const N_PALETTE_STYLE: u32 = 27;
 /// Занимает три номера подряд (30–32) — по числу `SECTIONS`.
@@ -460,6 +461,7 @@ impl Settings {
         self.cfg.hidden_tabs = self.cfg.custom.iter().enumerate().map(|(i, _)| self.cfg.tab_key(crate::tabs::CUSTOM_BASE + i)).collect();
         self.cfg.tabs = self.cfg.tab_keys().into_iter().map(|(_, k)| k).collect();
         self.cfg.idle_face = true;
+        self.cfg.collapsed_time = d.collapsed_time;
         self.cfg.collapsed_left = d.collapsed_left;
         self.cfg.collapsed_right = d.collapsed_right;
         self.cfg.strip_over_maximized = d.strip_over_maximized;
@@ -1123,6 +1125,15 @@ impl Settings {
         y += 22.0;
         param_divider(cv, x, iw, &mut y);
 
+        cv.text("Время на свёрнутом острове", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        let mut show_time = self.cfg.collapsed_time;
+        if ui.switch(cv, id(SETTINGS, N_COLLAPSED_TIME), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut show_time, true) {
+            self.cfg.collapsed_time = show_time;
+            self.changed = true;
+        }
+        y += 20.0;
+        param_divider(cv, x, iw, &mut y);
+
         // Режим свёрнутого острова: «Авто» — чёлка (полоска только над окнами на весь экран), «Полоска» — всегда.
         cv.text("Свёрнутый остров", Rect::new(x, y, 130.0, 18.0), &f.body, txt());
         let modes = [("Авто", false), ("Всегда полоска", true)];
@@ -1374,6 +1385,7 @@ mod tests {
         s.cfg.accent_pill = true;
         s.cfg.hidden_tabs = vec!["Apps".into()];
         s.cfg.idle_face = false;
+        s.cfg.collapsed_time = false;
         s.reset();
         assert_eq!(s.cfg.corner_radius, DEFAULT_RADIUS);
         assert_eq!(s.cfg.ui_scale, DEFAULT_SCALE);
@@ -1382,7 +1394,7 @@ mod tests {
         assert_eq!(s.cfg.material, Config::default().material);
         assert_eq!(s.cfg.palette_style, Config::default().palette_style);
         assert_eq!(s.cfg.accent_pill, Config::default().accent_pill);
-        assert!(s.cfg.hidden_tabs.is_empty() && s.cfg.idle_face);
+        assert!(s.cfg.hidden_tabs.is_empty() && s.cfg.idle_face && s.cfg.collapsed_time);
         assert_eq!(s.cfg.visible_tabs().len(), 7);
     }
 
@@ -1446,6 +1458,7 @@ mod tests {
             (N_POPUP_NOTIFS, 1),
             (N_COLLAPSED_PLAYER, 1),
             (N_COLLAPSED, 2),
+            (N_COLLAPSED_TIME, 1),
             (N_PALETTE_STYLE, PALETTE_STYLES.len() as u32),
             (N_SECTION, SECTIONS.len() as u32),
             (N_MATERIAL, MATERIALS.len() as u32),
