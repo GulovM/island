@@ -571,7 +571,7 @@ impl Notifications {
 
         // ---------- Лента карточек уведомлений ----------
         let meta_fmt = f.ui_at(13.0, crate::ui::weight::EMPHASIZED, false);
-        let body_fmt = f.ui_at(13.0, crate::ui::weight::PARAGRAPH, true);
+        let body_fmt = f.ui_at(11.0, crate::ui::weight::PARAGRAPH, true);
         let r_lbl = crate::i18n::pick("Прочитано", "Read");
         let read_btn_w = cv.text_w(r_lbl, &f.small_c) + 30.0;
         let mut layouts: Vec<CardLayout> = Vec::with_capacity(self.items.len());

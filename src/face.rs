@@ -15,8 +15,8 @@ use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, icon, on_color, w
 
 /// Дополнительная ширина свёрнутой чёлки под плашку активного таймера (логические пиксели).
 pub const TIMER_SLOT_W: f32 = 44.0;
-/// Кегль времени в свёрнутой чёлке: на 3 px крупнее боковых значков (9 px).
-pub const TIME_SIZE: f32 = 12.0;
+/// Кегль времени в свёрнутой чёлке: на 2 px крупнее боковых значков (9 px).
+pub const TIME_SIZE: f32 = 11.0;
 
 pub struct Face {
     enabled: bool,
@@ -551,17 +551,17 @@ mod tests {
             assert!(m_www.widthIncludingTrailingWhitespace < 34.0);
 
             // Проверяем, что кегль lang_text (body_b) равен кеглю таймера (body_c) — ровно 9pt,
-            // а кегль часов на свёрнутой чёлке — ровно на 3 px крупнее (12pt).
+            // а кегль часов на свёрнутой чёлке — ровно на 2 px крупнее (11pt).
             assert!((fonts.body_b.GetFontSize() - 9.0).abs() < 1e-4);
             assert!((fonts.body_c.GetFontSize() - 9.0).abs() < 1e-4);
-            assert!((TIME_SIZE - (fonts.body_b.GetFontSize() + 3.0)).abs() < 1e-4);
+            assert!((TIME_SIZE - (fonts.body_b.GetFontSize() + 2.0)).abs() < 1e-4);
 
             // Проверяем 4-элементную компоновку свёрнутого острова: раскладка, время, плашка таймера, Wi-Fi
             let r_w = 180.0f32;
             let pad = (r_w * 0.09).clamp(8.0, 16.0); // 16.0
             let lang_w = m_ukr.widthIncludingTrailingWhitespace;
 
-            // Время часов ("14:05") в крупном формате TIME_SIZE (12pt)
+            // Время часов ("14:05") в крупном формате TIME_SIZE (11pt)
             let time_fmt = fonts.display(TIME_SIZE, weight::EMPHASIZED, Align::Leading);
             let layout_time = fonts.layout("14:05", &time_fmt, 100.0, 20.0).expect("layout failed");
             let mut m_time = DWRITE_TEXT_METRICS::default();
