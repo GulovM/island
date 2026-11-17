@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### RU
+
+- Вкладка «Сегодня» → Таймер: добавлен режим Помодоро («Обычный таймер» / «Помодоро») с настраиваемой длительностью фокуса (1–120 мин) и отдыха (1–60 мин), числом циклов (1–12), автоматическим переключением фаз, пропуском этапа, шкалой прогресса и цветовой индикацией в свёрнутом острове (оранжевый — обычный таймер, красный — фокус, зелёный — отдых).
+- Настройки → Система: добавлен переключатель «Время на свёрнутом острове» (`collapsed_time`), позволяющий скрыть часы в чёлке, оставив боковые значки.
+- Навигация: в раскрытом острове стрелки `←` / `→` переключают вкладки по кругу (вне заполненных текстовых полей) и возвращают из настроек или центра уведомлений на текущую вкладку.
+- Внешний вид и виджеты: скорректированы размеры шрифта времени на свёрнутом острове и текста сообщений уведомлений; в виджете батареи убран отдельный значок молнии.
+
+### EN
+
+- Today tab → Timer: added Pomodoro mode ("Standard timer" / "Pomodoro") with configurable focus (1–120 min) and break (1–60 min) durations, cycle count (1–12), automatic phase transitions, phase skip, progress bar, and color-coded collapsed indicator (orange for standard timer, red for focus, green for break).
+- Settings → System: added the "Time on collapsed island" (`collapsed_time`) toggle to hide the center clock while keeping side icons.
+- Navigation: in the expanded island, `←` / `→` arrow keys cycle through tabs (when not editing a non-empty text field) and return from Settings or Notification Center to the current tab.
+- UI & widgets: adjusted font sizes for the collapsed clock and notification messages; removed the separate lightning bolt icon from the battery widget.
+
 ## [1.7.1] — 2026-11-16
 
 ### RU
