@@ -10,7 +10,10 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use crate::anim::{Spring, FADE_SPRING};
 use crate::bg::{self, Media, Snapshot, NOTIF_ICON_PX};
 use crate::tabs::notifications::PopupNotice;
-use crate::ui::{collapsed_chip_bg, collapsed_dim, collapsed_txt, icon, status_green, status_orange, status_red, Canvas, Rect, Ui, WHITE};
+use crate::ui::{
+    collapsed_chip_bg, collapsed_dim, collapsed_txt, icon, status_green, status_orange,
+    status_pomodoro, status_red, Canvas, Rect, Ui, WHITE,
+};
 
 /// Размеры форм (логические пиксели). Ширина не меньше ширины свёрнутого острова.
 pub const MINI: (f32, f32) = (252.0, 36.0);
@@ -23,6 +26,26 @@ pub const CAPSULE_TOP_Y: f32 = 8.0;
 /// Заряд, ниже которого (и без питания от сети) показывается предупреждение.
 const LOW_PCT: u8 = 20;
 
+/// Режим и текущая фаза таймера для согласованной цветовой индикации свёрнутого острова.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TimerKind {
+    #[default]
+    Timer,
+    PomoWork,
+    PomoBreak,
+}
+
+impl TimerKind {
+    #[inline]
+    pub fn tint(self) -> D2D1_COLOR_F {
+        match self {
+            Self::Timer => status_orange(),
+            Self::PomoWork => status_pomodoro(),
+            Self::PomoBreak => status_green(),
+        }
+    }
+}
+
 /// Что свёрнутый остров знает о запущенном (или стоящем на паузе) таймере вкладки Today.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TimerView {
@@ -33,6 +56,7 @@ pub struct TimerView {
     pub paused: bool,
     /// Через сколько миллисекунд сменится секунда на экране.
     pub next_ms: u32,
+    pub kind: TimerKind,
 }
 
 impl TimerView {
@@ -226,7 +250,8 @@ impl Live {
     pub fn set_timer(&mut self, t: Option<TimerView>) -> (bool, bool) {
         let appeared = self.timer.is_some() != t.is_some();
         // Миллисекунды до смены секунды видимого не меняют.
-        let changed = appeared || self.timer.map(|o| (o.secs, o.paused)) != t.map(|n| (n.secs, n.paused));
+        let changed = appeared
+            || self.timer.map(|o| (o.secs, o.paused, o.kind)) != t.map(|n| (n.secs, n.paused, n.kind));
         if let Some(n) = t {
             self.timer_frac.target = n.frac.clamp(0.0, 1.0);
             if self.timer.is_none() {
@@ -235,6 +260,12 @@ impl Live {
         }
         self.timer = t;
         (changed, appeared)
+    }
+
+    /// Цвет активного таймера (или фазы Pomodoro) для свёрнутого острова.
+    #[inline]
+    pub fn timer_tint(&self) -> D2D1_COLOR_F {
+        self.timer.map_or_else(status_orange, |t| t.kind.tint())
     }
 
     /// Плавная доля оставшегося времени для полоски.
@@ -515,7 +546,7 @@ impl Live {
         }
         let line = Canvas { g: cv.g, alpha: cv.alpha * self.timer_pulse(), accent: cv.accent };
         let track_r = Rect::new(r.x + 14.0, r.bottom() - 3.0, r.w - 28.0, 1.5);
-        line.rr(Rect::new(track_r.x, track_r.y, track_r.w * self.timer_frac(), track_r.h), 0.75, status_orange());
+        line.rr(Rect::new(track_r.x, track_r.y, track_r.w * self.timer_frac(), track_r.h), 0.75, self.timer_tint());
     }
 
     pub fn toast_alpha(&self) -> f32 {
@@ -882,5 +913,27 @@ mod tests {
         }
         assert!(l.wave_state().is_none());
         assert_eq!(l.wave_lvl, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn timer_tint_tracks_phase_and_triggers_change_on_phase_switch() {
+        let mut l = Live::new(true, true);
+        assert_eq!(l.timer_tint(), status_orange());
+
+        let work = TimerView { frac: 0.8, secs: 1200, paused: false, next_ms: 500, kind: TimerKind::PomoWork };
+        let (changed, appeared) = l.set_timer(Some(work));
+        assert!(changed && appeared);
+        assert_eq!(l.timer_tint(), status_pomodoro());
+
+        // Переключение работа -> перерыв при тех же секундах должно помечать изменение.
+        let brk = TimerView { kind: TimerKind::PomoBreak, ..work };
+        let (changed, appeared) = l.set_timer(Some(brk));
+        assert!(changed && !appeared);
+        assert_eq!(l.timer_tint(), status_green());
+
+        let std_timer = TimerView { kind: TimerKind::Timer, ..work };
+        let (changed, appeared) = l.set_timer(Some(std_timer));
+        assert!(changed && !appeared);
+        assert_eq!(l.timer_tint(), status_orange());
     }
 }

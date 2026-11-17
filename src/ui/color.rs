@@ -14,6 +14,8 @@ pub const ORANGE: D2D1_COLOR_F = rgb(0.95, 0.63, 0.14);
 pub const YELLOW: D2D1_COLOR_F = rgb(0.98, 0.80, 0.18);
 pub const PINK: D2D1_COLOR_F = rgb(0.91, 0.42, 0.60);
 pub const RED: D2D1_COLOR_F = rgb(0.93, 0.36, 0.33);
+/// Soft terracotta-coral for Pomodoro focus phase (non-alarming, low visual stress).
+pub const POMO_CORAL: D2D1_COLOR_F = rgb(0.88, 0.45, 0.42);
 pub const BLUE: D2D1_COLOR_F = rgb(0.38, 0.64, 1.0);
 pub const TEAL: D2D1_COLOR_F = rgb(0.18, 0.84, 0.75);
 pub const CYAN: D2D1_COLOR_F = rgb(0.25, 0.72, 0.98);
@@ -359,6 +361,21 @@ pub fn status_red() -> D2D1_COLOR_F {
     status_color(crate::ios::SysColor::Red, RED)
 }
 
+/// Мягкий тёплый терракотово-коралловый цвет для рабочей фазы Pomodoro:
+/// заметно мягче тревожного `status_red()`, чтобы не создавать ощущения цейтнота.
+#[inline]
+pub fn status_pomodoro() -> D2D1_COLOR_F {
+    if is_ios_palette() {
+        if is_dark_bg() {
+            rgb(0.91, 0.47, 0.44) // #E87870 — мягкий тёплый коралл на тёмном стекле
+        } else {
+            rgb(0.84, 0.39, 0.37) // #D6635E — приглушённый терракотово-розовый на светлом стекле
+        }
+    } else {
+        POMO_CORAL // #E0736B — мягкий тёплый коралл для Windows
+    }
+}
+
 /// Цвет переключателя во включённом состоянии:
 /// в стиле палитры iOS — системный зелёный `ios::sys(Green, dark)`,
 /// в стиле Windows — текущий цвет акцента.
@@ -603,6 +620,36 @@ mod tests {
 
             assert_eq!(win_fill, ios_fill);
             assert_eq!(win_green, ios_g);
+        }
+
+        crate::theme::set(derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows));
+    }
+
+    #[test]
+    fn status_pomodoro_is_softer_than_status_red() {
+        use crate::theme::{derive, DEFAULT_ACCENT, DEFAULT_BG, PaletteStyle};
+        let chroma = |c: D2D1_COLOR_F| {
+            let max = c.r.max(c.g).max(c.b);
+            let min = c.r.min(c.g).min(c.b);
+            max - min
+        };
+        let bg_dark = DEFAULT_BG;
+        let bg_light = [0.95, 0.95, 0.95];
+
+        for (style, bg) in [
+            (PaletteStyle::Windows, bg_dark),
+            (PaletteStyle::Windows, bg_light),
+            (PaletteStyle::Ios, bg_dark),
+            (PaletteStyle::Ios, bg_light),
+        ] {
+            crate::theme::set(derive(bg, DEFAULT_ACCENT, style));
+            let pomo = status_pomodoro();
+            let red = status_red();
+            assert_ne!(pomo, red);
+            assert!(pomo.r > pomo.g && pomo.r > pomo.b, "должен сохраняться тёплый коралловый оттенок");
+            assert!(chroma(pomo) < chroma(red), "помодоро-цвет должен быть мягче тревожного красного");
+            let txt_col = on_color(pomo);
+            assert!(apca_lc([txt_col.r, txt_col.g, txt_col.b], [pomo.r, pomo.g, pomo.b]).abs() >= 45.0);
         }
 
         crate::theme::set(derive(DEFAULT_BG, DEFAULT_ACCENT, PaletteStyle::Windows));

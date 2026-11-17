@@ -26,7 +26,6 @@ use crate::ui::{dim, icon, Canvas, Rect, Ui};
 use super::grid::{Grid, Item};
 use super::layout::{sz, Size, Spec, TabSpec};
 use super::{id, TODAY};
-use alarm::play_alarm;
 use calendar::MonthCache;
 pub use events::Notice;
 use todo::{RowAnim, TodoDrag};
@@ -113,6 +112,12 @@ pub struct Today {
     fired: bool,
     sound: bool,
     ring: Spring,
+    pomodoro: bool,
+    pomo_work: u32,
+    pomo_break: u32,
+    pomo_cycles: u32,
+    pomo_cycle: u32,
+    pomo_is_break: bool,
     todo: Vec<(bool, String)>,
     /// Время создания каждой задачи, секунды с 1970 (та же длина, что у `todo`); 0 — даты нет.
     todo_ts: Vec<u64>,
@@ -191,6 +196,12 @@ impl Default for Today {
             fired: false,
             sound: true,
             ring: Spring::unit(1.0, 160.0, 22.0),
+            pomodoro: false,
+            pomo_work: 25,
+            pomo_break: 5,
+            pomo_cycles: 4,
+            pomo_cycle: 1,
+            pomo_is_break: false,
             todo: Vec::new(),
             todo_ts: Vec::new(),
             todo_prio: Vec::new(),
@@ -311,16 +322,10 @@ impl Today {
         self.deadline
     }
 
-    /// Тик: вышло время таймера — сигнал и сброс. Всегда просит кадр (часы).
+    /// Тик: вышло время таймера — сигнал и сброс (или переход к следующей фазе Pomodoro). Всегда просит кадр (часы).
     pub fn poll(&mut self) -> bool {
         if self.deadline.is_some_and(|d| Instant::now() >= d) {
-            self.deadline = None;
-            self.left = self.total;
-            self.fired = true;
-            if self.sound {
-                play_alarm();
-            }
-            self.save_timer();
+            self.on_timer_expired();
         }
         // Проверки «устарело ли» дешёвые: сеть дёргается раз в 15–20 минут.
         online::refresh_weather(&self.city);

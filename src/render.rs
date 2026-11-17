@@ -1,5 +1,4 @@
 use super::*;
-use crate::ui::status_orange;
 
 /// Максимальный горизонтальный вылет аудиоволн за боковые края чёлки (логические пиксели).
 pub(crate) const WAVE_EDGE_REACH: f32 = 18.0;
@@ -98,13 +97,13 @@ impl App {
             }
         }
 
-        // Мягкое оранжевое свечение вокруг свёрнутого острова при активном таймере
+        // Мягкое свечение цвета активного таймера/фазы вокруг свёрнутого острова
         // (работает одинаково в стиле Windows и macOS).
         if self.live.timer().is_some() {
             let op_frac = timer_glow_opacity(pal.style, material, self.cfg.glass, opacity);
             let glow_a = op_frac * self.live.timer_pulse() * (1.0 - open).max(0.0);
             if glow_a > 0.005 {
-                let mut c = status_orange();
+                let mut c = self.live.timer_tint();
                 for (width, alpha) in [(8.0, 0.07), (5.0, 0.14), (2.5, 0.28), (1.2, 0.55)] {
                     c.a = alpha * glow_a;
                     g.brush.SetColor(&c);
@@ -287,7 +286,11 @@ impl App {
                 Slot::Toast => self.live.draw_toast(ui, &cv, r, cursor),
                 Slot::Face => {
                     let label = self.live.timer().map(|t| t.label());
-                    self.face.draw(&cv, r, label.as_deref().map(|l| (l, self.live.timer_pulse())));
+                    self.face.draw(
+                        &cv,
+                        r,
+                        label.as_deref().map(|l| (l, self.live.timer_pulse(), self.live.timer_tint())),
+                    );
                 }
                 Slot::Drop => self.draw_drop_pill(&cv, r),
             }
@@ -309,7 +312,7 @@ impl App {
                 // Скругления тела по краям не задеваем: полоска начинается чуть правее левого угла.
                 let inset = r_bot / s * 0.6;
                 let full = aw / s - 2.0 * inset;
-                cv.rr(ui::Rect::new(x0 / s + inset, y0 / s, full * self.live.timer_frac(), ah / s), ah / s / 2.0, status_orange());
+                cv.rr(ui::Rect::new(x0 / s + inset, y0 / s, full * self.live.timer_frac(), ah / s), ah / s / 2.0, self.live.timer_tint());
                 g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
                 g.dc.PopAxisAlignedClip();
             }

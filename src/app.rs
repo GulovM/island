@@ -1016,6 +1016,7 @@ mod tests {
             secs: 60,
             paused: false,
             next_ms: 1000,
+            kind: live::TimerKind::Timer,
         }));
         app.retarget();
         assert_eq!(app.idle_pill_size().0, base_w + face::TIMER_SLOT_W);
@@ -1097,6 +1098,7 @@ mod tests {
             secs: 60,
             paused: false,
             next_ms: 1000,
+            kind: live::TimerKind::Timer,
         }));
         assert!(app.can_peek(), "активный таймер разрешает peek лица");
 

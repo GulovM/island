@@ -11,7 +11,7 @@ use crate::anim::{Spring, FADE_SPRING};
 use crate::bg::{self, NetStatus, Snapshot};
 use crate::config::CollapsedIcon;
 use crate::sys::{battery_status, BatteryStatus};
-use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, icon, status_orange, weight, Align, Canvas, Rect, BLUE, WHITE};
+use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, icon, on_color, weight, Align, Canvas, Rect, BLUE};
 
 /// Дополнительная ширина свёрнутой чёлки под плашку активного таймера (логические пиксели).
 pub const TIMER_SLOT_W: f32 = 44.0;
@@ -285,19 +285,24 @@ impl Face {
         }
     }
 
+    /// Рисует плашку остатка таймера с цветом активного таймера/фазы и контрастным текстом.
+    unsafe fn draw_timer_pill(cv: &Canvas, pill_r: Rect, label: &str, pulse: f32, tint: D2D1_COLOR_F) {
+        let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
+        t.rr(pill_r, pill_r.h / 2.0, tint);
+        t.text(label, pill_r, &cv.g.fonts.small_c, on_color(tint));
+    }
+
     /// Рисует лицо внутри свёрнутого острова `r` (логические пиксели).
     /// При активном таймере отображаются левый значок, время, плашка остатка таймера и правый значок.
     /// Если `self.enabled == false`, рисуется только `timer`.
-    pub unsafe fn draw(&self, cv: &Canvas, r: Rect, timer: Option<(&str, f32)>) {
+    pub unsafe fn draw(&self, cv: &Canvas, r: Rect, timer: Option<(&str, f32, D2D1_COLOR_F)>) {
         let f = &cv.g.fonts;
         let pill_h = 14.0;
         if !self.enabled {
-            if let Some((label, pulse)) = timer {
+            if let Some((label, pulse, tint)) = timer {
                 let pill_w = cv.text_w(label, &f.small_c) + 8.0;
-                let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
                 let pill_r = Rect::new(r.cx() - pill_w / 2.0, r.cy() - pill_h / 2.0, pill_w, pill_h);
-                t.rr(pill_r, pill_h / 2.0, status_orange());
-                t.text(label, pill_r, &f.small_c, WHITE);
+                Self::draw_timer_pill(cv, pill_r, label, pulse, tint);
             }
             return;
         }
@@ -311,7 +316,7 @@ impl Face {
                 cv.digits(&self.time, r.x, r.w, r.cy(), TIME_SIZE, weight::EMPHASIZED, Align::Center, collapsed_txt());
             }
             (false, None) => {}
-            (true, Some((label, pulse))) => {
+            (true, Some((label, pulse, tint))) => {
                 let time_w = cv.digits_w(&self.time, TIME_SIZE, weight::EMPHASIZED);
                 let pill_w = cv.text_w(label, &f.small_c) + 8.0;
                 let available = (r.right() - pad - right_w) - (r.x + pad);
@@ -321,21 +326,17 @@ impl Face {
                 cv.digits(&self.time, x, time_w + 1.0, r.cy(), TIME_SIZE, weight::EMPHASIZED, Align::Leading, collapsed_txt());
                 x += time_w + gap;
 
-                let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
                 let pill_r = Rect::new(x, r.cy() - pill_h / 2.0, pill_w, pill_h);
-                t.rr(pill_r, pill_h / 2.0, status_orange());
-                t.text(label, pill_r, &f.small_c, WHITE);
+                Self::draw_timer_pill(cv, pill_r, label, pulse, tint);
             }
-            (false, Some((label, pulse))) => {
+            (false, Some((label, pulse, tint))) => {
                 let pill_w = cv.text_w(label, &f.small_c) + 8.0;
                 let avail_l = r.x + pad + left_w;
                 let avail_r = r.right() - pad - right_w;
                 let pill_x = ((avail_l + avail_r) / 2.0 - pill_w / 2.0).max(avail_l);
 
-                let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
                 let pill_r = Rect::new(pill_x, r.cy() - pill_h / 2.0, pill_w, pill_h);
-                t.rr(pill_r, pill_h / 2.0, status_orange());
-                t.text(label, pill_r, &f.small_c, WHITE);
+                Self::draw_timer_pill(cv, pill_r, label, pulse, tint);
             }
         }
         self.draw_slot(cv, self.right, r.right() - pad - right_w, right_w, r);

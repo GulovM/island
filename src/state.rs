@@ -27,6 +27,18 @@ pub struct TimerState {
     pub preset: Option<usize>,
     /// Звуковой сигнал включён.
     pub sound: bool,
+    /// Включён ли режим Pomodoro.
+    pub pomodoro: bool,
+    /// Время работы в минутах (1..=120, по умолчанию 25).
+    pub pomo_work: u32,
+    /// Время перерыва в минутах (1..=60, по умолчанию 5).
+    pub pomo_break: u32,
+    /// Количество циклов (1..=12, по умолчанию 4).
+    pub pomo_cycles: u32,
+    /// Номер текущего цикла (1..=pomo_cycles, по умолчанию 1).
+    pub pomo_cycle: u32,
+    /// Текущая фаза: `false` — работа (Фокус), `true` — перерыв (Отдых).
+    pub pomo_is_break: bool,
 }
 
 impl Default for TimerState {
@@ -37,6 +49,12 @@ impl Default for TimerState {
             finish: 0,
             preset: Some(1),
             sound: true,
+            pomodoro: false,
+            pomo_work: 25,
+            pomo_break: 5,
+            pomo_cycles: 4,
+            pomo_cycle: 1,
+            pomo_is_break: false,
         }
     }
 }
@@ -160,6 +178,12 @@ pub fn serialize(state: &State) -> String {
         out.push_str("preset = -1\n");
     }
     out.push_str(&format!("sound = {}\n", state.timer.sound as u8));
+    out.push_str(&format!("pomodoro = {}\n", state.timer.pomodoro as u8));
+    out.push_str(&format!("pomo_work = {}\n", state.timer.pomo_work));
+    out.push_str(&format!("pomo_break = {}\n", state.timer.pomo_break));
+    out.push_str(&format!("pomo_cycles = {}\n", state.timer.pomo_cycles));
+    out.push_str(&format!("pomo_cycle = {}\n", state.timer.pomo_cycle));
+    out.push_str(&format!("pomo_is_break = {}\n", state.timer.pomo_is_break as u8));
 
     out.push_str("\n[weather]\n");
     out.push_str(&format!("temp = {:.1}\n", state.weather.temp));
@@ -257,6 +281,32 @@ pub fn parse(text: &str) -> State {
             ("timer", "sound") => {
                 state.timer.sound = val == "1" || val.eq_ignore_ascii_case("true");
             }
+            ("timer", "pomodoro") => {
+                state.timer.pomodoro = val == "1" || val.eq_ignore_ascii_case("true");
+            }
+            ("timer", "pomo_work") => {
+                if let Ok(v) = val.parse::<u32>() {
+                    state.timer.pomo_work = v.clamp(1, 120);
+                }
+            }
+            ("timer", "pomo_break") => {
+                if let Ok(v) = val.parse::<u32>() {
+                    state.timer.pomo_break = v.clamp(1, 60);
+                }
+            }
+            ("timer", "pomo_cycles") => {
+                if let Ok(v) = val.parse::<u32>() {
+                    state.timer.pomo_cycles = v.clamp(1, 12);
+                }
+            }
+            ("timer", "pomo_cycle") => {
+                if let Ok(v) = val.parse::<u32>() {
+                    state.timer.pomo_cycle = v.clamp(1, 12);
+                }
+            }
+            ("timer", "pomo_is_break") => {
+                state.timer.pomo_is_break = val == "1" || val.eq_ignore_ascii_case("true");
+            }
             ("weather", "temp") => {
                 if let Ok(t) = val.parse::<f32>() {
                     if t.is_finite() {
@@ -302,6 +352,7 @@ pub fn parse(text: &str) -> State {
         }
     }
 
+    state.timer.pomo_cycle = state.timer.pomo_cycle.clamp(1, state.timer.pomo_cycles.max(1));
     state
 }
 
@@ -520,6 +571,12 @@ mod tests {
                 finish: 1718000600,
                 preset: Some(2),
                 sound: false,
+                pomodoro: true,
+                pomo_work: 30,
+                pomo_break: 10,
+                pomo_cycles: 6,
+                pomo_cycle: 3,
+                pomo_is_break: true,
             },
             weather: WeatherState {
                 temp: 22.4,
@@ -567,6 +624,21 @@ mod tests {
         let parsed = parse(garbage);
         // Не упало и дало осмысленные безопасные значения по умолчанию
         assert_eq!(parsed.version, STATE_VERSION);
+    }
+
+    #[test]
+    fn parse_clamps_pomodoro_fields_and_roundtrips() {
+        let raw = "[timer]\npomodoro = 1\npomo_work = 999\npomo_break = 0\npomo_cycles = 3\npomo_cycle = 10\npomo_is_break = true\n";
+        let parsed = parse(raw);
+        assert!(parsed.timer.pomodoro);
+        assert_eq!(parsed.timer.pomo_work, 120);
+        assert_eq!(parsed.timer.pomo_break, 1);
+        assert_eq!(parsed.timer.pomo_cycles, 3);
+        assert_eq!(parsed.timer.pomo_cycle, 3);
+        assert!(parsed.timer.pomo_is_break);
+
+        let text = serialize(&parsed);
+        assert_eq!(parse(&text), parsed);
     }
 
     #[test]
