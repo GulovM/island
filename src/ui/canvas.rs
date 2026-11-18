@@ -134,13 +134,13 @@ impl Canvas<'_> {
         self.g.dc.SetTransform(&base);
     }
 
-    pub unsafe fn text(&self, s: &str, r: Rect, f: &IDWriteTextFormat, c: D2D1_COLOR_F) {
+    unsafe fn draw_text_inner(&self, s: &str, r: Rect, f: &IDWriteTextFormat, c: D2D1_COLOR_F, layout: Option<IDWriteTextLayout>) {
         if s.is_empty() {
             return;
         }
         let opts = D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT;
         self.g.brush.SetColor(&self.col(c));
-        if let Some(layout) = self.g.fonts.layout(s, f, r.w, r.h) {
+        if let Some(layout) = layout {
             self.g.dc.DrawTextLayout(pt(r.x, r.y), &layout, &self.g.brush, opts);
             return;
         }
@@ -154,6 +154,24 @@ impl Canvas<'_> {
                 DWRITE_MEASURING_MODE_NATURAL,
             );
         });
+    }
+
+    pub unsafe fn text(&self, s: &str, r: Rect, f: &IDWriteTextFormat, c: D2D1_COLOR_F) {
+        if s.is_empty() {
+            return;
+        }
+        let layout = self.g.fonts.layout(s, f, r.w, r.h);
+        self.draw_text_inner(s, r, f, c, layout);
+    }
+
+    /// Рисует пользовательский текст без перевода `i18n`, выделяя диапазон UTF-16 `bold` (`(start, len)`)
+    /// полужирным (`Semi Bold`).
+    pub unsafe fn text_styled(&self, s: &str, r: Rect, f: &IDWriteTextFormat, c: D2D1_COLOR_F, bold: Option<(u32, u32)>) {
+        if s.is_empty() {
+            return;
+        }
+        let layout = self.g.fonts.layout_styled(s, f, r.w, r.h, bold);
+        self.draw_text_inner(s, r, f, c, layout);
     }
 
     /// Жирный абзац по центру с переносом (лишнее обрезается).
@@ -179,11 +197,8 @@ impl Canvas<'_> {
         self.g.dc.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r.d2d(), radiusX: rad, radiusY: rad }, &br);
     }
 
-    /// Ширина строки в логических пикселях по формату `f` (раскладка из кэша); при отказе DirectWrite —
-    /// грубая оценка по числу символов.
-    /// Сколько строк займёт `s` при переносе по словам в ширину `w` и какова высота строки.
-    pub unsafe fn wrapped(&self, s: &str, f: &IDWriteTextFormat, w: f32) -> (usize, f32) {
-        if let Some(l) = self.g.fonts.layout(s, f, w, 10_000.0) {
+    unsafe fn wrapped_from_layout(&self, l: Option<IDWriteTextLayout>) -> (usize, f32) {
+        if let Some(l) = l {
             let mut m = DWRITE_TEXT_METRICS::default();
             if l.GetMetrics(&mut m).is_ok() && m.lineCount > 0 {
                 return (m.lineCount as usize, m.height / m.lineCount as f32);
@@ -192,9 +207,20 @@ impl Canvas<'_> {
         (1, 11.0)
     }
 
-    /// Текст, не длиннее `max_lines` строк при переносе в ширину `w`: лишнее заменяется «…».
-    pub unsafe fn wrap_clip<'s>(&self, s: &'s str, f: &IDWriteTextFormat, w: f32, max_lines: usize) -> std::borrow::Cow<'s, str> {
-        let Some(l) = self.g.fonts.layout(s, f, w, 10_000.0) else { return s.into() };
+    /// Ширина строки в логических пикселях по формату `f` (раскладка из кэша); при отказе DirectWrite —
+    /// грубая оценка по числу символов.
+    /// Сколько строк займёт `s` при переносе по словам в ширину `w` и какова высота строки.
+    pub unsafe fn wrapped(&self, s: &str, f: &IDWriteTextFormat, w: f32) -> (usize, f32) {
+        self.wrapped_from_layout(self.g.fonts.layout(s, f, w, 10_000.0))
+    }
+
+    /// Как `wrapped`, но без подмены строки через `i18n` (для пользовательского текста).
+    pub unsafe fn wrapped_raw(&self, s: &str, f: &IDWriteTextFormat, w: f32) -> (usize, f32) {
+        self.wrapped_from_layout(self.g.fonts.layout_styled(s, f, w, 10_000.0, None))
+    }
+
+    unsafe fn wrap_clip_from_layout<'s>(&self, s: &'s str, l: Option<IDWriteTextLayout>, max_lines: usize) -> std::borrow::Cow<'s, str> {
+        let Some(l) = l else { return s.into() };
         let mut m = DWRITE_TEXT_METRICS::default();
         if l.GetMetrics(&mut m).is_err() || (m.lineCount as usize) <= max_lines {
             return s.into();
@@ -206,6 +232,16 @@ impl Canvas<'_> {
         }
         let units: u32 = lines.iter().take(max_lines).map(|x| x.length).sum();
         ellipsize_units(s, units as usize).into()
+    }
+
+    /// Текст, не длиннее `max_lines` строк при переносе в ширину `w`: лишнее заменяется «…».
+    pub unsafe fn wrap_clip<'s>(&self, s: &'s str, f: &IDWriteTextFormat, w: f32, max_lines: usize) -> std::borrow::Cow<'s, str> {
+        self.wrap_clip_from_layout(s, self.g.fonts.layout(s, f, w, 10_000.0), max_lines)
+    }
+
+    /// Как `wrap_clip`, но без подмены строки через `i18n` (для пользовательского текста).
+    pub unsafe fn wrap_clip_raw<'s>(&self, s: &'s str, f: &IDWriteTextFormat, w: f32, max_lines: usize) -> std::borrow::Cow<'s, str> {
+        self.wrap_clip_from_layout(s, self.g.fonts.layout_styled(s, f, w, 10_000.0, None), max_lines)
     }
 
     /// Как `text`, но с переключаемым зачёркиванием (для выполненных задач).

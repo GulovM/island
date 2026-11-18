@@ -118,6 +118,34 @@ pub(crate) fn split_display_fields(title: &str, body: &str, single_line_msg: boo
     }
 }
 
+/// Собирает строку шапки уведомления (`источник · заголовок · время`) и диапазон UTF-16
+/// для выделения заголовка уведомления полужирным (`Semi Bold`).
+pub(crate) fn format_notif_meta(app_name: &str, title: &str, when: &str) -> (String, Option<(u32, u32)>) {
+    let mut out = String::new();
+    let mut bold = None;
+    let push_part = |buf: &mut String, part: &str| -> (u32, u32) {
+        let clean = part.replace(['\r', '\n'], " ");
+        let clean = clean.trim();
+        if clean.is_empty() {
+            return (0, 0);
+        }
+        if !buf.is_empty() {
+            buf.push_str(" · ");
+        }
+        let start = buf.encode_utf16().count() as u32;
+        buf.push_str(clean);
+        let len = buf.encode_utf16().count() as u32 - start;
+        (start, len)
+    };
+    push_part(&mut out, app_name);
+    let title_span = push_part(&mut out, title);
+    if title_span.1 > 0 {
+        bold = Some(title_span);
+    }
+    push_part(&mut out, when);
+    (out, bold)
+}
+
 /// Всплывающее уведомление для показа в свёрнутой чёлке.
 #[derive(Clone, Debug)]
 pub struct PopupNotice {
@@ -476,18 +504,20 @@ impl Notifications {
         let iw = w - 2.0 * PAD;
 
         // ---------- Шапка ----------
+        let title_fmt = f.notif_at(12.5, crate::ui::weight::EMPHASIZED, false, false);
         let title = crate::i18n::pick("Уведомления", "Notifications");
-        let title_w = cv.text_w(title, &f.title) + 2.0;
-        cv.text(title, Rect::new(x, TOP, title_w, 22.0), &f.title, txt());
+        let title_w = cv.text_w(title, &title_fmt) + 2.0;
+        cv.text(title, Rect::new(x, TOP, title_w, 22.0), &title_fmt, txt());
 
         let mut lx = x + title_w + 6.0;
         let unread = self.unread_count();
         if unread > 0 {
             let badge = unread.to_string();
-            let df = f.display(11.0, crate::ui::weight::EMPHASIZED, Align::Leading);
+            let df = f.notif_at(11.0, crate::ui::weight::EMPHASIZED, false, false);
+            f.register_tabular(&df);
             let bw = cv.text_w(&badge, &df) + 2.0;
             // Выравниваем число по базовой линии заголовка «Уведомления» (внутри поля высотой 22 px).
-            let dy = match (cv.line_metrics(title, &f.title), cv.line_metrics(&badge, &df)) {
+            let dy = match (cv.line_metrics(title, &title_fmt), cv.line_metrics(&badge, &df)) {
                 (Some((th, tb)), Some((bh, bb))) => ((22.0 - th) / 2.0 + tb) - ((22.0 - bh) / 2.0 + bb),
                 _ => 0.7,
             };
@@ -529,7 +559,8 @@ impl Notifications {
 
         if self.dnd_active {
             let dnd_lbl = crate::i18n::pick("Не беспокоить", "Do Not Disturb");
-            let dw = cv.text_w(dnd_lbl, &f.small_c) + 22.0;
+            let dnd_fmt = f.notif_at(8.0, crate::ui::weight::EMPHASIZED, false, true);
+            let dw = cv.text_w(dnd_lbl, &dnd_fmt) + 22.0;
             if lx + dw + 8.0 <= rx {
                 let dr = Rect::new(lx, TOP + 2.0, dw, 18.0);
                 let pill_col = if ios {
@@ -539,7 +570,7 @@ impl Notifications {
                 };
                 cv.rr(dr, if ios { 9.0 } else { 5.0 }, pill_col);
                 cv.symbol(icon::MOON, Rect::new(dr.x + 5.0, dr.y + 3.0, 12.0, 12.0), 10.0, txt());
-                cv.text(dnd_lbl, Rect::new(dr.x + 17.0, dr.y, dw - 21.0, 18.0), &f.small_c, txt());
+                cv.text(dnd_lbl, Rect::new(dr.x + 17.0, dr.y, dw - 21.0, 18.0), &dnd_fmt, txt());
             }
         }
 
@@ -570,10 +601,11 @@ impl Notifications {
         }
 
         // ---------- Лента карточек уведомлений ----------
-        let meta_fmt = f.ui_at(13.0, crate::ui::weight::EMPHASIZED, false);
-        let body_fmt = f.ui_at(11.0, crate::ui::weight::PARAGRAPH, true);
+        let meta_fmt = f.notif_at(11.0, crate::ui::weight::REGULAR, false, false);
+        let body_fmt = f.notif_at(9.0, crate::ui::weight::REGULAR, true, false);
+        let btn_fmt = f.notif_at(8.0, crate::ui::weight::EMPHASIZED, false, false);
         let r_lbl = crate::i18n::pick("Прочитано", "Read");
-        let read_btn_w = cv.text_w(r_lbl, &f.small_c) + 30.0;
+        let read_btn_w = cv.text_w(r_lbl, &btn_fmt) + 30.0;
         let mut layouts: Vec<CardLayout> = Vec::with_capacity(self.items.len());
         let mut total_h = 0.0f32;
         for (i, item) in self.items.iter().enumerate() {
@@ -588,12 +620,12 @@ impl Notifications {
             let msg_clip = if msg_text.is_empty() {
                 String::new()
             } else {
-                cv.wrap_clip(&msg_text, &body_fmt, text_col_w, 2).into_owned()
+                cv.wrap_clip_raw(&msg_text, &body_fmt, text_col_w, 2).into_owned()
             };
             let msg_h = if msg_clip.is_empty() {
                 0.0
             } else {
-                let (lines, lh) = cv.wrapped(&msg_clip, &body_fmt, text_col_w);
+                let (lines, lh) = cv.wrapped_raw(&msg_clip, &body_fmt, text_col_w);
                 lines.min(2) as f32 * lh.max(18.0) + 2.0
             };
             let content_h = (20.0 + if msg_h > 0.0 { msg_h + 2.0 } else { 0.0 }).max(38.0);
@@ -692,18 +724,9 @@ impl Notifications {
             } else {
                 String::new()
             };
-            let mut parts: Vec<&str> = Vec::with_capacity(3);
-            parts.push(&item.app_name);
-            if !lay.meta_context.is_empty() {
-                parts.push(&lay.meta_context);
-            }
-            if !when.is_empty() {
-                parts.push(&when);
-            }
-            let meta = parts.join(" · ");
+            let (meta, meta_bold) = format_notif_meta(&item.app_name, &lay.meta_context, &when);
             let meta_w = (tw - 48.0).max(40.0);
-            let meta_clip = cv.wrap_clip(&meta, &meta_fmt, meta_w, 1);
-            cv.text(&meta_clip, Rect::new(tx, iy, meta_w, 18.0), &meta_fmt, bare());
+            cv.text_styled(&meta, Rect::new(tx, iy, meta_w, 18.0), &meta_fmt, bare(), meta_bold);
 
             let mut rx_ind = card_r.right() - 10.0;
             if card_hot || lay.menu_open {
@@ -733,7 +756,7 @@ impl Notifications {
                 } else {
                     tw
                 };
-                cv.text(&lay.msg_clip, Rect::new(tx, iy + 20.0, msg_w, lay.msg_h), &body_fmt, txt());
+                cv.text_styled(&lay.msg_clip, Rect::new(tx, iy + 20.0, msg_w, lay.msg_h), &body_fmt, txt(), None);
             }
 
             // Кнопка «Прочитано» справа ИЛИ 3 кнопки по правой кнопке мыши внизу карточки.
@@ -767,9 +790,9 @@ impl Notifications {
                 };
                 let l_cfg = crate::i18n::pick("Доп. настройки", "More settings");
 
-                let w1 = cv.text_w(l_disable, &f.small_c) + 16.0;
-                let w2 = cv.text_w(l_silent, &f.small_c) + 16.0;
-                let w3 = cv.text_w(l_cfg, &f.small_c) + 16.0;
+                let w1 = cv.text_w(l_disable, &btn_fmt) + 16.0;
+                let w2 = cv.text_w(l_silent, &btn_fmt) + 16.0;
+                let w3 = cv.text_w(l_cfg, &btn_fmt) + 16.0;
                 let gap = 6.0;
                 let avail = card_r.right() - 10.0 - tx;
                 let scale_k = ((avail - gap * 2.0) / (w1 + w2 + w3)).min(1.0);
@@ -845,8 +868,9 @@ impl Notifications {
 
         let cap = crate::i18n::pick("ПРАВИЛА ПРИЛОЖЕНИЙ", "APP RULES");
         cv.text(cap, Rect::new(view.x, view.y, view.w - 170.0, 14.0), &f.caps, dim());
+        let btn_fmt = f.notif_at(8.0, crate::ui::weight::EMPHASIZED, false, false);
         let cfg_lbl = crate::i18n::pick("Доп. настройки Windows", "Windows notification settings");
-        let cw = cv.text_w(cfg_lbl, &f.small_c) + 16.0;
+        let cw = cv.text_w(cfg_lbl, &btn_fmt) + 16.0;
         if notif_action_btn(
             ui,
             cv,
@@ -866,6 +890,7 @@ impl Notifications {
         let list_w = if total_h > list_view.h { list_view.w - 10.0 } else { list_view.w };
 
         let mut y = list_view.y - off;
+        let app_fmt = f.notif_at(9.0, crate::ui::weight::REGULAR, false, false);
         let mut change: Option<(usize, AppRule)> = None;
         for (i, r) in self.rules.iter().enumerate() {
             let row = Rect::new(list_view.x, y, list_w, 36.0);
@@ -878,7 +903,7 @@ impl Notifications {
                 cv.rr_line(row, rad, crate::ui::hairline(), 1.0);
             }
             let name = if r.app_name.is_empty() { &r.app_id } else { &r.app_name };
-            cv.text(name, Rect::new(row.x + 12.0, row.y + 8.0, row.w - 260.0, 20.0), &f.body, txt());
+            cv.text_styled(name, Rect::new(row.x + 12.0, row.y + 8.0, row.w - 260.0, 20.0), &app_fmt, txt(), None);
 
             let l_on = crate::i18n::pick("Вкл", "On");
             let l_sil = crate::i18n::pick("Без звука", "Silent");
@@ -921,11 +946,12 @@ impl Notifications {
         }
         let cy = view.cy() - 28.0;
         cv.symbol(icon::RINGER, Rect::new(view.cx() - 14.0, cy - 34.0, 28.0, 28.0), 22.0, cv.accent);
+        let msg_fmt = f.notif_at(9.0, crate::ui::weight::EMPHASIZED, false, true);
         let msg = crate::i18n::pick(
             "Разрешите доступ к уведомлениям Windows, чтобы видеть их здесь",
             "Allow notification access in Windows to view them here",
         );
-        cv.text(msg, Rect::new(view.x + 24.0, cy, view.w - 48.0, 24.0), &f.body_c, txt());
+        cv.text(msg, Rect::new(view.x + 24.0, cy, view.w - 48.0, 24.0), &msg_fmt, txt());
 
         let l_allow = crate::i18n::pick("Разрешить", "Allow");
         let l_win = crate::i18n::pick("Параметры Windows", "Windows settings");
@@ -958,14 +984,16 @@ impl Notifications {
 
     unsafe fn draw_empty(&self, cv: &Canvas, view: Rect) {
         let f = &cv.g.fonts;
+        let msg_fmt = f.notif_at(9.0, crate::ui::weight::EMPHASIZED, false, true);
+        let hint_fmt = f.notif_at(8.0, crate::ui::weight::REGULAR, false, true);
         cv.symbol(icon::RINGER, Rect::new(view.cx() - 14.0, view.cy() - 28.0, 28.0, 28.0), 22.0, dim());
         let msg = crate::i18n::pick("Новых уведомлений нет", "No new notifications");
-        cv.text(msg, Rect::new(view.x + 20.0, view.cy() + 6.0, view.w - 40.0, 20.0), &f.body_c, dim());
+        cv.text(msg, Rect::new(view.x + 20.0, view.cy() + 6.0, view.w - 40.0, 20.0), &msg_fmt, dim());
         let hint = crate::i18n::pick(
             "Правый клик по уведомлению — беззвучный режим или отключение",
             "Right-click a notification for silent mode or to disable",
         );
-        cv.text(hint, Rect::new(view.x + 20.0, view.cy() + 26.0, view.w - 40.0, 16.0), &f.small_c, dim());
+        cv.text(hint, Rect::new(view.x + 20.0, view.cy() + 26.0, view.w - 40.0, 16.0), &hint_fmt, dim());
     }
 }
 
@@ -1019,11 +1047,12 @@ unsafe fn notif_action_btn(
         cv.hairline(br, rad);
     }
 
+    let btn_fmt = cv.g.fonts.notif_at(8.0, crate::ui::weight::EMPHASIZED, false, false);
     if let Some(g) = glyph {
         cv.symbol(g, Rect::new(br.x + 8.0, br.y + (br.h - 11.0) / 2.0, 11.0, 11.0), 10.5, col);
-        cv.line(label, &cv.g.fonts.small_c, br.x + 21.0, (br.w - 27.0).max(10.0), br.cy(), Align::Center, col);
+        cv.line(label, &btn_fmt, br.x + 21.0, (br.w - 27.0).max(10.0), br.cy(), Align::Center, col);
     } else {
-        cv.line(label, &cv.g.fonts.small_c, br.x + 6.0, (br.w - 12.0).max(10.0), br.cy(), Align::Center, col);
+        cv.line(label, &btn_fmt, br.x + 6.0, (br.w - 12.0).max(10.0), br.cy(), Align::Center, col);
     }
     clicked
 }
@@ -1054,7 +1083,8 @@ unsafe fn paint_app_icon(ui: &mut Ui, cv: &Canvas, item: &NotifItem, tile: Rect,
         .unwrap_or_else(|| "W".to_string());
     let bg = D2D1_COLOR_F { a: 0.24, ..cv.accent };
     cv.rr(tile, rad, bg);
-    cv.text(&ch, tile, &cv.g.fonts.body_b, crate::ui::on_color(bg));
+    let ch_fmt = cv.g.fonts.notif_at(9.0, crate::ui::weight::EMPHASIZED, false, true);
+    cv.text_styled(&ch, tile, &ch_fmt, crate::ui::on_color(bg), None);
 }
 
 #[cfg(test)]
@@ -1240,5 +1270,22 @@ mod tests {
         assert_eq!(popups[0].title, "New");
         assert_eq!(n.unread_count(), 1);
         assert_eq!(n.items[0].title, "New");
+    }
+
+    #[test]
+    fn format_notif_meta_computes_utf16_bold_span_for_title() {
+        let (s, span) = format_notif_meta("Telegram", "Алексей 😀", "2 мин");
+        assert_eq!(s, "Telegram · Алексей 😀 · 2 мин");
+        let (start, len) = span.expect("title span");
+        assert_eq!(start as usize, "Telegram · ".encode_utf16().count());
+        assert_eq!(len as usize, "Алексей 😀".encode_utf16().count());
+
+        let (no_title, none_span) = format_notif_meta("Ножницы", "", "1 мин");
+        assert_eq!(no_title, "Ножницы · 1 мин");
+        assert_eq!(none_span, None);
+
+        let (popup_meta, popup_span) = format_notif_meta("Discord", "#dev: alice", "");
+        assert_eq!(popup_meta, "Discord · #dev: alice");
+        assert_eq!(popup_span, Some(("Discord · ".encode_utf16().count() as u32, "#dev: alice".encode_utf16().count() as u32)));
     }
 }

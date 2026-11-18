@@ -19,6 +19,8 @@ pub const WEIGHT_EMPHASIZED: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT(590);
 /// текст средний (не полужирный — иначе всё одинаково «кричит»), заголовки и кнопки полужирные,
 /// вторичный текст чуть плотнее Regular, чтобы не таял на размытом стекле.
 pub mod weight {
+    /// Обычный текст уведомлений (Regular).
+    pub const REGULAR: u32 = 400;
     /// Основной текст: строки списков, подписи настроек, поля ввода.
     pub const BODY: u32 = 540;
     /// Акцентный текст: заголовки плиток, кнопки, подписи по центру.
@@ -105,6 +107,9 @@ pub unsafe fn apply_tracking(layout: &IDWriteTextLayout, tracking: f32, len: u32
         }
     }
 }
+type BoldSpan = Option<(u32, u32)>;
+type LayoutEntry = (String, BoldSpan, IDWriteTextLayout);
+
 /// Форматы текста в логических пикселях (холст масштабируется трансформацией). Размеры сняты
 /// с макета: подписи 8 px, основной текст 9.5 px, заголовок трека 13 px, цифры часов 23 px.
 pub struct Fonts {
@@ -155,10 +160,15 @@ pub struct Fonts {
     ui_family: windows::core::PCWSTR,
     sized_caps: RefCell<HashMap<(u32, u32, i32), IDWriteTextFormat>>,
     /// Сделанные по месту форматы основного шрифта по (кегль×4, вес, перенос по словам).
+    #[allow(dead_code)] // сохранён для тестов и прочих вкладок, пока уведомления используют sized_notif
     sized_ui: RefCell<HashMap<(u32, u32, bool), IDWriteTextFormat>>,
+    /// Установлен ли в системе шрифт Inter (для уведомлений и центра уведомлений).
+    has_inter: bool,
+    /// Форматы уведомлений (`Inter`, либо запасной `ui_family`) по (кегль×4, вес, перенос, центр).
+    sized_notif: RefCell<HashMap<(u32, u32, bool, bool), IDWriteTextFormat>>,
     /// Готовые раскладки текста: `DrawText` строит её заново при каждом вызове, а в кадре
     /// десятки строк, которые не меняются от кадра к кадру.
-    layouts: RefCell<HashMap<u64, (String, IDWriteTextLayout)>>,
+    layouts: RefCell<HashMap<u64, LayoutEntry>>,
 }
 
 /// Предел кэша раскладок; при переполнении он сбрасывается целиком (меняющиеся строки —
@@ -183,6 +193,25 @@ pub fn optical_size(size: f32) -> f32 {
     (size * 1.15).clamp(8.0, 36.0)
 }
 
+unsafe fn create_var_format(
+    f: &IDWriteFactory,
+    family: windows::core::PCWSTR,
+    weight: u32,
+    size: f32,
+    opsz: f32,
+    center: bool,
+) -> Option<IDWriteTextFormat> {
+    let f6 = f.cast::<IDWriteFactory6>().ok()?;
+    let axes = [
+        DWRITE_FONT_AXIS_VALUE { axisTag: DWRITE_FONT_AXIS_TAG_WEIGHT, value: weight as f32 },
+        DWRITE_FONT_AXIS_VALUE { axisTag: DWRITE_FONT_AXIS_TAG_OPTICAL_SIZE, value: opsz },
+    ];
+    let t = f6.CreateTextFormat(family, None, &axes, size, w!("ru-RU")).ok()?;
+    let t: IDWriteTextFormat = t.cast().ok()?;
+    setup(f, &t, center).ok()?;
+    Some(t)
+}
+
 /// Формат на вариативном Segoe UI Variable: точный вес по оси `wght` (не ближайшее именованное
 /// начертание) и оптический размер по кеглю. Без вариативного шрифта (Windows 10) — `fmt` с
 /// семейством `legacy` и ближайшим весом.
@@ -197,16 +226,8 @@ pub(crate) unsafe fn fmt_var(
     // `theme::text_scale`): только настоящий текст, не иконочные форматы (те берут `fmt` напрямую).
     let size = size * crate::theme::text_scale();
     if font_exists(f, w!("Segoe UI Variable Text")) {
-        if let Ok(f6) = f.cast::<IDWriteFactory6>() {
-            let axes = [
-                DWRITE_FONT_AXIS_VALUE { axisTag: DWRITE_FONT_AXIS_TAG_WEIGHT, value: weight as f32 },
-                DWRITE_FONT_AXIS_VALUE { axisTag: DWRITE_FONT_AXIS_TAG_OPTICAL_SIZE, value: optical_size(size) },
-            ];
-            if let Ok(t) = f6.CreateTextFormat(w!("Segoe UI Variable"), None, &axes, size, w!("ru-RU")) {
-                let t: IDWriteTextFormat = t.cast()?;
-                setup(f, &t, center)?;
-                return Ok(t);
-            }
+        if let Some(t) = create_var_format(f, w!("Segoe UI Variable"), weight, size, optical_size(size), center) {
+            return Ok(t);
         }
     }
     fmt(f, legacy, DWRITE_FONT_WEIGHT(weight as i32), size, center)
@@ -406,6 +427,8 @@ impl Fonts {
             ui_family: ui,
             sized_caps: RefCell::new(HashMap::new()),
             sized_ui: RefCell::new(HashMap::new()),
+            has_inter: font_exists(f, w!("Inter")),
+            sized_notif: RefCell::new(HashMap::new()),
             layouts: RefCell::new(HashMap::new()),
         })
     }
@@ -447,6 +470,7 @@ impl Fonts {
     }
 
     /// Основной шрифт интерфейса нужного кегля и веса (с переносом по словам или однострочный).
+    #[allow(dead_code)] // сохранён для тестов и прочих вкладок, уведомления переведены на notif_at
     pub unsafe fn ui_at(&self, size: f32, weight: u32, wrap: bool) -> IDWriteTextFormat {
         let key = ((size * 4.0).round() as u32, weight, wrap);
         if let Some(t) = self.sized_ui.borrow().get(&key) {
@@ -465,6 +489,40 @@ impl Fonts {
         self.register_tracking(&t, ios::tracking_px(TextRole::Subheadline, size));
         self.sized_ui.borrow_mut().insert(key, t.clone());
         t
+    }
+
+    /// Шрифт уведомлений и центра уведомлений (`Inter`, запасной — основной шрифт интерфейса)
+    /// заданного кегля, веса и режима переноса по словам.
+    pub unsafe fn notif_at(&self, size: f32, weight: u32, wrap: bool, center: bool) -> IDWriteTextFormat {
+        let key = ((size * 4.0).round() as u32, weight, wrap, center);
+        if let Some(t) = self.sized_notif.borrow().get(&key) {
+            return t.clone();
+        }
+        let scaled = size * crate::theme::text_scale();
+        let made = if self.has_inter {
+            create_var_format(&self.factory, w!("Inter"), weight, scaled, scaled.clamp(14.0, 32.0), center)
+                .map(Ok)
+                .unwrap_or_else(|| fmt(&self.factory, w!("Inter"), DWRITE_FONT_WEIGHT(weight as i32), scaled, center))
+        } else {
+            fmt_var(&self.factory, self.ui_family, weight, size, center)
+        }
+        .and_then(|t| {
+            if wrap {
+                t.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
+                t.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
+            }
+            Ok(t)
+        });
+        let Ok(t) = made else {
+            return if wrap { self.wrap_l.clone() } else if center { self.body_c.clone() } else { self.body.clone() };
+        };
+        self.sized_notif.borrow_mut().insert(key, t.clone());
+        t
+    }
+
+    /// Регистрирует табличные цифры (`tnum`) для внешнего или динамически созданного формата.
+    pub fn register_tabular(&self, f: &IDWriteTextFormat) {
+        self.tabular.borrow_mut().insert(f.as_raw() as usize);
     }
 
     /// Регистрирует добавочный трекинг в пикселях для внешнего формата (например, подписей вкладок).
@@ -487,27 +545,52 @@ impl Fonts {
     /// Раскладка строки `s` в рамке `w`×`h` по формату `f` (из кэша, если такая уже была).
     /// `None` — рамка пустая или DirectWrite отказал; вызывающий рисует обычным `DrawText`.
     pub unsafe fn layout(&self, s: &str, f: &IDWriteTextFormat, w: f32, h: f32) -> Option<IDWriteTextLayout> {
+        let s = &*crate::i18n::tr(s);
+        self.layout_cached(s, f, w, h, None)
+    }
+
+    /// Раскладка без перевода строки (для пользовательского текста и уведомлений), с опциональным
+    /// выделением полужирным (`Semi Bold`) диапазона UTF-16 `bold` (`(start, len)`).
+    pub unsafe fn layout_styled(
+        &self,
+        s: &str,
+        f: &IDWriteTextFormat,
+        w: f32,
+        h: f32,
+        bold: Option<(u32, u32)>,
+    ) -> Option<IDWriteTextLayout> {
+        self.layout_cached(s, f, w, h, bold)
+    }
+
+    unsafe fn layout_cached(
+        &self,
+        s: &str,
+        f: &IDWriteTextFormat,
+        w: f32,
+        h: f32,
+        bold: Option<(u32, u32)>,
+    ) -> Option<IDWriteTextLayout> {
         if !(w > 0.0 && h > 0.0) {
             return None;
         }
-        let s = &*crate::i18n::tr(s);
         let mut hasher = DefaultHasher::new();
         s.hash(&mut hasher);
         (f.as_raw() as usize).hash(&mut hasher);
         w.to_bits().hash(&mut hasher);
         h.to_bits().hash(&mut hasher);
+        bold.hash(&mut hasher);
         let key = hasher.finish();
         let mut map = self.layouts.borrow_mut();
-        if let Some((text, layout)) = map.get(&key) {
-            if text == s {
+        if let Some((text, cached_bold, layout)) = map.get(&key) {
+            if text == s && *cached_bold == bold {
                 return Some(layout.clone());
             }
         }
         if map.len() >= LAYOUT_CACHE_MAX {
             map.clear();
         }
-        let layout = self.layout_exact(s, f, w, h)?;
-        map.insert(key, (s.to_string(), layout.clone()));
+        let layout = self.layout_exact_with_bold(s, f, w, h, bold)?;
+        map.insert(key, (s.to_string(), bold, layout.clone()));
         Some(layout)
     }
 
@@ -515,12 +598,33 @@ impl Fonts {
     /// Для пользовательского текста: его нельзя подменять переводом, а позиции курсора обязаны
     /// совпадать с тем, что реально нарисовано (иначе курсор «уезжает» на величину трекинга).
     pub unsafe fn layout_exact(&self, s: &str, f: &IDWriteTextFormat, w: f32, h: f32) -> Option<IDWriteTextLayout> {
+        self.layout_exact_with_bold(s, f, w, h, None)
+    }
+
+    unsafe fn layout_exact_with_bold(
+        &self,
+        s: &str,
+        f: &IDWriteTextFormat,
+        w: f32,
+        h: f32,
+        bold: Option<(u32, u32)>,
+    ) -> Option<IDWriteTextLayout> {
         let tracking = self.tracking_for(f);
         let tabular = self.tabular.borrow().contains(&(f.as_raw() as usize));
         crate::sys::with_utf16(s, |wide| -> Result<IDWriteTextLayout> {
             let layout = self.factory.CreateTextLayout(wide, f, w, h)?;
-            let range = DWRITE_TEXT_RANGE { startPosition: 0, length: wide.len() as u32 };
-            apply_tracking(&layout, tracking, range.length);
+            let total = wide.len() as u32;
+            let range = DWRITE_TEXT_RANGE { startPosition: 0, length: total };
+            apply_tracking(&layout, tracking, total);
+            if let Some((start, len)) = bold {
+                if start < total && len > 0 {
+                    let span = DWRITE_TEXT_RANGE {
+                        startPosition: start,
+                        length: len.min(total - start),
+                    };
+                    let _ = layout.SetFontWeight(DWRITE_FONT_WEIGHT_SEMI_BOLD, span);
+                }
+            }
             if tabular && s.bytes().any(|b| b.is_ascii_digit()) {
                 let typo = self.factory.CreateTypography()?;
                 typo.AddFontFeature(DWRITE_FONT_FEATURE { nameTag: DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, parameter: 1 })?;
@@ -717,6 +821,57 @@ mod tests {
             assert!((body.GetFontSize() - 13.0).abs() < 1e-4);
             assert_eq!(meta.GetWordWrapping(), DWRITE_WORD_WRAPPING_NO_WRAP);
             assert_eq!(body.GetWordWrapping(), DWRITE_WORD_WRAPPING_WRAP);
+        }
+    }
+
+    #[test]
+    fn notif_at_preserves_sizes_uses_inter_and_bold_spans() {
+        unsafe {
+            let factory: Result<IDWriteFactory> = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED);
+            let Ok(f) = factory else { return };
+            crate::theme::set_text_scale(1.0);
+            let Ok(fonts) = Fonts::new(&f) else { return };
+
+            let center_title = fonts.notif_at(12.5, weight::EMPHASIZED, false, false);
+            let meta = fonts.notif_at(13.0, weight::REGULAR, false, false);
+            let body = fonts.notif_at(11.0, weight::REGULAR, true, false);
+            let popup_meta = fonts.notif_at(8.0, weight::REGULAR, false, false);
+            let popup_body = fonts.notif_at(9.0, weight::REGULAR, false, false);
+
+            assert!((center_title.GetFontSize() - 12.5).abs() < 1e-4);
+            assert!((meta.GetFontSize() - 13.0).abs() < 1e-4);
+            assert!((body.GetFontSize() - 11.0).abs() < 1e-4);
+            assert!((popup_meta.GetFontSize() - 8.0).abs() < 1e-4);
+            assert!((popup_body.GetFontSize() - 9.0).abs() < 1e-4);
+
+            assert_eq!(weight_of(&center_title), weight::EMPHASIZED);
+            assert_eq!(weight_of(&meta), weight::REGULAR);
+            assert_eq!(weight_of(&body), weight::REGULAR);
+            assert_eq!(meta.GetWordWrapping(), DWRITE_WORD_WRAPPING_NO_WRAP);
+            assert_eq!(body.GetWordWrapping(), DWRITE_WORD_WRAPPING_WRAP);
+
+            if fonts.has_inter {
+                let mut buf = [0u16; 32];
+                meta.GetFontFamilyName(&mut buf).unwrap();
+                let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+                assert_eq!(String::from_utf16_lossy(&buf[..end]), "Inter");
+            }
+
+            let text = "Telegram · Алексей 😀 · 2 мин";
+            let start = "Telegram · ".encode_utf16().count() as u32;
+            let len = "Алексей 😀".encode_utf16().count() as u32;
+            let layout = fonts
+                .layout_styled(text, &meta, 300.0, 20.0, Some((start, len)))
+                .expect("layout_styled failed");
+            let mut w_src = DWRITE_FONT_WEIGHT(0);
+            let mut w_title = DWRITE_FONT_WEIGHT(0);
+            let mut w_time = DWRITE_FONT_WEIGHT(0);
+            layout.GetFontWeight(0, &mut w_src, None).unwrap();
+            layout.GetFontWeight(start, &mut w_title, None).unwrap();
+            layout.GetFontWeight(start + len + 3, &mut w_time, None).unwrap();
+            assert_eq!(w_src, DWRITE_FONT_WEIGHT_REGULAR);
+            assert_eq!(w_title, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            assert_eq!(w_time, DWRITE_FONT_WEIGHT_REGULAR);
         }
     }
 }

@@ -624,25 +624,22 @@ impl Live {
                             cv.symbol(icon::CALENDAR, ir, 14.0, cv.accent);
                         } else {
                             let ch = n.app_name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "W".into());
-                            cv.text(&ch, ir, &f.body_b, WHITE);
+                            let ch_fmt = f.notif_at(9.0, crate::ui::weight::EMPHASIZED, false, true);
+                            cv.text_styled(&ch, ir, &ch_fmt, WHITE, None);
                         }
                     }
 
                     let ntx = ir.right() + 10.0;
                     let ntw = (r.right() - 18.0 - ntx).max(40.0);
+                    let meta_fmt = f.notif_at(8.0, crate::ui::weight::REGULAR, false, false);
+                    let body_fmt = f.notif_at(9.0, crate::ui::weight::REGULAR, false, false);
                     let (meta_ctx, msg) = crate::tabs::notifications::split_display_fields(&n.title, &n.body, true);
-                    let meta = if meta_ctx.is_empty() {
-                        n.app_name.clone()
-                    } else {
-                        format!("{} · {}", n.app_name, meta_ctx)
-                    };
+                    let (meta, meta_bold) = crate::tabs::notifications::format_notif_meta(&n.app_name, &meta_ctx, "");
                     let meta_w = (ntw - 9.0).max(20.0);
-                    let clip_meta = cv.wrap_clip(&meta, &f.small_b, meta_w, 1);
                     cv.circle(ntx + 3.0, r.cy() - 9.0, 2.5, cv.accent);
-                    cv.text(&clip_meta, Rect::new(ntx + 9.0, r.cy() - 16.0, meta_w, 14.0), &f.small_b, collapsed_dim());
+                    cv.text_styled(&meta, Rect::new(ntx + 9.0, r.cy() - 16.0, meta_w, 14.0), &meta_fmt, collapsed_dim(), meta_bold);
 
-                    let clip_msg = cv.wrap_clip(&msg, &f.body, ntw, 1);
-                    cv.text(&clip_msg, Rect::new(ntx, r.cy() + 1.0, ntw, 17.0), &f.body, collapsed_txt());
+                    cv.text_styled(&msg, Rect::new(ntx, r.cy() + 1.0, ntw, 17.0), &body_fmt, collapsed_txt(), None);
                 }
             }
             Toast::Timer => {
@@ -658,9 +655,11 @@ impl Live {
                 cv.glyph(icon::CALENDAR, ic, false, cv.accent);
                 let x = Self::close_rect(r);
                 let tag_w = if tag.is_empty() { 0.0 } else { 44.0 };
-                cv.text(title, Rect::new(tx, cy - 8.0, x.x - tx - tag_w - 4.0, 16.0), &f.body, collapsed_txt());
+                let title_fmt = f.notif_at(9.0, crate::ui::weight::EMPHASIZED, false, false);
+                cv.text_styled(title, Rect::new(tx, cy - 8.0, x.x - tx - tag_w - 4.0, 16.0), &title_fmt, collapsed_txt(), None);
                 if tag_w > 0.0 {
-                    cv.text(tag, Rect::new(x.x - tag_w, cy - 8.0, tag_w, 16.0), &f.small, collapsed_dim());
+                    let tag_fmt = f.notif_at(8.0, crate::ui::weight::REGULAR, false, false);
+                    cv.text_styled(tag, Rect::new(x.x - tag_w, cy - 8.0, tag_w, 16.0), &tag_fmt, collapsed_dim(), None);
                 }
                 let hot = cursor.0 >= x.x - 4.0 && cursor.0 < x.right() + 4.0 && cursor.1 >= x.y - 4.0 && cursor.1 < x.bottom() + 4.0;
                 cv.circle(x.cx(), x.cy(), 9.0, crate::ui::mix(collapsed_chip_bg(), collapsed_txt(), if hot { 0.18 } else { 0.0 }));
