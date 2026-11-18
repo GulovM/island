@@ -4,6 +4,28 @@
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-11-18
+
+### RU
+
+- Буфер обмена и «Быстрый доступ»: добавлен мультивыбор записей (`Ctrl+клик`, `Shift+клик`), пакетное копирование (`Ctrl+C`), закрепление (`Ctrl+P`), удаление (`Del`) и перетаскивание наружу как из «Быстрого доступа», так и из истории «Буфера».
+- Файлы в буфере (`CF_HDROP`): скопированные в Проводнике файлы попадают в историю; копирование файлов любого формата и картинок (`CF_HDROP` + `CF_DIB`) кладёт их в буфер Windows для вставки в папки и мессенджеры; `Enter` открывает файлы и ссылки в «Быстром доступе».
+- Внешнее перетаскивание: при начале перетаскивания файла, ссылки или текста в любом окне Windows на острове сразу появляется подсказка «Добавить в быстрый доступ».
+- Сворачивание и фокус: `Esc`, повторное нажатие глобальной горячей клавиши активной вкладки, клик вне острова, а также копирование, открытие или перетаскивание наружу сворачивают остров и возвращают фокус прежнему окну; при открытии горячей клавишей остров ждёт захода курсора.
+- Скриншоты: опция «Прятать свёрнутый остров при скриншоте» скрывает по `PrtSc` и `Win+Shift+S` только свёрнутую чёлку, оставляя раскрытый остров на снимке.
+- Уведомления: центр уведомлений и всплывающие капсулы переведены на шрифт `Inter` (с резервным системным шрифтом) и выделяют заголовок уведомления полужирным (`Semi Bold`).
+- Документация и лицензия: добавлен английский `README.en.md` с переключателем языков и обновлены условия авторского права, запрета коммерческого использования, обязательной атрибуции форков и защиты названия и логотипа Kite Island.
+
+### EN
+
+- Clipboard & Quick Access: added multi-selection (`Ctrl+Click`, `Shift+Click`), batch copy (`Ctrl+C`), pin (`Ctrl+P`), delete (`Del`), and dragging items out from both Quick Access and Clipboard history.
+- Clipboard files (`CF_HDROP`): files copied in Explorer are recorded in history; copying files of any format or images (`CF_HDROP` + `CF_DIB`) puts them onto the Windows clipboard for pasting into Explorer and messengers; `Enter` opens files and links in Quick Access.
+- External drag indicator: starting to drag a file, link, or text anywhere in Windows immediately shows the "Add to Quick Access" drop hint on the island.
+- Collapse & focus UX: `Esc`, pressing the active tab's global hotkey again, clicking outside, or completing a copy/open/drag-out action collapses the island and restores focus to the previous window; hotkey-opened islands wait until the cursor enters and leaves.
+- Screenshots: "Hide collapsed island on screenshot" hides only the collapsed notch on `PrtSc` and `Win+Shift+S`, keeping the expanded island visible on screenshots.
+- Notifications: Notification Center and popup capsules now use `Inter` typography (falling back to the system UI font) with `Semi Bold` emphasis on notification titles.
+- Documentation & license: added English `README.en.md` with a language switcher and updated copyright, non-commercial license, fork attribution, and Kite Island brand/logo protection terms.
+
 ## [1.8.0] — 2026-11-17
 
 ### RU
