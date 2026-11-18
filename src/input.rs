@@ -150,6 +150,14 @@ impl App {
         if self.tabs.recording_hotkey() {
             return self.record_key(vk);
         }
+        if vk == VK_ESCAPE.0 as u32 && self.expanded {
+            if self.tabs.editing(self.normal_id()) {
+                self.toggle_edit();
+            } else {
+                self.collapse_after_action();
+            }
+            return true;
+        }
         let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
         let alt = GetKeyState(VK_MENU.0 as i32) < 0;
         // AltGr (польская, немецкая и др. раскладки) приходит как Ctrl+Alt: это ввод символа, не шорткат.
@@ -215,38 +223,84 @@ impl App {
         true
     }
 
+    pub(crate) unsafe fn is_external_window(&self, hwnd: HWND) -> bool {
+        if hwnd.0.is_null()
+            || hwnd == self.hwnd
+            || hwnd == self.glass_wnd
+            || self.hot.iter().any(|z| z.hwnd == hwnd)
+            || !IsWindow(Some(hwnd)).as_bool()
+            || !IsWindowVisible(hwnd).as_bool()
+        {
+            return false;
+        }
+        let mut buf = [0u16; 64];
+        let n = GetClassNameW(hwnd, &mut buf).max(0) as usize;
+        let class = String::from_utf16_lossy(&buf[..n]);
+        !matches!(class.as_str(), "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "SecondaryTrayWnd")
+    }
+
+    pub(crate) unsafe fn capture_prev_fg(&mut self) {
+        let fg = GetForegroundWindow();
+        if self.is_external_window(fg) {
+            self.prev_fg = fg;
+        }
+    }
+
+    pub(crate) unsafe fn force_foreground(target: HWND, attach_from: HWND) {
+        if target.0.is_null() || !IsWindow(Some(target)).as_bool() {
+            return;
+        }
+        if SetForegroundWindow(target).as_bool() {
+            return;
+        }
+        let me = windows::Win32::System::Threading::GetCurrentThreadId();
+        let fg = GetForegroundWindow();
+        for other in [fg, attach_from, target] {
+            if other.0.is_null() {
+                continue;
+            }
+            let tid = GetWindowThreadProcessId(other, None);
+            if tid != 0 && tid != me {
+                let _ = windows::Win32::System::Threading::AttachThreadInput(me, tid, true);
+                let ok = SetForegroundWindow(target).as_bool();
+                let _ = BringWindowToTop(target);
+                let _ = windows::Win32::System::Threading::AttachThreadInput(me, tid, false);
+                if ok || GetForegroundWindow() == target {
+                    return;
+                }
+            }
+        }
+        let _ = SetForegroundWindow(target);
+    }
+
     /// Включает/выключает активацию окна под фокус ввода. Остров не NOACTIVATE-окно только
-    /// пока в поле есть фокус; после этого активным снова становится прежнее окно.
+    /// пока он раскрыт или держит фокус уведомления; после этого активным снова становится прежнее окно.
     pub(crate) unsafe fn sync_focus(&mut self) {
         // Остров открыт — держит фокус клавиатуры всё время, не только пока в поле есть ввод,
         // иначе Tab/Enter не на что было бы послать: NOACTIVATE-окно без фокуса их не получает.
-        let want = self.expanded || self.ui.focus.is_some();
+        let want = self.expanded || (self.live.steals_focus() && self.ui.focus == Some(NOTICE_FOCUS));
         if want && !self.kbd {
             self.kbd = true;
-            self.prev_fg = GetForegroundWindow();
+            self.capture_prev_fg();
             let ex = GetWindowLongW(self.hwnd, GWL_EXSTYLE) as u32 & !WS_EX_NOACTIVATE.0;
             SetWindowLongW(self.hwnd, GWL_EXSTYLE, ex as i32);
             self.ensure_topmost(true);
-            if !SetForegroundWindow(self.hwnd).as_bool() {
-                // Фоновому процессу Windows не отдаёт передний план просто так (таймер сработал сам по себе):
-                // на миг присоединяемся к потоку окна, которое сейчас в фокусе.
-                let fg_thread = GetWindowThreadProcessId(self.prev_fg, None);
-                let me = windows::Win32::System::Threading::GetCurrentThreadId();
-                if fg_thread != 0 && fg_thread != me {
-                    let _ = windows::Win32::System::Threading::AttachThreadInput(me, fg_thread, true);
-                    let _ = SetForegroundWindow(self.hwnd);
-                    let _ = windows::Win32::System::Threading::AttachThreadInput(me, fg_thread, false);
-                }
-            }
+            Self::force_foreground(self.hwnd, self.prev_fg);
             let _ = SetFocus(Some(self.hwnd));
             self.ui.caret_on = true;
             SetTimer(Some(self.hwnd), CARET_TIMER, CARET_MS, None);
         } else if !want && self.kbd {
             self.kbd = false;
-            self.restore_noactivate();
-            if GetForegroundWindow() == self.hwnd && !self.prev_fg.0.is_null() && IsWindow(Some(self.prev_fg)).as_bool() {
-                let _ = SetForegroundWindow(self.prev_fg);
+            let fg = GetForegroundWindow();
+            let island_has_fg = fg == self.hwnd || fg.0.is_null() || fg == self.glass_wnd;
+            if island_has_fg
+                && !self.prev_fg.0.is_null()
+                && IsWindow(Some(self.prev_fg)).as_bool()
+                && !IsIconic(self.prev_fg).as_bool()
+            {
+                Self::force_foreground(self.prev_fg, self.hwnd);
             }
+            self.restore_noactivate();
         }
     }
 

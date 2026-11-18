@@ -228,14 +228,18 @@ pub enum Out {
 }
 
 /// Содержимое HGLOBAL-формата `DROPFILES`: заголовок 20 байт, пути UTF-16 через нуль, двойной нуль.
-fn build_hdrop(paths: &[String]) -> Vec<u8> {
+pub(crate) fn build_hdrop(paths: &[String]) -> Vec<u8> {
     let mut v = Vec::new();
     v.extend_from_slice(&20u32.to_le_bytes()); // pFiles
     v.extend_from_slice(&[0u8; 8]); // pt
     v.extend_from_slice(&0u32.to_le_bytes()); // fNC
     v.extend_from_slice(&1u32.to_le_bytes()); // fWide
     for p in paths {
-        for u in p.encode_utf16() {
+        let clean = p.trim().trim_matches('"').replace('/', "\\");
+        if clean.is_empty() {
+            continue;
+        }
+        for u in clean.encode_utf16() {
             v.extend_from_slice(&u.to_le_bytes());
         }
         v.extend_from_slice(&0u16.to_le_bytes());
@@ -391,7 +395,7 @@ fn drag_tmp_dir() -> PathBuf {
 
 /// Расшифрованная копия PNG: получатель может скопировать файл уже после броска, поэтому
 /// удаляется копия не сразу, а при следующем перетаскивании (старше часа).
-fn plain_png(sealed: &Path) -> Option<String> {
+pub(crate) fn plain_png(sealed: &Path) -> Option<String> {
     let dir = drag_tmp_dir();
     let _ = std::fs::create_dir_all(&dir);
     if let Ok(rd) = std::fs::read_dir(&dir) {
@@ -452,14 +456,14 @@ mod tests {
 
     #[test]
     fn hdrop_layout_matches_dropfiles() {
-        let b = build_hdrop(&["C:\\a.txt".to_string(), "D:\\б".to_string()]);
+        let b = build_hdrop(&["C:\\a.txt".to_string(), "D:/folder/б.png".to_string()]);
         assert_eq!(u32::from_le_bytes(b[0..4].try_into().unwrap()), 20, "смещение списка");
         assert_eq!(u32::from_le_bytes(b[16..20].try_into().unwrap()), 1, "fWide");
         let list: Vec<u16> = b[20..].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         assert_eq!(list.last(), Some(&0));
         assert_eq!(list[list.len() - 2], 0, "список заканчивается двойным нулём");
         let s = String::from_utf16_lossy(&list);
-        assert_eq!(s.split('\0').filter(|x| !x.is_empty()).collect::<Vec<_>>(), ["C:\\a.txt", "D:\\б"]);
+        assert_eq!(s.split('\0').filter(|x| !x.is_empty()).collect::<Vec<_>>(), ["C:\\a.txt", "D:\\folder\\б.png"]);
     }
 
     #[test]

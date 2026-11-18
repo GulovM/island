@@ -135,6 +135,7 @@ impl Ui {
     pub fn begin_frame(&mut self, cursor: (f32, f32), on_island: bool) {
         self.cursor = cursor;
         self.on_island = on_island;
+        self.interactive = false;
         if !self.down && !self.pressed && !self.released {
             self.drag = None;
         }
@@ -186,9 +187,12 @@ impl Ui {
     }
 
     pub fn end_frame(&mut self) {
-        // Нажатие мимо текстового поля снимает фокус ввода.
-        if self.pressed && !self.focus_claimed {
+        // Нажатие мимо текстового поля снимает фокус ввода (или возвращает sticky_focus).
+        // Если интерактивная вкладка открыта со sticky_focus без предшествующего фокуса, включаем его сразу.
+        if self.interactive && (self.focus.is_none() || (self.pressed && !self.focus_claimed)) && self.sticky_focus.is_some() {
             self.focus = self.sticky_focus;
+        } else if self.pressed && !self.focus_claimed {
+            self.focus = None;
         }
         if self.released {
             self.drag = None;
@@ -203,13 +207,23 @@ impl Ui {
     pub fn begin_content(&mut self, ox: f32, interactive: bool) {
         self.origin_x = ox;
         self.mouse = (self.cursor.0 - ox, self.cursor.1);
-        self.interactive = interactive && self.on_island;
+        self.interactive = interactive;
         self.clip = None;
     }
 
-    /// Мышь «захвачена» перетаскиванием или фокусом ввода: сворачивать остров нельзя.
+    pub(super) fn mouse_interactive(&self) -> bool {
+        self.interactive && self.on_island
+    }
+
+    /// Мышь «захвачена» активным перетаскиванием ползунка или элемента: сворачивать остров нельзя.
     pub fn holds_pointer(&self) -> bool {
-        (self.drag.is_some() && self.down) || self.focus.is_some()
+        self.drag.is_some() && self.down
+    }
+
+    /// Пользователь сейчас вводит текст в обычное поле (не в автофокусный поиск вкладки).
+    pub fn has_active_field_input(&self, auto_focus_id: Option<u32>) -> bool {
+        self.focus
+            .is_some_and(|fid| self.is_field(fid) && Some(fid) != auto_focus_id)
     }
 
     pub fn blur(&mut self) {
@@ -347,7 +361,7 @@ impl Ui {
                 self.focus_rect = Some(r);
             }
         }
-        let inside = self.interactive
+        let inside = self.mouse_interactive()
             && r.contains(self.mouse)
             && self.clip.is_none_or(|c| c.contains(self.mouse));
         let hover = inside && (self.drag.is_none() || self.drag == Some(id));
@@ -493,5 +507,21 @@ mod tests {
         assert!(ui.is_drag_released(1));
         ui.end_frame();
         assert!(!ui.is_drag_released(1));
+    }
+
+    #[test]
+    fn take_nav_works_even_when_cursor_outside_island_and_sticky_focus_applies() {
+        let mut ui = Ui::default();
+        ui.begin_frame((9000.0, 9000.0), false);
+        ui.begin_content(0.0, true);
+        ui.sticky_focus = Some(10);
+        ui.end_frame();
+        assert_eq!(ui.focus, Some(10), "sticky_focus ставится при открытой вкладке без клика");
+
+        ui.key(KeyEv::Copy);
+        ui.begin_frame((9000.0, 9000.0), false);
+        ui.begin_content(0.0, true);
+        assert_eq!(ui.take_nav(), vec![Nav::Copy], "Ctrl+C доходит до списка даже при курсоре вне острова");
+        assert!(!ui.holds_pointer(), "простой фокус поиска не блокирует сворачивание");
     }
 }

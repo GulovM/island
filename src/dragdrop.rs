@@ -193,7 +193,11 @@ impl App {
         log::info(if taken { "перетаскивание записи наружу: получатель принял" } else { "перетаскивание записи наружу: отменено или получатель не принял" });
         // Отпускание кнопки досталось не нам.
         self.ui.down = false;
-        self.check_hover();
+        if taken && !self.cursor_inside() {
+            self.collapse_after_action();
+        } else {
+            self.check_hover();
+        }
     }
 
     // ---------- Горячая клавиша раздела ----------
@@ -202,6 +206,15 @@ impl App {
     pub(crate) unsafe fn on_quick_hotkey(&mut self) -> bool {
         if self.hidden {
             return false;
+        }
+        if self.expanded
+            && !self.settings_open
+            && !self.notifications_open
+            && self.normal_id() == tabs::CLIPBOARD
+            && self.tabs.in_quick_section()
+        {
+            self.collapse_after_action();
+            return true;
         }
         // Вкладка «Буфер» выключена в настройках — открывать нечего.
         let Some(i) = self.order.iter().position(|&t| t == tabs::CLIPBOARD) else { return false };

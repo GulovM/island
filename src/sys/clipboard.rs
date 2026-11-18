@@ -7,10 +7,12 @@ use windows::Win32::System::DataExchange::{
     OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
+use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
 
 use super::wz;
 
 const CF_UNICODETEXT: u32 = 13;
+const CF_HDROP: u32 = 15;
 
 /// Открывает буфер обмена; менеджеры буфера держат его доли секунды, поэтому несколько коротких повторов.
 fn open_clipboard(owner: HWND) -> Option<()> {
@@ -49,28 +51,82 @@ pub fn clipboard_text(owner: HWND) -> Option<String> {
     }
 }
 
+/// Копирует сырые байты в глобальный блок памяти и передаёт его в открытый буфер обмена.
+unsafe fn set_format_bytes(cf: u32, bytes: &[u8]) -> bool {
+    let Ok(hg) = GlobalAlloc(GMEM_MOVEABLE, bytes.len()) else { return false };
+    let p = GlobalLock(hg) as *mut u8;
+    if p.is_null() {
+        let _ = GlobalFree(Some(hg));
+        return false;
+    }
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), p, bytes.len());
+    let _ = GlobalUnlock(hg);
+    // После успешного SetClipboardData память принадлежит системе; при отказе освобождаем сами.
+    let ok = SetClipboardData(cf, Some(HANDLE(hg.0))).is_ok();
+    if !ok {
+        let _ = GlobalFree(Some(hg));
+    }
+    ok
+}
+
+fn wide_bytes(s: &str) -> Vec<u8> {
+    wz(s).into_iter().flat_map(u16::to_le_bytes).collect()
+}
+
 /// Кладёт Unicode-текст в буфер обмена.
 pub fn set_clipboard_text(owner: HWND, text: &str) -> bool {
     unsafe {
-        let wide = wz(text);
-        let bytes = wide.len() * 2;
-        let Ok(hg) = GlobalAlloc(GMEM_MOVEABLE, bytes) else { return false };
-        let p = GlobalLock(hg) as *mut u16;
-        if p.is_null() {
-            let _ = GlobalFree(Some(hg));
-            return false;
-        }
-        std::ptr::copy_nonoverlapping(wide.as_ptr(), p, wide.len());
-        let _ = GlobalUnlock(hg);
         if open_clipboard(owner).is_none() {
-            let _ = GlobalFree(Some(hg));
             return false;
         }
         let _ = EmptyClipboard();
-        // После успешного SetClipboardData память принадлежит системе; при отказе освобождаем сами.
-        let ok = SetClipboardData(CF_UNICODETEXT, Some(HANDLE(hg.0))).is_ok();
-        if !ok {
-            let _ = GlobalFree(Some(hg));
+        let ok = set_format_bytes(CF_UNICODETEXT, &wide_bytes(text));
+        let _ = CloseClipboard();
+        ok
+    }
+}
+
+unsafe fn set_hdrop_with_copy_effect(files: &[String]) -> bool {
+    let hdrop = crate::dnd::build_hdrop(files);
+    if !set_format_bytes(CF_HDROP, &hdrop) {
+        return false;
+    }
+    let drop_eff = RegisterClipboardFormatW(w!("Preferred DropEffect"));
+    if drop_eff != 0 {
+        let _ = set_format_bytes(drop_eff, &1u32.to_le_bytes());
+    }
+    true
+}
+
+/// Кладёт файлы (CF_HDROP + Preferred DropEffect=Copy) и опционально изображение/текст в буфер обмена.
+pub fn set_clipboard_files(owner: HWND, files: &[String], text: Option<&str>, dib: Option<&[u8]>) -> bool {
+    let norm_files: Vec<String> = files
+        .iter()
+        .map(|p| p.trim().trim_matches('"').replace('/', "\\"))
+        .filter(|p| !p.is_empty())
+        .collect();
+    if norm_files.is_empty() {
+        return false;
+    }
+    unsafe {
+        if open_clipboard(owner).is_none() {
+            return false;
+        }
+        let _ = EmptyClipboard();
+        let ok = set_hdrop_with_copy_effect(&norm_files);
+        if ok {
+            if let Some(d) = dib {
+                let _ = set_format_bytes(CF_DIB, d);
+            }
+            let fallback;
+            let txt_str = match text {
+                Some(t) => t,
+                None => {
+                    fallback = norm_files.join("\r\n");
+                    &fallback
+                }
+            };
+            let _ = set_format_bytes(CF_UNICODETEXT, &wide_bytes(txt_str));
         }
         let _ = CloseClipboard();
         ok
@@ -101,6 +157,38 @@ pub fn clipboard_has_text() -> bool {
     unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT).is_ok() }
 }
 
+/// В буфере обмена есть список файлов (CF_HDROP).
+pub fn clipboard_has_files() -> bool {
+    unsafe { IsClipboardFormatAvailable(CF_HDROP).is_ok() }
+}
+
+/// Список путей файлов из буфера обмена (CF_HDROP).
+pub fn clipboard_files(owner: HWND) -> Option<Vec<String>> {
+    unsafe {
+        open_clipboard(owner)?;
+        let mut out = None;
+        if let Ok(h) = GetClipboardData(CF_HDROP) {
+            let hdrop = HDROP(h.0);
+            let count = DragQueryFileW(hdrop, u32::MAX, None);
+            let mut files = Vec::with_capacity(count as usize);
+            for i in 0..count {
+                let len = DragQueryFileW(hdrop, i, None) as usize;
+                let mut buf = vec![0u16; len + 1];
+                let n = DragQueryFileW(hdrop, i, Some(&mut buf)) as usize;
+                let path = String::from_utf16_lossy(&buf[..n.min(len)]);
+                if !path.trim().is_empty() {
+                    files.push(path);
+                }
+            }
+            if !files.is_empty() {
+                out = Some(files);
+            }
+        }
+        let _ = CloseClipboard();
+        out
+    }
+}
+
 // ---------- Изображения в буфере обмена ----------
 
 const CF_DIB: u32 = 8;
@@ -113,7 +201,7 @@ pub fn clipboard_has_image() -> bool {
 /// Изображение из буфера обмена: (ширина, высота, BGRA сверху вниз, непрозрачное).
 pub fn clipboard_image(owner: HWND) -> Option<(u32, u32, Vec<u8>)> {
     unsafe {
-        OpenClipboard(Some(owner)).ok()?;
+        open_clipboard(owner)?;
         let mut out = None;
         if let Ok(h) = GetClipboardData(CF_DIB) {
             let hg = HGLOBAL(h.0);
@@ -168,24 +256,28 @@ fn parse_dib(d: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     Some((w as u32, h as u32, out))
 }
 
-/// Кладёт изображение (готовый DIB: заголовок + пиксели снизу вверх) в буфер обмена.
-pub fn set_clipboard_dib(owner: HWND, dib: &[u8]) -> bool {
+/// Кладёт изображение (готовый DIB: заголовок + пиксели снизу вверх) и опционально временный файл
+/// PNG (`CF_HDROP`) в буфер обмена, чтобы вставка работала и в редакторах, и в папках Проводника.
+pub fn set_clipboard_dib_with_file(owner: HWND, dib: &[u8], file_path: Option<&str>) -> bool {
     unsafe {
-        let Ok(hg) = GlobalAlloc(GMEM_MOVEABLE, dib.len()) else { return false };
-        let p = GlobalLock(hg) as *mut u8;
-        if p.is_null() {
-            return false;
-        }
-        std::ptr::copy_nonoverlapping(dib.as_ptr(), p, dib.len());
-        let _ = GlobalUnlock(hg);
-        if OpenClipboard(Some(owner)).is_err() {
+        if open_clipboard(owner).is_none() {
             return false;
         }
         let _ = EmptyClipboard();
-        let ok = SetClipboardData(CF_DIB, Some(HANDLE(hg.0))).is_ok();
+        let ok = set_format_bytes(CF_DIB, dib);
+        if ok {
+            if let Some(path) = file_path.map(str::trim).filter(|p| !p.is_empty()) {
+                let _ = set_hdrop_with_copy_effect(&[path.to_string()]);
+            }
+        }
         let _ = CloseClipboard();
         ok
     }
+}
+
+/// Кладёт изображение (готовый DIB: заголовок + пиксели снизу вверх) в буфер обмена.
+pub fn set_clipboard_dib(owner: HWND, dib: &[u8]) -> bool {
+    set_clipboard_dib_with_file(owner, dib, None)
 }
 
 #[cfg(test)]

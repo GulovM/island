@@ -304,8 +304,17 @@ impl App {
         true
     }
 
+    /// Сворачивает остров после явного действия (копирование, открытие, Esc, повторная горячая клавиша)
+    /// и кратко подавляет раскрытие по наведению, чтобы курсор над свёрнутой плашкой не открыл её заново.
+    pub(crate) unsafe fn collapse_after_action(&mut self) {
+        self.hover_suppress_until = Some(Instant::now() + std::time::Duration::from_millis(600));
+        self.disarm_leave();
+        self.set_expanded(false);
+    }
+
     pub(crate) unsafe fn set_expanded(&mut self, expanded: bool) {
         if expanded && !self.expanded {
+            self.capture_prev_fg();
             self.ensure_topmost(true);
             self.ui.reset_marquees();
         }
@@ -313,6 +322,12 @@ impl App {
         self.leave_hold = None;
         if expanded {
             self.dismiss_toast();
+            if !self.settings_open
+                && !self.notifications_open
+                && matches!(self.normal_id(), tabs::CLIPBOARD | tabs::APPS)
+            {
+                self.ui.focus = Some(tabs::id(self.normal_id(), 0));
+            }
         }
         if expanded && self.cfg.system_colors {
             // Подстраховка на случай, если уведомление об смене системных цветов не пришло.
@@ -324,11 +339,13 @@ impl App {
             self.sync_focus();
         }
         if !expanded {
+            self.cursor_entered = false;
             self.shot_keep_until = None;
             crate::state::flush();
             self.trim_pending = true;
             // После сворачивания карточка снова показывает то, что реально играет.
             crate::bg::reset_card_session();
+            self.ui.sticky_focus = None;
             self.ui.blur();
             self.sync_focus();
             self.ui.down = false;
@@ -342,6 +359,9 @@ impl App {
             }
         }
         self.retarget();
+        if expanded {
+            self.cursor_entered = self.cursor_inside();
+        }
         self.open.target = if expanded { 1.0 } else { 0.0 };
     }
 
@@ -393,6 +413,7 @@ impl App {
     pub(crate) unsafe fn move_to(&mut self, mon: HMONITOR) {
         self.disarm_leave();
         self.expanded = false;
+        self.cursor_entered = false;
         self.open.target = 0.0;
         self.open.snap();
         self.apply_monitor(mon, true);
@@ -557,6 +578,25 @@ impl App {
         }
     }
 
+    /// Удерживает раскрытый остров от автосворачивания по уходу курсора:
+    /// активное перетаскивание виджета или файла наружу, запись горячей клавиши,
+    /// открытие с клавиатуры до первого захода мыши на остров, либо ввод текста
+    /// в обычное поле (не автофокусный поиск вкладки).
+    pub(crate) fn holds_open(&self) -> bool {
+        if self.ui.holds_pointer() || crate::dnd::is_self_drag() || self.tabs.recording_hotkey() {
+            return true;
+        }
+        if !self.cursor_entered {
+            return true;
+        }
+        let auto_focus_id = match self.cur_id() {
+            tabs::CLIPBOARD => Some(tabs::id(tabs::CLIPBOARD, 0)),
+            tabs::APPS => Some(tabs::id(tabs::APPS, 0)),
+            _ => None,
+        };
+        self.ui.has_active_field_input(auto_focus_id)
+    }
+
     /// Раскрытый остров: курсор вне занимаемой области — запускаем отсчёт сворачивания,
     /// вернулся — отменяем. Вызывается и на каждом кадре, потому что область меняется
     /// (смена вкладки, анимация), а мышь при этом может стоять на месте.
@@ -564,6 +604,9 @@ impl App {
         if self.shot_keep_until.is_some_and(|t| Instant::now() < t) {
             self.disarm_leave();
             return;
+        }
+        if self.expanded && self.cursor_inside() {
+            self.cursor_entered = true;
         }
         if let Some(held) = self.leave_hold {
             let mut p = POINT::default();
@@ -575,8 +618,8 @@ impl App {
                 return;
             }
         }
-        // Перетаскивание ползунка и ввод текста не должны сворачивать остров.
-        if self.expanded && !self.cursor_inside() && !self.ui.holds_pointer() {
+        // Перетаскивание ползунка и ввод текста в обычное поле не должны сворачивать остров.
+        if self.expanded && !self.cursor_inside() && !self.holds_open() {
             self.arm_leave();
         } else {
             self.disarm_leave();
@@ -609,7 +652,11 @@ impl App {
         if self.shot_keep_until.is_some_and(|t| Instant::now() < t) {
             return false;
         }
-        if self.expanded && self.leave_hold.is_none() && !self.cursor_inside() && !self.ui.holds_pointer() {
+        if self.expanded && self.cursor_inside() {
+            self.cursor_entered = true;
+            return false;
+        }
+        if self.expanded && self.leave_hold.is_none() && !self.cursor_inside() && !self.holds_open() {
             self.set_expanded(false);
             return true;
         }

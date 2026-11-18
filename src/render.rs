@@ -577,7 +577,7 @@ impl App {
             if let Some(prev) = self.tab_prev {
                 layer(prev, content_p * (1.0 - fade), -self.tab_dir * SLIDE * fade, false, ui, tabs);
             }
-            layer(self.cur_id(), content_p * fade, self.tab_dir * SLIDE * (1.0 - fade), true, ui, tabs);
+            layer(self.cur_id(), content_p * fade, self.tab_dir * SLIDE * (1.0 - fade), self.expanded, ui, tabs);
             // Над раскрытым островом тащат файл, ссылку или текст: надпись закрывает содержимое
             // только при наведении на сам остров (или при показе итога броска).
             let show_overlay = self.drag_over || !self.ext_drag;

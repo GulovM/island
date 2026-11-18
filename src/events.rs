@@ -7,6 +7,10 @@ impl App {
         if self.hidden {
             return false;
         }
+        if self.expanded && !self.settings_open && !self.notifications_open && self.normal_id() == tabs::APPS {
+            self.collapse_after_action();
+            return true;
+        }
         // Вкладка Apps выключена в настройках — горячей клавише нечего открывать.
         let Some(i) = self.order.iter().position(|&t| t == tabs::APPS) else { return false };
         self.open_from_hotkey(i, tabs::APPS);
@@ -54,6 +58,15 @@ impl App {
                     return true;
                 }
                 let switched = self.click(x, y);
+                if self.expanded && GetForegroundWindow() != self.hwnd {
+                    if !self.kbd {
+                        self.sync_focus();
+                    } else {
+                        self.capture_prev_fg();
+                        Self::force_foreground(self.hwnd, self.prev_fg);
+                        let _ = SetFocus(Some(self.hwnd));
+                    }
+                }
                 if !switched && self.expanded {
                     self.ui.down = true;
                     self.ui.pressed = true;
@@ -133,12 +146,17 @@ impl App {
             }
             Ev::Key(vk, ext) => self.on_key(vk, ext),
             Ev::Deactivated => {
-                if self.kbd {
-                    // Пользователь кликнул в другое окно: возвращать ему фокус не нужно.
+                if dnd::is_self_drag() {
+                    return false;
+                }
+                if self.kbd || self.expanded {
+                    // Пользователь кликнул в другое окно: не возвращаем фокус острову и сворачиваем его.
                     self.kbd = false;
-                    self.ui.blur();
                     self.restore_noactivate();
-                    self.check_hover();
+                    self.disarm_leave();
+                    if self.expanded {
+                        self.set_expanded(false);
+                    }
                     return true;
                 }
                 false
@@ -352,9 +370,27 @@ impl App {
         if sys::clipboard_owned_by(self.hwnd) || sys::clipboard_excluded() {
             return false;
         }
+        let has_files = sys::clipboard_has_files();
         let has_text = sys::clipboard_has_text();
-        if !has_text && !sys::clipboard_has_image() {
+        if !has_files && !has_text && !sys::clipboard_has_image() {
             return false;
+        }
+        if has_files {
+            let mut files = None;
+            for _ in 0..5 {
+                files = sys::clipboard_files(self.hwnd);
+                if files.is_some() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
+            if let Some(list) = files {
+                let mut changed = false;
+                for path in list.into_iter().rev() {
+                    changed |= self.tabs.on_clipboard(path);
+                }
+                return changed && self.expanded;
+            }
         }
         // Буфер может быть занят источником копирования — несколько коротких попыток.
         if has_text {
@@ -508,14 +544,31 @@ impl App {
             match a {
                 tabs::Action::Copy(text) => {
                     sys::set_clipboard_text(self.hwnd, &text);
+                    self.collapse_after_action();
                 }
                 tabs::Action::CopyImage(path) => {
                     self.put_image(&path);
+                    self.collapse_after_action();
+                }
+                tabs::Action::CopyFiles { mut files, images, text } => {
+                    for p in &images {
+                        if let Some(tmp) = dnd::plain_png(p) {
+                            files.push(tmp);
+                        }
+                    }
+                    let dib = images.first().and_then(|p| img::load_dib(p));
+                    if !files.is_empty() {
+                        sys::set_clipboard_files(self.hwnd, &files, text.as_deref(), dib.as_deref());
+                    } else if let Some(d) = dib {
+                        sys::set_clipboard_dib(self.hwnd, &d);
+                    } else if let Some(t) = text {
+                        sys::set_clipboard_text(self.hwnd, &t);
+                    }
+                    self.collapse_after_action();
                 }
                 tabs::Action::Open(target) => {
                     if sys::open(&target) {
-                        self.disarm_leave();
-                        self.set_expanded(false);
+                        self.collapse_after_action();
                     } else {
                         // Файл исчез после последней проверки: запись помечается недоступной.
                         self.tabs.mark_missing(&target);
@@ -524,8 +577,7 @@ impl App {
                 tabs::Action::DragOut(out) => self.run_drag_out(out),
                 tabs::Action::SetQuickHotkey(combo) => self.set_quick_hotkey(combo),
                 tabs::Action::Collapse => {
-                    self.disarm_leave();
-                    self.set_expanded(false);
+                    self.collapse_after_action();
                 }
                 tabs::Action::Layout(tab, text) if tab >= tabs::CUSTOM_BASE => {
                     if let Some(c) = self.cfg.custom.get_mut(tab - tabs::CUSTOM_BASE) {
@@ -555,10 +607,13 @@ impl App {
         dirty
     }
 
-    /// Кладёт PNG из истории или быстрого доступа в буфер обмена как изображение.
+    /// Кладёт PNG из истории или быстрого доступа в буфер обмена как изображение (и файл PNG).
     pub(crate) unsafe fn put_image(&self, path: &std::path::Path) -> bool {
         match img::load_dib(path) {
-            Some(dib) => sys::set_clipboard_dib(self.hwnd, &dib),
+            Some(dib) => {
+                let tmp = dnd::plain_png(path);
+                sys::set_clipboard_dib_with_file(self.hwnd, &dib, tmp.as_deref())
+            }
             None => {
                 log::error(&format!("не удалось прочитать изображение {}", path.display()));
                 false

@@ -24,8 +24,9 @@ pub use appearance::{
     taskbar_light, text_scale_factor, transparency_enabled, ColorRetry, is_theme_setting_str,
 };
 pub use clipboard::{
-    clipboard_excluded, clipboard_has_image, clipboard_has_text, clipboard_image, clipboard_owned_by,
-    clipboard_text, set_clipboard_dib, set_clipboard_text,
+    clipboard_excluded, clipboard_files, clipboard_has_files, clipboard_has_image, clipboard_has_text,
+    clipboard_image, clipboard_owned_by, clipboard_text, set_clipboard_dib, set_clipboard_dib_with_file,
+    set_clipboard_files, set_clipboard_text,
 };
 pub use energy_saver::{energy_saver, set_energy_saver};
 pub use night_light::{night_light, set_night_light};

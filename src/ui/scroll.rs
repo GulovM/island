@@ -44,7 +44,8 @@ impl Ui {
         if !show_bar && self.drag == Some(id) {
             self.drag = None;
         }
-        let hov = self.interactive && view.contains(self.mouse);
+        let mouse_ok = self.mouse_interactive();
+        let hov = mouse_ok && view.contains(self.mouse);
         let wheel = self.wheel;
         let s = self.scrolls.entry(id).or_insert_with(|| Scroll {
             off: 0.0,
@@ -65,7 +66,7 @@ impl Ui {
 
         // Перетаскивание полосы: нажатие в зоне у правого края захватывает мышь раньше
         // содержимого (область рисуется до строк), дальше бегунок следует за курсором.
-        let (interactive, mouse, pressed, down) = (self.interactive, self.mouse, self.pressed, self.down);
+        let (interactive, mouse, pressed, down) = (mouse_ok, self.mouse, self.pressed, self.down);
         let mut dragging = self.drag == Some(id) && down;
         s.hot = dragging;
         if show_bar && s.max > 0.0 {
@@ -128,7 +129,7 @@ impl Ui {
 
     /// Колесо мыши над прямоугольником `r` (в координатах слоя): забирает накопленное значение.
     pub fn wheel_in(&mut self, r: Rect) -> f32 {
-        if self.interactive && r.contains(self.mouse) && self.wheel != 0.0 {
+        if self.mouse_interactive() && r.contains(self.mouse) && self.wheel != 0.0 {
             std::mem::take(&mut self.wheel)
         } else {
             0.0

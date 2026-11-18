@@ -421,7 +421,7 @@ impl Ui {
 
     /// Курсор над прямоугольником (без захвата нажатия, в отличие от `click_area`).
     pub fn hovering(&self, r: Rect) -> bool {
-        self.interactive && r.contains(self.mouse)
+        self.mouse_interactive() && r.contains(self.mouse)
     }
 
     pub fn hover_of(&mut self, id: u32) -> f32 {
@@ -525,7 +525,7 @@ impl Ui {
                 changed = true;
             }
         } else if clicked {
-            let target = if self.interactive && r.contains(self.mouse) {
+            let target = if self.mouse_interactive() && r.contains(self.mouse) {
                 self.mouse.0 >= r.cx()
             } else {
                 !*right

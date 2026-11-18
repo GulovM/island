@@ -75,6 +75,9 @@ pub struct App {
     /// Раскрытый остров удерживается на экране на время съёмки скриншота.
     pub(crate) shot_keep_until: Option<Instant>,
     pub(crate) leave_armed: bool,
+    /// Курсор хотя бы раз зашёл внутрь раскрытого острова: до этого уход мыши его не сворачивает
+    /// (актуально при открытии с горячей клавиши, когда мышь остаётся в другом окне).
+    pub(crate) cursor_entered: bool,
     /// Позиция курсора в момент смены размера острова (настройки, вкладка, правка): пока мышь
     /// не двинулась и не вернулась на остров, он не сворачивается из-за того, что сам съёжился.
     pub(crate) leave_hold: Option<POINT>,
@@ -264,6 +267,7 @@ impl App {
                 shot_until: None,
                 shot_keep_until: None,
                 leave_armed: false,
+                cursor_entered: false,
                 leave_hold: None,
                 trim_pending: true,
                 rgn: (-1, -1, -1, -1),
@@ -897,6 +901,7 @@ mod tests {
                 shot_until: None,
                 shot_keep_until: None,
                 leave_armed: false,
+                cursor_entered: false,
                 leave_hold: None,
                 trim_pending: false,
                 rgn: (0, 0, 0, 0),
@@ -1195,5 +1200,32 @@ mod tests {
         }
         assert!((app.face.alpha() - 1.0).abs() < 1e-3);
         assert!((app.live.mini_alpha() - 0.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_holds_open_clipboard_auto_collapse_and_hotkey() {
+        let mut app = App::for_test(Config::default());
+        app.order = vec![tabs::CLIPBOARD, tabs::TODAY];
+        app.tab = 0;
+        app.expanded = true;
+
+        let clip_search = tabs::id(tabs::CLIPBOARD, 0);
+        app.ui.set_field_text(clip_search, "");
+        app.ui.focus = Some(clip_search);
+
+        // Открыто горячей клавишей при курсоре вне острова: до первого захода мыши не сворачиваем.
+        app.cursor_entered = false;
+        assert!(app.holds_open());
+
+        // После захода мыши на остров фокус автофокусного поиска вкладки «Буфер» не мешает сворачиванию.
+        app.cursor_entered = true;
+        assert!(!app.holds_open());
+
+        // На другой вкладке явный фокус в обычном текстовом поле удерживает остров открытым.
+        app.tab = 1;
+        let other_field = tabs::id(tabs::TODAY, 5);
+        app.ui.set_field_text(other_field, "задача");
+        app.ui.focus = Some(other_field);
+        assert!(app.holds_open());
     }
 }

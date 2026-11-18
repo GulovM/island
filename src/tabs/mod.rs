@@ -54,6 +54,12 @@ pub enum Action {
     Copy(String),
     /// То же для изображения из истории или быстрого доступа (путь к PNG).
     CopyImage(PathBuf),
+    /// Положить файлы (и опционально изображения/текст при мультивыборе) в буфер обмена (CF_HDROP).
+    CopyFiles {
+        files: Vec<String>,
+        images: Vec<PathBuf>,
+        text: Option<String>,
+    },
     /// Открыть файл или ссылку из быстрого доступа и свернуть остров.
     Open(String),
     /// Запись быстрого доступа потащили наружу.
@@ -640,6 +646,11 @@ impl Tabs {
     /// Открывает на вкладке «Буфер» раздел «Быстрый доступ» (горячая клавиша раздела).
     pub fn open_quick(&mut self) {
         self.clip.set_section(clipboard::Section::Quick);
+    }
+
+    /// Открыт ли сейчас раздел «Быстрый доступ» вкладки «Буфер».
+    pub fn in_quick_section(&self) -> bool {
+        self.clip.section() == clipboard::Section::Quick
     }
 
     /// Вкладка ждёт нажатия сочетания для горячей клавиши раздела.

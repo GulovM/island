@@ -413,6 +413,10 @@ impl Clip {
         self.note = None;
     }
 
+    pub fn section(&self) -> Section {
+        self.section
+    }
+
     pub fn set_section(&mut self, s: Section) {
         if s == self.section {
             return;
@@ -832,10 +836,7 @@ impl Clip {
                 Nav::Pin => {}
                 Nav::Copy => {
                     let sel = l.selected_indices(&order);
-                    let items: Vec<&Item> = sel.iter().map(|&n| &l.items[n]).collect();
-                    if let Some(a) = copy_many(sec, &items) {
-                        act.push(a);
-                    }
+                    self.copy_selected(sec, l, &sel, act);
                 }
                 Nav::Delete => {
                     let sel = l.selected_indices(&order);
@@ -996,6 +997,24 @@ impl Clip {
         self.footer(ui, cv, w, h, act, sec, l, &order);
     }
 
+    fn copy_selected(&mut self, sec: Section, l: &List, indices: &[usize], act: &mut Vec<Action>) {
+        if indices.is_empty() {
+            return;
+        }
+        let items: Vec<&Item> = indices
+            .iter()
+            .map(|&n| &l.items[n])
+            .filter(|it| !self.missing(it))
+            .collect();
+        if items.is_empty() {
+            self.note = Some("Файл не найден");
+            return;
+        }
+        if let Some(a) = copy_many(sec, &items) {
+            act.push(a);
+        }
+    }
+
     /// Что делает Enter на записи: в быстром доступе открывает файлы и ссылки.
     /// Недоступный файл не делает ничего.
     fn enter_action(&self, sec: Section, it: &Item) -> Option<Action> {
@@ -1150,12 +1169,7 @@ impl Clip {
                         act.push(a);
                     }
                 }
-                K::Copy => {
-                    let items: Vec<&Item> = indices.iter().map(|&i| &l.items[i]).collect();
-                    if let Some(a) = copy_many(sec, &items) {
-                        act.push(a);
-                    }
-                }
+                K::Copy => self.copy_selected(sec, l, &indices, act),
                 K::Pin => {
                     self.pin_many(l, &indices);
                 }
@@ -1179,9 +1193,16 @@ impl Clip {
 }
 
 fn copy_action(sec: Section, it: &Item) -> Action {
-    match it.image() {
-        Some((file, _, _)) => Action::CopyImage(sec.dir().join(file)),
-        None => Action::Copy(it.path().map_or_else(|| it.text.clone(), str::to_string)),
+    if let Some((file, _, _)) = it.image() {
+        Action::CopyImage(sec.dir().join(file))
+    } else if let Some(p) = it.path() {
+        Action::CopyFiles {
+            files: vec![p.to_string()],
+            images: Vec::new(),
+            text: Some(p.to_string()),
+        }
+    } else {
+        Action::Copy(it.text.clone())
     }
 }
 
@@ -1190,15 +1211,29 @@ fn copy_many(sec: Section, items: &[&Item]) -> Option<Action> {
         [] => None,
         [single] => Some(copy_action(sec, single)),
         many => {
-            let texts: Vec<String> = many
-                .iter()
-                .filter(|it| !it.is_image())
-                .map(|it| it.path().map_or_else(|| it.text.clone(), str::to_string))
-                .collect();
-            if !texts.is_empty() {
-                Some(Action::Copy(texts.join("\n")))
+            let mut files = Vec::new();
+            let mut images = Vec::new();
+            let mut texts = Vec::new();
+            let dir = sec.dir();
+            for &it in many {
+                if let Some((file, _, _)) = it.image() {
+                    images.push(dir.join(file));
+                } else if let Some(p) = it.path() {
+                    files.push(p.to_string());
+                } else {
+                    texts.push(it.text.clone());
+                }
+            }
+            if files.is_empty() && images.is_empty() {
+                (!texts.is_empty()).then(|| Action::Copy(texts.join("\n")))
+            } else if files.is_empty() && images.len() == 1 && texts.is_empty() {
+                Some(Action::CopyImage(images.remove(0)))
             } else {
-                many.first().map(|it| copy_action(sec, it))
+                Some(Action::CopyFiles {
+                    files,
+                    images,
+                    text: (!texts.is_empty()).then(|| texts.join("\n")),
+                })
             }
         }
     }
@@ -1627,5 +1662,49 @@ mod tests {
         assert_eq!(format_file_size(1024), "1.0 КБ");
         assert_eq!(format_file_size(1024 * 1536), "1.5 МБ");
         assert_eq!(format_file_size(1024 * 1024 * 1024 * 2), "2.00 ГБ");
+    }
+
+    #[test]
+    fn copy_action_and_copy_many_emit_expected_actions() {
+        let f_zip = it(r"C:\Temp\archive.zip", 0);
+        let f_bin = it(r"D:\data\file.customext", 0);
+        let img = it(&format!("{IMG_TAG}snap.png:10x10"), 0);
+        let txt = it("plain note", 0);
+        let url = it("https://example.com", 0);
+
+        match copy_action(Section::Quick, &f_zip) {
+            Action::CopyFiles { files, images, text } => {
+                assert_eq!(files, vec![r"C:\Temp\archive.zip"]);
+                assert!(images.is_empty());
+                assert_eq!(text.as_deref(), Some(r"C:\Temp\archive.zip"));
+            }
+            _ => panic!("expected Action::CopyFiles for single file"),
+        }
+        assert!(matches!(copy_action(Section::Quick, &img), Action::CopyImage(p) if p.ends_with("snap.png")));
+        assert!(matches!(copy_action(Section::Quick, &txt), Action::Copy(t) if t == "plain note"));
+        assert!(matches!(copy_action(Section::Quick, &url), Action::Copy(t) if t == "https://example.com"));
+
+        // Multiple files of arbitrary extensions -> Action::CopyFiles
+        match copy_many(Section::Quick, &[&f_zip, &f_bin]).unwrap() {
+            Action::CopyFiles { files, images, text } => {
+                assert_eq!(files, vec![r"C:\Temp\archive.zip", r"D:\data\file.customext"]);
+                assert!(images.is_empty());
+                assert!(text.is_none());
+            }
+            _ => panic!("expected Action::CopyFiles for multiple files"),
+        }
+
+        // Mixed file + image + text -> Action::CopyFiles with all parts
+        match copy_many(Section::Buffer, &[&f_zip, &img, &txt]).unwrap() {
+            Action::CopyFiles { files, images, text } => {
+                assert_eq!(files, vec![r"C:\Temp\archive.zip"]);
+                assert_eq!(images, vec![clip_dir().join("snap.png")]);
+                assert_eq!(text.as_deref(), Some("plain note"));
+            }
+            _ => panic!("expected Action::CopyFiles for mixed selection"),
+        }
+
+        // Multiple texts -> Action::Copy joined by newline
+        assert!(matches!(copy_many(Section::Buffer, &[&txt, &url]), Some(Action::Copy(t)) if t == "plain note\nhttps://example.com"));
     }
 }
