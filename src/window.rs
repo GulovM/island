@@ -324,6 +324,7 @@ impl App {
             self.sync_focus();
         }
         if !expanded {
+            self.shot_keep_until = None;
             crate::state::flush();
             self.trim_pending = true;
             // После сворачивания карточка снова показывает то, что реально играет.
@@ -560,6 +561,10 @@ impl App {
     /// вернулся — отменяем. Вызывается и на каждом кадре, потому что область меняется
     /// (смена вкладки, анимация), а мышь при этом может стоять на месте.
     pub(crate) unsafe fn check_hover(&mut self) {
+        if self.shot_keep_until.is_some_and(|t| Instant::now() < t) {
+            self.disarm_leave();
+            return;
+        }
         if let Some(held) = self.leave_hold {
             let mut p = POINT::default();
             let moved = GetCursorPos(&mut p).is_ok() && (p.x != held.x || p.y != held.y);
@@ -601,6 +606,9 @@ impl App {
 
     pub(crate) unsafe fn on_leave_timer(&mut self) -> bool {
         self.disarm_leave();
+        if self.shot_keep_until.is_some_and(|t| Instant::now() < t) {
+            return false;
+        }
         if self.expanded && self.leave_hold.is_none() && !self.cursor_inside() && !self.ui.holds_pointer() {
             self.set_expanded(false);
             return true;
@@ -659,7 +667,24 @@ impl App {
         Some((ctx.covered, game))
     }
 
-    /// Скриншот: остров сворачивается и скрывается вместе с подложкой, чтобы не попасть в кадр
+    /// Нажата клавиша скриншота: раскрытый остров остаётся видимым (и удерживается на экране
+    /// на время выделения области), а свёрнутый прячется, если включено в настройках.
+    pub(crate) unsafe fn on_shot(&mut self) -> bool {
+        if self.hidden {
+            return false;
+        }
+        if self.expanded {
+            self.disarm_leave();
+            self.shot_keep_until = Some(Instant::now() + std::time::Duration::from_millis(SHOT_HIDE_MS));
+            return false;
+        }
+        if should_hide_on_screenshot(self.cfg.hide_on_screenshot, self.expanded, self.hidden) {
+            self.hide_for_shot();
+        }
+        false
+    }
+
+    /// Скриншот: свёрнутый остров скрывается вместе с подложкой, чтобы не попасть в кадр
     /// и не перекрыть окно выбора области. Через `SHOT_HIDE_MS` он вернётся (`restore_after_shot`).
     pub(crate) unsafe fn hide_for_shot(&mut self) {
         if self.hidden {
@@ -702,6 +727,15 @@ impl App {
 
     /// Возвращает `true`, если нужно перерисовать.
     pub(crate) unsafe fn refresh_environment(&mut self) -> bool {
+        if let Some(t) = self.shot_keep_until {
+            if Instant::now() >= t {
+                if FindWindowW(w!("SnipOverlayRootWindow"), PCWSTR::null()).is_ok() {
+                    self.shot_keep_until = Some(Instant::now() + std::time::Duration::from_millis(300));
+                } else {
+                    self.shot_keep_until = None;
+                }
+            }
+        }
         if self.shot_until.is_some() {
             return self.restore_after_shot();
         }
@@ -709,6 +743,12 @@ impl App {
             return false;
         };
         let mut changed = false;
+        if self.ext_drag && !self.drag_over {
+            let down = GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0 || GetAsyncKeyState(VK_RBUTTON.0 as i32) < 0;
+            if !down {
+                changed |= self.on_ext_drag(false);
+            }
+        }
         // У яркости нет системного события, как у громкости: встроенную панель читаем на каждом опросе.
         if !self.hidden {
             if let Some(level) = crate::bright::get_panel() {
@@ -1018,6 +1058,13 @@ pub(crate) fn should_poll_lang(expanded: bool, hidden: bool, stripped: bool, idl
     !expanded && !hidden && !stripped && (idle_face || timer_active)
 }
 
+/// Определяет, нужно ли прятать остров при нажатии PrtSc / Win+Shift+S.
+/// Параметр `hide_on_screenshot` действует только на свёрнутый остров; раскрытый всегда попадает в снимок.
+#[inline]
+pub(crate) fn should_hide_on_screenshot(hide_cfg: bool, expanded: bool, hidden: bool) -> bool {
+    hide_cfg && !expanded && !hidden
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1126,5 +1173,17 @@ mod tests {
         assert!(is_fullscreen_game(QUNS_D3D, true, true, false, false, "Valve001"));
         assert!(is_fullscreen_game(QUNS_D3D, true, true, false, false, "D3D Window"));
         assert!(is_fullscreen_game(QUNS_D3D, true, true, false, false, "GameMainWnd"));
+    }
+
+    #[test]
+    fn screenshot_hides_only_collapsed_island_when_enabled() {
+        // Раскрытый остров всегда остаётся на скриншоте, даже если hide_on_screenshot = true.
+        assert!(!should_hide_on_screenshot(true, true, false));
+        assert!(!should_hide_on_screenshot(false, true, false));
+        // Свёрнутый остров скрывается только при включённом параметре и если не скрыт игрой.
+        assert!(should_hide_on_screenshot(true, false, false));
+        assert!(!should_hide_on_screenshot(false, false, false));
+        assert!(!should_hide_on_screenshot(true, false, true));
+        assert!(!should_hide_on_screenshot(true, true, true));
     }
 }

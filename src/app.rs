@@ -72,6 +72,8 @@ pub struct App {
     pub(crate) hidden: bool,
     /// Остров спрятан на время скриншота до этого момента.
     pub(crate) shot_until: Option<Instant>,
+    /// Раскрытый остров удерживается на экране на время съёмки скриншота.
+    pub(crate) shot_keep_until: Option<Instant>,
     pub(crate) leave_armed: bool,
     /// Позиция курсора в момент смены размера острова (настройки, вкладка, правка): пока мышь
     /// не двинулась и не вернулась на остров, он не сворачивается из-за того, что сам съёжился.
@@ -108,6 +110,10 @@ pub struct App {
     pub(crate) drop_msg: Option<crate::dragdrop::DropMsg>,
     /// Появление надписи перетаскивания, 0..1.
     pub(crate) drag_a: Spring,
+    /// Идёт внешнее системное перетаскивание (OLE DoDragDrop).
+    pub(crate) ext_drag: bool,
+    /// Перетаскиваемое сейчас наведено непосредственно на окно острова.
+    pub(crate) drag_over: bool,
 
     /// Тулкит и состояние вкладок.
     pub(crate) ui: Ui,
@@ -256,6 +262,7 @@ impl App {
                 covered: false,
                 hidden: false,
                 shot_until: None,
+                shot_keep_until: None,
                 leave_armed: false,
                 leave_hold: None,
                 trim_pending: true,
@@ -276,6 +283,8 @@ impl App {
                 capsule: Spring::unit(0.0, 340.0, 27.0),
                 drop_msg: None,
                 drag_a: Spring::unit(0.0, 260.0, 30.0),
+                ext_drag: false,
+                drag_over: false,
                 ui: Ui::default(),
                 tabs: tabs::Tabs::default(),
                 shown_tab: None,
@@ -886,6 +895,7 @@ mod tests {
                 covered: false,
                 hidden: false,
                 shot_until: None,
+                shot_keep_until: None,
                 leave_armed: false,
                 leave_hold: None,
                 trim_pending: false,
@@ -904,6 +914,8 @@ mod tests {
                 capsule: Spring::unit(0.0, 340.0, 27.0),
                 drop_msg: None,
                 drag_a: Spring::unit(0.0, 260.0, 30.0),
+                ext_drag: false,
+                drag_over: false,
                 ui: Ui::default(),
                 tabs: tabs::Tabs::default(),
                 shown_tab: None,

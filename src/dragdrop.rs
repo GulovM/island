@@ -14,6 +14,8 @@ const RESULT_MS: u32 = 1300;
 /// Что сказано на надписи перетаскивания.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DropMsg {
+    /// Системное перетаскивание началось где-то на экране (ещё не над островом).
+    Hint,
     /// Можно бросать.
     Ready,
     /// «Быстрый доступ» заполнен.
@@ -34,6 +36,7 @@ impl DropMsg {
         use crate::i18n::pick;
         let max = tabs::clipboard::QUICK_MAX;
         match self {
+            DropMsg::Hint => (pick("Добавить в быстрый доступ", "Add to Quick Access").into(), pick("Перетащите на остров", "Drag onto the island").into()),
             DropMsg::Ready => (pick("Быстрый доступ", "Quick Access").into(), pick("Отпустите, чтобы добавить", "Release to add").into()),
             DropMsg::Full => (
                 pick("Быстрый доступ заполнен", "Quick Access is full").into(),
@@ -58,7 +61,7 @@ impl DropMsg {
     /// Значок и его цвет.
     fn glyph(self, accent: D2D1_COLOR_F) -> (&'static str, D2D1_COLOR_F) {
         match self {
-            DropMsg::Ready => (icon::ADD, accent),
+            DropMsg::Hint | DropMsg::Ready => (icon::ADD, accent),
             DropMsg::Added(_) | DropMsg::Existing => (icon::CHECK, ui::status_green()),
             DropMsg::Full | DropMsg::AddedFull(_) | DropMsg::Unsupported => (icon::CLOSE, ui::status_orange()),
         }
@@ -97,11 +100,37 @@ impl App {
         }
     }
 
+    /// Внешнее системное перетаскивание началось или завершилось.
+    pub(crate) unsafe fn on_ext_drag(&mut self, active: bool) -> bool {
+        if active {
+            if self.hidden || dnd::is_self_drag() {
+                return false;
+            }
+            self.ext_drag = true;
+            if !self.drag_over {
+                let full = self.tabs.quick_full();
+                dnd::set_full(full);
+                self.set_drop_msg(Some(if full { DropMsg::Full } else { DropMsg::Hint }));
+                return true;
+            }
+            false
+        } else {
+            self.ext_drag = false;
+            if !self.drag_over && matches!(self.drop_msg, Some(DropMsg::Hint | DropMsg::Ready | DropMsg::Full | DropMsg::Unsupported)) {
+                self.set_drop_msg(None);
+                self.check_hover();
+                return true;
+            }
+            false
+        }
+    }
+
     /// На остров навели перетаскиваемое. `ok` — это можно добавить.
     pub(crate) unsafe fn on_drag_enter(&mut self, ok: bool) -> bool {
         if self.hidden {
             return false;
         }
+        self.drag_over = true;
         let full = self.tabs.quick_full();
         dnd::set_full(full);
         self.set_drop_msg(Some(match (ok, full) {
@@ -114,6 +143,13 @@ impl App {
 
     /// Перетаскиваемое ушло с острова, не будучи брошенным.
     pub(crate) unsafe fn on_drag_leave(&mut self) -> bool {
+        self.drag_over = false;
+        if self.ext_drag && (GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0 || GetAsyncKeyState(VK_RBUTTON.0 as i32) < 0) {
+            let full = self.tabs.quick_full();
+            self.set_drop_msg(Some(if full { DropMsg::Full } else { DropMsg::Hint }));
+            return true;
+        }
+        self.ext_drag = false;
         let shown = self.drop_msg.is_some();
         self.set_drop_msg(None);
         self.check_hover();
@@ -122,6 +158,8 @@ impl App {
 
     /// Брошено на остров: записи идут в «Быстрый доступ».
     pub(crate) unsafe fn on_dropped(&mut self, items: Vec<String>) -> bool {
+        self.drag_over = false;
+        self.ext_drag = false;
         let msg = if items.is_empty() {
             DropMsg::Unsupported
         } else {
@@ -146,6 +184,8 @@ impl App {
         // Кнопка уходит к OLE: ни долгое нажатие, ни перетаскивание внутри острова не должны продолжиться.
         let _ = KillTimer(Some(self.hwnd), LONG_TIMER);
         self.press_pos = None;
+        self.ext_drag = false;
+        self.drag_over = false;
         self.ui.down = false;
         self.ui.pressed = false;
         self.ui.released = false;
@@ -270,8 +310,22 @@ mod tests {
 
     #[test]
     fn messages_have_a_title() {
-        for m in [DropMsg::Ready, DropMsg::Full, DropMsg::Unsupported, DropMsg::Added(2), DropMsg::AddedFull(1), DropMsg::Existing] {
-            assert!(!m.text().0.is_empty(), "{m:?}");
+        let accent = D2D1_COLOR_F { r: 1.0, g: 0.8, b: 0.2, a: 1.0 };
+        for m in [
+            DropMsg::Hint,
+            DropMsg::Ready,
+            DropMsg::Full,
+            DropMsg::Unsupported,
+            DropMsg::Added(2),
+            DropMsg::AddedFull(1),
+            DropMsg::Existing,
+        ] {
+            let (title, sub) = m.text();
+            assert!(!title.is_empty(), "{m:?}");
+            if m == DropMsg::Hint {
+                assert!(!sub.is_empty());
+                assert_eq!(m.glyph(accent).0, icon::ADD);
+            }
         }
         assert!(DropMsg::Full.text().1.contains("30"), "лимит назван числом");
     }

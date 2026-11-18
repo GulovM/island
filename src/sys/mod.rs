@@ -25,7 +25,7 @@ pub use appearance::{
 };
 pub use clipboard::{
     clipboard_excluded, clipboard_has_image, clipboard_has_text, clipboard_image, clipboard_owned_by,
-    clipboard_text, send_paste, set_clipboard_dib, set_clipboard_text,
+    clipboard_text, set_clipboard_dib, set_clipboard_text,
 };
 pub use energy_saver::{energy_saver, set_energy_saver};
 pub use night_light::{night_light, set_night_light};

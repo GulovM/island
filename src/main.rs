@@ -111,6 +111,8 @@ pub(crate) const WTS_SESSION_UNLOCK: usize = 8;
 pub(crate) const WM_RECHECK: u32 = WM_APP + 1;
 /// Нажата клавиша скриншота (из хука клавиатуры).
 pub(crate) const WM_SHOT: u32 = WM_APP + 5;
+/// Началось или завершилось системное перетаскивание (`wParam != 0` — активно).
+pub(crate) const WM_EXT_DRAG: u32 = WM_APP + 6;
 /// Сколько остров остаётся спрятанным после клавиши скриншота.
 pub(crate) const SHOT_HIDE_MS: u64 = 1500;
 /// Сообщение от значка в трее.
@@ -126,9 +128,6 @@ pub(crate) const POLL_TIMER: usize = 5;
 pub(crate) const POLL_MS: u32 = 1000;
 /// Срабатывание таймера на вкладке Today, в том числе при свёрнутом острове.
 pub(crate) const ALARM_TIMER: usize = 6;
-/// Пауза между сворачиванием и эмуляцией Ctrl+V: окну нужно вернуть фокус.
-pub(crate) const PASTE_TIMER: usize = 7;
-pub(crate) const PASTE_DELAY_MS: u32 = 160;
 /// Срок жизни уведомления в свёрнутой форме.
 pub(crate) const TOAST_TIMER: usize = 8;
 /// Идентификатор фокуса ввода, когда клавиатура у острова только ради уведомления о таймере (Esc его закрывает).
@@ -156,7 +155,7 @@ pub(crate) const EVENT_TICK_MS: u32 = 15_000;
 /// Автоскрытие кнопок контекстного меню уведомления через 1,5 с после ухода курсора.
 pub(crate) const NOTIF_MENU_TIMER: usize = 17;
 /// Плашка «Быстрый доступ» на свёрнутом острове при перетаскивании, логические пиксели.
-pub(crate) const DROP_PILL: (f32, f32) = (240.0, 40.0);
+pub(crate) const DROP_PILL: (f32, f32) = (256.0, 40.0);
 pub(crate) const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 pub(crate) const WM_HOTKEY: u32 = 0x0312;
 pub(crate) const HOTKEY_ID: i32 = 1;
@@ -275,6 +274,15 @@ fn run() -> Result<()> {
                 EVENT_SYSTEM_MOVESIZEEND,
                 None,
                 Some(on_win_event),
+                0,
+                0,
+                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+            ),
+            SetWinEventHook(
+                EVENT_SYSTEM_CAPTURESTART,
+                EVENT_SYSTEM_DRAGDROPEND,
+                None,
+                Some(on_drag_win_event),
                 0,
                 0,
                 WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,

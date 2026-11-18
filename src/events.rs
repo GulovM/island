@@ -153,12 +153,7 @@ impl App {
             Ev::Hot(h) => self.on_hot(h),
             Ev::Hotkey(id) if id == QUICK_HOTKEY_ID => self.on_quick_hotkey(),
             Ev::Hotkey(_) => self.on_hotkey(),
-            Ev::Shot => {
-                if self.cfg.hide_on_screenshot {
-                    self.hide_for_shot();
-                }
-                false
-            }
+            Ev::Shot => self.on_shot(),
             Ev::Display => self.reconfigure(),
             Ev::Resume => self.on_resume(),
             Ev::Lock => {
@@ -322,15 +317,11 @@ impl App {
                 self.tabs.notif_menu_timeout()
             }
             Ev::Clip => self.on_clipboard(),
-            Ev::PasteNow => {
-                let _ = KillTimer(Some(self.hwnd), PASTE_TIMER);
-                sys::send_paste();
-                false
-            }
             Ev::DragEnter(ok) => self.on_drag_enter(ok),
             Ev::DragLeave => self.on_drag_leave(),
             Ev::Dropped(items) => self.on_dropped(items),
             Ev::DropTimer => self.on_drop_timer(),
+            Ev::ExtDrag(active) => self.on_ext_drag(active),
         }
     }
 
@@ -515,21 +506,8 @@ impl App {
         for a in std::mem::take(&mut self.tabs.actions) {
             dirty = true;
             match a {
-                tabs::Action::Paste(text) => {
-                    sys::set_clipboard_text(self.hwnd, &text);
-                    self.disarm_leave();
-                    self.set_expanded(false);
-                    SetTimer(Some(self.hwnd), PASTE_TIMER, PASTE_DELAY_MS, None);
-                }
                 tabs::Action::Copy(text) => {
                     sys::set_clipboard_text(self.hwnd, &text);
-                }
-                tabs::Action::PasteImage(path) => {
-                    if self.put_image(&path) {
-                        self.disarm_leave();
-                        self.set_expanded(false);
-                        SetTimer(Some(self.hwnd), PASTE_TIMER, PASTE_DELAY_MS, None);
-                    }
                 }
                 tabs::Action::CopyImage(path) => {
                     self.put_image(&path);

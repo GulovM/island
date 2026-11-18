@@ -55,8 +55,6 @@ pub(crate) enum Ev {
     Bg,
     /// Изменился буфер обмена.
     Clip,
-    /// Пора вставлять текст (Ctrl+V) в окно, где работали.
-    PasteNow,
     /// Громкость (0..1) или «без звука» изменились.
     Volume(f32, bool),
     /// Изменилось питание: сеть/батарея или заряд.
@@ -91,6 +89,8 @@ pub(crate) enum Ev {
     Dropped(Vec<String>),
     /// Итог броска показан достаточно.
     DropTimer,
+    /// Внешнее системное перетаскивание (OLE DoDragDrop) началось или закончилось.
+    ExtDrag(bool),
 }
 
 /// Вкладка ждёт сочетание для горячей клавиши: Alt+клавиша приходит как `WM_SYSKEYDOWN`, и её надо
@@ -119,6 +119,44 @@ pub(crate) unsafe extern "system" fn on_win_event(
 ) {
     let main = MAIN_WND.with(|w| w.get());
     let _ = PostMessageW(Some(main), WM_RECHECK, WPARAM(0), LPARAM(0));
+}
+
+/// Хук системных событий OLE drag-and-drop (`EVENT_SYSTEM_DRAGDROPSTART/END` и захват мыши
+/// окном `CLIPBRDWNDCLASS`, которое создаёт `ole32!DoDragDrop` в чужом процессе).
+pub(crate) unsafe extern "system" fn on_drag_win_event(
+    _hook: HWINEVENTHOOK,
+    event: u32,
+    hwnd: HWND,
+    _id_object: i32,
+    _id_child: i32,
+    _thread: u32,
+    _time: u32,
+) {
+    const CLIPBRD_CLASS: [u16; 15] = [
+        b'C' as u16, b'L' as u16, b'I' as u16, b'P' as u16, b'B' as u16,
+        b'R' as u16, b'D' as u16, b'W' as u16, b'N' as u16, b'D' as u16,
+        b'C' as u16, b'L' as u16, b'A' as u16, b'S' as u16, b'S' as u16,
+    ];
+    let active = match event {
+        EVENT_SYSTEM_DRAGDROPSTART => Some(true),
+        EVENT_SYSTEM_DRAGDROPEND => Some(false),
+        EVENT_SYSTEM_CAPTURESTART | EVENT_SYSTEM_CAPTUREEND if !hwnd.0.is_null() => {
+            let mut buf = [0u16; 32];
+            let n = GetClassNameW(hwnd, &mut buf).max(0) as usize;
+            if n == CLIPBRD_CLASS.len() && buf[..n] == CLIPBRD_CLASS {
+                Some(event == EVENT_SYSTEM_CAPTURESTART)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    if let Some(active) = active {
+        let main = MAIN_WND.with(|w| w.get());
+        if !main.0.is_null() {
+            let _ = PostMessageW(Some(main), WM_EXT_DRAG, WPARAM(active as usize), LPARAM(0));
+        }
+    }
 }
 
 /// Хук клавиатуры: PrtSc и Win+Shift+S будят главное окно, чтобы остров ушёл с экрана до съёмки.
@@ -192,6 +230,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_SHOT => {
             push(Ev::Shot);
+            LRESULT(0)
+        }
+        WM_EXT_DRAG => {
+            push(Ev::ExtDrag(wp.0 != 0));
             LRESULT(0)
         }
         WM_TRAY => {
@@ -292,10 +334,6 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_TIMER if wp.0 == ALARM_TIMER => {
             push(Ev::Alarm);
-            LRESULT(0)
-        }
-        WM_TIMER if wp.0 == PASTE_TIMER => {
-            push(Ev::PasteNow);
             LRESULT(0)
         }
         WM_TIMER if wp.0 == TOAST_TIMER => {

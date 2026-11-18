@@ -7,10 +7,6 @@ use windows::Win32::System::DataExchange::{
     OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY,
-    VK_CONTROL,
-};
 
 use super::wz;
 
@@ -98,26 +94,6 @@ pub fn clipboard_excluded() -> bool {
 /// Владелец буфера обмена — наше окно (мы сами записали текст).
 pub fn clipboard_owned_by(hwnd: HWND) -> bool {
     unsafe { GetClipboardOwner().map(|h| h == hwnd).unwrap_or(false) }
-}
-
-/// Эмулирует Ctrl+V в окне, которое сейчас в фокусе.
-pub fn send_paste() {
-    let key = |vk: VIRTUAL_KEY, up: bool| INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: vk,
-                wScan: 0,
-                dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    };
-    let inputs = [key(VK_CONTROL, false), key(VIRTUAL_KEY(0x56), false), key(VIRTUAL_KEY(0x56), true), key(VK_CONTROL, true)];
-    unsafe {
-        SendInput(&inputs, size_of::<INPUT>() as i32);
-    }
 }
 
 /// В буфере обмена есть Unicode-текст.

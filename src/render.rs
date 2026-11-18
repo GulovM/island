@@ -578,8 +578,10 @@ impl App {
                 layer(prev, content_p * (1.0 - fade), -self.tab_dir * SLIDE * fade, false, ui, tabs);
             }
             layer(self.cur_id(), content_p * fade, self.tab_dir * SLIDE * (1.0 - fade), true, ui, tabs);
-            // Над раскрытым островом тащат файл, ссылку или текст: надпись закрывает содержимое.
-            let drag = self.drag_a.value.clamp(0.0, 1.0) * content_p;
+            // Над раскрытым островом тащат файл, ссылку или текст: надпись закрывает содержимое
+            // только при наведении на сам остров (или при показе итога броска).
+            let show_overlay = self.drag_over || !self.ext_drag;
+            let drag = if show_overlay { self.drag_a.value.clamp(0.0, 1.0) * content_p } else { 0.0 };
             if self.expanded && drag > 0.01 {
                 g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
                 let cv = Canvas { g, alpha: drag, accent };

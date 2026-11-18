@@ -43,6 +43,11 @@ pub fn set_full(full: bool) {
     FULL.store(full, Ordering::Relaxed);
 }
 
+/// Идёт перетаскивание наружу, начатое самим островом.
+pub fn is_self_drag() -> bool {
+    SELF_DRAG.load(Ordering::Relaxed)
+}
+
 /// Включает OLE в главном потоке (STA). Нужно до `register`/`drag_out`.
 pub fn init() -> bool {
     // SAFETY: вызывается один раз из главного потока до создания окон.
@@ -214,6 +219,12 @@ pub enum Out {
     Url(String),
     /// Зашифрованный PNG из хранилища: отдаётся картинкой и временным файлом.
     Image(PathBuf),
+    /// Несколько выбранных записей: файлы, картинки (временные PNG) и/или текст.
+    Multi {
+        files: Vec<String>,
+        images: Vec<PathBuf>,
+        text: Option<String>,
+    },
 }
 
 /// Содержимое HGLOBAL-формата `DROPFILES`: заголовок 20 байт, пути UTF-16 через нуль, двойной нуль.
@@ -392,7 +403,12 @@ fn plain_png(sealed: &Path) -> Option<String> {
         }
     }
     let plain = sys::unseal(&std::fs::read(sealed).ok()?)?;
-    let path = dir.join(format!("island-{}.png", sys::now_secs()));
+    let name = sealed
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| format!("island-{n}"))
+        .unwrap_or_else(|| format!("island-{}.png", sys::now_secs()));
+    let path = dir.join(name);
     std::fs::write(&path, plain).ok()?;
     path.to_str().map(str::to_string)
 }
@@ -408,6 +424,14 @@ pub unsafe fn drag_out(out: Out) -> bool {
         Out::Image(p) => {
             let files = plain_png(&p).into_iter().collect();
             Data { files, text: None, url: None, image: Some(p), url_cf }
+        }
+        Out::Multi { mut files, images, text } => {
+            for p in &images {
+                if let Some(tmp) = plain_png(p) {
+                    files.push(tmp);
+                }
+            }
+            Data { files, text, url: None, image: images.into_iter().next(), url_cf }
         }
     };
     let data: IDataObject = data.into();

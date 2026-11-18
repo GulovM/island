@@ -1194,8 +1194,8 @@ impl Settings {
         y += 13.0;
         param_divider(cv, x, iw, &mut y);
 
-        // По PrtSc и Win+Shift+S остров прячется, чтобы не попасть в кадр; выкл. — виден на скриншотах.
-        cv.text("Прятать остров при скриншоте", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
+        // По PrtSc и Win+Shift+S свёрнутый остров прячется, чтобы не попасть в кадр; раскрытый виден всегда.
+        cv.text("Прятать свёрнутый остров при скриншоте", Rect::new(x, y, iw - 40.0, 20.0), &f.body, txt());
         let mut hide = self.cfg.hide_on_screenshot;
         if ui.switch(cv, id(SETTINGS, N_HIDE_SHOT), Rect::new(lc.right() - 40.0, y + 2.0, 30.0, 16.0), &mut hide, true) {
             self.cfg.hide_on_screenshot = hide;

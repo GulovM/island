@@ -21,6 +21,7 @@ use std::sync::Mutex;
 use crate::dnd::Out;
 use crate::sys;
 use windows::Win32::System::SystemInformation::GetLocalTime;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
 
 use crate::ui::{chips_total_width, icon, Canvas, Nav, Rect, Submit, Ui, bare, card, dim, status_orange, txt};
 
@@ -98,6 +99,7 @@ impl Section {
     }
 }
 
+#[derive(Clone)]
 struct Item {
     text: String,
     ts: u64,
@@ -169,6 +171,10 @@ impl Item {
 struct List {
     items: Vec<Item>,
     selected: Option<String>,
+    /// Дополнительные выбранные записи при Ctrl+клике / Shift+клике.
+    multi: HashSet<String>,
+    /// Опорная запись для диапазонного выделения (Shift+клик).
+    anchor: Option<String>,
     /// 0 — все, 1 — текст, 2 — ссылки, 3 — фото, 4 — файлы.
     filter: usize,
 }
@@ -192,6 +198,91 @@ impl List {
 
     fn position(&self, text: &str) -> Option<usize> {
         self.items.iter().position(|i| i.text == text)
+    }
+
+    fn is_selected(&self, text: &str) -> bool {
+        self.selected.as_deref() == Some(text) || self.multi.contains(text)
+    }
+
+    fn clear_selection(&mut self) {
+        self.selected = None;
+        self.multi.clear();
+        self.anchor = None;
+    }
+
+    fn select_only(&mut self, text: String) {
+        self.multi.clear();
+        self.anchor = Some(text.clone());
+        self.selected = Some(text);
+    }
+
+    fn toggle_select(&mut self, text: String) {
+        if self.is_selected(&text) {
+            self.multi.remove(&text);
+            if self.selected.as_deref() == Some(text.as_str()) {
+                self.selected = self.multi.iter().next().cloned();
+                if let Some(new_sel) = &self.selected {
+                    self.multi.remove(new_sel);
+                }
+            }
+        } else {
+            if let Some(prev) = self.selected.take() {
+                self.multi.insert(prev);
+            }
+            self.anchor = Some(text.clone());
+            self.selected = Some(text);
+        }
+    }
+
+    fn select_range(&mut self, order: &[usize], target_vis_pos: usize, keep_existing: bool) {
+        let Some(&target_idx) = order.get(target_vis_pos) else { return };
+        let anchor_pos = self
+            .anchor
+            .as_deref()
+            .or(self.selected.as_deref())
+            .and_then(|a| order.iter().position(|&idx| self.items[idx].text == a));
+        if let Some(a_pos) = anchor_pos {
+            if !keep_existing {
+                self.multi.clear();
+            } else if let Some(prev) = self.selected.take() {
+                self.multi.insert(prev);
+            }
+            let (lo, hi) = (a_pos.min(target_vis_pos), a_pos.max(target_vis_pos));
+            for &idx in &order[lo..=hi] {
+                self.multi.insert(self.items[idx].text.clone());
+            }
+            let target_text = self.items[target_idx].text.clone();
+            self.multi.remove(&target_text);
+            self.selected = Some(target_text);
+        } else {
+            self.select_only(self.items[target_idx].text.clone());
+        }
+    }
+
+    fn selected_indices(&self, order: &[usize]) -> Vec<usize> {
+        let out: Vec<usize> = order.iter().copied().filter(|&n| self.is_selected(&self.items[n].text)).collect();
+        if out.is_empty() {
+            self.selected.as_deref().and_then(|t| self.position(t)).into_iter().collect()
+        } else {
+            out
+        }
+    }
+
+    fn prune_selection(&mut self) {
+        self.multi.retain(|t| self.items.iter().any(|i| &i.text == t));
+        if let Some(sel) = &self.selected {
+            if !self.items.iter().any(|i| &i.text == sel) {
+                self.selected = self.multi.iter().next().cloned();
+                if let Some(new_sel) = &self.selected {
+                    self.multi.remove(new_sel);
+                }
+            }
+        }
+        if let Some(anc) = &self.anchor {
+            if !self.items.iter().any(|i| &i.text == anc) {
+                self.anchor = self.selected.clone();
+            }
+        }
     }
 }
 
@@ -465,7 +556,9 @@ impl Clip {
         let rep = quick::add_entries(&mut self.quick.items, entries, sys::now_secs());
         if rep.new + rep.existing > 0 {
             quick::save(&self.quick.items);
-            self.quick.selected = self.quick.items.first().map(|i| i.text.clone());
+            if let Some(first) = self.quick.items.first() {
+                self.quick.select_only(first.text.clone());
+            }
             self.recheck_quick();
         }
         rep
@@ -476,35 +569,96 @@ impl Clip {
     }
 
     /// Переносит запись истории в «Быстрый доступ». `false` — не вышло (причина в `note`).
+    #[cfg(test)]
     fn pin(&mut self, l: &mut List, n: usize) -> bool {
-        if !quick::can_pin(&self.quick.items, &l.items[n]) {
-            self.note = Some("Быстрый доступ заполнен — освободите место");
-            return false;
-        }
-        if let Some((file, _, _)) = l.items[n].image() {
-            if !quick::copy_image(file) {
-                self.note = Some("Не удалось сохранить картинку");
-                return false;
+        self.pin_many(l, &[n])
+    }
+
+    /// Переносит выбранные записи истории в «Быстрый доступ». `false` — не вышло (причина в `note`).
+    fn pin_many(&mut self, l: &mut List, indices: &[usize]) -> bool {
+        let mut unique: Vec<usize> = Vec::new();
+        for &n in indices {
+            if n < l.items.len() && !unique.contains(&n) {
+                unique.push(n);
             }
         }
-        let it = l.items.remove(n);
-        it.remove_file(&clip_dir());
-        quick::insert_front(&mut self.quick.items, it, sys::now_secs());
+        if unique.is_empty() {
+            return false;
+        }
+        let now = sys::now_secs();
+        let mut pinned: Vec<usize> = Vec::new();
+        let mut extra = 0usize;
+        let mut failed_note = None;
+        for &n in &unique {
+            let it = &l.items[n];
+            let in_batch = pinned.iter().any(|&p| l.items[p].text == it.text);
+            let in_quick = self.quick.items.iter().any(|q| q.text == it.text);
+            let fits = if in_batch {
+                true
+            } else if extra == 0 {
+                quick::can_pin(&self.quick.items, it)
+            } else {
+                in_quick || self.quick.items.len() + extra < quick::MAX_ITEMS
+            };
+            if !fits {
+                failed_note = Some("Быстрый доступ заполнен — освободите место");
+                break;
+            }
+            if let Some((file, _, _)) = it.image() {
+                if !quick::copy_image(file) {
+                    failed_note = Some("Не удалось сохранить картинку");
+                    break;
+                }
+            }
+            if !in_batch && !in_quick {
+                extra += 1;
+            }
+            pinned.push(n);
+        }
+        if pinned.is_empty() {
+            self.note = failed_note;
+            return false;
+        }
+        // Вставляем в обратном порядке, чтобы верхние элементы списка остались наверху быстрого доступа.
+        for &n in pinned.iter().rev() {
+            quick::insert_front(&mut self.quick.items, l.items[n].clone(), now);
+        }
+        pinned.sort_unstable_by(|a, b| b.cmp(a));
+        let dir = clip_dir();
+        for n in pinned {
+            let it = l.items.remove(n);
+            it.remove_file(&dir);
+        }
         quick::save(&self.quick.items);
         save_buffer(&l.items);
+        l.prune_selection();
         self.recheck_quick();
-        self.note = Some("Закреплено в «Быстром доступе»");
-        true
+        self.note = failed_note.or(Some("Закреплено в «Быстром доступе»"));
+        failed_note.is_none()
     }
 
     fn remove_at(&mut self, sec: Section, l: &mut List, n: usize) {
-        let it = l.items.remove(n);
-        it.remove_file(&sec.dir());
+        self.remove_many(sec, l, &[n]);
+        l.clear_selection();
+    }
+
+    fn remove_many(&mut self, sec: Section, l: &mut List, indices: &[usize]) {
+        let mut to_remove: Vec<usize> = indices.iter().copied().filter(|&n| n < l.items.len()).collect();
+        to_remove.sort_unstable_by(|a, b| b.cmp(a));
+        to_remove.dedup();
+        if to_remove.is_empty() {
+            return;
+        }
+        let dir = sec.dir();
+        for n in to_remove {
+            let it = l.items.remove(n);
+            it.remove_file(&dir);
+        }
         match sec {
             Section::Buffer => save_buffer(&l.items),
             Section::Quick => quick::save(&l.items),
         }
-        l.selected = None;
+        l.prune_selection();
     }
 
     // ---------- Горячая клавиша раздела ----------
@@ -651,13 +805,14 @@ impl Clip {
 
         // Пока ждём сочетание, клавиатура у кнопки горячей клавиши, а не у поиска.
         ui.sticky_focus = Some(if self.recording { id(CLIPBOARD, HOTKEY_ID) } else { fid });
+        l.prune_selection();
         let order = l.visible(&query);
 
-        // Клавиши, пока в поиске фокус: стрелки двигают выбор, Ctrl+P закрепляет, Enter вставляет.
+        // Клавиши, пока в поиске фокус: стрелки двигают выбор, Ctrl+P закрепляет.
         let mut cur = l.selected.as_deref().and_then(|t| order.iter().position(|&n| l.items[n].text == t));
         // Выбор по умолчанию — первая запись: кнопки внизу и превью сразу работают.
         if cur.is_none() && !order.is_empty() {
-            l.selected = Some(l.items[order[0]].text.clone());
+            l.select_only(l.items[order[0]].text.clone());
             cur = Some(0);
         }
         let mut pos = cur;
@@ -667,21 +822,25 @@ impl Clip {
                 Nav::Down => pos = Some(pos.map_or(0, |p| (p + 1).min(order.len().saturating_sub(1)))),
                 Nav::Up => pos = Some(pos.map_or(0, |p| p.saturating_sub(1))),
                 Nav::Pin if !quick_sec => {
-                    if let Some(&n) = pos.and_then(|p| order.get(p)) {
-                        self.pin(l, n);
+                    let sel = l.selected_indices(&order);
+                    if !sel.is_empty() {
+                        self.pin_many(l, &sel);
                         // Порядок списка устарел: перерисуем в следующем кадре.
                         return;
                     }
                 }
                 Nav::Pin => {}
                 Nav::Copy => {
-                    if let Some(&n) = pos.and_then(|p| order.get(p)) {
-                        act.push(copy_action(sec, &l.items[n]));
+                    let sel = l.selected_indices(&order);
+                    let items: Vec<&Item> = sel.iter().map(|&n| &l.items[n]).collect();
+                    if let Some(a) = copy_many(sec, &items) {
+                        act.push(a);
                     }
                 }
                 Nav::Delete => {
-                    if let Some(&n) = pos.and_then(|p| order.get(p)) {
-                        self.remove_at(sec, l, n);
+                    let sel = l.selected_indices(&order);
+                    if !sel.is_empty() {
+                        self.remove_many(sec, l, &sel);
                         return;
                     }
                 }
@@ -689,7 +848,9 @@ impl Clip {
             }
         }
         if pos != cur {
-            l.selected = pos.and_then(|p| order.get(p)).map(|&n| l.items[n].text.clone());
+            if let Some(text) = pos.and_then(|p| order.get(p)).map(|&n| l.items[n].text.clone()) {
+                l.select_only(text);
+            }
         }
         if ui.take_submitted(fid).is_some() {
             let target = l.selected.as_deref().and_then(|t| l.position(t)).or_else(|| order.first().copied());
@@ -724,7 +885,6 @@ impl Clip {
 
         let sid = id(CLIPBOARD, 100 + sec.index() as u32);
         let row_base = 200 + 300 * sec.index() as u32;
-        let selected_pos = l.selected.as_deref().and_then(|t| order.iter().position(|&n| l.items[n].text == t));
         let off = ui.scroll_begin(cv, sid, list, y);
         let mut clicked = None;
         let mut drag_item = None;
@@ -757,7 +917,7 @@ impl Clip {
                 (icon::TEXT_DOC, crate::ios::to_d2d(crate::ios::gray(crate::ios::GrayToken::Gray, dark), 1.0))
             };
             let r = Rect::new(list.x, yy, list.w - 3.0, ROW);
-            let sel = selected_pos == Some(p);
+            let sel = l.is_selected(&it.text);
             let label = it.label();
             let right = if missing {
                 crate::i18n::t("не найден").to_string()
@@ -768,10 +928,10 @@ impl Clip {
             };
             let rid = id(CLIPBOARD, row_base + p as u32);
             if ui.row_compact_tinted(cv, rid, r, g, true, &label, &right, 0.0, sel, !sel, Some(tint)) {
-                clicked = Some(n);
+                clicked = Some((p, n));
             }
-            // Нажатие на строке быстрого доступа и сдвиг мыши — начало перетаскивания наружу.
-            if quick_sec && !missing && !self.drag_fired && ui.is_dragging(rid) {
+            // Нажатие на строке и сдвиг мыши — начало перетаскивания наружу.
+            if !missing && !self.drag_fired && ui.is_dragging(rid) {
                 let m = ui.pointer();
                 match self.drag_from {
                     Some((i, o)) if i == rid => {
@@ -791,12 +951,33 @@ impl Clip {
         if let Some(n) = drag_item {
             self.drag_from = None;
             self.drag_fired = true;
-            l.selected = Some(l.items[n].text.clone());
-            act.push(Action::DragOut(drag_payload(&l.items[n])));
+            if !l.is_selected(&l.items[n].text) {
+                l.select_only(l.items[n].text.clone());
+            }
+            let sel = l.selected_indices(&order);
+            let items: Vec<&Item> = sel
+                .into_iter()
+                .filter(|&idx| !self.missing(&l.items[idx]))
+                .map(|idx| &l.items[idx])
+                .collect();
+            let payload = if items.is_empty() {
+                drag_payload(sec, &l.items[n])
+            } else {
+                drag_payload_many(sec, &items)
+            };
+            act.push(Action::DragOut(payload));
         }
-        if let Some(n) = clicked {
+        if let Some((p, n)) = clicked {
             self.note = None;
-            l.selected = Some(l.items[n].text.clone());
+            let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
+            let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
+            if shift {
+                l.select_range(&order, p, ctrl);
+            } else if ctrl {
+                l.toggle_select(l.items[n].text.clone());
+            } else {
+                l.select_only(l.items[n].text.clone());
+            }
         }
         if order.is_empty() {
             let msg = match (l.items.is_empty(), quick_sec) {
@@ -812,11 +993,11 @@ impl Clip {
             self.remove_at(sec, l, n);
             return;
         }
-        self.footer(ui, cv, w, h, act, sec, l);
+        self.footer(ui, cv, w, h, act, sec, l, &order);
     }
 
-    /// Что делает Enter на записи: в буфере — вставляет в прежнее окно; в быстром доступе файлы и
-    /// ссылки открывает, текст и картинки вставляет. Недоступный файл не делает ничего.
+    /// Что делает Enter на записи: в быстром доступе открывает файлы и ссылки.
+    /// Недоступный файл не делает ничего.
     fn enter_action(&self, sec: Section, it: &Item) -> Option<Action> {
         if sec == Section::Quick {
             if let Some(p) = it.path() {
@@ -826,15 +1007,7 @@ impl Clip {
                 return Some(Action::Open(it.text.trim().to_string()));
             }
         }
-        Some(paste_action(sec, it))
-    }
-
-    /// Подпись клавиши Enter под выбранную запись.
-    fn enter_label(sec: Section, it: Option<&Item>) -> &'static str {
-        match it {
-            Some(i) if sec == Section::Quick && (i.is_file() || i.is_link()) => "Открыть",
-            _ => "Вставить",
-        }
+        None
     }
 
     /// Превью выбранной записи. `Some(n)` — пользователь убрал недоступный файл (индекс записи).
@@ -929,7 +1102,7 @@ impl Clip {
 
     /// Нижняя строка как в макете: клавиши с подписями (кликабельны) и подсказка справа.
     #[allow(clippy::too_many_arguments)]
-    unsafe fn footer(&mut self, ui: &mut Ui, cv: &Canvas, w: f32, h: f32, act: &mut Vec<Action>, sec: Section, l: &mut List) {
+    unsafe fn footer(&mut self, ui: &mut Ui, cv: &Canvas, w: f32, h: f32, act: &mut Vec<Action>, sec: Section, l: &mut List, order: &[usize]) {
         let cy = h - 21.0;
         let sel = l.selected.as_deref().and_then(|t| l.position(t));
         #[derive(Clone, Copy, PartialEq)]
@@ -939,12 +1112,15 @@ impl Clip {
             Pin,
             Delete,
         }
-        let enter = Self::enter_label(sec, sel.map(|i| &l.items[i]));
-        let keys: Vec<(K, &str, &str)> = if sec == Section::Quick {
-            vec![(K::Enter, "↵", enter), (K::Copy, "Ctrl C", "Копировать"), (K::Delete, "Del", "Убрать")]
+        let can_open = sec == Section::Quick && sel.is_some_and(|i| l.items[i].is_file() || l.items[i].is_link());
+        let mut keys: Vec<(K, &str, &str)> = if sec == Section::Quick {
+            vec![(K::Copy, "Ctrl C", "Копировать"), (K::Delete, "Del", "Убрать")]
         } else {
-            vec![(K::Enter, "↵", enter), (K::Copy, "Ctrl C", "Копировать"), (K::Pin, "Ctrl P", "Закрепить"), (K::Delete, "Del", "Удалить")]
+            vec![(K::Copy, "Ctrl C", "Копировать"), (K::Pin, "Ctrl P", "Закрепить"), (K::Delete, "Del", "Удалить")]
         };
+        if can_open {
+            keys.insert(0, (K::Enter, "↵", "Открыть"));
+        }
         let mut x = PAD + 2.0;
         let mut after = None;
         for (k, (key, cap, label)) in keys.iter().enumerate() {
@@ -960,24 +1136,30 @@ impl Clip {
             cv.keycap(x, cy, cap, label);
             x += wdt + 12.0;
             if clicked {
-                if let Some(i) = sel {
+                let sel_indices = l.selected_indices(order);
+                if !sel_indices.is_empty() {
                     self.note = None;
-                    after = Some((*key, i));
+                    after = Some((*key, sel_indices));
                 }
             }
         }
-        if let Some((key, i)) = after {
+        if let Some((key, indices)) = after {
             match key {
                 K::Enter => {
-                    if let Some(a) = self.enter_action(sec, &l.items[i]) {
+                    if let Some(a) = sel.and_then(|i| self.enter_action(sec, &l.items[i])) {
                         act.push(a);
                     }
                 }
-                K::Copy => act.push(copy_action(sec, &l.items[i])),
-                K::Pin => {
-                    self.pin(l, i);
+                K::Copy => {
+                    let items: Vec<&Item> = indices.iter().map(|&i| &l.items[i]).collect();
+                    if let Some(a) = copy_many(sec, &items) {
+                        act.push(a);
+                    }
                 }
-                K::Delete => self.remove_at(sec, l, i),
+                K::Pin => {
+                    self.pin_many(l, &indices);
+                }
+                K::Delete => self.remove_many(sec, l, &indices),
             }
         }
         let hint = match (self.note, sec) {
@@ -990,16 +1172,9 @@ impl Clip {
                 }
             }
             (None, Section::Buffer) if self.paused => "Запись приостановлена (шестерёнка)".to_string(),
-            (None, Section::Buffer) => "↑↓ выбор • Tab фильтр • Enter вставить".to_string(),
+            (None, Section::Buffer) => "↑↓ выбор • Tab фильтр • перетащите в окно".to_string(),
         };
-        cv.text(&hint, Rect::new(w - PAD - 250.0, cy - 7.0, 248.0, 14.0), &cv.g.fonts.small_r, bare());
-    }
-}
-
-fn paste_action(sec: Section, it: &Item) -> Action {
-    match it.image() {
-        Some((file, _, _)) => Action::PasteImage(sec.dir().join(file)),
-        None => Action::Paste(it.path().map_or_else(|| it.text.clone(), str::to_string)),
+        cv.text(&hint, Rect::new(w - PAD - 270.0, cy - 7.0, 268.0, 14.0), &cv.g.fonts.small_r, bare());
     }
 }
 
@@ -1010,10 +1185,29 @@ fn copy_action(sec: Section, it: &Item) -> Action {
     }
 }
 
+fn copy_many(sec: Section, items: &[&Item]) -> Option<Action> {
+    match items {
+        [] => None,
+        [single] => Some(copy_action(sec, single)),
+        many => {
+            let texts: Vec<String> = many
+                .iter()
+                .filter(|it| !it.is_image())
+                .map(|it| it.path().map_or_else(|| it.text.clone(), str::to_string))
+                .collect();
+            if !texts.is_empty() {
+                Some(Action::Copy(texts.join("\n")))
+            } else {
+                many.first().map(|it| copy_action(sec, it))
+            }
+        }
+    }
+}
+
 /// Что отдать, когда запись тянут наружу: файл — файлом, ссылка — ссылкой, картинка — картинкой.
-fn drag_payload(it: &Item) -> Out {
+fn drag_payload(sec: Section, it: &Item) -> Out {
     if let Some((file, _, _)) = it.image() {
-        Out::Image(quick::dir().join(file))
+        Out::Image(sec.dir().join(file))
     } else if let Some(p) = it.path() {
         Out::Files(vec![p.to_string()])
     } else if it.is_link() {
@@ -1021,6 +1215,28 @@ fn drag_payload(it: &Item) -> Out {
     } else {
         Out::Text(it.text.clone())
     }
+}
+
+/// Что отдать при перетаскивании одной или нескольких выбранных записей наружу.
+fn drag_payload_many(sec: Section, items: &[&Item]) -> Out {
+    if items.len() == 1 {
+        return drag_payload(sec, items[0]);
+    }
+    let mut files = Vec::new();
+    let mut images = Vec::new();
+    let mut texts = Vec::new();
+    let dir = sec.dir();
+    for &it in items {
+        if let Some((file, _, _)) = it.image() {
+            images.push(dir.join(file));
+        } else if let Some(p) = it.path() {
+            files.push(p.to_string());
+        } else {
+            texts.push(it.text.clone());
+        }
+    }
+    let text = (!texts.is_empty()).then(|| texts.join("\n"));
+    Out::Multi { files, images, text }
 }
 
 fn chars_label(chars: usize) -> String {
@@ -1253,18 +1469,87 @@ mod tests {
         let text = it("заметка", 0);
         assert!(matches!(c.enter_action(Section::Quick, &file), Some(Action::Open(p)) if p == r"C:\Docs\a.pdf"));
         assert!(matches!(c.enter_action(Section::Quick, &link), Some(Action::Open(u)) if u == "https://example.com"));
-        assert!(matches!(c.enter_action(Section::Quick, &text), Some(Action::Paste(_))));
-        assert!(matches!(c.enter_action(Section::Buffer, &file), Some(Action::Paste(_))), "в буфере Enter вставляет");
+        assert!(c.enter_action(Section::Quick, &text).is_none());
+        assert!(c.enter_action(Section::Buffer, &file).is_none(), "в буфере вставка по Enter убрана");
         c.mark_missing(r"C:\Docs\a.pdf");
         assert!(c.enter_action(Section::Quick, &file).is_none(), "недоступный файл не открывается");
     }
 
     #[test]
     fn quick_drag_payload_by_kind() {
-        assert!(matches!(drag_payload(&it(r"C:\a.txt", 0)), Out::Files(f) if f == [r"C:\a.txt"]));
-        assert!(matches!(drag_payload(&it("https://a.b", 0)), Out::Url(_)));
-        assert!(matches!(drag_payload(&it("просто текст", 0)), Out::Text(_)));
-        assert!(matches!(drag_payload(&it(&format!("{IMG_TAG}x.png:1x1"), 0)), Out::Image(_)));
+        assert!(matches!(drag_payload(Section::Quick, &it(r"C:\a.txt", 0)), Out::Files(f) if f == [r"C:\a.txt"]));
+        assert!(matches!(drag_payload(Section::Quick, &it("https://a.b", 0)), Out::Url(_)));
+        assert!(matches!(drag_payload(Section::Quick, &it("просто текст", 0)), Out::Text(_)));
+        assert!(matches!(drag_payload(Section::Quick, &it(&format!("{IMG_TAG}x.png:1x1"), 0)), Out::Image(p) if p.ends_with("x.png")));
+        assert!(matches!(drag_payload(Section::Buffer, &it(&format!("{IMG_TAG}b.png:2x2"), 0)), Out::Image(p) if p == clip_dir().join("b.png")));
+    }
+
+    #[test]
+    fn multi_selection_ctrl_and_shift_click() {
+        let mut l = List::default();
+        for name in ["a", "b", "c", "d", "e"] {
+            l.items.push(it(name, 1));
+        }
+        let order = l.visible("");
+
+        // Обычный клик выбирает одну запись и ставит её опорой.
+        l.select_only("b".into());
+        assert_eq!(l.selected_indices(&order), vec![1]);
+
+        // Shift+клик вниз выделяет диапазон [1..=3].
+        l.select_range(&order, 3, false);
+        assert_eq!(l.selected_indices(&order), vec![1, 2, 3]);
+
+        // Повторный Shift+клик вверх от той же опоры ("b") выделяет [0..=1].
+        l.select_range(&order, 0, false);
+        assert_eq!(l.selected_indices(&order), vec![0, 1]);
+
+        // Ctrl+клик добавляет "d" к текущему выбору и снимает "a".
+        l.toggle_select("d".into());
+        assert_eq!(l.selected_indices(&order), vec![0, 1, 3]);
+        l.toggle_select("a".into());
+        assert_eq!(l.selected_indices(&order), vec![1, 3]);
+        // Снятие последней выбранной не оставляет пустоты, пока есть остальные.
+        l.toggle_select("d".into());
+        assert_eq!(l.selected_indices(&order), vec![1]);
+        l.toggle_select("b".into());
+        assert!(l.selected_indices(&order).is_empty());
+    }
+
+    #[test]
+    fn multi_drag_and_batch_remove_and_pin() {
+        let mut c = Clip::default();
+        let mut l = List::default();
+        l.items.push(it(r"C:\one.txt", 1));
+        l.items.push(it("hello", 2));
+        l.items.push(it("world", 3));
+        l.items.push(it(&format!("{IMG_TAG}snap.png:10x10"), 4));
+        let order = l.visible("");
+
+        l.select_only(r"C:\one.txt".into());
+        l.toggle_select("hello".into());
+        l.toggle_select("world".into());
+        let sel = l.selected_indices(&order);
+        let refs: Vec<&Item> = sel.iter().map(|&i| &l.items[i]).collect();
+        match drag_payload_many(Section::Buffer, &refs) {
+            Out::Multi { files, images, text } => {
+                assert_eq!(files, vec![r"C:\one.txt"]);
+                assert!(images.is_empty());
+                assert_eq!(text.as_deref(), Some("hello\nworld"));
+            }
+            _ => panic!("expected Out::Multi"),
+        }
+
+        // Закрепление нескольких записей сразу переносит их в быстрый доступ, удаляя из истории.
+        assert!(c.pin_many(&mut l, &[1, 2]));
+        assert_eq!(l.items.len(), 2);
+        assert_eq!(c.quick.items.len(), 2);
+        assert_eq!(c.quick.items[0].text, "hello");
+        assert_eq!(c.quick.items[1].text, "world");
+
+        // Пакетное удаление оставшихся записей.
+        c.remove_many(Section::Buffer, &mut l, &[0, 1]);
+        assert!(l.items.is_empty());
     }
 
     #[test]
