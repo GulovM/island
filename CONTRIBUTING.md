@@ -30,4 +30,12 @@ cargo clippy --all-targets -- -D warnings
 Не копируйте в проект код, графику и другие ресурсы Hitodama и иных приложений — только собственная реализация
 (см. [NOTICE.md](NOTICE.md)).
 
+## Авторское право и форки
+
+Проект принадлежит **GulovM** (`Copyright (c) 2026 GulovM`) и распространяется только для некоммерческого
+использования на условиях [LICENSE](LICENSE) и [NOTICE.md](NOTICE.md). Если вы создаёте форк на базе
+Kite Island, обязательно укажите авторство GulovM и ссылку на оригинальный репозиторий, не используйте
+название «Kite Island» в названии вашего приложения и замените официальные логотипы и иконки
+(`assets/brand/*`, `assets/island.ico`).
+
 Локально то же самое делает `powershell -ExecutionPolicy Bypass -File tools\package.ps1`.

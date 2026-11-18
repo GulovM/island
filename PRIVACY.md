@@ -1,6 +1,6 @@
 # Privacy Policy — Kite Island
 
-Last updated: 2026-11-16
+Last updated: 2026-11-18
 
 Kite Island is a desktop program for Windows 10 and Windows 11 that shows a dynamic island at the top of the screen. It displays quick controls, notifications, calendar, weather, timer, system status and media playback. This policy explains which data the program uses, where it is stored, and how it is shared.
 
@@ -25,7 +25,7 @@ Contact: gulovmuhsin121@gmail.com
 | GitHub | Request for the latest release at `api.github.com/repos/GulovM/island/releases/latest` (IP address, program version, and reading the release `body` changelog notes) | To check for program updates and display "What's new" release notes |
 | Speed test service | Test data transfer | To run the speed test you start yourself |
 
-On your computer, Kite Island also reads the media information (`SMTC` / audio meter) that Windows exposes for the current media session and, if you grant access in Windows, the Windows system notifications (`UserNotificationListener`) so you can view them in the Notification Center and popup capsules. Notification contents, app rules (`notif_rules.txt`) and read state (`notif_read.txt`) stay strictly local on your device and are never sent over the network.
+On your computer, Kite Island also reads the media information (`SMTC` / audio meter) that Windows exposes for the current media session, Windows clipboard entries (text, links, images, and copied file paths via `CF_HDROP`) for the Clipboard tab, and, if you grant access in Windows, the Windows system notifications (`UserNotificationListener`) so you can view them in the Notification Center and popup capsules. Clipboard contents, notification contents, app rules (`notif_rules.txt`) and read state (`notif_read.txt`) stay strictly local on your device and are never sent over the network.
 
 ## 3. How data is used
 
@@ -63,7 +63,7 @@ This policy may change. The date at the top shows the last update. Changes are p
 
 # Политика конфиденциальности — Kite Island (русская версия)
 
-Дата обновления: 2026-11-16
+Дата обновления: 2026-11-18
 
 Kite Island — программа для Windows 10 и Windows 11, которая показывает «остров» (динамическое окно) вверху экрана: быстрые переключатели, уведомления, календарь, погоду, таймер, состояние системы и воспроизведение музыки. Этот документ описывает, какие данные использует программа, где они хранятся и кому передаются.
 
@@ -88,7 +88,7 @@ Kite Island — программа для Windows 10 и Windows 11, котора
 | GitHub | Запрос последней версии программы к `api.github.com/repos/GulovM/island/releases/latest` (IP-адрес, версия программы и чтение поля `body` со списком изменений) | Проверка обновлений и показ раздела «Что нового» |
 | Сервис проверки скорости | Тестовая передача данных | Тест скорости, который вы запускаете сами |
 
-На вашем компьютере Kite Island также читает сведения о воспроизведении, которые Windows отдаёт для текущей медиасессии (`SMTC` и уровень звука для визуализации волн), а при вашем разрешении в Windows — системные уведомления (`UserNotificationListener`) для показа во вкладке уведомлений и всплывающих капсулах. Содержимое уведомлений, правила по приложениям (`notif_rules.txt`) и отметки о прочтении (`notif_read.txt`) остаются исключительно на вашем компьютере и никогда не передаются по сети.
+На вашем компьютере Kite Island также читает сведения о воспроизведении, которые Windows отдаёт для текущей медиасессии (`SMTC` и уровень звука для визуализации волн), локальный буфер обмена Windows (текст, ссылки, изображения и пути к скопированным файлам `CF_HDROP`) для вкладки «Буфер», а при вашем разрешении в Windows — системные уведомления (`UserNotificationListener`) для показа во вкладке уведомлений и всплывающих капсулах. Записи буфера обмена, содержимое уведомлений, правила по приложениям (`notif_rules.txt`) и отметки о прочтении (`notif_read.txt`) остаются исключительно на вашем компьютере и никогда не передаются по сети.
 
 ## 3. Как используются данные
 

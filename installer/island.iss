@@ -55,7 +55,9 @@ english.RemoveData=Also delete Kite Island settings and cache (%APPDATA%\island)
 [Files]
 Source: "..\target\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\README.en.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\NOTICE.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [InstallDelete]
 ; Ярлыки версий, когда программа называлась просто Island: без этого после обновления

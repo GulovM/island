@@ -63,7 +63,9 @@ try {
     New-Item -ItemType Directory -Force $stage | Out-Null
     Copy-Item $exe $stage
     Copy-Item (Join-Path $root "README.md") $stage
+    Copy-Item (Join-Path $root "README.en.md") $stage
     Copy-Item (Join-Path $root "LICENSE") $stage
+    Copy-Item (Join-Path $root "NOTICE.md") $stage
 
     $zip = Join-Path $dist "island-$version-portable.zip"
     if (Test-Path $zip) { Remove-Item -Force $zip }

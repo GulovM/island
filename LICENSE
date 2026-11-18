@@ -1,21 +1,102 @@
-MIT License
+Kite Island Non-Commercial & Brand Protection License
 
-Copyright (c) 2026 GulovM
+Copyright (c) 2026 GulovM. All rights reserved, except as explicitly granted below.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This software and its associated documentation, source code, and assets (the "Software") are made available under the following terms (in English and Russian):
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+================================================================================
+ENGLISH
+================================================================================
 
+1. Permitted Non-Commercial Use, Cloning, and Modification
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+the Software to download, install, run, clone, study, modify, and redistribute
+the Software in source or binary form strictly for personal, educational,
+research, or other non-commercial purposes, subject to all conditions below.
+
+2. No Commercial Use or Sale
+You may NOT sell, license for a fee, rent, lease, sublicense for commercial
+benefit, monetize (including through advertisements, sponsorships, paid
+distributions, or paid tiers/subscriptions), bundle into commercial products or
+services, or otherwise use the Software or any derivative work for any
+commercial purpose without prior written permission from the copyright holder
+(GulovM).
+
+3. Mandatory Attribution for Forks and Derivative Works
+If you create a fork, modified version, or derivative project based on the
+Software (in whole or in part), you MUST:
+  a) Retain this LICENSE file and NOTICE.md intact in all copies and forks;
+  b) Clearly and prominently state in your repository README, documentation,
+     release notes, and application interface / "About" section that your
+     project is based on "Kite Island" by GulovM (https://github.com/GulovM/island).
+
+4. Brand Name, Logo, and Trademark Restriction
+The name "Kite Island" and the official Kite Island logos, marks, and icons
+(including but not limited to assets/brand/logo-light.svg,
+assets/brand/logo-dark.svg, assets/brand/mark.svg, assets/island.ico,
+favicon.svg, and their rendered/derived forms) are the exclusive brand assets
+of GulovM.
+  a) Any fork or derivative application MUST NOT use "Kite Island" as its own
+     application name, product name, executable/package title, or branding,
+     except solely in a factual attribution statement (e.g., "Based on Kite
+     Island by GulovM");
+  b) Any fork or derivative application MUST NOT use, copy, or redistribute the
+     official Kite Island logos, kite emblem, or icons. You must replace all
+     logos and application icons with your own original branding.
+
+5. Disclaimer of Warranty and Limitation of Liability
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+AUTHOR OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM,
+OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+================================================================================
+РУССКИЙ
+================================================================================
+
+1. Разрешённое некоммерческое использование, клонирование и изменение
+Настоящим бесплатно разрешается любому лицу, получившему копию данного
+программного обеспечения и сопутствующих материалов («ПО»), скачивать,
+устанавливать, запускать, клонировать, изучать, изменять и распространять ПО
+в виде исходного кода или исполняемых файлов исключительно в личных, учебных,
+исследовательских и иных некоммерческих целях при соблюдении всех условий ниже.
+
+2. Запрет на коммерческое использование и продажу
+Запрещается продавать ПО или любые производные работы на его основе,
+передавать их за плату, сдавать в аренду, монетизировать (включая рекламу,
+платные версии, подписки, платный доступ и платную дистрибуцию), включать в
+коммерческие продукты или сервисы и иным образом использовать в коммерческих
+целях без предварительного письменного разрешения правообладателя (GulovM).
+
+3. Обязательное указание авторства в форках и производных проектах
+При создании форка, модификации или любого производного приложения на основе
+ПО (полностью или частично) вы ОБЯЗАНЫ:
+  a) Сохранить настоящий файл LICENSE и файл NOTICE.md без удаления во всех
+     копиях и форках;
+  b) Явно и заметно указать в README, документации, описании релизов и
+     интерфейсе / разделе «О программе» вашего проекта, что за основу взято
+     приложение «Kite Island» автора GulovM (https://github.com/GulovM/island).
+
+4. Запрет на использование названия и логотипа
+Название «Kite Island», а также официальные логотипы, знак и иконки Kite Island
+(включая, но не ограничиваясь файлами assets/brand/logo-light.svg,
+assets/brand/logo-dark.svg, assets/brand/mark.svg, assets/island.ico,
+favicon.svg и их производными изображениями) принадлежат исключительно автору
+(GulovM).
+  a) В сторонних форках и производных приложениях ЗАПРЕЩАЕТСЯ использовать
+     название «Kite Island» в названии собственного приложения, продукта,
+     установщика или бренда (допускается только фактическое указание основы:
+     «Основано на Kite Island от GulovM»);
+  b) В сторонних форках и производных приложениях ЗАПРЕЩАЕТСЯ использовать
+     логотипы, знак воздушного змея и иконки Kite Island — их необходимо
+     заменить на собственные оригинальные изображения.
+
+5. Отказ от гарантий и ограничение ответственности
+ПО ПРЕДОСТАВЛЯЕТСЯ «КАК ЕСТЬ» («AS IS»), БЕЗ КАКИХ-ЛИБО ГАРАНТИЙ, ЯВНЫХ ИЛИ
+ПОДРАЗУМЕВАЕМЫХ, ВКЛЮЧАЯ ГАРАНТИИ ТОВАРНОЙ ПРИГОДНОСТИ, ПРИГОДНОСТИ ДЛЯ
+ОПРЕДЕЛЁННОЙ ЦЕЛИ И ОТСУТСТВИЯ НАРУШЕНИЯ ПРАВ. НИ ПРИ КАКИХ ОБСТОЯТЕЛЬСТВАХ
+АВТОР ИЛИ ПРАВООБЛАДАТЕЛИ НЕ НЕСУТ ОТВЕТСТВЕННОСТИ ЗА ЛЮБЫЕ ПРЕТЕНЗИИ, УБЫТКИ
+ИЛИ ИНУЮ ОТВЕТСТВЕННОСТЬ, ВОЗНИКАЮЩУЮ ИЗ ИСПОЛЬЗОВАНИЯ ПО ИЛИ В СВЯЗИ С НИМ.
