@@ -53,8 +53,9 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-family: "Geologica", system-ui, "Segoe UI", sans-serif;
-  font-size: 18px;
+  font-size: clamp(16px, 0.3vw + 15.5px, 19px);
   line-height: 1.55;
+  overflow-wrap: break-word;
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--link); text-underline-offset: .18em; }
@@ -64,32 +65,31 @@ a:hover { text-decoration-thickness: 2px; }
 :root[data-theme="dark"] :focus-visible { outline-color: var(--sky); }
 code { font-family: inherit; font-weight: 600; }
 
-.wrap { max-width: 1160px; margin: 0 auto; padding: 0 28px; }
-@media (max-width: 600px) { .wrap { padding: 0 16px; } body { font-size: 17px; } }
+.wrap { width: 100%; max-width: 1280px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 48px); }
+@media (min-width: 1800px) { .wrap { max-width: 1440px; } }
 
 /* ---------- Шапка ---------- */
-.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 0; }
-.brand { display: inline-flex; color: var(--fg); }
-.brand svg { height: 34px; width: auto; display: block; overflow: visible; }
-.top nav { display: flex; gap: 22px; align-items: center; font-size: 16px; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: clamp(16px, 2vw, 24px) 0; }
+.brand { display: inline-flex; color: var(--fg); flex-shrink: 0; }
+.brand svg { height: clamp(24px, 3vw, 34px); width: auto; display: block; overflow: visible; }
+.top nav { display: flex; gap: clamp(14px, 2vw, 24px); align-items: center; font-size: clamp(14.5px, 1.2vw, 16px); }
 .top nav a { color: var(--fg); text-decoration: none; }
 .top nav a:hover { color: var(--link); }
-@media (max-width: 860px) { .top nav .opt { display: none; } }
-@media (max-width: 600px) { .brand svg { height: 28px; } }
+@media (max-width: 560px) { .top nav .opt { display: none; } }
 
 /* ---------- Первый экран ---------- */
-.hero { padding: 40px 0 72px; }
+.hero { padding: clamp(20px, 3.5vw, 44px) 0 clamp(48px, 6vw, 76px); }
 .hero h1 {
   font-weight: 800;
-  font-size: clamp(40px, 6.4vw, 84px);
-  line-height: .98;
+  font-size: clamp(32px, 6vw, 68px);
+  line-height: 1.0;
   letter-spacing: -.035em;
   margin: 0;
-  max-width: 13ch;
+  max-width: 14ch;
 }
-.lede { max-width: 58ch; margin: 28px 0 0; font-size: clamp(18px, 1.6vw, 21px); color: var(--muted); }
+.lede { max-width: 60ch; margin: clamp(18px, 2.5vw, 28px) 0 0; font-size: clamp(16.5px, 1.3vw, 20px); color: var(--muted); }
 .lede b { color: var(--fg); font-weight: 600; }
-.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; margin-top: 34px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; margin-top: clamp(22px, 3vw, 34px); }
 .btn {
   display: inline-flex; align-items: center; gap: 10px;
   background: var(--cobalt); color: #fff; text-decoration: none;
@@ -101,18 +101,33 @@ code { font-family: inherit; font-weight: 600; }
 .btn:active { transform: scale(.98); }
 .btn svg { width: 20px; height: 20px; flex: none; }
 .meta { font-size: 15px; color: var(--muted); }
+@media (min-width: 1080px) {
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    column-gap: clamp(32px, 4vw, 64px);
+    align-items: center;
+  }
+  .hero h1 { grid-column: 1; grid-row: 1 / 3; font-size: clamp(44px, 3.8vw, 68px); max-width: 13.5ch; }
+  .hero .lede { grid-column: 2; grid-row: 1; margin-top: 0; align-self: end; }
+  .hero .actions { grid-column: 2; grid-row: 2; margin-top: 22px; align-self: start; }
+  .hero .demo { grid-column: 1 / -1; margin-top: clamp(36px, 4vw, 52px); }
+}
+@media (max-width: 480px) {
+  .btn { width: 100%; justify-content: center; padding: 14px 20px; font-size: 17px; }
+}
 
 /* ---------- Демо: экран с островом и змеем ----------
    Внутри .screen 1em = одна логическая точка острова (экран 1100 точек в ширину), поэтому
    размеры перенесены из программы как есть: свёрнутый 180×24, раскрытый 581×267, «ушки» 8,
    нижние углы 14 (в свёрнутом ×0,72). Текстовым узлам — свой font-size в em, коробкам — нет. */
-.demo { margin: 56px 0 0; }
+.demo { margin: clamp(32px, 4.5vw, 56px) 0 0; container-type: inline-size; }
 .screen {
   position: relative;
   aspect-ratio: 16 / 10;
   border-radius: 22px;
   overflow: hidden;
-  container-type: inline-size;
+  font-size: calc((100vw - 32px) / 1100);
   font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   background:
     radial-gradient(60% 30% at 18% 62%, rgba(255,255,255,.55), transparent 70%),
@@ -300,21 +315,37 @@ code { font-family: inherit; font-weight: 600; }
 .screen.touched .hint { opacity: 0; }
 .hint .tch { display: none; }
 @media (hover: none) { .hint .ms { display: none; } .hint .tch { display: inline; } }
-@media (max-width: 600px) { .screen { border-radius: 14px; } .hint span { font-size: 22em; } .hint { top: 34em; } }
+@media (max-width: 860px) {
+  .screen { aspect-ratio: 16 / 11; border-radius: 18px; }
+  .island { font-size: 1.3em; }
+  .hot { width: 780em; height: 78em; }
+  .hint { top: 44em; padding: 5em 13em; }
+  .hint span { font-size: 15em; }
+}
+@media (max-width: 600px) {
+  .screen { aspect-ratio: 4 / 3; border-radius: 14px; }
+  .island { font-size: 1.76em; }
+  .hot { width: 1040em; height: 96em; }
+  .hint { top: 56em; padding: 6em 16em; }
+  .hint span { font-size: 20em; }
+}
+@media (max-width: 420px) {
+  .screen { aspect-ratio: 5 / 4; border-radius: 12px; }
+  .island { font-size: 1.82em; }
+}
 .demo figcaption { margin-top: 14px; font-size: 15px; color: var(--muted); max-width: 70ch; }
 
 /* ---------- Секции ---------- */
-section { padding: 88px 0; border-top: 1px solid var(--line); }
-h2 { font-weight: 800; font-size: clamp(32px, 4vw, 52px); line-height: 1.04; letter-spacing: -.03em; margin: 0 0 18px; max-width: 18ch; }
+section { padding: clamp(52px, 7vw, 96px) 0; border-top: 1px solid var(--line); }
+h2 { font-weight: 800; font-size: clamp(26px, 4vw, 52px); line-height: 1.04; letter-spacing: -.03em; margin: 0 0 18px; max-width: 18ch; }
 .intro { max-width: 60ch; color: var(--muted); margin: 0; }
-@media (max-width: 600px) { section { padding: 64px 0; } }
 
 /* Название: две половины змея */
-.name { display: grid; grid-template-columns: 1fr 1fr; margin-top: 48px; border-radius: 26px; overflow: hidden; }
-.name > div { padding: 40px 40px 44px; }
+.name { display: grid; grid-template-columns: 1fr 1fr; margin-top: clamp(28px, 4vw, 48px); border-radius: clamp(18px, 2.2vw, 26px); overflow: hidden; }
+.name > div { padding: clamp(24px, 3.5vw, 44px); }
 .name .k { background: var(--cobalt); color: #fff; }
 .name .i { background: var(--sky); color: var(--ink); }
-.name h3 { margin: 0 0 14px; font-size: clamp(30px, 3.4vw, 44px); font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+.name h3 { margin: 0 0 14px; font-size: clamp(24px, 3.4vw, 44px); font-weight: 800; letter-spacing: -.03em; line-height: 1; }
 .name h3 span { font-weight: 400; opacity: .8; }
 .name p { margin: 0; max-width: 46ch; }
 .name p + p { margin-top: 12px; }
@@ -322,7 +353,7 @@ h2 { font-weight: 800; font-size: clamp(32px, 4vw, 52px); line-height: 1.04; let
 .mark-note { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; margin-top: 40px; max-width: 760px; }
 .mark-note svg { width: 92px; height: 92px; }
 .mark-note p { margin: 0; color: var(--muted); }
-@media (max-width: 600px) { .mark-note { grid-template-columns: 1fr; gap: 16px; } }
+@media (max-width: 600px) { .mark-note { grid-template-columns: 1fr; gap: 16px; } .mark-note svg { width: 68px; height: 68px; } }
 
 /* Вкладки — как ряд вкладок острова */
 .tabs { margin-top: 44px; }
@@ -338,23 +369,27 @@ h2 { font-weight: 800; font-size: clamp(32px, 4vw, 52px); line-height: 1.04; let
 .tablist button:hover { color: #fff; }
 .tablist button[aria-selected="true"] { background: var(--cobalt); color: #fff; }
 .tablist button:focus-visible { outline: 3px solid var(--sky); outline-offset: -3px; }
+@media (max-width: 1020px) { .tablist { flex-wrap: wrap; border-radius: 20px; } }
+@media (max-width: 600px) {
+  .tablist { width: 100%; border-radius: 16px; }
+  .tablist button { flex: 1 1 auto; text-align: center; padding: 8px 12px; font-size: 14.5px; border-radius: 12px; }
+}
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tablist { background: #1A2659; } }
 :root[data-theme="dark"] .tablist { background: #1A2659; }
-.tabpanel { margin-top: 30px; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 48px; align-items: start; min-height: 240px; }
-.tabpanel h3 { margin: 0; font-size: clamp(26px, 2.6vw, 34px); font-weight: 800; letter-spacing: -.025em; line-height: 1.1; }
+.tabpanel { margin-top: 30px; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(24px, 4vw, 56px); align-items: start; min-height: 240px; }
+.tabpanel h3 { margin: 0; font-size: clamp(22px, 2.6vw, 34px); font-weight: 800; letter-spacing: -.025em; line-height: 1.1; }
 .tabpanel p { margin: 12px 0 0; color: var(--muted); max-width: 44ch; }
 .tabpanel ul { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
 .tabpanel li { padding: 14px 0; border-bottom: 1px solid var(--line); }
-@media (max-width: 760px) { .tabpanel { grid-template-columns: 1fr; gap: 20px; } }
+@media (max-width: 760px) { .tabpanel { grid-template-columns: 1fr; gap: 20px; min-height: 0; } }
 
 /* Лёгкость */
-.light-facts { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 48px; border-top: 2px solid var(--fg); }
-.light-facts div { padding: 22px 24px 0 0; }
-.light-facts strong { display: block; font-size: clamp(34px, 4vw, 54px); font-weight: 800; letter-spacing: -.04em; line-height: 1; }
+.light-facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px 24px; margin-top: 48px; padding-top: 22px; border-top: 2px solid var(--fg); }
+.light-facts strong { display: block; font-size: clamp(24px, 4vw, 54px); font-weight: 800; letter-spacing: -.04em; line-height: 1; white-space: nowrap; }
 .light-facts span { display: block; margin-top: 10px; color: var(--muted); font-size: 16px; max-width: 22ch; }
-@media (max-width: 860px) { .light-facts { grid-template-columns: 1fr 1fr; row-gap: 30px; } }
+@media (max-width: 860px) { .light-facts { grid-template-columns: 1fr 1fr; } }
 
-.more { display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px 48px; margin-top: 64px; }
+.more { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(24px, 3.5vw, 36px) clamp(24px, 4vw, 48px); margin-top: clamp(40px, 5vw, 64px); }
 .more h3 { margin: 0 0 6px; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
 .more p { margin: 0; color: var(--muted); font-size: 16.5px; }
 @media (max-width: 860px) { .more { grid-template-columns: 1fr 1fr; } }
@@ -369,7 +404,12 @@ h2 { font-weight: 800; font-size: clamp(32px, 4vw, 52px); line-height: 1.04; let
 }
 .steps h3 { margin: 0 0 8px; font-size: 22px; font-weight: 600; letter-spacing: -.015em; }
 .steps p { margin: 0; color: var(--muted); font-size: 16.5px; }
-@media (max-width: 760px) { .steps { grid-template-columns: 1fr; gap: 28px; } }
+@media (max-width: 860px) {
+  .steps { grid-template-columns: 1fr; gap: 28px; }
+  .steps li { display: grid; grid-template-columns: 40px 1fr; column-gap: 16px; align-items: start; }
+  .steps li::before { width: 40px; height: 40px; font-size: 18px; grid-row: 1 / 3; margin-bottom: 0; }
+  .steps h3, .steps p { grid-column: 2; }
+}
 .req { margin-top: 40px; color: var(--muted); font-size: 16px; }
 
 footer { border-top: 1px solid var(--line); padding: 48px 0 64px; font-size: 15.5px; color: var(--muted); }
@@ -422,7 +462,7 @@ footer nav { display: flex; flex-wrap: wrap; gap: 10px 22px; }
 
     <figure class="demo">
       <div class="screen" id="screen">
-        <svg class="sky-art" viewBox="0 0 1000 625" aria-hidden="true">
+        <svg class="sky-art" viewBox="0 0 1000 625" preserveAspectRatio="xMaxYMax meet" aria-hidden="true">
           <path class="string" d="M790 262 C 830 380, 760 470, 958 610"/>
           <g class="kite-fly">
             <use href="#mark" x="735" y="150" width="110" height="112"/>
