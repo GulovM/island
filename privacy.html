@@ -61,7 +61,7 @@
   <p class="lang-switch">English · <a href="#ru">Русская версия</a></p>
 
   <h1>Privacy Policy — Kite Island</h1>
-  <p class="meta">Last updated: 2026-11-14</p>
+  <p class="meta">Last updated: 2026-11-18</p>
 
   <p>Kite Island is a desktop program for Windows 10 and Windows 11 that shows a dynamic island at the top of the screen. It shows quick controls, notifications, calendar, weather, timer, system status and media playback. This policy explains which data the program uses, where it is stored, and how it is shared.</p>
 
@@ -88,7 +88,7 @@
       <tr><td>Speed test service</td><td>Test data transfer</td><td>To run the speed test you start yourself</td></tr>
     </tbody>
   </table>
-  <p>On your computer, Kite Island also reads the media information (<code>SMTC</code> / audio meter) that Windows exposes for the current media session and, if you grant access in Windows, Windows system notifications (<code>UserNotificationListener</code>) so you can view them in the Notification Center and popup capsules. Notification contents, app rules (<code>notif_rules.txt</code>) and read state (<code>notif_read.txt</code>) stay strictly local on your device and are never sent over the network.</p>
+  <p>On your computer, Kite Island also reads the media information (<code>SMTC</code> / audio meter) that Windows exposes for the current media session, Windows clipboard entries (text, links, images, and copied file paths via <code>CF_HDROP</code>) for the Clipboard tab, and, if you grant access in Windows, Windows system notifications (<code>UserNotificationListener</code>) so you can view them in the Notification Center and popup capsules. Clipboard contents, notification contents, app rules (<code>notif_rules.txt</code>) and read state (<code>notif_read.txt</code>) stay strictly local on your device and are never sent over the network.</p>
 
   <h2>3. How data is used</h2>
   <ul>
@@ -102,7 +102,7 @@
   <ul>
     <li>Data is stored only on your computer, in the Kite Island data folder (<code>%APPDATA%\island</code>) under your Windows user profile.</li>
     <li>OAuth tokens and Apple app-specific passwords (<code>%APPDATA%\island\cal_accounts.bin</code>), clipboard history/Quick Access (<code>clipboard.txt</code>, <code>quick.txt</code>), and calendar links and event caches (<code>%APPDATA%\island\calendar_cache_*.ics</code>) are encrypted with Windows DPAPI (<code>CryptProtectData</code>). A protected file cannot be opened by another Windows account or on another computer.</li>
-    <li>Calendar event caches and pending sync items (<code>events.txt</code>, <code>events_sync.txt</code>), as well as notification preferences (<code>notif_rules.txt</code>, <code>notif_read.txt</code>) and app icon caches, are stored locally so features work offline.</li>
+    <li>Calendar event caches and pending sync items (<code>events.txt</code>, <code>events_sync.txt</code>), as well as notification preferences (<code>notif_rules.txt</code>, <code>notif_read.txt</code>), Windows banner suppression backup (<code>win_banners_backup.txt</code>), and app icon caches, are stored locally so features work offline and recover cleanly.</li>
     <li>The developer does not receive copies of this data.</li>
   </ul>
 
@@ -126,7 +126,7 @@
 
   <div id="ru">
   <h1>Политика конфиденциальности — Kite Island</h1>
-  <p class="meta">Дата обновления: 2026-11-14</p>
+  <p class="meta">Дата обновления: 2026-11-18</p>
 
   <p>Kite Island — программа для Windows 10 и Windows 11, которая показывает «остров» (динамическое окно) вверху экрана: быстрые переключатели, уведомления, календарь, погоду, таймер, состояние системы и воспроизведение музыки. Этот документ описывает, какие данные использует программа, где они хранятся и кому передаются.</p>
 
@@ -153,7 +153,7 @@
       <tr><td>Сервис проверки скорости</td><td>Тестовая передача данных</td><td>Тест скорости, который вы запускаете сами</td></tr>
     </tbody>
   </table>
-  <p>На вашем компьютере Kite Island также читает сведения о воспроизведении, которые Windows отдаёт для текущей медиасессии (<code>SMTC</code> и уровень звука для визуализации волн), а при вашем разрешении в Windows — системные уведомления (<code>UserNotificationListener</code>) для показа во вкладке уведомлений и всплывающих капсулах. Содержимое уведомлений, правила по приложениям (<code>notif_rules.txt</code>) и отметки о прочтении (<code>notif_read.txt</code>) остаются исключительно на вашем компьютере и никогда не передаются по сети.</p>
+  <p>На вашем компьютере Kite Island также читает сведения о воспроизведении, которые Windows отдаёт для текущей медиасессии (<code>SMTC</code> и уровень звука для визуализации волн), локальный буфер обмена Windows (текст, ссылки, изображения и пути к скопированным файлам <code>CF_HDROP</code>) для вкладки «Буфер», а при вашем разрешении в Windows — системные уведомления (<code>UserNotificationListener</code>) для показа во вкладке уведомлений и всплывающих капсулах. Записи буфера обмена, содержимое уведомлений, правила по приложениям (<code>notif_rules.txt</code>) и отметки о прочтении (<code>notif_read.txt</code>) остаются исключительно на вашем компьютере и никогда не передаются по сети.</p>
 
   <h2>3. Как используются данные</h2>
   <ul>
@@ -167,7 +167,7 @@
   <ul>
     <li>Данные хранятся только на вашем компьютере, в папке данных Kite Island (<code>%APPDATA%\island</code>) в профиле пользователя Windows.</li>
     <li>Токены OAuth и пароли приложений Apple (<code>%APPDATA%\island\cal_accounts.bin</code>), история буфера и «Быстрый доступ» (<code>clipboard.txt</code>, <code>quick.txt</code>), а также ссылки на календари и кэш событий (<code>%APPDATA%\island\calendar_cache_*.ics</code>) шифруются через Windows DPAPI (<code>CryptProtectData</code>). Защищённый файл не открывается другой учётной записью Windows и на другом компьютере.</li>
-    <li>Кэш событий, очередь отложенной записи в календарь (<code>events.txt</code>, <code>events_sync.txt</code>), правила уведомлений (<code>notif_rules.txt</code>, <code>notif_read.txt</code>) и кэш иконок приложений также хранятся локально на вашем компьютере.</li>
+    <li>Кэш событий, очередь отложенной записи в календарь (<code>events.txt</code>, <code>events_sync.txt</code>), правила уведомлений (<code>notif_rules.txt</code>, <code>notif_read.txt</code>), резервная копия настроек системных баннеров Windows (<code>win_banners_backup.txt</code>) и кэш иконок приложений также хранятся локально на вашем компьютере.</li>
     <li>Разработчик не получает копий этих данных.</li>
   </ul>
 
