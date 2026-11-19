@@ -1243,8 +1243,7 @@ impl Settings {
             crate::state::set_dnd_restore_popups(false);
             self.changed = true;
         }
-        let show_reboot = (self.cfg.popup_notifications || crate::state::dnd_restore_popups())
-            && crate::sys::notif_banners_need_reboot();
+        let show_reboot = crate::sys::notif_banners_need_reboot();
         let show_dnd = crate::bg::snapshot().dnd_active;
         if show_reboot || show_dnd {
             y += 18.0;

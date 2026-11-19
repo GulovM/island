@@ -7,9 +7,11 @@
 //! Исходные значения сохраняются в `%APPDATA%\island\win_banners_backup.txt` и возвращаются
 //! при ручном выключении опции.
 //!
-//! Пока Windows не перезагружена после записи `ShowBanner = 0`, в RAM-ветке реестра
-//! (`REG_OPTION_VOLATILE`) держится маркер `HKCU\Software\KiteIslandBannerPending`: он переживает
-//! перезапуск острова в текущем сеансе, но автоматически пропадает после перезагрузки ОС.
+//! Исходное состояние опции в текущем сеансе Windows хранится в RAM-ветке реестра
+//! (`REG_OPTION_VOLATILE`) в `HKCU\Software\KiteIslandBannerPending\BootState`: ключ переживает
+//! перезапуск острова в текущем сеансе, но автоматически пропадает после перезагрузки или
+//! завершения работы ОС. Подсказка «Требуется перезагрузка» показывается только пока текущее
+//! состояние отличается от исходного для этого сеанса.
 
 use std::collections::HashSet;
 use std::ffi::c_void;
@@ -20,15 +22,16 @@ use std::sync::Mutex;
 use windows::core::{w, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS};
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteKeyW, RegEnumKeyExW, RegGetValueW,
-    RegOpenKeyExW, RegSetKeyValueW, HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, KEY_WRITE,
-    REG_DWORD, REG_OPTION_VOLATILE, RRF_RT_REG_DWORD,
+    RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegEnumKeyExW, RegGetValueW, RegOpenKeyExW,
+    RegSetKeyValueW, HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, KEY_WRITE, REG_DWORD,
+    REG_OPTION_VOLATILE, RRF_RT_REG_DWORD,
 };
 
 use super::{data_dir, wz};
 
 const SETTINGS_ROOT: &str = r"Software\Microsoft\Windows\CurrentVersion\Notifications\Settings";
 const REBOOT_MARKER_KEY: PCWSTR = w!("Software\\KiteIslandBannerPending");
+const BOOT_STATE_VALUE: PCWSTR = w!("BootState");
 const SHOW_BANNER: PCWSTR = w!("ShowBanner");
 const ENABLED: PCWSTR = w!("Enabled");
 const BACKUP_FILE: &str = "win_banners_backup.txt";
@@ -40,6 +43,7 @@ static STATE: Mutex<Option<BannerState>> = Mutex::new(None);
 #[derive(Default)]
 struct BannerState {
     active: bool,
+    boot_enabled: Option<bool>,
     backup_loaded: bool,
     backup: Vec<(String, Option<u32>)>,
     processed: HashSet<String>,
@@ -264,19 +268,27 @@ fn enum_notification_subkeys() -> Vec<String> {
     out
 }
 
-fn volatile_marker_exists() -> bool {
-    unsafe {
-        let mut hk = HKEY::default();
-        if RegOpenKeyExW(HKEY_CURRENT_USER, REBOOT_MARKER_KEY, None, KEY_READ, &mut hk) == ERROR_SUCCESS {
-            let _guard = KeyGuard(hk);
-            true
-        } else {
-            false
-        }
-    }
+fn read_boot_state() -> Option<bool> {
+    let mut val = 0u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    // SAFETY: чтение одного DWORD из volatile-ключа в HKCU.
+    let err = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            REBOOT_MARKER_KEY,
+            BOOT_STATE_VALUE,
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut val as *mut u32 as *mut c_void),
+            Some(&mut size),
+        )
+    };
+    (err == ERROR_SUCCESS).then_some(val != 0)
 }
 
-fn set_volatile_marker() {
+fn write_boot_state(enabled: bool) {
+    let val = u32::from(enabled);
+    // SAFETY: создаём volatile-ключ в HKCU и пишем один DWORD; ключ живёт до перезагрузки/выключения ОС.
     unsafe {
         let mut hk = HKEY::default();
         let err = RegCreateKeyExW(
@@ -292,16 +304,20 @@ fn set_volatile_marker() {
         );
         if err == ERROR_SUCCESS {
             let _guard = KeyGuard(hk);
-            REBOOT_PENDING.store(true, Ordering::Relaxed);
+            let _ = RegSetKeyValueW(
+                hk,
+                PCWSTR::null(),
+                BOOT_STATE_VALUE,
+                REG_DWORD.0,
+                Some(&val as *const u32 as *const c_void),
+                std::mem::size_of::<u32>() as u32,
+            );
         }
     }
 }
 
-fn clear_volatile_marker() {
-    unsafe {
-        let _ = RegDeleteKeyW(HKEY_CURRENT_USER, REBOOT_MARKER_KEY);
-    }
-    REBOOT_PENDING.store(false, Ordering::Relaxed);
+fn needs_reboot_for(boot_enabled: bool, current_enabled: bool) -> bool {
+    current_enabled != boot_enabled
 }
 
 fn apply_app_locked(st: &mut BannerState, app_id: &str, backup_dirty: &mut bool) -> bool {
@@ -370,22 +386,25 @@ fn restore_all_locked(st: &mut BannerState) {
         }
     }
     let _ = std::fs::remove_file(backup_path());
-    clear_volatile_marker();
 }
 
-/// Инициализация на старте приложения: читает маркер перезагрузки и синхронизирует `ShowBanner`.
+/// Инициализация на старте приложения: фиксирует исходное состояние сеанса и синхронизирует `ShowBanner`.
 pub fn init_notif_banners(effective_enabled: bool) {
-    REBOOT_PENDING.store(volatile_marker_exists(), Ordering::Relaxed);
+    let boot = match read_boot_state() {
+        Some(v) => v,
+        None => {
+            write_boot_state(effective_enabled);
+            effective_enabled
+        }
+    };
+    REBOOT_PENDING.store(needs_reboot_for(boot, effective_enabled), Ordering::Relaxed);
     let Ok(mut guard) = STATE.lock() else { return };
     let st = guard.get_or_insert_with(BannerState::default);
+    st.boot_enabled = Some(boot);
     if effective_enabled {
-        if enable_all_locked(st) {
-            set_volatile_marker();
-        }
+        let _ = enable_all_locked(st);
     } else if backup_path().exists() {
         restore_all_locked(st);
-    } else {
-        clear_volatile_marker();
     }
 }
 
@@ -393,13 +412,18 @@ pub fn init_notif_banners(effective_enabled: bool) {
 pub fn set_notif_banners_suppressed(enable: bool) {
     let Ok(mut guard) = STATE.lock() else { return };
     let st = guard.get_or_insert_with(BannerState::default);
+    let boot = *st.boot_enabled.get_or_insert_with(|| {
+        read_boot_state().unwrap_or_else(|| {
+            write_boot_state(!enable);
+            !enable
+        })
+    });
     if enable {
-        if enable_all_locked(st) {
-            set_volatile_marker();
-        }
+        let _ = enable_all_locked(st);
     } else {
         restore_all_locked(st);
     }
+    REBOOT_PENDING.store(needs_reboot_for(boot, enable), Ordering::Relaxed);
 }
 
 /// Для нового `app_id`, появившегося в `UserNotificationListener`: сохраняет бэкап и ставит `ShowBanner = 0`.
@@ -470,5 +494,15 @@ mod tests {
         assert!(!is_valid_app_id("C:\\Program Files\\App.exe"));
         assert!(!is_valid_app_id("foo/bar"));
         assert!(!is_valid_app_id("foo\0bar"));
+    }
+
+    #[test]
+    fn reboot_required_only_when_differs_from_boot_state() {
+        // Состояние совпадает с состоянием при старте сеанса — перезагрузка не требуется.
+        assert!(!needs_reboot_for(false, false));
+        assert!(!needs_reboot_for(true, true));
+        // Изменили в любую сторону — требуется перезагрузка; вернули обратно — снова не требуется.
+        assert!(needs_reboot_for(false, true));
+        assert!(needs_reboot_for(true, false));
     }
 }
