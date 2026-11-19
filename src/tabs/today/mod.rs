@@ -28,6 +28,11 @@ use super::layout::{sz, Size, Spec, TabSpec};
 use super::{id, TODAY};
 use calendar::MonthCache;
 pub use events::Notice;
+
+/// Идентификатор поля ввода задач (черновик сохраняется при закрытии острова).
+pub(crate) fn todo_field_id() -> u32 {
+    id(TODAY, todo::ID_FIELD)
+}
 use todo::{RowAnim, TodoDrag};
 
 // ID самой вкладки: карточка часов и стрелки смены циферблата.
@@ -264,7 +269,6 @@ impl Today {
         self.apple_form_open = false;
         self.cal_last_overlay = false;
         self.edit = None;
-        self.todo_adding = false;
         self.sync()
     }
 
@@ -279,7 +283,6 @@ impl Today {
         self.cal_last_overlay = false;
         self.ev_form = None;
         self.edit = None;
-        self.todo_adding = false;
         self.clock_pick = None;
     }
 

@@ -320,6 +320,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             }
             LRESULT(0)
         }
+        WM_KILLFOCUS => {
+            push(Ev::Deactivated);
+            LRESULT(0)
+        }
         WM_TIMER if wp.0 == CARET_TIMER => {
             push(Ev::Caret);
             LRESULT(0)

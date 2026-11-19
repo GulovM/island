@@ -14,7 +14,7 @@ use crate::ui::{
 const MAX_TODO: usize = 100;
 
 // ID задач на вкладке: поле ввода и кнопки, прокрутка обеих колонок и по `MAX_TODO` на строки, удаление, правку и важность.
-const ID_FIELD: u32 = 30;
+pub(super) const ID_FIELD: u32 = 30;
 const ID_ADD: u32 = 31;
 const ID_CANCEL: u32 = 32;
 const ID_SORT: u32 = 33;
@@ -658,6 +658,23 @@ impl Today {
         (clicked && !prio_clicked && !edit_clicked && !del_clicked, del_clicked, edit_clicked, prio_clicked)
     }
 
+    /// Закрывает поле ввода при потере фокуса, если оно пустое или шла правка существующей задачи.
+    /// Недобавленный черновик новой задачи сохраняется при сворачивании острова и уходе фокуса.
+    fn sync_field_blur(&mut self, ui: &mut Ui) {
+        let fid = id(TODAY, ID_FIELD);
+        if !ui.down && !ui.released && ui.focus != Some(fid) {
+            if self.edit.is_some() {
+                self.edit = None;
+                self.todo_draft_prio = Priority::None;
+                let _ = ui.submit_field(fid);
+            } else if self.todo_adding && ui.field_text(fid).trim().is_empty() {
+                self.todo_adding = false;
+                self.todo_draft_prio = Priority::None;
+                let _ = ui.submit_field(fid);
+            }
+        }
+    }
+
     pub(super) unsafe fn todo_card(&mut self, ui: &mut Ui, cv: &Canvas, card: Rect) {
         self.roll_day();
         cv.card(card);
@@ -671,13 +688,7 @@ impl Today {
         if !editing {
             self.edit = None;
         }
-        // Закрываем скрываемое поле ввода при уходе фокуса, но не посреди нажатия на строку.
-        if (self.todo_adding || self.edit.is_some()) && !ui.down && !ui.released && ui.focus != Some(fid) {
-            self.todo_adding = false;
-            self.edit = None;
-            self.todo_draft_prio = Priority::None;
-            let _ = ui.submit_field(fid);
-        }
+        self.sync_field_blur(ui);
         let show_field = self.todo_adding || self.edit.is_some();
 
         // Определение размера по геометрии карточки:
@@ -1454,5 +1465,39 @@ mod tests {
         assert_eq!(Priority::Low.glyph(), icon::FLAG_FILL);
         assert_eq!(Priority::Medium.glyph(), icon::FLAG_FILL);
         assert_eq!(Priority::High.glyph(), icon::FLAG_FILL);
+    }
+
+    #[test]
+    fn draft_task_survives_island_close() {
+        let mut t = Today::default();
+        let mut ui = Ui::default();
+        let fid = id(TODAY, ID_FIELD);
+
+        // Пользователь начал вводить новую задачу и выбрал важность.
+        t.todo_adding = true;
+        t.todo_draft_prio = Priority::High;
+        ui.set_field_text(fid, "Купить молоко");
+        ui.focus = Some(fid);
+
+        // Остров сворачивается: фокус снят, вкладка скрыта, затем снова открыта.
+        ui.blur();
+        t.hide_overlays();
+        t.sync_field_blur(&mut ui);
+        assert!(t.todo_adding);
+        assert_eq!(t.todo_draft_prio, Priority::High);
+        assert_eq!(ui.field_text(fid), "Купить молоко");
+
+        t.show();
+        t.sync_field_blur(&mut ui);
+        assert!(t.todo_adding);
+        assert_eq!(t.todo_draft_prio, Priority::High);
+        assert_eq!(ui.field_text(fid), "Купить молоко");
+
+        // Пустое (или только из пробелов) поле по-прежнему закрывается при потере фокуса.
+        ui.set_field_text(fid, "   ");
+        t.sync_field_blur(&mut ui);
+        assert!(!t.todo_adding);
+        assert_eq!(t.todo_draft_prio, Priority::None);
+        assert_eq!(ui.field_text(fid), "");
     }
 }

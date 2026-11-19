@@ -1227,5 +1227,11 @@ mod tests {
         app.ui.set_field_text(other_field, "задача");
         app.ui.focus = Some(other_field);
         assert!(app.holds_open());
+
+        // Поле ввода задач сохраняет черновик при закрытии, поэтому не мешает сворачиванию.
+        let todo_field = tabs::today::todo_field_id();
+        app.ui.set_field_text(todo_field, "купить молоко");
+        app.ui.focus = Some(todo_field);
+        assert!(!app.holds_open());
     }
 }

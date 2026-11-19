@@ -90,6 +90,8 @@ pub enum KeyEv {
     Char(char),
     Left(bool),
     Right(bool),
+    LeftWord(bool),
+    RightWord(bool),
     Home(bool),
     End(bool),
     Backspace,
@@ -113,7 +115,7 @@ fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// Позиция начала слова слева от `caret` для Ctrl+Backspace.
+/// Позиция начала слова слева от `caret` для Ctrl+Left и Ctrl+Backspace.
 fn prev_word_start(chars: &[char], caret: usize) -> usize {
     let mut i = caret.min(chars.len());
     while i > 0 && chars[i - 1].is_whitespace() {
@@ -134,7 +136,7 @@ fn prev_word_start(chars: &[char], caret: usize) -> usize {
     i
 }
 
-/// Позиция конца слова справа от `caret` для Ctrl+Delete.
+/// Позиция конца слова справа от `caret` для Ctrl+Right и Ctrl+Delete.
 fn next_word_end(chars: &[char], caret: usize) -> usize {
     let n = chars.len();
     let mut i = caret.min(n);
@@ -482,6 +484,18 @@ impl Ui {
                     f.anchor = f.caret;
                 }
             }
+            KeyEv::LeftWord(sh) => {
+                f.caret = if f.secret { 0 } else { prev_word_start(&f.chars, f.caret) };
+                if !sh {
+                    f.anchor = f.caret;
+                }
+            }
+            KeyEv::RightWord(sh) => {
+                f.caret = if f.secret { n } else { next_word_end(&f.chars, f.caret) };
+                if !sh {
+                    f.anchor = f.caret;
+                }
+            }
             KeyEv::Home(sh) => {
                 f.caret = 0;
                 if !sh {
@@ -664,5 +678,69 @@ mod tests {
         ui.key(KeyEv::DeleteLine);
         assert_eq!(ui.field_text(id), "one");
         assert_eq!(ui.fields[&id].caret, 3);
+    }
+
+    #[test]
+    fn ctrl_left_and_right_word_navigation() {
+        let mut ui = Ui::default();
+        let id = 77;
+        ui.set_field_text(id, "привет,   world_1  test");
+        ui.focus = Some(id);
+
+        // Ctrl+Left из конца: на начало "test" -> "world_1" -> "," -> "привет" -> 0.
+        ui.key(KeyEv::LeftWord(false));
+        assert_eq!(ui.fields[&id].caret, 19);
+        assert_eq!(ui.fields[&id].anchor, 19);
+
+        ui.key(KeyEv::LeftWord(false));
+        assert_eq!(ui.fields[&id].caret, 10);
+
+        ui.key(KeyEv::LeftWord(false));
+        assert_eq!(ui.fields[&id].caret, 6);
+
+        ui.key(KeyEv::LeftWord(false));
+        assert_eq!(ui.fields[&id].caret, 0);
+
+        ui.key(KeyEv::LeftWord(false));
+        assert_eq!(ui.fields[&id].caret, 0);
+
+        // Ctrl+Right из начала: в конец "привет" -> "," -> "world_1" -> "test" -> конец.
+        ui.key(KeyEv::RightWord(false));
+        assert_eq!(ui.fields[&id].caret, 6);
+        assert_eq!(ui.fields[&id].anchor, 6);
+
+        ui.key(KeyEv::RightWord(false));
+        assert_eq!(ui.fields[&id].caret, 7);
+
+        ui.key(KeyEv::RightWord(false));
+        assert_eq!(ui.fields[&id].caret, 17);
+
+        ui.key(KeyEv::RightWord(false));
+        assert_eq!(ui.fields[&id].caret, 23);
+
+        ui.key(KeyEv::RightWord(false));
+        assert_eq!(ui.fields[&id].caret, 23);
+
+        // Ctrl+Shift+Left выделяет слово целиком.
+        ui.key(KeyEv::LeftWord(true));
+        assert_eq!(ui.fields[&id].selected(), "test");
+
+        // Из середины слова Ctrl+Left идёт в начало этого слова, Ctrl+Right — в конец.
+        ui.fields.get_mut(&id).unwrap().caret = 13;
+        ui.fields.get_mut(&id).unwrap().anchor = 13;
+        ui.key(KeyEv::LeftWord(false));
+        assert_eq!(ui.fields[&id].caret, 10);
+        ui.fields.get_mut(&id).unwrap().caret = 13;
+        ui.fields.get_mut(&id).unwrap().anchor = 13;
+        ui.key(KeyEv::RightWord(false));
+        assert_eq!(ui.fields[&id].caret, 17);
+
+        // В поле пароля Ctrl+Left / Ctrl+Right прыгают в начало / конец, не выдавая границ слов.
+        ui.set_secret(id, true);
+        ui.set_field_text(id, "sec ret");
+        ui.key(KeyEv::LeftWord(false));
+        assert_eq!(ui.fields[&id].caret, 0);
+        ui.key(KeyEv::RightWord(false));
+        assert_eq!(ui.fields[&id].caret, 7);
     }
 }

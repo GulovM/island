@@ -589,6 +589,10 @@ impl App {
         if !self.cursor_entered {
             return true;
         }
+        // Черновик задачи сохраняется при сворачивании, поэтому поле задач не удерживает остров.
+        if self.ui.focus == Some(tabs::today::todo_field_id()) {
+            return false;
+        }
         let auto_focus_id = match self.cur_id() {
             tabs::CLIPBOARD => Some(tabs::id(tabs::CLIPBOARD, 0)),
             tabs::APPS => Some(tabs::id(tabs::APPS, 0)),

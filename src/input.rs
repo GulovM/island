@@ -186,8 +186,20 @@ impl App {
             }
         }
         let ev = match vk {
-            v if v == VK_LEFT.0 as u32 => KeyEv::Left(shift),
-            v if v == VK_RIGHT.0 as u32 => KeyEv::Right(shift),
+            v if v == VK_LEFT.0 as u32 => {
+                if ctrl {
+                    KeyEv::LeftWord(shift)
+                } else {
+                    KeyEv::Left(shift)
+                }
+            }
+            v if v == VK_RIGHT.0 as u32 => {
+                if ctrl {
+                    KeyEv::RightWord(shift)
+                } else {
+                    KeyEv::Right(shift)
+                }
+            }
             v if v == VK_HOME.0 as u32 => KeyEv::Home(shift),
             v if v == VK_END.0 as u32 => KeyEv::End(shift),
             v if v == VK_BACK.0 as u32 => match (extended, ctrl) {
