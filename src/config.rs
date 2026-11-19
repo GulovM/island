@@ -141,7 +141,7 @@ calendar_ics = []
 # «@col,row» — крупная ячейка сетки, например "v2 wifi:0@0,0 -night". Строки старого формата (без «v2»,
 # мелкая сетка) приводятся к ближайшим стандартным размерам, а совсем старые (@col) сбрасываются.
 # Остров автоматически подгоняется под видимые виджеты по «Готово»; в режиме правки ручки по краям позволяют растянуть сетку обратно.
-layout_controls = ""
+layout_controls = "v2 wifi:3x1@0,0 bluetooth:3x1@3,0 audio:3x1@6,0 night@0,1 dark@3,1 volume:4x1@5,2 brightness:4x1@5,3 media:5x2@0,2 dnd:3x1@6,1"
 layout_today = ""
 layout_stats = ""
 
@@ -1294,7 +1294,9 @@ gmail = \"https://mail.google.com\"
     #[test]
     fn layout_keys_parse_and_save() {
         assert_eq!(Config::default().layouts, [String::new(), String::new(), String::new()]);
-        assert_eq!(parse(DEFAULT_TEMPLATE).layouts, Config::default().layouts);
+        let tmpl = parse(DEFAULT_TEMPLATE);
+        assert!(tmpl.layouts[0].starts_with("v2 "));
+        assert_eq!(&tmpl.layouts[1..], [String::new(), String::new()]);
         let c = parse("layout_controls = \"-wifi night:1@0,1\"\nlayout_today = \"clock\"\nlayout_stats = \"\"\n");
         assert_eq!(c.layouts[0], "-wifi night:1@0,1");
         assert_eq!(c.layouts[1], "clock");
@@ -1473,5 +1475,35 @@ gmail = \"https://mail.google.com\"
         let round = parse(&set_keys(DEFAULT_TEMPLATE, &updates));
         assert_eq!(round.collapsed_left, CollapsedIcon::Bluetooth);
         assert_eq!(round.collapsed_right, CollapsedIcon::Battery);
+    }
+
+    #[test]
+    fn new_install_controls_layout_is_9x4_and_keeps_existing_default_unchanged() {
+        use crate::tabs::{controls, grid::Grid, layout};
+        // У существующего пользователя (конфиг уже есть, layout_controls пустой) раскладка не меняется.
+        assert_eq!(Config::default().layouts[0], "");
+
+        // У нового пользователя шаблон задаёт 9×4 без пустого пространства справа.
+        let tmpl = parse(DEFAULT_TEMPLATE);
+        assert!(!tmpl.layouts[0].is_empty());
+
+        let mut g = Grid::default();
+        g.configure(0, &controls::SPEC, &tmpl.layouts[0]);
+        assert_eq!((g.window().cols(), g.window().rows()), (9, 4));
+        assert_eq!((g.window().island_w(), g.window().island_h(0.0)), (524.0, 268.0));
+        assert_eq!(g.layout().visible_count(0), 9);
+        assert!(g.take_saved().is_none(), "стартовая раскладка уже уплотнена и не перезаписывается");
+
+        // Проверяем отсутствие пересечений.
+        let spec = layout::resolve_full(&controls::SPEC, 9);
+        let placed = g.layout().pack(spec, 0);
+        assert_eq!(placed.len(), 9);
+        for (i, a) in placed.iter().enumerate() {
+            for b in &placed[i + 1..] {
+                let cols = a.col < b.col + b.w && b.col < a.col + a.w;
+                let rows = a.row < b.row + b.h && b.row < a.row + a.h;
+                assert!(!(cols && rows), "виджеты {} и {} пересекаются", a.idx, b.idx);
+            }
+        }
     }
 }

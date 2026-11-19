@@ -1696,7 +1696,7 @@ mod tests {
         use crate::tabs::controls::SPEC;
         let mut g = Grid::default();
         // Wi-Fi и Bluetooth разнесены по углам: в уплотнённом режиме они встают рядом
-        g.configure(0, &SPEC, "v2 wifi@0,0 bluetooth@4,3 -audio -night -dark -dnd -volume -brightness -media");
+        g.configure(0, &SPEC, "v2 wifi@0,0 bluetooth@4,3");
         let lay = g.layout();
         let (w, b) = (lay.entry(0).unwrap(), lay.entry(1).unwrap());
         assert_eq!((w.col, w.row), (0, 0));
@@ -1723,12 +1723,12 @@ mod tests {
         g.begin_edit();
         // Пока правят, ничего само не двигается: Bluetooth можно оставить в углу
         g.lay.entry_mut(1).unwrap().col = 5;
-        g.lay.entry_mut(1).unwrap().row = 4;
+        g.lay.entry_mut(1).unwrap().row = 3;
         let _ = g.take_saved();
-        assert_eq!((g.layout().entry(1).unwrap().col, g.layout().entry(1).unwrap().row), (5, 4));
+        assert_eq!((g.layout().entry(1).unwrap().col, g.layout().entry(1).unwrap().row), (5, 3));
         // По «Готово» освобождается ряд — виджеты уплотняются и раскладка сохраняется
         g.end_edit();
-        assert!(g.layout().entry(1).unwrap().row < 4);
+        assert!(g.layout().entry(1).unwrap().row < 3);
         assert!(g.take_saved().is_some());
     }
 
@@ -1788,7 +1788,7 @@ mod tests {
         use crate::tabs::controls::SPEC;
         let mut g = Grid::default();
         g.set_compact(false);
-        g.configure(0, &SPEC, "v2 wifi@0,0 bluetooth@4,3 -audio -night -dark -dnd -volume -brightness -media");
+        g.configure(0, &SPEC, "v2 wifi@0,0 bluetooth@4,3");
         let _ = g.take_saved();
         g.set_compact(true);
         let b = g.layout().entry(1).unwrap();

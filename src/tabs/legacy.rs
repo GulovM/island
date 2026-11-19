@@ -30,7 +30,7 @@ static SPEED: [Size; 3] = [sz(8, 5), sz(16, 5), sz(24, 5)];
 fn old_sizes(key: &str) -> Option<(&'static [Size], usize)> {
     Some(match key {
         "wifi" | "bluetooth" | "audio" => (&TILE, 1),
-        "night" | "dark" | "dnd" => (&TILE, 2),
+        "night" | "dark" => (&TILE, 2),
         "volume" | "brightness" => (&SLIDER, 1),
         "media" => (&PLAYER, 2),
         "clock" => (&CLOCK, 1),
