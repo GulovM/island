@@ -32,6 +32,8 @@ pub struct App {
     pub(crate) tray_key: Option<bool>,
     pub(crate) cfg: Config,
     pub(crate) scale: f32,
+    /// Логический размер аппаратной моноброви на текущем мониторе (`(0, 0)`, если её нет).
+    pub(crate) notch: (f32, f32),
     pub(crate) mon: HMONITOR,
     pub(crate) win_x: i32,
     pub(crate) win_y: i32,
@@ -51,8 +53,8 @@ pub struct App {
     /// Подложка стекла через Windows.UI.Composition (`HostBackdropBrush` + клип по контуру тела).
     /// `Some` — новый путь работает, `None` — откат к старому accent-размытию.
     pub(crate) backdrop: Option<crate::backdrop::Backdrop>,
-    /// Контроллер `DispatcherQueue` главного потока (живёт в `App`, переживает пересоздание `Backdrop`).
-    dq: Option<windows::System::DispatcherQueueController>,
+    /// Контроллер подложки (живёт в `App`, переживает пересоздание `Backdrop`).
+    dq: Option<()>,
     /// Системные «Эффекты прозрачности» включены; иначе DWM рисует плоский фон вместо размытия.
     pub(crate) transparency: bool,
 
@@ -216,8 +218,9 @@ impl App {
             let mon = MonitorFromPoint(POINT::default(), MONITOR_DEFAULTTOPRIMARY);
             set_ui_scale(cfg.ui_scale);
             let scale = monitor_scale(mon);
+            let notch = monitor_notch(mon, scale);
             let cw = (WIN_LOGICAL.0 * scale).ceil() as i32;
-            let ch = (WIN_LOGICAL.1 * scale).ceil() as i32;
+            let ch = ((WIN_LOGICAL.1 + if notch.0 > 1.0 && notch.1 > 1.0 { notch.1 } else { 0.0 }) * scale).ceil() as i32;
 
             // До создания `Fonts` внутри `Gfx::new`: размер формата фиксируется при создании,
             // живьём не перечитываем (см. theme::text_scale).
@@ -240,6 +243,7 @@ impl App {
                 icon_owned: false,
                 tray_key: None,
                 scale,
+                notch,
                 mon,
                 win_x: 0,
                 win_y: 0,
@@ -331,8 +335,34 @@ impl App {
         }
     }
 
+    /// Присутствует ли на текущем мониторе аппаратная монобровь.
+    pub(crate) fn has_notch(&self) -> bool {
+        self.notch.0 > 1.0 && self.notch.1 > 1.0
+    }
+
+    /// Логическая ширина моноброви (0 на обычных экранах).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn notch_w(&self) -> f32 {
+        if self.has_notch() { self.notch.0 } else { 0.0 }
+    }
+
+    /// Логическая высота моноброви (0 на обычных экранах).
+    pub(crate) fn notch_h(&self) -> f32 {
+        if self.has_notch() { self.notch.1 } else { 0.0 }
+    }
+
+    /// Вертикальная позиция строки вкладок в логических пикселях окна.
+    pub(crate) fn tab_top(&self) -> f32 {
+        TAB_TOP + self.notch_h()
+    }
+
+    /// Размер свёрнутой чёлки в логических пикселях (на MacBook с монобровью обрамляет её крыльями).
     pub(crate) fn collapsed(&self) -> (f32, f32) {
-        self.cfg.collapsed
+        if self.has_notch() {
+            face::notch_collapsed_size(self.notch.0, self.notch.1, self.cfg.collapsed.1, 0.0)
+        } else {
+            self.cfg.collapsed
+        }
     }
 
     /// Под телом настоящее размытие: стекло включено в конфиге, в Windows включены «Эффекты прозрачности»
@@ -461,7 +491,7 @@ impl App {
     /// Центр шестерёнки в логических пикселях окна: у правого края острова в ряду вкладок.
     pub(crate) fn gear_center(&self) -> (f32, f32) {
         let half = self.body_size().0 / self.scale / 2.0;
-        (self.win_w as f32 / self.scale / 2.0 + half - 16.0, TAB_TOP + TAB_H / 2.0)
+        (self.win_w as f32 / self.scale / 2.0 + half - 16.0, self.tab_top() + TAB_H / 2.0)
     }
 
     /// Центр иконки колокольчика: левее шестерёнки и правее карандаша.
@@ -828,7 +858,7 @@ impl App {
 /// `GaussianBlurEffect`) на Win11+ либо `accent blur-behind` на Win10 / при откате.
 unsafe fn init_glass_window(
     hinst: HINSTANCE,
-    dq: &mut Option<windows::System::DispatcherQueueController>,
+    dq: &mut Option<()>,
 ) -> windows::core::Result<(HWND, Option<crate::backdrop::Backdrop>, bool)> {
     let build = crate::sys::windows_build_number();
     if crate::backdrop::use_host_backdrop(build) {
@@ -877,7 +907,8 @@ mod tests {
                 icon_owned: false,
                 tray_key: None,
                 scale: 1.0,
-                mon: HMONITOR(std::ptr::null_mut()),
+                notch: (0.0, 0.0),
+                mon: HMONITOR(0),
                 win_x: 0,
                 win_y: 0,
                 win_w: 200,

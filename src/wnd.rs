@@ -82,10 +82,11 @@ pub(crate) enum Ev {
     /// Кнопку удерживают дольше `LONG_MS`.
     LongPress,
     /// На остров навели перетаскиваемое: `true` — это можно добавить в «Быстрый доступ».
+    #[allow(dead_code)]
     DragEnter(bool),
-    /// Перетаскиваемое ушло с острова, не будучи брошенным.
+    #[allow(dead_code)]
     DragLeave,
-    /// Брошено на остров: записи для «Быстрого доступа» (пустой список — отказ).
+    #[allow(dead_code)]
     Dropped(Vec<String>),
     /// Итог броска показан достаточно.
     DropTimer,
@@ -541,6 +542,17 @@ pub(crate) unsafe fn monitor_scale(mon: HMONITOR) -> f32 {
         scale = scale.min(mw / WIN_LOGICAL.0).min(mh * 0.95 / WIN_LOGICAL.1);
     }
     scale
+}
+
+/// Аппаратная «монобровь» (notch) на экране в логических единицах острова `(width, height)`.
+/// На экранах без чёлки возвращает `(0.0, 0.0)`.
+pub(crate) unsafe fn monitor_notch(mon: HMONITOR, scale: f32) -> (f32, f32) {
+    let (w, h) = windows::Win32::Graphics::Gdi::GetMonitorNotch(mon);
+    if w > 1.0 && h > 1.0 && scale > 0.0 {
+        (w / scale, h / scale)
+    } else {
+        (0.0, 0.0)
+    }
 }
 
 /// Ширина подписи каждой вкладки (логические пиксели, вместе с внутренними полями).

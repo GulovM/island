@@ -1,0 +1,13 @@
+[package]
+name = "island-macos-windows"
+version = "0.61.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "windows"
+path = "src/lib.rs"
+
+[dependencies]
+windows-core = { package = "island-macos-core", path = "../windows-core" }
+windows-numerics = { package = "island-macos-numerics", path = "../windows-numerics" }

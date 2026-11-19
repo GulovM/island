@@ -1,40 +1,31 @@
 //! Определение оборудования: число ядер, название CPU и GPU.
 
-use std::ffi::c_void;
-
-use windows::core::w;
-use windows::Win32::Foundation::ERROR_SUCCESS;
-use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
-use windows::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
-
 pub(super) fn cpu_count() -> usize {
-    let mut si = SYSTEM_INFO::default();
-    unsafe { GetSystemInfo(&mut si) };
-    si.dwNumberOfProcessors.clamp(1, 256) as usize
+    std::thread::available_parallelism()
+        .map(|n| n.get().clamp(1, 256))
+        .unwrap_or(8)
 }
 
-/// Модель процессора из реестра, без «(R)», «(TM)», частоты и встроенной графики.
+/// Модель процессора (на macOS — `sysctl -n machdep.cpu.brand_string`).
 pub(super) fn cpu_name() -> String {
-    let mut buf = [0u16; 128];
-    let mut size = (buf.len() * 2) as u32;
-    let r = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            w!("HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"),
-            w!("ProcessorNameString"),
-            RRF_RT_REG_SZ,
-            None,
-            Some(buf.as_mut_ptr() as *mut c_void),
-            Some(&mut size),
-        )
-    };
-    if r != ERROR_SUCCESS {
-        return String::new();
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = std::process::Command::new("/usr/sbin/sysctl")
+            .args(["-n", "machdep.cpu.brand_string"])
+            .output()
+        {
+            if out.status.success() {
+                let s = clean_cpu(&String::from_utf8_lossy(&out.stdout));
+                if !s.is_empty() {
+                    return s;
+                }
+            }
+        }
     }
-    let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-    clean_cpu(&String::from_utf16_lossy(&buf[..n]))
+    String::new()
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn clean_cpu(raw: &str) -> String {
     let mut s = raw.replace("(R)", "").replace("(TM)", "").replace("(tm)", "");
     for cut in [" with ", " w/ ", " @ ", " CPU"] {

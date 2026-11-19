@@ -296,6 +296,7 @@ impl SystemColors {
 
 /// Разбор значения `AccentPalette` (8 цветов по 4 байта RGBA: Light3, Light2, Light1, Accent,
 /// Dark1, Dark2, Dark3, служебный).
+#[cfg(test)]
 pub fn parse_accent_palette(bytes: &[u8]) -> Option<SystemColors> {
     if bytes.len() < 28 {
         return None;

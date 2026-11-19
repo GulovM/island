@@ -7,14 +7,20 @@
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(not(target_os = "macos"))]
 use windows::core::{w, PCWSTR};
+#[cfg(not(target_os = "macos"))]
 use windows::Win32::UI::Shell::ShellExecuteW;
+#[cfg(not(target_os = "macos"))]
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 use crate::{bg, log, online, sys};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const CURRENT_CHANGELOG: &str = env!("ISLAND_CURRENT_CHANGELOG");
+#[cfg(target_os = "macos")]
+const API: &str = "https://api.github.com/repos/GulovM/island/releases?per_page=20";
+#[cfg(not(target_os = "macos"))]
 const API: &str = "https://api.github.com/repos/GulovM/island/releases/latest";
 /// Скачивать можно только отсюда: ссылки из ответа API проверяются по этому префиксу.
 const DOWNLOADS: &str = "https://github.com/GulovM/island/releases/download/";
@@ -269,13 +275,82 @@ fn run_install(r: &Release) {
 
 fn fetch_latest() -> Result<Option<Release>, String> {
     let text = online::get_text(API)?;
+    #[cfg(target_os = "macos")]
+    {
+        Ok(parse_mac_releases(&text).filter(|r| is_newer(&r.version, VERSION)))
+    }
+    #[cfg(not(target_os = "macos"))]
     Ok(parse_release(&text).filter(|r| is_newer(&r.version, VERSION)))
 }
 
-/// Версия и ссылки на установщик и контрольные суммы из ответа `releases/latest`.
+/// Разбирает массив релизов GitHub API и выбирает самый свежий стабильный релиз macOS (`.dmg`).
+#[cfg(any(target_os = "macos", test))]
+fn parse_mac_releases(json: &str) -> Option<Release> {
+    let trimmed = json.trim();
+    if !trimmed.starts_with('[') {
+        return parse_release_with(trimmed, "-macos.dmg");
+    }
+    let mut best: Option<Release> = None;
+    let bytes = trimmed.as_bytes();
+    let mut i = 1usize;
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut esc = false;
+    let mut start = None;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_str {
+            if esc {
+                esc = false;
+            } else if b == b'\\' {
+                esc = true;
+            } else if b == b'"' {
+                in_str = false;
+            }
+        } else {
+            match b {
+                b'"' => in_str = true,
+                b'{' => {
+                    if depth == 0 {
+                        start = Some(i);
+                    }
+                    depth += 1;
+                }
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(s) = start.take() {
+                            let obj = &trimmed[s..=i];
+                            let is_draft = obj.contains("\"draft\":true") || obj.contains("\"draft\": true");
+                            let is_pre = obj.contains("\"prerelease\":true") || obj.contains("\"prerelease\": true");
+                            if !is_draft && !is_pre {
+                                if let Some(rel) = parse_release_with(obj, "-macos.dmg") {
+                                    if best.as_ref().is_none_or(|b_rel| is_newer(&rel.version, &b_rel.version)) {
+                                        best = Some(rel);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    best
+}
+
+/// Версия и ссылки на установщик и контрольные суммы из ответа GitHub Releases.
+#[cfg(any(not(target_os = "macos"), test))]
 fn parse_release(json: &str) -> Option<Release> {
+    parse_release_with(json, "-setup.exe")
+}
+
+fn parse_release_with(json: &str, asset_suffix: &str) -> Option<Release> {
     let tag = online::json_str(json, "tag_name")?;
-    let version = tag.trim_start_matches('v').to_string();
+    let version = tag.trim_start_matches('v').trim_end_matches("-macos").to_string();
     parse_ver(&version)?;
     let key = "\"browser_download_url\":";
     let urls: Vec<String> = json
@@ -286,7 +361,7 @@ fn parse_release(json: &str) -> Option<Release> {
         })
         .filter(|u| u.starts_with(DOWNLOADS))
         .collect();
-    let setup_url = urls.iter().find(|u| u.ends_with("-setup.exe"))?.clone();
+    let setup_url = urls.iter().find(|u| u.ends_with(asset_suffix))?.clone();
     let sums_url = urls.iter().find(|u| u.ends_with("/SHA256SUMS.txt"))?.clone();
     // Тело релиза — секция версии из CHANGELOG.md (CI копирует её без заголовка `## [x.y.z]`).
     let section = online::json_str_multiline(json, "body")
@@ -335,6 +410,67 @@ fn download_and_launch(r: &Release) -> Result<(), &'static str> {
     // Перед запуском установщика сбрасываем всё состояние острова на диск.
     crate::state::flush();
 
+    launch_installer(&dir, &path)
+}
+
+#[cfg(target_os = "macos")]
+fn current_app_bundle() -> std::path::PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        for anc in exe.ancestors() {
+            if anc.extension().and_then(|e| e.to_str()) == Some("app") {
+                return anc.to_path_buf();
+            }
+        }
+    }
+    std::path::PathBuf::from("/Applications/Kite Island.app")
+}
+
+#[cfg(target_os = "macos")]
+fn launch_installer(dir: &std::path::Path, dmg: &std::path::Path) -> Result<(), &'static str> {
+    let mnt = dir.join("mount");
+    let _ = std::fs::create_dir_all(&mnt);
+    let attached = std::process::Command::new("hdiutil")
+        .args(["attach", &dmg.to_string_lossy(), "-nobrowse", "-readonly", "-mountpoint", &mnt.to_string_lossy()])
+        .status()
+        .is_ok_and(|s| s.success());
+    if !attached {
+        log::error("не удалось примонтировать .dmg обновления");
+        return Err("Не удалось открыть образ");
+    }
+
+    let src_app = mnt.join("Kite Island.app");
+    if !src_app.exists() {
+        let _ = std::process::Command::new("hdiutil")
+            .args(["detach", &mnt.to_string_lossy(), "-quiet"])
+            .status();
+        log::error("в образе .dmg не найдено Kite Island.app");
+        return Err("Файл повреждён");
+    }
+
+    let dst_app = current_app_bundle();
+    let sh_quote = |p: &std::path::Path| format!("'{}'", p.to_string_lossy().replace('\'', "'\\''"));
+    let script = format!(
+        "sleep 1; rm -rf {dst} && ditto {src} {dst}; hdiutil detach {mnt} -quiet || true; open -n {dst}",
+        src = sh_quote(&src_app),
+        dst = sh_quote(&dst_app),
+        mnt = sh_quote(&mnt),
+    );
+    match std::process::Command::new("/bin/sh").args(["-c", &script]).spawn() {
+        Ok(_) => {
+            std::process::exit(0);
+        }
+        Err(e) => {
+            let _ = std::process::Command::new("hdiutil")
+                .args(["detach", &mnt.to_string_lossy(), "-quiet"])
+                .status();
+            log::error(&format!("не удалось запустить скрипт обновления macOS: {e}"));
+            Err("Не удалось запустить установщик")
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn launch_installer(_dir: &std::path::Path, path: &std::path::Path) -> Result<(), &'static str> {
     // ShellExecute, а не Command: при установке «для всех» установщик сам запросит права. Установку
     // «для себя» в защищённую папку (например, Program Files) он не повышает — просим права сами,
     // иначе старый island.exe не заменить («отказано в доступе»).
@@ -351,6 +487,7 @@ fn download_and_launch(r: &Release) -> Result<(), &'static str> {
 }
 
 /// Можно ли без повышения прав писать в папку, где лежит island.exe (пробный файл создаётся и удаляется).
+#[cfg(not(target_os = "macos"))]
 fn install_dir_writable() -> bool {
     let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) else { return true };
     let probe = dir.join(format!(".island-write-test-{}", std::process::id()));
@@ -412,6 +549,22 @@ mod tests {
         assert!(r.sums_url.ends_with("SHA256SUMS.txt"));
         assert_eq!(r.notes_ru, vec!["Первый пункт".to_string(), "Второй пункт".to_string()]);
         assert!(parse_release(r#"{"tag_name":"v0.4.0","assets":[]}"#).is_none());
+    }
+
+    #[test]
+    fn macos_release_list_picks_newest_macos_dmg_and_strips_suffix() {
+        let json = format!(
+            r####"[
+                {{"tag_name":"v2.0.0","draft":false,"prerelease":false,"body":"","assets":[{{"name":"island-2.0.0-setup.exe","browser_download_url":"{d}v2.0.0/island-2.0.0-setup.exe"}},{{"name":"SHA256SUMS.txt","browser_download_url":"{d}v2.0.0/SHA256SUMS.txt"}}]}},
+                {{"tag_name":"v1.9.2-macos","draft":false,"prerelease":false,"body":"### RU\r\n- Исправлена монобровь","assets":[{{"name":"island-1.9.2-macos.dmg","browser_download_url":"{d}v1.9.2-macos/island-1.9.2-macos.dmg"}},{{"name":"SHA256SUMS.txt","browser_download_url":"{d}v1.9.2-macos/SHA256SUMS.txt"}}]}},
+                {{"tag_name":"v1.9.5-macos","draft":true,"prerelease":false,"body":"","assets":[{{"name":"island-1.9.5-macos.dmg","browser_download_url":"{d}v1.9.5-macos/island-1.9.5-macos.dmg"}},{{"name":"SHA256SUMS.txt","browser_download_url":"{d}v1.9.5-macos/SHA256SUMS.txt"}}]}}
+            ]"####,
+            d = DOWNLOADS
+        );
+        let r = parse_mac_releases(&json).unwrap();
+        assert_eq!(r.version, "1.9.2");
+        assert!(r.setup_url.ends_with("island-1.9.2-macos.dmg"));
+        assert_eq!(r.notes_ru, vec!["Исправлена монобровь".to_string()]);
     }
 
     #[test]

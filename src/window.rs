@@ -109,7 +109,7 @@ impl App {
         let base_ear = (EAR * s * (ah / (collapsed_h * s)).min(1.0)).min(ah) * ear_cap;
         let ear = if base_ear < 0.5 { 0.0 } else { base_ear };
 
-        let y0 = live::CAPSULE_TOP_Y * s * detach;
+        let y0 = (self.notch_h() + live::CAPSULE_TOP_Y) * s * detach;
         let base_r = (self.cfg.corner_radius * (0.72 + 0.28 * open) * s)
             .min(aw / 2.0)
             .min(ah - ear)
@@ -130,15 +130,19 @@ impl App {
 
     pub(crate) fn expanded_target(&self) -> (f32, f32) {
         let id = self.cur_id();
-        (self.tab_w(id) * self.scale, self.tab_h(id) * self.scale)
+        (self.tab_w(id) * self.scale, (self.tab_h(id) + self.notch_h()) * self.scale)
     }
 
     /// Размер свёрнутой капсулы: расширяется на ширину плашки активного таймера.
     pub(crate) fn idle_pill_size(&self) -> (f32, f32) {
-        let (w, h) = self.collapsed();
         let timer = !self.expanded && !self.stripped() && !self.hidden && self.live.timer().is_some();
         let extra = if timer { face::TIMER_SLOT_W } else { 0.0 };
-        (w + extra, h)
+        if self.has_notch() {
+            face::notch_collapsed_size(self.notch.0, self.notch.1, self.cfg.collapsed.1, extra)
+        } else {
+            let (w, h) = self.collapsed();
+            (w + extra, h)
+        }
     }
 
     fn toast_size(&self) -> (f32, f32) {
@@ -150,17 +154,26 @@ impl App {
 
     pub(crate) fn collapsed_target(&self) -> (f32, f32) {
         let collapsed = self.collapsed();
+        let ny = self.notch_h();
         let (w, h) = if self.stripped() {
-            // Ширина прежняя: зона наведения не растёт, меняется только высота.
-            (collapsed.0, STRIP_H)
+            if self.has_notch() {
+                ((self.notch.0 + 16.0).max(self.cfg.collapsed.0), self.notch.1 + STRIP_H)
+            } else {
+                // Ширина прежняя: зона наведения не растёт, меняется только высота.
+                (collapsed.0, STRIP_H)
+            }
         } else {
             match self.live_form() {
-                live::Form::Mini => (live::MINI.0.max(collapsed.0), live::MINI.1.max(collapsed.1)),
+                live::Form::Mini => (live::MINI.0.max(collapsed.0), (live::MINI.1 + ny).max(collapsed.1)),
                 live::Form::Toast => {
                     let ts = self.toast_size();
-                    (ts.0.max(collapsed.0), ts.1.max(collapsed.1))
+                    if self.live.display_toast().is_some_and(|t| t.is_capsule()) {
+                        (ts.0.max(self.cfg.collapsed.0), ts.1)
+                    } else {
+                        (ts.0.max(collapsed.0), (ts.1 + ny).max(collapsed.1))
+                    }
                 }
-                live::Form::Drop => (DROP_PILL.0.max(collapsed.0), DROP_PILL.1.max(collapsed.1)),
+                live::Form::Drop => (DROP_PILL.0.max(collapsed.0), (DROP_PILL.1 + ny).max(collapsed.1)),
                 live::Form::Idle => self.idle_pill_size(),
             }
         };
@@ -253,13 +266,15 @@ impl App {
     pub(crate) fn toast_rect(&self) -> ui::Rect {
         let collapsed = self.collapsed();
         let ts = self.toast_size();
-        let fw = ts.0.max(collapsed.0);
-        let y = if self.live.display_toast().is_some_and(|t| t.is_capsule()) {
-            live::CAPSULE_TOP_Y
+        let is_cap = self.live.display_toast().is_some_and(|t| t.is_capsule());
+        let fw = if is_cap { ts.0.max(self.cfg.collapsed.0) } else { ts.0.max(collapsed.0) };
+        let fh = if is_cap { ts.1.max(self.cfg.collapsed.1) } else { ts.1 };
+        let y = if is_cap {
+            self.notch_h() + live::CAPSULE_TOP_Y
         } else {
-            0.0
+            self.notch_h()
         };
-        ui::Rect::new(self.win_w as f32 / self.scale / 2.0 - fw / 2.0, y, fw, ts.1.max(collapsed.1))
+        ui::Rect::new(self.win_w as f32 / self.scale / 2.0 - fw / 2.0, y, fw, fh)
     }
 
     /// Клик (в пикселях окна) попал в × уведомления о таймере.
@@ -376,12 +391,15 @@ impl App {
         }
         let rc = mi.rcMonitor;
         let scale = monitor_scale(mon);
+        let notch = monitor_notch(mon, scale);
+        let notch_h = if notch.0 > 1.0 && notch.1 > 1.0 { notch.1 } else { 0.0 };
         let cw = (WIN_LOGICAL.0 * scale).ceil() as i32;
-        let ch = (WIN_LOGICAL.1 * scale).ceil() as i32;
+        let ch = ((WIN_LOGICAL.1 + notch_h) * scale).ceil() as i32;
 
         let mut resized = false;
-        if (scale - self.scale).abs() > 0.001 || cw != self.win_w || ch != self.win_h {
+        if (scale - self.scale).abs() > 0.001 || notch != self.notch || cw != self.win_w || ch != self.win_h {
             self.scale = scale;
+            self.notch = notch;
             self.win_w = cw;
             self.win_h = ch;
             if let Some(g) = &mut self.gfx {
@@ -499,7 +517,7 @@ impl App {
         let (cw, ch) = self.body_size();
         let (_, cur_y0, _, _, cur_ear, _, _) = self.body_geometry();
         let target_y0 = if !self.expanded && self.capsule.target > 0.5 {
-            live::CAPSULE_TOP_Y * self.scale
+            (self.notch_h() + live::CAPSULE_TOP_Y) * self.scale
         } else {
             0.0
         };
@@ -675,7 +693,7 @@ impl App {
     /// в F11 или развёрнутом виде остров не прячут.
     pub(crate) unsafe fn probe(&self) -> Option<(bool, bool)> {
         let quns = SHQueryUserNotificationState().ok().map(|s| s.0 as u32);
-        let mon = if !self.mon.0.is_null() {
+        let mon = if self.mon.0 != 0 {
             self.mon
         } else {
             MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST)
@@ -1236,5 +1254,35 @@ mod tests {
         assert!(!should_hide_on_screenshot(false, false, false));
         assert!(!should_hide_on_screenshot(true, false, true));
         assert!(!should_hide_on_screenshot(true, true, true));
+    }
+
+    #[test]
+    fn macbook_notch_layout_adapts_collapsed_strip_mini_and_expanded() {
+        let mut plain = App::for_test(Config::default());
+        plain.notch = (0.0, 0.0);
+        assert!(!plain.has_notch());
+        assert_eq!(plain.collapsed(), plain.cfg.collapsed);
+        assert_eq!(plain.gear_center().1, TAB_TOP + TAB_H / 2.0);
+
+        let mut notched = App::for_test(Config::default());
+        notched.notch = (160.0, 32.0);
+        assert!(notched.has_notch());
+        assert_eq!(notched.notch_w(), 160.0);
+        assert_eq!(notched.notch_h(), 32.0);
+        let (cw, ch) = notched.collapsed();
+        assert!(cw > 160.0, "свёрнутая ширина {cw} должна включать крылья по бокам чёлки");
+        assert!((ch - 32.0).abs() < 1e-4);
+
+        // В режиме полоски высота выходит чуть ниже физической моноброви.
+        notched.cfg.always_strip = true;
+        let (_, strip_h) = notched.collapsed_target();
+        assert!((strip_h - (32.0 + STRIP_H)).abs() < 1e-4);
+        notched.cfg.always_strip = false;
+
+        // Мини-плеер, тосты и панель вкладок опускаются ниже моноброви.
+        let exp_plain = plain.expanded_target().1;
+        let exp_notched = notched.expanded_target().1;
+        assert!((exp_notched - (exp_plain + 32.0)).abs() < 1e-4);
+        assert!((notched.gear_center().1 - (32.0 + TAB_TOP + TAB_H / 2.0)).abs() < 1e-4);
     }
 }

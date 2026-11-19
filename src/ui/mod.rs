@@ -84,6 +84,7 @@ pub struct Ui {
     /// Курсор в координатах текущего слоя содержимого.
     mouse: (f32, f32),
     origin_x: f32,
+    pub(crate) origin_y: f32,
     on_island: bool,
     interactive: bool,
     /// Кнопка удерживается / только что нажата / только что отпущена (в этом кадре).
@@ -203,10 +204,17 @@ impl Ui {
         self.key_activate = false;
     }
 
-    /// Начало слоя содержимого: `ox` — левый край панели в логических пикселях окна.
+    /// Начало слоя содержимого: `(ox, oy)` — верхний левый угол области панели в логических пикселях окна.
+    #[cfg(any(feature = "gallery", test))]
     pub fn begin_content(&mut self, ox: f32, interactive: bool) {
+        self.begin_content_at(ox, 0.0, interactive);
+    }
+
+    /// Вариант `begin_content` со смещением по вертикали (для экранов с аппаратной монобровью).
+    pub fn begin_content_at(&mut self, ox: f32, oy: f32, interactive: bool) {
         self.origin_x = ox;
-        self.mouse = (self.cursor.0 - ox, self.cursor.1);
+        self.origin_y = oy;
+        self.mouse = (self.cursor.0 - ox, self.cursor.1 - oy);
         self.interactive = interactive;
         self.clip = None;
     }

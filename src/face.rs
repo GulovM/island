@@ -15,8 +15,24 @@ use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, icon, on_color, w
 
 /// Дополнительная ширина свёрнутой чёлки под плашку активного таймера (логические пиксели).
 pub const TIMER_SLOT_W: f32 = 44.0;
+/// Боковое «крыло» свёрнутой чёлки на экранах MacBook с аппаратной монобровью.
+pub const NOTCH_EAR_PAD: f32 = 10.0;
+pub const NOTCH_WING_W: f32 = 76.0;
 /// Кегль времени в свёрнутой чёлке: на 2 px крупнее боковых значков (9 px).
 pub const TIME_SIZE: f32 = 11.0;
+
+/// Итоговый размер свёрнутого острова при наличии аппаратной моноброви `(notch_w, notch_h)`.
+pub fn notch_collapsed_size(notch_w: f32, notch_h: f32, collapsed_h: f32, extra_w: f32) -> (f32, f32) {
+    let wing = NOTCH_WING_W + extra_w * 0.5;
+    (notch_w + 2.0 * wing, notch_h.max(collapsed_h))
+}
+
+/// Возвращает левое и правое крыло внутри прямоугольника `r`, оставляя центр шириной `notch_w` пустым.
+pub fn notch_wings(r: Rect, notch_w: f32) -> (Rect, Rect) {
+    let half_n = (notch_w * 0.5).clamp(0.0, r.w * 0.45);
+    let wing_w = (r.w * 0.5 - half_n).max(0.0);
+    (Rect::new(r.x, r.y, wing_w, r.h), Rect::new(r.cx() + half_n, r.y, wing_w, r.h))
+}
 
 pub struct Face {
     enabled: bool,
@@ -336,6 +352,57 @@ impl Face {
         self.draw_slot(cv, self.right, r.right() - pad - right_w, right_w, r);
     }
 
+    /// Рисует свёрнутый островок на экране с аппаратной монобровью (`notch_w × notch_h`):
+    /// содержимое распределяется по левому и правому «крылу» вокруг физического выреза камеры.
+    pub unsafe fn draw_with_notch(
+        &self,
+        cv: &Canvas,
+        r: Rect,
+        timer: Option<(&str, f32, D2D1_COLOR_F)>,
+        notch_w: f32,
+        notch_h: f32,
+    ) {
+        let f = &cv.g.fonts;
+        let pill_h = 14.0;
+        let (mut lw, mut rw) = notch_wings(r, notch_w);
+        if notch_h > 0.0 && notch_h < r.h {
+            lw.h = notch_h;
+            rw.h = notch_h;
+        }
+        if !self.enabled {
+            if let Some((label, pulse, tint)) = timer {
+                let pill_w = (cv.text_w(label, &f.small_c) + 8.0).min((rw.w - 8.0).max(16.0));
+                let pill_r = Rect::new(rw.cx() - pill_w / 2.0, rw.cy() - pill_h / 2.0, pill_w, pill_h);
+                Self::draw_timer_pill(cv, pill_r, label, pulse, tint);
+            }
+            return;
+        }
+
+        let pad = NOTCH_EAR_PAD;
+        let inner_pad = 6.0;
+        let left_w = self.slot_w(cv, self.left);
+        self.draw_slot(cv, self.left, lw.x + pad, left_w, lw);
+        if self.show_time {
+            let time_x = lw.x + pad + left_w;
+            let time_w = (lw.right() - inner_pad - time_x).max(0.0);
+            if time_w > 12.0 {
+                cv.digits(&self.time, time_x, time_w, lw.cy(), TIME_SIZE, weight::EMPHASIZED, Align::Trailing, collapsed_txt());
+            }
+        }
+
+        let right_w = self.slot_w(cv, self.right);
+        self.draw_slot(cv, self.right, rw.right() - pad - right_w, right_w, rw);
+        if let Some((label, pulse, tint)) = timer {
+            let max_pill = (rw.w - inner_pad - pad - right_w - 6.0).max(16.0);
+            let pill_w = (cv.text_w(label, &f.small_c) + 8.0).min(max_pill);
+            let avail_l = rw.x + inner_pad;
+            let avail_r = (rw.right() - pad - right_w).max(avail_l);
+            let pill_x = ((avail_l + avail_r) * 0.5 - pill_w * 0.5).max(avail_l);
+            let pill_r = Rect::new(pill_x, rw.cy() - pill_h / 2.0, pill_w, pill_h);
+            Self::draw_timer_pill(cv, pill_r, label, pulse, tint);
+        }
+    }
+
     /// Значок Wi-Fi: точка и три дуги, нарисованные примитивами (глифов в шрифте может не быть).
     /// `(cx, cy)` — точка-источник у нижнего края значка (центр концентрических дуг и точки).
     ///
@@ -617,5 +684,23 @@ mod tests {
         let visual_center = cy_offset - (r_outer + thick / 2.0 - r_dot) / 2.0;
         // Совпадает с вертикальным центром текстовой рамки r.cy() - 0.5 (h - 1.0)
         assert!((visual_center - (-0.5)).abs() < 0.15);
+    }
+
+    #[test]
+    fn notch_wings_avoid_center_cutout() {
+        let (w, h) = notch_collapsed_size(160.0, 32.0, 26.0, 0.0);
+        assert!((w - (160.0 + 2.0 * NOTCH_WING_W)).abs() < 1e-4);
+        assert!((h - 32.0).abs() < 1e-4);
+
+        let r = Rect::new(100.0, 0.0, w, h);
+        let (lw, rw) = notch_wings(r, 160.0);
+        assert!((lw.right() - (r.cx() - 80.0)).abs() < 1e-4);
+        assert!((rw.x - (r.cx() + 80.0)).abs() < 1e-4);
+        assert!((lw.w - NOTCH_WING_W).abs() < 1e-4);
+        assert!((rw.w - NOTCH_WING_W).abs() < 1e-4);
+
+        let (wt, ht) = notch_collapsed_size(160.0, 32.0, 26.0, TIMER_SLOT_W);
+        assert!((wt - (w + TIMER_SLOT_W)).abs() < 1e-4);
+        assert!((ht - 32.0).abs() < 1e-4);
     }
 }

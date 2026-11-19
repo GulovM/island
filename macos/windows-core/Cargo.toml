@@ -1,0 +1,9 @@
+[package]
+name = "island-macos-core"
+version = "0.61.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "windows_core"
+path = "src/lib.rs"

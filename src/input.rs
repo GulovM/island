@@ -115,7 +115,8 @@ impl App {
                 return true;
             }
         }
-        if y < TAB_TOP || y > TAB_TOP + TAB_H {
+        let top = self.tab_top();
+        if y < top || y > top + TAB_H {
             return false;
         }
         for (i, (tx, tw)) in self.tab_rects().iter().enumerate() {

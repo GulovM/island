@@ -1,6 +1,4 @@
-use windows::Win32::Foundation::SYSTEMTIME;
-use windows::Win32::System::SystemInformation::{GetLocalTime, GetSystemTime};
-use windows::Win32::System::Time::SystemTimeToTzSpecificLocalTime;
+use windows::Win32::System::SystemInformation::GetLocalTime;
 
 /// Вместо фиксированного смещения: переводить время из UTC по правилам часового пояса системы на
 /// дату события (учёт летнего времени).
@@ -37,30 +35,52 @@ pub fn weekday(day: i64) -> i64 {
 
 pub fn now_local_minutes() -> i64 {
     let t = unsafe { GetLocalTime() };
-    days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32) * 1440 + t.wHour as i64 * 60 + t.wMinute as i64
+    days_from_civil(t.wYear as i32, t.wMonth as u32, t.wDay as u32) * 1440
+        + t.wHour as i64 * 60
+        + t.wMinute as i64
 }
 
 pub fn utc_offset_minutes() -> i64 {
-    let u = unsafe { GetSystemTime() };
-    let utc = days_from_civil(u.wYear as i32, u.wMonth as u32, u.wDay as u32) * 1440 + u.wHour as i64 * 60 + u.wMinute as i64;
-    now_local_minutes() - utc
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let utc_mins = secs.div_euclid(60);
+    now_local_minutes() - utc_mins
 }
 
 /// Смещение местного времени от UTC на момент `utc` (минуты с эпохи). `offset == SYSTEM_TZ` —
 /// правила системы, иначе заданное смещение.
-pub(super) fn offset_at(utc: i64, offset: i64) -> i64 {
+pub(super) fn offset_at(#[cfg_attr(not(unix), allow(unused_variables))] utc: i64, offset: i64) -> i64 {
     if offset != SYSTEM_TZ {
         return offset;
     }
-    let (y, mo, d) = civil_from_days(utc.div_euclid(1440));
-    let m = utc.rem_euclid(1440);
-    let st = SYSTEMTIME { wYear: y as u16, wMonth: mo as u16, wDay: d as u16, wHour: (m / 60) as u16, wMinute: (m % 60) as u16, ..Default::default() };
-    let mut local = SYSTEMTIME::default();
-    if unsafe { SystemTimeToTzSpecificLocalTime(None, &st, &mut local) }.is_err() {
-        return utc_offset_minutes();
+    #[cfg(unix)]
+    {
+        #[repr(C)]
+        struct Tm {
+            tm_sec: i32,
+            tm_min: i32,
+            tm_hour: i32,
+            tm_mday: i32,
+            tm_mon: i32,
+            tm_year: i32,
+            tm_wday: i32,
+            tm_yday: i32,
+            tm_isdst: i32,
+            tm_gmtoff: isize,
+            tm_zone: *const i8,
+        }
+        extern "C" {
+            fn localtime_r(timep: *const isize, result: *mut Tm) -> *mut Tm;
+        }
+        let secs = (utc * 60) as isize;
+        let mut tm: Tm = unsafe { std::mem::zeroed() };
+        if !unsafe { localtime_r(&secs, &mut tm) }.is_null() {
+            return (tm.tm_gmtoff / 60) as i64;
+        }
     }
-    let l = days_from_civil(local.wYear as i32, local.wMonth as u32, local.wDay as u32) * 1440 + local.wHour as i64 * 60 + local.wMinute as i64;
-    l - utc
+    utc_offset_minutes()
 }
 
 #[cfg(test)]

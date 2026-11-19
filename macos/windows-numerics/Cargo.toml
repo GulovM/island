@@ -1,0 +1,9 @@
+[package]
+name = "island-macos-numerics"
+version = "0.2.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "windows_numerics"
+path = "src/lib.rs"

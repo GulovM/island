@@ -1,28 +1,16 @@
-//! Чтение системных уведомлений Windows и статуса «Не беспокоить» (Focus Assist / DND)
-//! через WinRT (`UserNotificationListener` и `ToastNotificationManagerForUser`).
-//! Работает событийно на фоновом потоке: в простое 0% CPU.
+//! Чтение системных уведомлений macOS (Notification Center `db2/db`) и статуса «Не беспокоить» (Focus).
+//! При отсутствии Full Disk Access просит доступ в Настройках macOS, а локально хранит список
+//! отмеченных как прочитанные уведомлений.
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use windows::core::{IInspectable, HSTRING};
-use windows::ApplicationModel::AppInfo;
-use windows::Foundation::{Size, TypedEventHandler};
-use windows::Storage::Streams::{DataReader, IRandomAccessStreamWithContentType};
-use windows::UI::Notifications::Management::{
-    UserNotificationListener, UserNotificationListenerAccessStatus,
-};
-use windows::UI::Notifications::{
-    KnownNotificationBindings, NotificationKinds, ToastNotificationManager,
-    ToastNotificationManagerForUser, ToastNotificationMode, UserNotification,
-};
-
-use super::winrt::wait;
-use super::{send, Cmd};
+use super::parse_plist_xml_dict;
 
 /// Размер кэшированной иконки приложения (в пикселях, premultiplied BGRA).
 pub const ICON_PX: u32 = crate::icons::SIZE_PX;
-/// 100-наносекундных тиков между 1601-01-01 (WinRT DateTime) и 1970-01-01 (Unix epoch).
-const UNIX_EPOCH_100NS: i64 = 116_444_736_000_000_000;
+/// Разница между эпохой Apple CoreFoundation (`2001-01-01`) и Unix (`1970-01-01`).
+const APPLE_EPOCH_OFFSET: i64 = 978_307_200;
 const MAX_NOTIFS: usize = 100;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -31,16 +19,6 @@ pub enum Access {
     Unspecified,
     Allowed,
     Denied,
-}
-
-impl Access {
-    fn from_winrt(s: UserNotificationListenerAccessStatus) -> Self {
-        match s {
-            UserNotificationListenerAccessStatus::Allowed => Self::Allowed,
-            UserNotificationListenerAccessStatus::Denied => Self::Denied,
-            _ => Self::Unspecified,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -56,218 +34,199 @@ pub struct SysNotif {
     pub icon: Option<Arc<Vec<u8>>>,
 }
 
-static WATCH_INIT: Mutex<Option<WatchState>> = Mutex::new(None);
+static DISMISSED: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
+static NC_DB_PATH: Mutex<Option<String>> = Mutex::new(None);
 
-struct WatchState {
-    _listener: Option<UserNotificationListener>,
-    _dnd_mgr: Option<ToastNotificationManagerForUser>,
+#[cfg(target_os = "macos")]
+fn run_cmd(prog: &str, args: &[&str]) -> Option<(bool, String, String)> {
+    let out = std::process::Command::new(prog).args(args).output().ok()?;
+    Some((
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    ))
 }
 
-// SAFETY: WinRT-объекты хранятся только ради удержания подписок событий до конца жизни процесса
-// (внутри MTA-потока фонового воркера и процесса).
-unsafe impl Send for WatchState {}
-unsafe impl Sync for WatchState {}
-
-/// Подписывается на `NotificationChanged` и `NotificationModeChanged`. Безопасно вызывать повторно.
-pub unsafe fn init() {
-    let Ok(mut guard) = WATCH_INIT.lock() else { return };
-    if guard.is_some() {
-        return;
-    }
-
-    let listener = UserNotificationListener::Current().ok().inspect(|l| {
-        let handler = TypedEventHandler::new(|_, _| {
-            send(Cmd::NotifRefresh);
-            Ok(())
-        });
-        let _ = l.NotificationChanged(&handler);
-    });
-
-    let dnd_mgr = ToastNotificationManager::GetDefault().ok().inspect(|m| {
-        let handler: TypedEventHandler<ToastNotificationManagerForUser, IInspectable> =
-            TypedEventHandler::new(|_, _| {
-                send(Cmd::DndRefresh);
-                Ok(())
-            });
-        let _ = m.NotificationModeChanged(&handler);
-    });
-
-    *guard = Some(WatchState { _listener: listener, _dnd_mgr: dnd_mgr });
+#[cfg(not(target_os = "macos"))]
+fn run_cmd(_prog: &str, _args: &[&str]) -> Option<(bool, String, String)> {
+    None
 }
 
-/// Запрашивает у пользователя доступ к уведомлениям Windows.
-pub unsafe fn request_access() -> Access {
-    let Ok(l) = UserNotificationListener::Current() else {
-        return Access::Denied;
-    };
-    match wait(l.RequestAccessAsync()) {
-        Ok(s) => Access::from_winrt(s),
-        Err(_) => Access::from_winrt(l.GetAccessStatus().unwrap_or(UserNotificationListenerAccessStatus::Unspecified)),
-    }
-}
-
-/// Читает текущий список тост-уведомлений из Windows.
-pub unsafe fn poll_notifications() -> (Access, Vec<SysNotif>) {
-    let Ok(l) = UserNotificationListener::Current() else {
-        return (Access::Denied, Vec::new());
-    };
-    let access = l
-        .GetAccessStatus()
-        .map(Access::from_winrt)
-        .unwrap_or(Access::Unspecified);
-    if access != Access::Allowed {
-        return (access, Vec::new());
-    }
-
-    let Ok(list) = wait(l.GetNotificationsAsync(NotificationKinds::Toast)) else {
-        return (access, Vec::new());
-    };
-
-    let mut out = Vec::new();
-    for un in list {
-        if let Some(item) = extract_notif(&un) {
-            out.push(item);
+fn nc_db_path() -> Option<String> {
+    if let Ok(guard) = NC_DB_PATH.lock() {
+        if let Some(p) = guard.as_ref() {
+            return Some(p.clone());
         }
     }
-    // Свежие сверху.
-    out.sort_by(|a, b| b.time_secs.cmp(&a.time_secs).then_with(|| b.id.cmp(&a.id)));
-    out.truncate(MAX_NOTIFS);
-    (access, out)
-}
-
-/// Удаляет одно уведомление из центра уведомлений Windows.
-pub unsafe fn remove_notification(id: u32) {
-    if let Ok(l) = UserNotificationListener::Current() {
-        let _ = l.RemoveNotification(id);
-    }
-}
-
-/// Проверяет, включён ли в Windows режим «Не беспокоить» (`PriorityOnly` или `AlarmsOnly`).
-pub unsafe fn poll_dnd() -> Option<bool> {
-    let mgr = ToastNotificationManager::GetDefault().ok()?;
-    let mode = mgr.NotificationMode().ok()?;
-    Some(mode != ToastNotificationMode::Unrestricted)
-}
-
-#[allow(non_snake_case, dead_code)]
-mod qh {
-    use windows::core::{HRESULT, PCWSTR, PWSTR};
-
-    /// Внутренний COM-интерфейс Focus Assist / Quiet Hours Windows 10/11 (`UserSelectedProfile`).
-    #[windows::core::interface("6bff4732-81ec-4ffb-ae67-b6c1bc29631f")]
-    pub unsafe trait IQuietHoursSettings: windows::core::IUnknown {
-        pub unsafe fn get_UserSelectedProfile(&self, profile_id: *mut PWSTR) -> HRESULT;
-        pub unsafe fn put_UserSelectedProfile(&self, profile_id: PCWSTR) -> HRESULT;
-    }
-}
-
-/// Включает (`PriorityOnly`) или выключает (`Unrestricted`) системный режим «Не беспокоить».
-pub unsafe fn set_dnd(on: bool) -> bool {
-    use windows::core::{w, GUID};
-    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_LOCAL_SERVER};
-    use qh::IQuietHoursSettings;
-
-    const CLSID_QUIET_HOURS_SETTINGS: GUID = GUID::from_u128(0xf53321fa_34f8_4b7f_b9a3_361877cb94cf);
-    let settings = match CoCreateInstance::<_, IQuietHoursSettings>(&CLSID_QUIET_HOURS_SETTINGS, None, CLSCTX_LOCAL_SERVER) {
-        Ok(s) => s,
-        Err(e) => {
-            crate::log::error(&format!("не удалось получить IQuietHoursSettings: {e}"));
-            return false;
-        }
-    };
-    let profile = if on {
-        w!("Microsoft.QuietHoursProfile.PriorityOnly")
-    } else {
-        w!("Microsoft.QuietHoursProfile.Unrestricted")
-    };
-    let hr = settings.put_UserSelectedProfile(profile);
-    if hr.is_err() {
-        crate::log::error(&format!("не удалось переключить «Не беспокоить»: 0x{:08X}", hr.0 as u32));
-        return false;
-    }
-    true
-}
-
-unsafe fn extract_notif(un: &UserNotification) -> Option<SysNotif> {
-    let id = un.Id().ok()?;
-    let time_secs = un
-        .CreationTime()
-        .ok()
-        .map(|dt| ((dt.UniversalTime - UNIX_EPOCH_100NS).max(0) / 10_000_000) as u64)
-        .unwrap_or(0);
-
-    let app_info = un.AppInfo().ok();
-    let app_id = app_info
-        .as_ref()
-        .and_then(|a| a.AppUserModelId().ok())
-        .map(|s| s.to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "windows.unknown".to_string());
-
-    let mut app_name = app_info
-        .as_ref()
-        .and_then(|a| a.DisplayInfo().ok())
-        .and_then(|d| d.DisplayName().ok())
-        .map(|s| s.to_string())
-        .unwrap_or_default();
-    if app_name.starts_with('@') {
-        if let Some(resolved) = crate::icons::resolve_indirect(&app_name) {
-            app_name = resolved;
-        }
-    }
-    if app_name.trim().is_empty() {
-        app_name = crate::icons::reg_app_name(&app_id).unwrap_or_else(|| fallback_app_name(&app_id));
-    }
-
-    let (title, body) = extract_texts(un, &app_id, &app_name);
-    if title.is_empty() && body.is_empty() {
+    let (ok, out, _) = run_cmd("getconf", &["DARWIN_USER_DIR"])?;
+    if !ok {
         return None;
     }
-
-    let icon = crate::icons::resolve_notif_icon(&app_id, &app_name, || {
-        read_logo_bytes(&app_id, app_info.as_ref())
-    });
-
-    Some(SysNotif { id, app_id, app_name, title, body, time_secs, icon })
+    let dir = out.trim();
+    if dir.is_empty() {
+        return None;
+    }
+    let path = format!("{}/com.apple.notificationcenter/db2/db", dir.trim_end_matches('/'));
+    if let Ok(mut guard) = NC_DB_PATH.lock() {
+        *guard = Some(path.clone());
+    }
+    Some(path)
 }
 
-unsafe fn extract_texts(un: &UserNotification, app_id: &str, app_name: &str) -> (String, String) {
-    let Ok(notif) = un.Notification() else { return (String::new(), String::new()) };
-    let Ok(visual) = notif.Visual() else { return (String::new(), String::new()) };
+fn hex_decode(hex: &str) -> Option<Vec<u8>> {
+    let s = hex.trim();
+    if s.is_empty() || s.len() % 2 != 0 {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(s.len() / 2);
+    for pair in s.as_bytes().chunks_exact(2) {
+        let hi = std::str::from_utf8(pair).ok()?;
+        bytes.push(u8::from_str_radix(hi, 16).ok()?);
+    }
+    Some(bytes)
+}
 
-    let binding = KnownNotificationBindings::ToastGeneric()
-        .ok()
-        .and_then(|name| visual.GetBinding(&name).ok())
-        .or_else(|| {
-            visual
-                .Bindings()
-                .ok()
-                .and_then(|v| v.GetAt(0).ok())
-        });
-    let Some(binding) = binding else { return (String::new(), String::new()) };
-    let Ok(elems) = binding.GetTextElements() else { return (String::new(), String::new()) };
+#[cfg(target_os = "macos")]
+fn plist_blob_to_xml(blob: &[u8]) -> Option<String> {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = std::process::Command::new("plutil")
+        .args(["-convert", "xml1", "-o", "-", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(blob).ok()?;
+    }
+    let out = child.wait_with_output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
 
-    let mut lines: Vec<String> = Vec::new();
-    let mut attribution: Option<String> = None;
-    let placement_key = HSTRING::from("placement");
-    for el in elems {
-        if let Ok(t) = el.Text() {
-            let clean = t.to_string().trim().to_string();
-            if !clean.is_empty() {
-                let is_attr = el
-                    .Hints()
-                    .ok()
-                    .and_then(|h| h.Lookup(&placement_key).ok())
-                    .is_some_and(|v| v.to_string().eq_ignore_ascii_case("attribution"));
-                if is_attr {
-                    attribution = Some(clean);
-                } else {
-                    lines.push(clean);
-                }
+#[cfg(not(target_os = "macos"))]
+fn plist_blob_to_xml(_blob: &[u8]) -> Option<String> {
+    None
+}
+
+/// Подготовка наблюдателя уведомлений (на macOS чтение идёт фоновым опросом `db2/db`).
+pub unsafe fn init() {}
+
+/// Открывает настройки Full Disk Access, чтобы пользователь разрешил чтение уведомлений macOS.
+pub unsafe fn request_access() -> Access {
+    let (access, _) = poll_notifications();
+    if access != Access::Allowed {
+        let _ = run_cmd("open", &["x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"]);
+    }
+    access
+}
+
+/// Читает доставленные уведомления macOS из базы Центра уведомлений.
+pub unsafe fn poll_notifications() -> (Access, Vec<SysNotif>) {
+    let Some(db) = nc_db_path() else {
+        return (Access::Allowed, Vec::new());
+    };
+    if !std::path::Path::new(&db).exists() {
+        return (Access::Allowed, Vec::new());
+    }
+    let sql = "SELECT r.rec_id, a.identifier, CAST(r.delivered_date AS INTEGER), hex(r.data) \
+               FROM record r JOIN app a ON r.app_id = a.app_id \
+               ORDER BY r.delivered_date DESC LIMIT 100;";
+    let Some((ok, stdout, stderr)) = run_cmd("sqlite3", &["-readonly", "-separator", "\t", &db, sql]) else {
+        return (Access::Allowed, Vec::new());
+    };
+    if !ok {
+        let low = stderr.to_ascii_lowercase();
+        if low.contains("authorization denied") || low.contains("operation not permitted") || low.contains("permission denied") {
+            return (Access::Denied, Vec::new());
+        }
+        return (Access::Allowed, Vec::new());
+    }
+
+    let dismissed = DISMISSED.lock().ok().and_then(|g| g.clone()).unwrap_or_default();
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        let mut parts = line.splitn(4, '\t');
+        let (Some(id_s), Some(app_id_s), Some(ts_s), Some(hex_s)) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        let Ok(id) = id_s.trim().parse::<u32>() else { continue };
+        if dismissed.contains(&id) {
+            continue;
+        }
+        let app_id = if app_id_s.trim().is_empty() {
+            "com.apple.unknown".to_string()
+        } else {
+            app_id_s.trim().to_string()
+        };
+        let cf_secs = ts_s.trim().parse::<i64>().unwrap_or(0);
+        let time_secs = (cf_secs + APPLE_EPOCH_OFFSET).max(0) as u64;
+        let Some(blob) = hex_decode(hex_s) else { continue };
+        let Some(xml) = plist_blob_to_xml(&blob) else { continue };
+        let fields = parse_plist_xml_dict(&xml);
+        let app_name = crate::icons::reg_app_name(&app_id).unwrap_or_else(|| fallback_app_name(&app_id));
+
+        let mut lines = Vec::new();
+        for key in ["titl", "subt", "body"] {
+            if let Some(val) = fields.iter().find(|(k, _)| k == key).map(|(_, v)| v.trim()).filter(|v| !v.is_empty()) {
+                lines.push(val.to_string());
             }
         }
+        let (title, body) = parse_notif_texts(&app_id, &app_name, &lines, None);
+        if title.is_empty() && body.is_empty() {
+            continue;
+        }
+        let icon = crate::icons::resolve_notif_icon(&app_id, &app_name, || None);
+        out.push(SysNotif { id, app_id, app_name, title, body, time_secs, icon });
     }
-    parse_notif_texts(app_id, app_name, &lines, attribution.as_deref())
+    out.sort_by(|a, b| b.time_secs.cmp(&a.time_secs).then_with(|| b.id.cmp(&a.id)));
+    out.truncate(MAX_NOTIFS);
+    (Access::Allowed, out)
+}
+
+/// Помечает уведомление скрытым в ленте острова.
+pub unsafe fn remove_notification(id: u32) {
+    if let Ok(mut guard) = DISMISSED.lock() {
+        guard.get_or_insert_with(HashSet::new).insert(id);
+    }
+}
+
+/// Проверяет, включён ли в macOS режим Фокусирования / «Не беспокоить».
+pub unsafe fn poll_dnd() -> Option<bool> {
+    if let Some(home) = std::env::var_os("HOME") {
+        let assertions = std::path::PathBuf::from(home).join("Library/DoNotDisturb/DB/Assertions.json");
+        if let Ok(text) = std::fs::read_to_string(assertions) {
+            return Some(text.contains("assertionDetails"));
+        }
+    }
+    let (ok, out, _) = run_cmd("defaults", &["read", "com.apple.controlcenter", "NSStatusItem Visible FocusModes"])?;
+    if !ok {
+        return Some(false);
+    }
+    Some(out.trim() == "1")
+}
+
+/// Переключает системный режим Focus через macOS Shortcuts (если настроена быстрая команда Focus/DND).
+pub unsafe fn set_dnd(on: bool) -> bool {
+    let (_, list, _) = match run_cmd("shortcuts", &["list"]) {
+        Some(r) => r,
+        None => return false,
+    };
+    let candidates: &[&str] = if on {
+        &["Turn Do Not Disturb On", "Do Not Disturb On", "Focus On", "Включить Не беспокоить"]
+    } else {
+        &["Turn Do Not Disturb Off", "Do Not Disturb Off", "Focus Off", "Выключить Не беспокоить"]
+    };
+    for name in candidates {
+        if list.lines().any(|l| l.trim().eq_ignore_ascii_case(name))
+            && run_cmd("shortcuts", &["run", name]).is_some_and(|(ok, _, _)| ok)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -478,49 +437,13 @@ fn parse_notif_texts(app_id: &str, app_name: &str, lines: &[String], attribution
     (head.to_string(), tail.to_string())
 }
 
-unsafe fn read_logo_bytes(app_id: &str, info: Option<&AppInfo>) -> Option<Vec<u8>> {
-    let owned = if info.is_none() && app_id.contains('!') {
-        AppInfo::GetFromAppUserModelId(&HSTRING::from(app_id)).ok()
-    } else {
-        None
-    };
-    let info = info.or(owned.as_ref())?;
-    let disp = info.DisplayInfo().ok()?;
-    let logo_ref = disp
-        .GetLogo(Size { Width: ICON_PX as f32, Height: ICON_PX as f32 })
-        .ok()?;
-    let stream: IRandomAccessStreamWithContentType = wait(logo_ref.OpenReadAsync()).ok()?;
-    let size = stream.Size().ok()?;
-    if size == 0 || size > (4 << 20) {
-        return None;
-    }
-    let size = size as u32;
-    let reader = DataReader::CreateDataReader(&stream).ok()?;
-    let mut loaded = 0u32;
-    while loaded < size {
-        let chunk = wait(reader.LoadAsync(size - loaded)).ok()?;
-        if chunk == 0 {
-            break;
-        }
-        loaded = loaded.saturating_add(chunk);
-    }
-    let avail = reader.UnconsumedBufferLength().ok()? as usize;
-    if avail == 0 {
-        return None;
-    }
-    let mut bytes = vec![0u8; avail];
-    reader.ReadBytes(&mut bytes).ok()?;
-    Some(bytes)
-}
-
-fn fallback_app_name(aumid: &str) -> String {
-    let base = aumid.split('!').next().unwrap_or(aumid);
+fn fallback_app_name(bundle_id: &str) -> String {
+    let base = bundle_id.split('!').next().unwrap_or(bundle_id);
     let base = base.rsplit(['\\', '/']).next().unwrap_or(base);
-    let base = base.split('_').next().unwrap_or(base);
-    let base = base.strip_suffix(".exe").or_else(|| base.strip_suffix(".EXE")).unwrap_or(base);
+    let base = base.strip_suffix(".app").or_else(|| base.strip_suffix(".exe")).unwrap_or(base);
     let last = base.rsplit('.').next().unwrap_or(base).trim();
     if last.is_empty() {
-        "Windows".to_string()
+        "macOS".to_string()
     } else {
         last.to_string()
     }

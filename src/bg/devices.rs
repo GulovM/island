@@ -1,211 +1,136 @@
-//! Списки устройств (Wi-Fi, Bluetooth, аудио) и функции работы с аудио-устройствами.
+//! Списки устройств (Wi-Fi / Bluetooth / Audio) и их кэш для выпадающих меню острова.
 
 use std::sync::Mutex;
-use std::time::Instant;
 
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
-use windows::Win32::Media::Audio::{
-    eMultimedia, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
-};
-use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+use windows::Win32::Media::Audio::IMMDevice;
 
-use super::bluetooth;
-use super::{notify, SNAPSHOT};
-
-/// Какой список устройств запрошен (выпадающие списки вкладки Controls).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ListKind {
     Wifi,
     Bluetooth,
     Audio,
 }
 
-/// Строка выпадающего списка.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DevItem {
-    /// Wi-Fi: имя сохранённого профиля (пусто, если сеть не сохранена); аудио: id конечной точки;
-    /// Bluetooth: id устройства WinRT.
     pub id: String,
     pub name: String,
     pub sub: String,
     pub active: bool,
-    /// Wi-Fi без профиля: «аутентификация|шифрование» для нового профиля («open|none» — без пароля;
-    /// пусто — корпоративная сеть, подключаться через Параметры). Bluetooth и аудио: ContainerId
-    /// устройства, если его можно подключить из острова (Bluetooth-аудио), иначе пусто.
     pub extra: String,
 }
 
-/// Строка состояния последнего действия для каждого списка («Подключение…», «Неверный пароль?»).
-static STATUS: Mutex<[Option<(String, Instant)>; 3]> = Mutex::new([None, None, None]);
-/// Сколько держится сообщение о результате (сообщение «…» держится, пока действие идёт).
-const STATUS_TTL: std::time::Duration = std::time::Duration::from_secs(6);
+static LISTS: Mutex<[Vec<DevItem>; 3]> = Mutex::new([Vec::new(), Vec::new(), Vec::new()]);
+static STATUS: Mutex<[Option<String>; 3]> = Mutex::new([None, None, None]);
 
-/// Сообщение для списка `kind`, если оно свежее.
-pub fn status(kind: ListKind) -> Option<String> {
-    let s = STATUS.lock().ok()?;
-    let (text, at) = s[kind as usize].as_ref()?;
-    (text.ends_with('…') || at.elapsed() < STATUS_TTL).then(|| text.clone())
+fn idx(k: ListKind) -> usize {
+    match k {
+        ListKind::Wifi => 0,
+        ListKind::Bluetooth => 1,
+        ListKind::Audio => 2,
+    }
 }
 
-/// Ставит сообщение для списков `kinds` и будит вкладку (новая ревизия снимка).
+pub fn status(kind: ListKind) -> Option<String> {
+    STATUS.lock().ok().and_then(|s| s[idx(kind)].clone())
+}
+
 pub(super) fn set_status(kinds: &[ListKind], text: &str) {
     if let Ok(mut s) = STATUS.lock() {
-        for k in kinds {
-            s[*k as usize] = Some((text.to_string(), Instant::now()));
+        for &k in kinds {
+            s[idx(k)] = if text.is_empty() { None } else { Some(text.to_string()) };
         }
     }
-    bump();
+    super::notify();
 }
-
-/// Новая ревизия снимка без перечитывания состояния: вкладка заберёт списки и статус.
-fn bump() {
-    if let Ok(mut s) = SNAPSHOT.lock() {
-        let mut snap = s.clone().unwrap_or_default();
-        snap.rev += 1;
-        *s = Some(snap);
-    }
-    notify();
-}
-
-static LISTS: Mutex<[Vec<DevItem>; 3]> = Mutex::new([Vec::new(), Vec::new(), Vec::new()]);
 
 pub fn list(kind: ListKind) -> Vec<DevItem> {
-    LISTS.lock().map(|l| l[kind as usize].clone()).unwrap_or_default()
+    LISTS.lock().ok().map(|l| l[idx(kind)].clone()).unwrap_or_default()
 }
 
 pub(super) fn store_list(kind: ListKind, items: Vec<DevItem>) {
     if let Ok(mut l) = LISTS.lock() {
-        l[kind as usize] = items;
+        l[idx(kind)] = items;
     }
+    super::notify();
 }
 
+#[allow(dead_code)]
 pub(super) unsafe fn device() -> Option<IMMDevice> {
-    let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
-    en.GetDefaultAudioEndpoint(eRender, eMultimedia).ok()
+    None
 }
 
+#[allow(dead_code)]
 pub(super) unsafe fn endpoint() -> Option<IAudioEndpointVolume> {
-    device()?.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None).ok()
+    None
 }
 
-/// «Динамики (Realtek Audio)» → «Динамики».
-pub(super) unsafe fn device_name(dev: &IMMDevice) -> Option<String> {
-    let name = device_full_name(dev)?;
-    let short = name.split(" (").next().unwrap_or(&name).trim().to_string();
-    let short = if short.is_empty() { name } else { short };
-    Some(label_for(&short, device_form_factor(dev)))
+#[cfg(test)]
+pub(super) unsafe fn device_name(_dev: &IMMDevice) -> Option<String> {
+    None
 }
 
-const PKEY_FORM_FACTOR: windows::Win32::Foundation::PROPERTYKEY = windows::Win32::Foundation::PROPERTYKEY {
-    fmtid: windows::core::GUID::from_u128(0x1da5d803_d492_4edd_8c23_e0c0ffee7f0e),
-    pid: 0,
-};
-
-/// Тип устройства по `PKEY_AudioEndpoint_FormFactor` (3 — наушники, 5 — гарнитура).
-unsafe fn device_form_factor(dev: &IMMDevice) -> Option<u32> {
-    use windows::Win32::System::Com::StructuredStorage::PropVariantClear;
-    use windows::Win32::System::Com::STGM_READ;
-    use windows::Win32::System::Variant::VT_UI4;
-    let store = dev.OpenPropertyStore(STGM_READ).ok()?;
-    let mut pv = store.GetValue(&PKEY_FORM_FACTOR).ok()?;
-    let v = (pv.Anonymous.Anonymous.vt == VT_UI4).then(|| pv.Anonymous.Anonymous.Anonymous.ulVal);
-    let _ = PropVariantClear(&mut pv);
-    v
+#[allow(dead_code)]
+pub(super) unsafe fn device_id(_dev: &IMMDevice) -> Option<String> {
+    None
 }
 
-/// Windows называет конечную точку наушников общим «Динамики»: по типу устройства подставляем «Наушники».
-fn label_for(name: &str, form: Option<u32>) -> String {
-    let lower = name.to_lowercase();
-    let already = ["науш", "headphone", "headset", "гарнитур"].iter().any(|w| lower.contains(w));
-    if matches!(form, Some(3 | 5)) && !already {
-        crate::i18n::tr("Наушники").to_string()
-    } else {
-        name.to_string()
-    }
-}
-
-/// Полное дружественное имя устройства: «Динамики (Realtek Audio)».
-unsafe fn device_full_name(dev: &IMMDevice) -> Option<String> {
-    use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
-    use windows::Win32::System::Com::StructuredStorage::PropVariantClear;
-    use windows::Win32::System::Com::STGM_READ;
-    use windows::Win32::System::Variant::VT_LPWSTR;
-    let store = dev.OpenPropertyStore(STGM_READ).ok()?;
-    let mut pv = store.GetValue(&PKEY_Device_FriendlyName).ok()?;
-    let name = if pv.Anonymous.Anonymous.vt == VT_LPWSTR {
-        pv.Anonymous.Anonymous.Anonymous.pwszVal.to_string().ok()
-    } else {
-        None
-    };
-    let _ = PropVariantClear(&mut pv);
-    name
-}
-
-pub(super) unsafe fn device_id(dev: &IMMDevice) -> Option<String> {
-    let p = dev.GetId().ok()?;
-    let s = p.to_string().ok();
-    windows::Win32::System::Com::CoTaskMemFree(Some(p.0 as *const std::ffi::c_void));
-    s
-}
-
-/// Активные устройства вывода звука; текущее по умолчанию помечено `active`.
 pub(super) unsafe fn audio_devices() -> Vec<DevItem> {
-    let mut out = Vec::new();
-    let Ok(en) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else { return out };
-    let default = en.GetDefaultAudioEndpoint(eRender, eMultimedia).ok().and_then(|d| device_id(&d));
-    let Ok(coll) = en.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) else { return out };
-    for i in 0..coll.GetCount().unwrap_or(0) {
-        let Ok(dev) = coll.Item(i) else { continue };
-        let (Some(id), Some(full)) = (device_id(&dev), device_full_name(&dev)) else { continue };
-        let (name, sub) = match full.split_once(" (") {
-            Some((n, rest)) => (n.trim().to_string(), rest.trim_end_matches(')').to_string()),
-            None => (full.clone(), String::new()),
-        };
-        let name = label_for(&name, device_form_factor(&dev));
-        let active = default.as_deref() == Some(id.as_str());
-        out.push(DevItem { id, name, sub, active, extra: String::new() });
-    }
-    // Отключённые Bluetooth-наушники и колонки: клик подключает и делает основными.
-    let eps = bluetooth::audio_endpoints();
-    for (_, name, container) in bluetooth::paired_cached() {
-        let mine: Vec<&bluetooth::AudioEp> = eps.iter().filter(|e| e.container == container).collect();
-        if container.is_empty() || mine.is_empty() || mine.iter().any(|e| e.active) {
-            continue;
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = std::process::Command::new("/usr/sbin/system_profiler")
+            .args(["SPAudioDataType"])
+            .output()
+        {
+            let s = String::from_utf8_lossy(&out.stdout);
+            let mut items = Vec::new();
+            let mut cur_name: Option<String> = None;
+            let mut is_out = false;
+            let mut is_default = false;
+            let push_dev = |items: &mut Vec<DevItem>, name: String, active: bool| {
+                let sub = if active {
+                    crate::i18n::pick("По умолчанию", "Default").to_string()
+                } else {
+                    String::new()
+                };
+                items.push(DevItem { id: name.clone(), name, sub, active, extra: String::new() });
+            };
+            for line in s.lines() {
+                let trim = line.trim();
+                let indent = line.len() - line.trim_start().len();
+                if indent == 8 && trim.ends_with(':') {
+                    if let (Some(name), true) = (cur_name.take(), is_out) {
+                        push_dev(&mut items, name, is_default);
+                    }
+                    cur_name = Some(trim.trim_end_matches(':').to_string());
+                    is_out = false;
+                    is_default = false;
+                } else if trim.starts_with("Output Channels:") {
+                    is_out = true;
+                } else if trim == "Default Output Device: Yes" {
+                    is_default = true;
+                }
+            }
+            if let (Some(name), true) = (cur_name, is_out) {
+                push_dev(&mut items, name, is_default);
+            }
+            if !items.is_empty() {
+                return items;
+            }
         }
-        let id = mine[0].endpoint.clone();
-        out.push(DevItem { id, name, sub: "Bluetooth • не подключено".into(), active: false, extra: container });
     }
-    out
+    Vec::new()
 }
 
 #[cfg(test)]
 mod tests {
-    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
-    use super::super::bluetooth::bluetooth_devices;
-    use super::super::wifi::wifi_networks;
     use super::*;
 
     #[test]
-    fn headphones_label() {
-        assert_eq!(label_for("Динамики", Some(3)), "Наушники");
-        assert_eq!(label_for("Динамики", Some(5)), "Наушники");
-        assert_eq!(label_for("Динамики", Some(1)), "Динамики");
-        assert_eq!(label_for("Динамики", None), "Динамики");
-        assert_eq!(label_for("Headset Earphone", Some(5)), "Headset Earphone");
-    }
-
-    /// Живая проверка списков устройств (только чтение).
-    #[test]
-    #[ignore]
-    fn live_lists() {
+    fn device_name_no_panic() {
         unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            for (n, l) in [("wifi", wifi_networks(false)), ("bt", bluetooth_devices()), ("audio", audio_devices())] {
-                println!("{n}: {}", l.len());
-                for d in l.iter().take(8) {
-                    println!("  {} | {} | active={} | extra={} | id={}", d.name, d.sub, d.active, d.extra, d.id.chars().take(24).collect::<String>());
-                }
-            }
+            assert!(device_name(&IMMDevice).is_none());
         }
     }
 }

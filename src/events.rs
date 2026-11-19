@@ -71,7 +71,7 @@ impl App {
                     self.ui.down = true;
                     self.ui.pressed = true;
                     // Долгое нажатие на пустом месте вкладки с виджетами включает правку.
-                    if self.pencil_visible() && !self.tabs.editing(self.normal_id()) && y as f32 / self.scale > 31.0 {
+                    if self.pencil_visible() && !self.tabs.editing(self.normal_id()) && y as f32 / self.scale > self.tab_top() + TAB_H + 5.0 {
                         self.press_pos = Some((x, y));
                         SetTimer(Some(self.hwnd), LONG_TIMER, LONG_MS, None);
                     }
@@ -316,10 +316,10 @@ impl App {
                 if !self.expanded && self.hits_toast_notice(px, py) {
                     return self.dismiss_toast();
                 }
-                if self.expanded && self.notifications_open && (py as f32 / self.scale) > TAB_TOP + TAB_H {
+                if self.expanded && self.notifications_open && (py as f32 / self.scale) > self.tab_top() + TAB_H {
                     let half = self.body_size().0 / self.scale / 2.0;
                     let ox = self.win_w as f32 / self.scale / 2.0 - half;
-                    let (mx, my) = (px as f32 / self.scale - ox, py as f32 / self.scale);
+                    let (mx, my) = (px as f32 / self.scale - ox, py as f32 / self.scale - self.notch_h());
                     let (consumed, cancel_timer) = self.tabs.notif_right_click(mx, my);
                     if cancel_timer {
                         let _ = KillTimer(Some(self.hwnd), NOTIF_MENU_TIMER);

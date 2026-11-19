@@ -1,9 +1,11 @@
-name: release
+name: release-macos
 
 on:
   push:
-    tags: ["v*"]
+    branches: ["macos"]
+    tags: ["v*-macos"]
   pull_request:
+    branches: ["macos"]
   workflow_dispatch:
 
 permissions:
@@ -11,65 +13,65 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: macos-latest
     timeout-minutes: 30
     env:
-      # build.rs падает, если не нашёл rc.exe: иначе exe собрался бы без иконки и манифеста.
-      ISLAND_REQUIRE_RC: "1"
       ISLAND_GOOGLE_CLIENT_ID: ${{ secrets.ISLAND_GOOGLE_CLIENT_ID }}
       ISLAND_GOOGLE_CLIENT_SECRET: ${{ secrets.ISLAND_GOOGLE_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Tag matches Cargo.toml version
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
-          ver=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
-          [ "v$ver" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != Cargo.toml $ver"; exit 1; }
+          ver=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          [ "v${ver}-macos" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != v${ver}-macos"; exit 1; }
       - name: Clippy
         run: cargo clippy --release --locked --all-targets -- -D warnings
       - name: Tests
         run: cargo test --release --locked
-      - name: Install Inno Setup
-        run: choco install innosetup --no-progress -y
-      - name: Package
-        shell: powershell
-        # Подпись включается секретами SIGN_PFX_BASE64 / SIGN_PFX_PASSWORD; без них пакет собирается неподписанным.
-        env:
-          SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
-          ISLAND_SIGN_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
+      - name: Build universal binary
+        shell: bash
         run: |
-          if ($env:SIGN_PFX_BASE64) {
-            $pfx = Join-Path $env:RUNNER_TEMP "sign.pfx"
-            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_BASE64))
-            $env:ISLAND_SIGN_PFX = $pfx
-          }
-          powershell -ExecutionPolicy Bypass -File tools\package.ps1
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+          mkdir -p target/universal/release
+          lipo -create \
+            target/aarch64-apple-darwin/release/island \
+            target/x86_64-apple-darwin/release/island \
+            -output target/universal/release/island
+      - name: Package macOS dmg & portable zip
+        shell: bash
+        env:
+          ISLAND_MAC_SIGN_IDENTITY: ${{ secrets.ISLAND_MAC_SIGN_IDENTITY }}
+        run: bash tools/package-macos.sh --bin target/universal/release/island
       - name: Extract release notes
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           ver="${GITHUB_REF_NAME#v}"
+          ver="${ver%-macos}"
           awk -v ver="$ver" '
             /^## \[/ { if (found) exit; if ($0 ~ "^## \\[" ver "\\]") found=1; next }
             found { print }
           ' CHANGELOG.md > dist/RELEASE_NOTES.md
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Publish macOS release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/island-*-setup.exe
-            dist/island-*-portable.zip
+            dist/island-*-macos.dmg
+            dist/island-*-macos-portable.zip
             dist/SHA256SUMS.txt
           body_path: dist/RELEASE_NOTES.md
           generate_release_notes: false
       - uses: actions/upload-artifact@v4
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         with:
-          name: dist
+          name: dist-macos
           path: dist/

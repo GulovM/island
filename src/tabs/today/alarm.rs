@@ -1,10 +1,7 @@
 //! Сигнал окончания таймера: WAV из памяти и воспроизведение в отдельном потоке.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
-
-use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT, SND_PURGE};
-use windows::Win32::System::Diagnostics::Debug::Beep;
+use std::time::Duration;
 
 /// WAV (16 бит, моно) с тремя двойными гудками: звучит через звуковое устройство по умолчанию,
 /// в отличие от `Beep` и звуков схемы Windows, которые на многих системах молчат.
@@ -101,28 +98,42 @@ fn wav_duration(w: &[u8]) -> Option<Duration> {
     (byte_rate > 0).then(|| Duration::from_secs_f64(data as f64 / f64::from(byte_rate)))
 }
 
-/// Играет WAV из памяти `repeats` раз, не блокируясь внутри PlaySound, чтобы его можно было оборвать.
-/// `false` — воспроизвести не удалось.
+/// Играет WAV на macOS через системный `afplay` (`repeats` раз), поддерживая прерывание по `STOP`.
 unsafe fn play_wav(wav: &[u8], repeats: u32) -> bool {
-    let Some(len) = wav_duration(wav) else { return false };
-    for _ in 0..repeats {
-        if STOP.load(Ordering::Acquire) {
-            return true;
-        }
-        if !PlaySoundW(windows::core::PCWSTR(wav.as_ptr().cast()), None, SND_MEMORY | SND_ASYNC | SND_NODEFAULT).as_bool() {
-            return false;
-        }
-        // Буфер должен жить, пока звук играет.
-        let end = Instant::now() + len + Duration::from_millis(80);
-        while Instant::now() < end {
+    let _len = wav_duration(wav);
+    let tmp = std::env::temp_dir().join("kite-island-alarm.wav");
+    if std::fs::write(&tmp, wav).is_err() {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        for _ in 0..repeats {
             if STOP.load(Ordering::Acquire) {
-                let _ = PlaySoundW(windows::core::PCWSTR::null(), None, SND_PURGE);
                 return true;
             }
-            std::thread::sleep(Duration::from_millis(25));
+            let Ok(mut child) = std::process::Command::new("/usr/bin/afplay").arg(&tmp).spawn() else {
+                return false;
+            };
+            loop {
+                if STOP.load(Ordering::Acquire) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return true;
+                }
+                match child.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+                    Err(_) => break,
+                }
+            }
         }
+        true
     }
-    true
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = repeats;
+        false
+    }
 }
 
 /// Сигнал окончания таймера в отдельном потоке (не блокирует интерфейс).
@@ -133,22 +144,11 @@ pub(super) fn play_alarm() {
     STOP.store(false, Ordering::Release);
     std::thread::spawn(|| {
         unsafe {
-            // Стандартный сигнал будильника Windows (дважды); нет файла — мягкий звон из памяти,
-            // и только если не звучит ничего — системный гудок.
-            let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
-            let mut ok = std::fs::read(format!(r"{root}\Media\Alarm01.wav")).is_ok_and(|w| play_wav(&w, 2));
-            if !ok {
-                ok = play_wav(&alarm_wav(), 1);
-            }
-            if !ok {
-                for _ in 0..3 {
-                    if STOP.load(Ordering::Acquire) {
-                        break;
-                    }
-                    let _ = Beep(880, 150);
-                    let _ = Beep(1175, 200);
-                    std::thread::sleep(Duration::from_millis(250));
-                }
+            if !play_wav(&alarm_wav(), 2) && !STOP.load(Ordering::Acquire) {
+                #[cfg(target_os = "macos")]
+                let _ = std::process::Command::new("/usr/bin/afplay")
+                    .arg("/System/Library/Sounds/Glass.aiff")
+                    .status();
             }
         }
         PLAYING.store(false, Ordering::Release);
@@ -164,8 +164,11 @@ pub(super) fn play_ding() {
     STOP.store(false, Ordering::Release);
     std::thread::spawn(|| {
         unsafe {
-            if !play_wav(&ding_wav(), 1) {
-                let _ = Beep(1047, 200);
+            if !play_wav(&ding_wav(), 1) && !STOP.load(Ordering::Acquire) {
+                #[cfg(target_os = "macos")]
+                let _ = std::process::Command::new("/usr/bin/afplay")
+                    .arg("/System/Library/Sounds/Tink.aiff")
+                    .status();
             }
         }
         PLAYING.store(false, Ordering::Release);
@@ -175,15 +178,25 @@ pub(super) fn play_ding() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use windows::Win32::Media::Audio::SND_SYNC;
 
     /// Слышимая проверка: `cargo test alarm_plays -- --ignored`.
     #[test]
     #[ignore]
     fn alarm_plays() {
         let wav = alarm_wav();
-        let ok = unsafe { PlaySoundW(windows::core::PCWSTR(wav.as_ptr().cast()), None, SND_MEMORY | SND_SYNC | SND_NODEFAULT).as_bool() };
-        assert!(ok);
+        let tmp = std::env::temp_dir().join("island-alarm-test.wav");
+        assert!(std::fs::write(&tmp, &wav).is_ok());
+        #[cfg(target_os = "macos")]
+        {
+            let ok = std::process::Command::new("/usr/bin/afplay")
+                .arg(&tmp)
+                .status()
+                .is_ok_and(|s| s.success());
+            let _ = std::fs::remove_file(&tmp);
+            assert!(ok);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]

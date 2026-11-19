@@ -1,10 +1,6 @@
-use std::ffi::c_void;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::time::Instant;
-
-use windows::core::{w, PCWSTR};
-use windows::Win32::Networking::WinHttp::*;
-
-use crate::sys;
 
 pub(crate) struct Resp {
     pub status: u16,
@@ -12,19 +8,6 @@ pub(crate) struct Resp {
     pub body: Vec<u8>,
     pub(super) total: u64,
     pub(super) secs: f64,
-}
-
-/// Хэндл WinHTTP, закрывается при выходе из области видимости.
-struct H(*mut c_void);
-
-impl Drop for H {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                let _ = WinHttpCloseHandle(self.0);
-            }
-        }
-    }
 }
 
 pub(super) fn split_url(url: &str) -> Result<(bool, String, u16, String), String> {
@@ -51,76 +34,22 @@ pub(super) fn split_url(url: &str) -> Result<(bool, String, u16, String), String
     Ok((secure, host.to_string(), port, path.to_string()))
 }
 
-/// Запрос GET (или POST с `upload` байт нулей). Тело сохраняется до `keep` байт, но считается целиком.
+/// Запрос GET (или POST с `upload` байт нулей) через `curl` на macOS.
 pub(super) unsafe fn http(url: &str, upload: Option<usize>, keep: usize) -> Result<Resp, String> {
-    let (secure, host, port, path) = split_url(url)?;
-    let session = H(WinHttpOpen(w!("Island/0.1"), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, PCWSTR::null(), PCWSTR::null(), 0));
-    if session.0.is_null() {
-        return Err("WinHttpOpen".into());
+    let _ = split_url(url)?;
+    let normalized = url.strip_prefix("webcal://").map(|r| format!("https://{r}")).unwrap_or_else(|| url.to_string());
+    let payload = upload.map(|n| vec![0u8; n]);
+    let mut r = request(
+        if payload.is_some() { "POST" } else { "GET" },
+        &normalized,
+        &[],
+        payload.as_deref(),
+        keep,
+    )?;
+    if upload.is_some() {
+        r.total = upload.unwrap_or(0) as u64;
     }
-    let _ = WinHttpSetTimeouts(session.0, 8000, 8000, 20_000, 20_000);
-    let hostw = sys::wz(&host);
-    let conn = H(WinHttpConnect(session.0, PCWSTR(hostw.as_ptr()), port, 0));
-    if conn.0.is_null() {
-        return Err(format!("нет соединения с {host}"));
-    }
-    let pathw = sys::wz(&path);
-    let verb = if upload.is_some() { w!("POST") } else { w!("GET") };
-    let flags = if secure { WINHTTP_FLAG_SECURE } else { WINHTTP_OPEN_REQUEST_FLAGS(0) };
-    let req = H(WinHttpOpenRequest(conn.0, verb, PCWSTR(pathw.as_ptr()), PCWSTR::null(), PCWSTR::null(), std::ptr::null(), flags));
-    if req.0.is_null() {
-        return Err("WinHttpOpenRequest".into());
-    }
-    let t0 = Instant::now();
-    match upload {
-        None => WinHttpSendRequest(req.0, None, None, 0, 0, 0).map_err(|e| e.to_string())?,
-        Some(n) => {
-            WinHttpSendRequest(req.0, None, None, 0, n as u32, 0).map_err(|e| e.to_string())?;
-            let chunk = vec![0u8; 64 * 1024];
-            let mut sent = 0usize;
-            while sent < n {
-                let k = (n - sent).min(chunk.len());
-                let mut wr = 0u32;
-                WinHttpWriteData(req.0, Some(chunk.as_ptr() as *const c_void), k as u32, &mut wr).map_err(|e| e.to_string())?;
-                if wr == 0 {
-                    return Err("отправка оборвалась".into());
-                }
-                sent += wr as usize;
-            }
-        }
-    }
-    WinHttpReceiveResponse(req.0, std::ptr::null_mut()).map_err(|e| e.to_string())?;
-    let (mut status, mut len) = (0u32, 4u32);
-    let _ = WinHttpQueryHeaders(
-        req.0,
-        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-        PCWSTR::null(),
-        Some(&mut status as *mut u32 as *mut c_void),
-        &mut len,
-        std::ptr::null_mut(),
-    );
-    let mut body = Vec::new();
-    let mut buf = vec![0u8; 64 * 1024];
-    let mut total = 0u64;
-    loop {
-        let mut avail = 0u32;
-        WinHttpQueryDataAvailable(req.0, &mut avail).map_err(|e| e.to_string())?;
-        if avail == 0 {
-            break;
-        }
-        let want = (avail as usize).min(buf.len());
-        let mut got = 0u32;
-        WinHttpReadData(req.0, buf.as_mut_ptr() as *mut c_void, want as u32, &mut got).map_err(|e| e.to_string())?;
-        if got == 0 {
-            break;
-        }
-        total += got as u64;
-        if body.len() < keep {
-            let room = keep - body.len();
-            body.extend_from_slice(&buf[..(got as usize).min(room)]);
-        }
-    }
-    Ok(Resp { status: status as u16, final_url: url.to_string(), body, total, secs: t0.elapsed().as_secs_f64() })
+    Ok(r)
 }
 
 pub(crate) fn resolve_redirect_url(base_url: &str, location: &str) -> Option<String> {
@@ -172,37 +101,7 @@ pub(crate) fn is_trusted_auth_redirect(url: &str) -> bool {
         || h.ends_with(".googleapis.com")
 }
 
-unsafe fn query_location_header(req: *mut c_void) -> Option<String> {
-    let mut byte_len = 0u32;
-    let _ = WinHttpQueryHeaders(
-        req,
-        WINHTTP_QUERY_LOCATION,
-        PCWSTR::null(),
-        None,
-        &mut byte_len,
-        std::ptr::null_mut(),
-    );
-    if byte_len == 0 {
-        return None;
-    }
-    let mut buf = vec![0u16; (byte_len as usize / 2) + 1];
-    WinHttpQueryHeaders(
-        req,
-        WINHTTP_QUERY_LOCATION,
-        PCWSTR::null(),
-        Some(buf.as_mut_ptr() as *mut c_void),
-        &mut byte_len,
-        std::ptr::null_mut(),
-    )
-    .ok()?;
-    let len = (byte_len as usize / 2).min(buf.len());
-    let s = String::from_utf16_lossy(&buf[..len]);
-    Some(s.trim_end_matches('\0').trim().to_string())
-}
-
-/// Произвольный HTTP-запрос (`GET`, `POST`, `PROPFIND`, `REPORT`) с заголовками, телом
-/// и ручной обработкой редиректов (до 5 переходов) с сохранением метода, тела и `Authorization`
-/// на доверенных CalDAV/OAuth доменах.
+/// Произвольный HTTP-запрос (`GET`, `POST`, `PROPFIND`, `REPORT`) с заголовками и ручной обработкой редиректов.
 pub(crate) unsafe fn request(
     method: &str,
     url: &str,
@@ -210,83 +109,71 @@ pub(crate) unsafe fn request(
     body: Option<&[u8]>,
     keep: usize,
 ) -> Result<Resp, String> {
-    let session = H(WinHttpOpen(
-        w!("Island/0.1"),
-        WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-        PCWSTR::null(),
-        PCWSTR::null(),
-        0,
-    ));
-    if session.0.is_null() {
-        return Err("WinHttpOpen".into());
-    }
-    let _ = WinHttpSetTimeouts(session.0, 8000, 8000, 20_000, 20_000);
-
-    let mut cur_url = url.to_string();
+    let curl = if cfg!(target_os = "macos") { "/usr/bin/curl" } else { "curl" };
+    let mut cur_url = url.strip_prefix("webcal://").map(|r| format!("https://{r}")).unwrap_or_else(|| url.to_string());
     let mut allow_auth = true;
-    let verbw = sys::wz(method);
     let t0 = Instant::now();
 
     for _hop in 0..=5 {
-        let (secure, host, port, path) = split_url(&cur_url)?;
-        let hostw = sys::wz(&host);
-        let conn = H(WinHttpConnect(session.0, PCWSTR(hostw.as_ptr()), port, 0));
-        if conn.0.is_null() {
-            return Err(format!("нет соединения с {host}"));
-        }
-        let pathw = sys::wz(&path);
-        let flags = if secure { WINHTTP_FLAG_SECURE } else { WINHTTP_OPEN_REQUEST_FLAGS(0) };
-        let req = H(WinHttpOpenRequest(
-            conn.0,
-            PCWSTR(verbw.as_ptr()),
-            PCWSTR(pathw.as_ptr()),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            std::ptr::null(),
-            flags,
-        ));
-        if req.0.is_null() {
-            return Err("WinHttpOpenRequest".into());
-        }
-
-        let disable_flags: u32 = WINHTTP_DISABLE_REDIRECTS;
-        let disable_bytes = std::slice::from_raw_parts(&disable_flags as *const u32 as *const u8, std::mem::size_of::<u32>());
-        let _ = WinHttpSetOption(Some(req.0), WINHTTP_OPTION_DISABLE_FEATURE, Some(disable_bytes));
-
+        let _ = split_url(&cur_url)?;
+        let mut cmd = Command::new(curl);
+        cmd.arg("-sS")
+            .arg("-X")
+            .arg(method)
+            .arg("--connect-timeout")
+            .arg("8")
+            .arg("--max-time")
+            .arg("20")
+            .arg("--dump-header")
+            .arg("-")
+            .arg("--user-agent")
+            .arg("KiteIsland/1.9");
         for &(k, v) in headers {
             if !allow_auth && k.eq_ignore_ascii_case("Authorization") {
                 continue;
             }
-            let line = format!("{k}: {v}\r\n");
-            let linew = sys::wz(&line);
-            let slice = &linew[..linew.len().saturating_sub(1)];
-            WinHttpAddRequestHeaders(req.0, slice, WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE)
-                .map_err(|e| e.to_string())?;
+            cmd.arg("-H").arg(format!("{k}: {v}"));
         }
-
-        let body_bytes = body.unwrap_or(&[]);
-        let body_len = body_bytes.len() as u32;
-        let opt_ptr = if body_bytes.is_empty() {
-            None
+        if body.is_some() {
+            cmd.arg("--data-binary").arg("@-").stdin(Stdio::piped());
         } else {
-            Some(body_bytes.as_ptr() as *const c_void)
+            cmd.stdin(Stdio::null());
+        }
+        cmd.arg(&cur_url).stdout(Stdio::piped()).stderr(Stdio::piped());
+
+        let mut child = cmd.spawn().map_err(|e| format!("curl: {e}"))?;
+        if let Some(bytes) = body {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(bytes);
+            }
+        }
+        let out = child.wait_with_output().map_err(|e| format!("curl wait: {e}"))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            return Err(if err.is_empty() { format!("http error {}", out.status) } else { err });
+        }
+        let raw = &out.stdout;
+        let sep = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|i| (i, 4))
+            .or_else(|| raw.windows(2).position(|w| w == b"\n\n").map(|i| (i, 2)));
+        let (hdr_bytes, body_bytes) = match sep {
+            Some((i, n)) => (&raw[..i], &raw[i + n..]),
+            None => (&raw[..], &[][..]),
         };
-        WinHttpSendRequest(req.0, None, opt_ptr, body_len, body_len, 0).map_err(|e| e.to_string())?;
-
-        WinHttpReceiveResponse(req.0, std::ptr::null_mut()).map_err(|e| e.to_string())?;
-        let (mut status, mut len) = (0u32, 4u32);
-        let _ = WinHttpQueryHeaders(
-            req.0,
-            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-            PCWSTR::null(),
-            Some(&mut status as *mut u32 as *mut c_void),
-            &mut len,
-            std::ptr::null_mut(),
-        );
-
-        let code = status as u16;
-        if matches!(code, 301 | 302 | 307 | 308) {
-            if let Some(loc) = query_location_header(req.0) {
+        let hdr_text = String::from_utf8_lossy(hdr_bytes);
+        let status = hdr_text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|s| s.parse::<u16>().ok())
+            .unwrap_or(200);
+        if matches!(status, 301 | 302 | 307 | 308) {
+            if let Some(loc) = hdr_text
+                .lines()
+                .find_map(|l| l.split_once(':').filter(|(k, _)| k.eq_ignore_ascii_case("location")).map(|(_, v)| v.trim().to_string()))
+            {
                 if let Some(next_url) = resolve_redirect_url(&cur_url, &loc) {
                     allow_auth = allow_auth && is_trusted_auth_redirect(&next_url);
                     cur_url = next_url;
@@ -294,33 +181,12 @@ pub(crate) unsafe fn request(
                 }
             }
         }
-
-        let mut resp_body = Vec::new();
-        let mut buf = vec![0u8; 64 * 1024];
-        let mut total = 0u64;
-        loop {
-            let mut avail = 0u32;
-            WinHttpQueryDataAvailable(req.0, &mut avail).map_err(|e| e.to_string())?;
-            if avail == 0 {
-                break;
-            }
-            let want = (avail as usize).min(buf.len());
-            let mut got = 0u32;
-            WinHttpReadData(req.0, buf.as_mut_ptr() as *mut c_void, want as u32, &mut got)
-                .map_err(|e| e.to_string())?;
-            if got == 0 {
-                break;
-            }
-            total += got as u64;
-            if resp_body.len() < keep {
-                let room = keep - resp_body.len();
-                resp_body.extend_from_slice(&buf[..(got as usize).min(room)]);
-            }
-        }
+        let total = body_bytes.len() as u64;
+        let kept = body_bytes[..body_bytes.len().min(keep)].to_vec();
         return Ok(Resp {
-            status: code,
+            status,
             final_url: cur_url,
-            body: resp_body,
+            body: kept,
             total,
             secs: t0.elapsed().as_secs_f64(),
         });

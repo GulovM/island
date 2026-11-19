@@ -1,6 +1,7 @@
 //! Вкладка Power: блокировка, сон, перезагрузка, выключение. Перезагрузка и выключение
 //! требуют второго нажатия в течение трёх секунд — случайный клик ничего не сделает.
 
+#[cfg(not(target_os = "macos"))]
 use std::os::windows::process::CommandExt;
 use std::time::{Duration, Instant};
 
@@ -9,7 +10,7 @@ use crate::ui::{icon, Canvas, Rect, Ui};
 use super::{id, PAD, POWER, TOP};
 
 const CONFIRM: Duration = Duration::from_secs(3);
-/// `CREATE_NO_WINDOW`: shutdown.exe не мигает консолью.
+#[cfg(not(target_os = "macos"))]
 const NO_WINDOW: u32 = 0x0800_0000;
 
 const LOCK: usize = 0;
@@ -89,17 +90,28 @@ impl Power {
             RESTART | SHUTDOWN => {
                 if self.armed.is_some_and(|(a, _)| a == idx) {
                     self.armed = None;
-                    let flag = if idx == RESTART { "/r" } else { "/s" };
-                    // Полный путь: имя без пути ищется в текущем каталоге и PATH (подмена exe).
-                    let exe = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()))
-                        .join("System32")
-                        .join("shutdown.exe");
-                    if let Err(e) = std::process::Command::new(exe)
-                        .args([flag, "/t", "0"])
-                        .creation_flags(NO_WINDOW)
-                        .spawn()
+                    #[cfg(target_os = "macos")]
                     {
-                        crate::log::error(&format!("shutdown.exe не запустился: {e}"));
+                        let verb = if idx == RESTART { "restart" } else { "shut down" };
+                        let script = format!("tell application \"System Events\" to {verb}");
+                        if let Err(e) = std::process::Command::new("osascript").args(["-e", &script]).spawn() {
+                            crate::log::error(&format!("osascript {verb} не запустился: {e}"));
+                        }
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        let flag = if idx == RESTART { "/r" } else { "/s" };
+                        // Полный путь: имя без пути ищется в текущем каталоге и PATH (подмена exe).
+                        let exe = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()))
+                            .join("System32")
+                            .join("shutdown.exe");
+                        if let Err(e) = std::process::Command::new(exe)
+                            .args([flag, "/t", "0"])
+                            .creation_flags(NO_WINDOW)
+                            .spawn()
+                        {
+                            crate::log::error(&format!("shutdown.exe не запустился: {e}"));
+                        }
                     }
                 } else {
                     self.armed = Some((idx, Instant::now() + CONFIRM));

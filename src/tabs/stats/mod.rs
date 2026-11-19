@@ -6,21 +6,12 @@
 //! пока вкладка видна.
 
 use std::collections::HashMap;
-use std::ffi::c_void;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::FILETIME;
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
-use windows::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2, MIB_IF_TABLE2};
-use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives};
-use windows::Win32::System::Power::{CallNtPowerInformation, ProcessorInformation, PROCESSOR_POWER_INFORMATION};
-use windows::Win32::System::ProcessStatus::{GetPerformanceInfo, PERFORMANCE_INFORMATION};
-use windows::Win32::System::SystemInformation::{GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX};
-use windows::Win32::System::Threading::GetSystemTimes;
 
 use crate::anim::Spring;
 use crate::online::{self, Online};
@@ -48,9 +39,6 @@ mod procs;
 use procs::*;
 
 const GB: f32 = 1024.0 * 1024.0 * 1024.0;
-/// Значение `GetDriveTypeW` для встроенного накопителя (`DRIVE_FIXED`; константа лежит в фиче
-/// `Win32_System_WindowsProgramming`, которую ради неё подключать не стоит).
-const DRIVE_FIXED: u32 = 3;
 
 // Номера виджетов в `SPEC`.
 const CPU: usize = 0;
@@ -203,10 +191,6 @@ fn aim(ring: &mut Spring, v: f32) {
     ring.target = v;
 }
 
-pub(super) fn ft(f: FILETIME) -> u64 {
-    ((f.dwHighDateTime as u64) << 32) | f.dwLowDateTime as u64
-}
-
 impl Stats {
     pub fn load(&mut self, top_by_cpu: bool) {
         self.top_by_cpu = top_by_cpu;
@@ -264,11 +248,24 @@ impl Stats {
                 self.sample_disks();
             }
             self.sample_net();
-            let mut pi = PERFORMANCE_INFORMATION { cb: size_of::<PERFORMANCE_INFORMATION>() as u32, ..Default::default() };
-            if GetPerformanceInfo(&mut pi, pi.cb).is_ok() {
-                self.cur.procs = pi.ProcessCount;
+            #[cfg(target_os = "macos")]
+            {
+                if let Ok(out) = std::process::Command::new("/bin/ps").args(["-axo", "pid="]).output() {
+                    self.cur.procs = String::from_utf8_lossy(&out.stdout).lines().count() as u32;
+                }
+                if let Ok(out) = std::process::Command::new("/usr/sbin/sysctl").args(["-n", "kern.boottime"]).output() {
+                    let s = String::from_utf8_lossy(&out.stdout);
+                    if let Some(sec_s) = s.split("sec = ").nth(1).and_then(|r| r.split(',').next()) {
+                        if let Ok(boot) = sec_s.trim().parse::<u64>() {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(boot);
+                            self.cur.uptime_s = now.saturating_sub(boot);
+                        }
+                    }
+                }
             }
-            self.cur.uptime_s = GetTickCount64() / 1000;
         }
         let c = &self.cur;
         let ram = if c.ram_total > 0.0 { c.ram_used / c.ram_total } else { 0.0 };
@@ -283,86 +280,128 @@ impl Stats {
     }
 
     unsafe fn sample_cpu(&mut self) {
-        let (mut idle, mut kernel, mut user) = (FILETIME::default(), FILETIME::default(), FILETIME::default());
-        if GetSystemTimes(Some(&mut idle), Some(&mut kernel), Some(&mut user)).is_ok() {
-            let now = (ft(idle), ft(kernel), ft(user));
-            if let Some(p) = self.prev_cpu {
-                // Время ядра в Windows уже включает простой.
-                let total = (now.1 - p.1) + (now.2 - p.2);
-                let busy = total.saturating_sub(now.0 - p.0);
-                if total > 0 {
-                    self.cur.cpu = (busy as f32 / total as f32).clamp(0.0, 1.0);
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(out) = std::process::Command::new("/usr/bin/top")
+                .args(["-l", "1", "-n", "0", "-s", "0"])
+                .output()
+            {
+                let s = String::from_utf8_lossy(&out.stdout);
+                for line in s.lines() {
+                    if line.starts_with("CPU usage:") {
+                        if let Some(idle_i) = line.find("% idle") {
+                            let before = &line[..idle_i];
+                            if let Some(num) = before.rsplit(|c: char| !c.is_ascii_digit() && c != '.').next() {
+                                if let Ok(idle) = num.parse::<f32>() {
+                                    self.cur.cpu = ((100.0 - idle) / 100.0).clamp(0.0, 1.0);
+                                }
+                            }
+                        }
+                        break;
+                    }
                 }
             }
-            self.prev_cpu = Some(now);
-        }
-        let n = cpu_count();
-        let mut buf = vec![PROCESSOR_POWER_INFORMATION::default(); n];
-        let size = (n * size_of::<PROCESSOR_POWER_INFORMATION>()) as u32;
-        if CallNtPowerInformation(ProcessorInformation, None, 0, Some(buf.as_mut_ptr() as *mut c_void), size).is_ok() {
-            let sum: u64 = buf.iter().map(|p| p.CurrentMhz as u64).sum();
-            self.cur.mhz = (sum / n as u64) as u32;
         }
     }
 
     unsafe fn sample_memory(&mut self) {
-        let mut m = MEMORYSTATUSEX { dwLength: size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
-        if GlobalMemoryStatusEx(&mut m).is_ok() {
-            self.cur.ram_total = m.ullTotalPhys as f32;
-            self.cur.ram_used = (m.ullTotalPhys - m.ullAvailPhys) as f32;
+        #[cfg(target_os = "macos")]
+        {
+            let total = std::process::Command::new("/usr/sbin/sysctl")
+                .args(["-n", "hw.memsize"])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<u64>().ok())
+                .unwrap_or(0);
+            if total > 0 {
+                self.cur.ram_total = total as f32;
+                let mut used = (total as f32) * 0.5;
+                if let Ok(out) = std::process::Command::new("/usr/bin/vm_stat").output() {
+                    let s = String::from_utf8_lossy(&out.stdout);
+                    let page_size: u64 = s
+                        .lines()
+                        .next()
+                        .and_then(|l| l.split("page size of ").nth(1))
+                        .and_then(|r| r.split_whitespace().next())
+                        .and_then(|n| n.parse().ok())
+                        .unwrap_or(16384);
+                    let val = |prefix: &str| -> u64 {
+                        s.lines()
+                            .find(|l| l.starts_with(prefix))
+                            .and_then(|l| l.split(':').nth(1))
+                            .and_then(|v| v.trim().trim_end_matches('.').parse::<u64>().ok())
+                            .unwrap_or(0)
+                    };
+                    let pages = val("Pages active:") + val("Pages wired down:") + val("Pages occupied by compressor:");
+                    if pages > 0 {
+                        used = (pages * page_size) as f32;
+                    }
+                }
+                self.cur.ram_used = used.min(self.cur.ram_total);
+            }
         }
     }
 
-    /// Перечисляет встроенные тома (`DRIVE_FIXED`): съёмные, сетевые и оптические не учитываются.
     unsafe fn sample_disks(&mut self) {
-        let mask = GetLogicalDrives();
-        let mut disks = Vec::new();
-        for i in 0..26u32 {
-            if mask & (1 << i) == 0 {
-                continue;
+        #[cfg(target_os = "macos")]
+        {
+            let mut disks = Vec::new();
+            if let Ok(out) = std::process::Command::new("/bin/df").args(["-k", "/"]).output() {
+                let s = String::from_utf8_lossy(&out.stdout);
+                if let Some(line) = s.lines().nth(1) {
+                    let cols: Vec<&str> = line.split_whitespace().collect();
+                    if cols.len() >= 4 {
+                        let tot_kb = cols[1].parse::<u64>().unwrap_or(0);
+                        let avail_kb = cols[3].parse::<u64>().unwrap_or(0);
+                        let tot_b = tot_kb as f32 * 1024.0;
+                        let used_b = tot_kb.saturating_sub(avail_kb) as f32 * 1024.0;
+                        if tot_b > 0.0 {
+                            disks.push(DiskSample {
+                                letter: '/',
+                                used_gb: used_b / GB,
+                                total_gb: tot_b / GB,
+                            });
+                        }
+                    }
+                }
             }
-            let letter = (b'A' + i as u8) as char;
-            let root: Vec<u16> = format!("{letter}:\\").encode_utf16().chain(std::iter::once(0)).collect();
-            if GetDriveTypeW(PCWSTR(root.as_ptr())) != DRIVE_FIXED {
-                continue;
+            self.cur.disks = disks;
+            if self.disk_view > self.cur.disks.len() {
+                self.disk_view = 0;
             }
-            let (mut free, mut total) = (0u64, 0u64);
-            if GetDiskFreeSpaceExW(PCWSTR(root.as_ptr()), None, Some(&mut total), Some(&mut free)).is_ok() && total > 0 {
-                disks.push(DiskSample { letter, used_gb: total.saturating_sub(free) as f32 / GB, total_gb: total as f32 / GB });
-            }
-        }
-        self.cur.disks = disks;
-        if self.disk_view > self.cur.disks.len() {
-            self.disk_view = 0;
         }
     }
 
     unsafe fn sample_net(&mut self) {
-        let mut table: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
-        if GetIfTable2(&mut table).is_err() || table.is_null() {
-            return;
-        }
-        let rows = std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize);
-        let (mut rx, mut tx) = (0u64, 0u64);
-        for r in rows {
-            // Только физические адаптеры, чтобы VPN и виртуальные не удваивали трафик.
-            let hardware = r.InterfaceAndOperStatusFlags._bitfield & 1 != 0;
-            if hardware && r.OperStatus.0 == 1 {
-                rx += r.InOctets;
-                tx += r.OutOctets;
+        #[cfg(target_os = "macos")]
+        {
+            let Ok(out) = std::process::Command::new("/usr/sbin/netstat")
+                .args(["-ibn"])
+                .output()
+            else {
+                return;
+            };
+            let s = String::from_utf8_lossy(&out.stdout);
+            let (mut rx, mut tx) = (0u64, 0u64);
+            for line in s.lines().skip(1) {
+                let cols: Vec<&str> = line.split_whitespace().collect();
+                // en* физические интерфейсы с Link#
+                if cols.len() >= 11 && cols[0].starts_with("en") && cols[2].starts_with("<Link#") {
+                    rx = rx.saturating_add(cols[6].parse::<u64>().unwrap_or(0));
+                    tx = tx.saturating_add(cols[9].parse::<u64>().unwrap_or(0));
+                }
             }
+            let now = Instant::now();
+            if let Some((t, prx, ptx)) = self.prev_net {
+                let dt = (now - t).as_secs_f32().max(0.05);
+                let d_rx = rx.saturating_sub(prx);
+                let d_tx = tx.saturating_sub(ptx);
+                self.cur.rx_bps = d_rx as f32 / dt;
+                self.cur.tx_bps = d_tx as f32 / dt;
+                self.session_bytes += d_rx + d_tx;
+            }
+            self.prev_net = Some((now, rx, tx));
         }
-        FreeMibTable(table as *const c_void);
-        let now = Instant::now();
-        if let Some((t, prx, ptx)) = self.prev_net {
-            let dt = (now - t).as_secs_f32().max(0.05);
-            let d_rx = rx.saturating_sub(prx);
-            let d_tx = tx.saturating_sub(ptx);
-            self.cur.rx_bps = d_rx as f32 / dt;
-            self.cur.tx_bps = d_tx as f32 / dt;
-            self.session_bytes += d_rx + d_tx;
-        }
-        self.prev_net = Some((now, rx, tx));
     }
 
     /// Рисует вкладку по сетке. `h` — высота панели (с полосой правки).

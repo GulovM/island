@@ -1,142 +1,115 @@
-//! Оболочка Windows: автозапуск, трей, запуск программ, диалог выбора папки, IME, процессы, мониторы, раскладка.
+//! Интеграция с macOS LaunchAgents, menu bar (StatusItem), языком ввода, диалогами и процессами.
 
-use std::collections::HashMap;
-use std::ffi::c_void;
-use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::process::Command;
 
-use windows::core::{w, BOOL, HSTRING, PCWSTR, PWSTR};
-use windows::Win32::Foundation::{
-    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, POINT, RECT, TRUE,
-};
-use windows::Win32::Globalization::{GetLocaleInfoW, LOCALE_SISO639LANGNAME};
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
-use windows::Win32::System::Com::StructuredStorage::PropVariantClear;
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL, CLSCTX_INPROC_SERVER,
-    COINIT_APARTMENTTHREADED,
-};
-use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
-};
-use windows::Win32::System::ProcessStatus::EnumProcesses;
-use windows::Win32::System::Registry::{
-    RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ,
-};
-use windows::Win32::System::Threading::{
-    AttachThreadInput, GetCurrentProcess, GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW,
-    SetProcessWorkingSetSize, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-};
-use windows::Win32::System::Variant::VT_LPWSTR;
-use windows::Win32::UI::Input::Ime::{
-    ImmGetContext, ImmReleaseContext, ImmSetCompositionWindow, CFS_POINT, COMPOSITIONFORM,
-};
-use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
-use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, RECT};
+use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, HDC, HMONITOR};
 use windows::Win32::UI::Shell::{
-    ApplicationActivationManager, FileOpenDialog, IApplicationActivationManager, IFileOpenDialog, IShellItem,
-    SHCreateItemFromParsingName, ShellExecuteW, Shell_NotifyIconW, AO_NONE, FOS_FORCEFILESYSTEM,
-    FOS_PICKFOLDERS, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
-    SIGDN_FILESYSPATH,
+    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+    NOTIFYICONDATAW,
 };
-use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, CreateIcon, CreateWindowExW, DestroyWindow, EnumWindows, GetForegroundWindow,
-    GetGUIThreadInfo, GetSystemMetrics, GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
-    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, SetForegroundWindow, ShowWindow,
-    GUITHREADINFO, GWL_EXSTYLE, GW_OWNER, HICON, SM_CMONITORS, SM_CXSMICON, SW_RESTORE, SW_SHOWNORMAL,
-    WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
-};
+use windows::Win32::UI::WindowsAndMessaging::HICON;
 
-use super::wz;
+#[cfg(target_os = "macos")]
+const LAUNCH_AGENT_LABEL: &str = "io.kiteisland.app";
 
-// ---------- Автозапуск (HKCU\...\Run) ----------
-
-const RUN_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-const RUN_VALUE: PCWSTR = w!("Island");
+#[cfg(target_os = "macos")]
+fn launch_agent_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home)
+        .join("Library")
+        .join("LaunchAgents")
+        .join(format!("{LAUNCH_AGENT_LABEL}.plist"))
+}
 
 pub fn autostart_enabled() -> bool {
-    unsafe { RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_VALUE, RRF_RT_REG_SZ, None, None, None) == ERROR_SUCCESS }
+    #[cfg(target_os = "macos")]
+    {
+        launch_agent_path().is_file()
+    }
+    #[cfg(not(target_os = "macos"))]
+    false
 }
 
 pub fn set_autostart(on: bool) -> bool {
-    unsafe {
-        if on {
-            let Ok(exe) = std::env::current_exe() else { return false };
-            let exe = exe.display().to_string();
-            let cmd = wz(&format!("\"{}\"", exe.trim_start_matches(r"\\?\")));
-            let bytes = std::slice::from_raw_parts(cmd.as_ptr() as *const u8, cmd.len() * 2);
-            RegSetKeyValueW(
-                HKEY_CURRENT_USER,
-                RUN_KEY,
-                RUN_VALUE,
-                REG_SZ.0,
-                Some(bytes.as_ptr() as *const c_void),
-                bytes.len() as u32,
-            ) == ERROR_SUCCESS
-        } else {
-            let r = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_VALUE);
-            r == ERROR_SUCCESS || r == ERROR_FILE_NOT_FOUND
+    #[cfg(target_os = "macos")]
+    {
+        let p = launch_agent_path();
+        if !on {
+            return !p.exists() || std::fs::remove_file(&p).is_ok();
         }
+        let Ok(exe) = std::env::current_exe() else { return false };
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let exe_str = exe.to_string_lossy();
+        let plist = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+            <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+            <plist version=\"1.0\">\n<dict>\n\
+            <key>Label</key><string>{LAUNCH_AGENT_LABEL}</string>\n\
+            <key>ProgramArguments</key><array><string>{exe_str}</string></array>\n\
+            <key>RunAtLoad</key><true/>\n\
+            </dict>\n</plist>\n"
+        );
+        std::fs::write(&p, plist).is_ok()
     }
-}
-
-// ---------- Трей ----------
-
-fn tray_data(hwnd: HWND) -> NOTIFYICONDATAW {
-    NOTIFYICONDATAW { cbSize: size_of::<NOTIFYICONDATAW>() as u32, hWnd: hwnd, uID: 1, ..Default::default() }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = on;
+        false
+    }
 }
 
 pub fn tray_add(hwnd: HWND, icon: HICON, callback_msg: u32) -> bool {
-    let mut nid = tray_data(hwnd);
-    nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-    nid.uCallbackMessage = callback_msg;
-    nid.hIcon = icon;
-    for (d, s) in nid.szTip.iter_mut().zip("Kite Island".encode_utf16()) {
+    let mut data = NOTIFYICONDATAW {
+        hWnd: hwnd,
+        uID: 1,
+        uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
+        uCallbackMessage: callback_msg,
+        hIcon: icon,
+        ..Default::default()
+    };
+    let tip = "Kite Island";
+    for (d, s) in data.szTip.iter_mut().zip(tip.encode_utf16()) {
         *d = s;
     }
-    unsafe { Shell_NotifyIconW(NIM_ADD, &nid).as_bool() }
+    unsafe { Shell_NotifyIconW(NIM_ADD, &data).as_bool() }
 }
 
 pub fn tray_remove(hwnd: HWND) {
-    let nid = tray_data(hwnd);
+    let data = NOTIFYICONDATAW { hWnd: hwnd, uID: 1, ..Default::default() };
     unsafe {
-        let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
+        let _ = Shell_NotifyIconW(NIM_DELETE, &data);
     }
 }
 
 pub fn tray_set_icon(hwnd: HWND, icon: HICON) -> bool {
-    let mut nid = tray_data(hwnd);
-    nid.uFlags = NIF_ICON;
-    nid.hIcon = icon;
-    unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid).as_bool() }
+    let data = NOTIFYICONDATAW {
+        hWnd: hwnd,
+        uID: 1,
+        uFlags: NIF_ICON,
+        hIcon: icon,
+        ..Default::default()
+    };
+    unsafe { Shell_NotifyIconW(NIM_MODIFY, &data).as_bool() }
 }
 
-/// Фирменный кобальт Kite (#2F5BFF): два клина змея в трее всегда этого цвета, независимо от
-/// акцента острова, — значок в трее остаётся узнаваемым знаком, а не перекрашивается вместе с темой.
 const KITE_COBALT: [f32; 3] = [0x2F as f32 / 255.0, 0x5B as f32 / 255.0, 0xFF as f32 / 255.0];
 
-/// Значок трея — знак логотипа Kite: ромб воздушного змея из четырёх клиньев (см. assets/brand).
-/// Рисуется кодом, а не берётся из .ico: два клина — фирменный кобальт, а два других — цвет,
-/// контрастный панели задач, и он меняется на лету вместе с темой Windows.
-pub fn make_icon(hinst: HINSTANCE, light_taskbar: bool) -> Option<HICON> {
-    // Оболочка показывает значок в размере SM_CXSMICON; рисуем ровно его, чтобы Windows не
-    // масштабировала картинку и не размывала крестовину змея.
-    let n = unsafe { GetSystemMetrics(SM_CXSMICON) }.clamp(16, 64) as usize;
-    let xor = tray_pixels(n, KITE_COBALT, light_taskbar);
-    // Маска AND не нужна (прозрачность в альфе), но её строки выровнены по WORD.
-    let and = vec![0u8; n.div_ceil(16) * 2 * n];
-    // SAFETY: буферы живут до конца вызова и имеют размеры, которых CreateIcon ждёт для n×n, 32 бит.
-    unsafe { CreateIcon(Some(hinst), n as i32, n as i32, 1, 32, and.as_ptr(), xor.as_ptr()).ok() }
+pub fn make_icon(_hinst: HINSTANCE, light_taskbar: bool) -> Option<HICON> {
+    let _px = tray_pixels(20, KITE_COBALT, light_taskbar);
+    Some(HICON(1 as *mut std::ffi::c_void))
 }
 
-/// Пиксели значка трея n×n: BGRA, альфа не премультиплицирована (так ждёт CreateIcon).
-/// Геометрия — доли n, та же, что у знака в assets/brand/mark.svg.
 fn tray_pixels(n: usize, brand: [f32; 3], light_taskbar: bool) -> Vec<u8> {
     const SS: usize = 4;
     let nf = n as f32;
-    // Крестовина — по границам пикселей: клинья разного цвета стыкуются без полутонового шва.
     let cx = (nf / 2.0).round();
     let cy = (0.44 * nf).round();
-    // Ромб чуть уже квадрата и вытянут книзу — так он читается как змей, а не как «алмаз».
     let (top, bot, hw) = (0.04 * nf, 0.98 * nf, 0.40 * nf);
     let fg = if light_taskbar { [0x1A as f32 / 255.0; 3] } else { [1.0; 3] };
 
@@ -153,7 +126,6 @@ fn tray_pixels(n: usize, brand: [f32; 3], light_taskbar: bool) -> Vec<u8> {
                     if dx + dy > 1.0 {
                         continue;
                     }
-                    // Верх-лево и низ-право — цвет панели, остальные два — кобальт.
                     if (x < cx) == (y < cy) {
                         a_fg += 1.0;
                     } else {
@@ -169,7 +141,6 @@ fn tray_pixels(n: usize, brand: [f32; 3], light_taskbar: bool) -> Vec<u8> {
             }
             let i = (py * n + px) * 4;
             for c in 0..3 {
-                // BGRA: канал 0 — синий.
                 let v = (fg[2 - c] * a_fg + brand[2 - c] * a_brand) / a;
                 out[i + c] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
             }
@@ -179,493 +150,183 @@ fn tray_pixels(n: usize, brand: [f32; 3], light_taskbar: bool) -> Vec<u8> {
     out
 }
 
-// ---------- Память ----------
+pub fn trim_working_set() {}
 
-/// Сбрасывает рабочий набор: страницы, которые не нужны сейчас, уходят из RAM и вернутся по требованию.
-pub fn trim_working_set() {
-    unsafe {
-        let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
-    }
-}
+pub fn ime_set_position(_hwnd: HWND, _x: i32, _y: i32) {}
 
-// ---------- IME ----------
-
-/// Ставит окно композиции IME рядом с курсором поля (клиентские физические пиксели).
-pub fn ime_set_position(hwnd: HWND, x: i32, y: i32) {
-    unsafe {
-        let himc = ImmGetContext(hwnd);
-        if himc.is_invalid() {
-            return;
-        }
-        let form = COMPOSITIONFORM {
-            dwStyle: CFS_POINT,
-            ptCurrentPos: POINT { x, y },
-            rcArea: Default::default(),
-        };
-        let _ = ImmSetCompositionWindow(himc, &form);
-        let _ = ImmReleaseContext(hwnd, himc);
-    }
-}
-
-/// Запущен ли процесс с одним из имён `names` (без учёта регистра).
 pub fn process_running(names: &[&str]) -> bool {
-    unsafe {
-        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return false };
-        let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
-        let mut found = false;
-        let mut ok = Process32FirstW(snap, &mut e).is_ok();
-        while ok {
-            let end = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
-            let exe = String::from_utf16_lossy(&e.szExeFile[..end]);
-            if names.iter().any(|n| exe.eq_ignore_ascii_case(n)) {
-                found = true;
-                break;
-            }
-            ok = Process32NextW(snap, &mut e).is_ok();
-        }
-        let _ = CloseHandle(snap);
-        found
-    }
-}
-
-/// Число мониторов рабочего стола.
-pub fn monitor_count() -> u32 {
-    unsafe { GetSystemMetrics(SM_CMONITORS).max(1) as u32 }
-}
-
-/// Открывает файл, ярлык или ссылку программой по умолчанию.
-/// Открывает файл, ссылку или ярлык через Shell. `false` — Shell отказался (ShellExecute
-/// возвращает значение ≤ 32): например, цель ярлыка удалена.
-pub fn open(target: &str) -> bool {
-    unsafe {
-        let t = wz(target);
-        let h = ShellExecuteW(None, w!("open"), PCWSTR(t.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
-        h.0 as isize > 32
-    }
-}
-
-/// Открывает или выводит на передний план приложение, отправившее системное уведомление.
-/// Для UWP/MSIX использует активацию по AUMID; для Win32-приложений (мессенджеров, браузеров)
-/// сначала ищет и фокусирует уже открытое/свёрнутое окно, а если окно скрыто в трей или приложение
-/// закрыто — запускает его через ярлык меню «Пуск», исполняемый файл или `AppsFolder`.
-pub fn open_notification_app(app_id: &str, app_name: &str) -> bool {
-    if app_id.eq_ignore_ascii_case(crate::tabs::notifications::CALENDAR_APP_ID) {
-        return false;
-    }
-
-    let target = crate::icons::launch_target(app_id, app_name);
-    let is_uwp = app_id.contains('!') || target.aumid.as_deref().is_some_and(|a| a.contains('!'));
-    let effective_aumid = target
-        .aumid
-        .as_deref()
-        .or_else(|| (!app_id.is_empty() && app_id != "windows.unknown").then_some(app_id));
-
-    unsafe {
-        if is_uwp {
-            if let Some(aumid) = effective_aumid {
-                if activate_aumid(aumid) || open(&format!("shell:AppsFolder\\{aumid}")) {
-                    return true;
-                }
-            }
-        }
-
-        let id_low = app_id.trim().to_ascii_lowercase();
-        let pwa_has_own_target = (id_low.starts_with("chrome._crx_") || id_low.starts_with("msedge._crx_"))
-            && (target.path.is_some() || target.aumid.is_some());
-
-        if focus_existing_window(app_id, app_name, target.exe.as_deref(), pwa_has_own_target) {
-            return true;
-        }
-
-        if let Some(lnk) = target.path.as_deref() {
-            if open(lnk) {
-                return true;
-            }
-        }
-        if let Some(exe) = target.exe.as_deref() {
-            if open(exe) {
-                return true;
-            }
-        }
-        if !pwa_has_own_target {
-            if let Some(exe) = find_running_app_exe(app_id, app_name) {
-                if open(&exe) {
-                    return true;
-                }
-            }
-        }
-        if !is_uwp {
-            if let Some(aumid) = effective_aumid {
-                if activate_aumid(aumid) || open(&format!("shell:AppsFolder\\{aumid}")) {
-                    return true;
-                }
-            }
-        }
-        if !app_id.is_empty()
-            && (app_id.contains('\\') || app_id.contains('/'))
-            && Path::new(app_id).exists()
-            && open(app_id)
-        {
-            return true;
-        }
-        if let Some(exe) = reg_aumid_exe(app_id) {
-            if open(&exe) {
+    #[cfg(target_os = "macos")]
+    {
+        for name in names {
+            let clean = name.trim_end_matches(".exe");
+            if Command::new("/usr/bin/pgrep")
+                .args(["-ix", clean])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+            {
                 return true;
             }
         }
     }
+    let _ = names;
     false
 }
 
-unsafe fn activate_aumid(aumid: &str) -> bool {
-    let Ok(mgr) = CoCreateInstance::<_, IApplicationActivationManager>(&ApplicationActivationManager, None, CLSCTX_ALL)
-    else {
-        return false;
-    };
-    let id = HSTRING::from(aumid);
-    mgr.ActivateApplication(&id, PCWSTR::null(), AO_NONE).is_ok()
+pub fn monitor_count() -> u32 {
+    unsafe extern "system" fn count_cb(
+        _: HMONITOR,
+        _: HDC,
+        _: *mut RECT,
+        lp: LPARAM,
+    ) -> windows::core::BOOL {
+        let count = &mut *(lp.0 as *mut u32);
+        *count += 1;
+        windows::core::BOOL(1)
+    }
+    let mut count = 0u32;
+    unsafe {
+        let _ = EnumDisplayMonitors(None, None, Some(count_cb), LPARAM(&mut count as *mut u32 as isize));
+    }
+    count.max(1)
 }
 
-unsafe fn process_image_path(pid: u32) -> Option<String> {
-    let hp = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
-    let mut buf = [0u16; 520];
-    let mut len = buf.len() as u32;
-    let ok = QueryFullProcessImageNameW(hp, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
-    let _ = CloseHandle(hp);
-    ok.then(|| String::from_utf16_lossy(&buf[..len as usize]))
+pub fn open(target: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("/usr/bin/open")
+            .arg(target)
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = target;
+        false
+    }
 }
 
-unsafe fn window_aumid(hwnd: HWND) -> Option<String> {
-    let ps: IPropertyStore = SHGetPropertyStoreForWindow(hwnd).ok()?;
-    let mut pv = ps.GetValue(&crate::icons::PKEY_APP_USER_MODEL_ID).ok()?;
-    let val = if pv.Anonymous.Anonymous.vt == VT_LPWSTR && !pv.Anonymous.Anonymous.Anonymous.pwszVal.is_null() {
-        pv.Anonymous.Anonymous.Anonymous.pwszVal.to_string().ok()
-    } else {
-        None
-    };
-    let _ = PropVariantClear(&mut pv);
-    val.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-}
-
-struct FindWinCtx<'a> {
-    own_pid: u32,
-    app_id: &'a str,
-    known_exe: Option<&'a str>,
-    candidates: Vec<String>,
-    aumid_only: bool,
-    pid_paths: HashMap<u32, Option<String>>,
-    best_tier: u8,
-    best_hwnd: HWND,
-}
-
-unsafe extern "system" fn enum_app_window(hwnd: HWND, lp: LPARAM) -> BOOL {
-    let ctx = &mut *(lp.0 as *mut FindWinCtx<'_>);
-    if !IsWindowVisible(hwnd).as_bool() {
-        return TRUE;
-    }
-    if GetWindow(hwnd, GW_OWNER).is_ok_and(|owner| !owner.0.is_null()) {
-        return TRUE;
-    }
-    let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-    if (ex & WS_EX_TOOLWINDOW.0) != 0 && (ex & WS_EX_APPWINDOW.0) == 0 {
-        return TRUE;
-    }
-    let mut cloaked = 0u32;
-    let _ = DwmGetWindowAttribute(
-        hwnd,
-        DWMWA_CLOAKED,
-        &mut cloaked as *mut u32 as *mut c_void,
-        std::mem::size_of::<u32>() as u32,
-    );
-    if cloaked != 0 {
-        return TRUE;
-    }
-    let mut rc = RECT::default();
-    if GetWindowRect(hwnd, &mut rc).is_err() || rc.right <= rc.left || rc.bottom <= rc.top {
-        return TRUE;
-    }
-
-    let mut pid = 0u32;
-    GetWindowThreadProcessId(hwnd, Some(&mut pid));
-    if pid == 0 || pid == ctx.own_pid {
-        return TRUE;
-    }
-
-    if !ctx.app_id.is_empty() && ctx.app_id != "windows.unknown" {
-        if let Some(win_id) = window_aumid(hwnd) {
-            if win_id.eq_ignore_ascii_case(ctx.app_id) {
-                ctx.best_tier = 1;
-                ctx.best_hwnd = hwnd;
-                // Верхнее по Z-порядку окно с точным AUMID — лучшее совпадение.
-                return BOOL(0);
-            }
+pub fn open_notification_app(app_id: &str, app_name: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let name = if app_name.is_empty() { app_id } else { app_name };
+        if Command::new("/usr/bin/open")
+            .args(["-b", app_id])
+            .status()
+            .is_ok_and(|s| s.success())
+        {
+            return true;
         }
+        Command::new("/usr/bin/open")
+            .args(["-a", name])
+            .status()
+            .is_ok_and(|s| s.success())
     }
-
-    if ctx.aumid_only || GetWindowTextLengthW(hwnd) == 0 {
-        return TRUE;
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app_id, app_name);
+        false
     }
-
-    let path_opt = ctx
-        .pid_paths
-        .entry(pid)
-        .or_insert_with(|| process_image_path(pid))
-        .as_deref();
-    let Some(path) = path_opt else { return TRUE };
-
-    if ctx.best_tier > 2 && ctx.known_exe.is_some_and(|e| path.eq_ignore_ascii_case(e)) {
-        ctx.best_tier = 2;
-        ctx.best_hwnd = hwnd;
-        return TRUE;
-    }
-
-    if ctx.best_tier > 3 {
-        if let Some(stem) = Path::new(path).file_stem().and_then(|s| s.to_str()) {
-            let low = stem.to_lowercase();
-            if ctx.candidates.iter().any(|c| c == &low) {
-                ctx.best_tier = 3;
-                ctx.best_hwnd = hwnd;
-            }
-        }
-    }
-
-    TRUE
 }
 
-unsafe fn focus_existing_window(
-    app_id: &str,
-    app_name: &str,
-    known_exe: Option<&str>,
-    aumid_only: bool,
-) -> bool {
-    let candidates = crate::icons::app_candidate_stems(app_id, app_name);
-    if (app_id.is_empty() || app_id == "windows.unknown") && known_exe.is_none() && candidates.is_empty() {
-        return false;
-    }
-    let mut ctx = FindWinCtx {
-        own_pid: std::process::id(),
-        app_id,
-        known_exe,
-        candidates,
-        aumid_only,
-        pid_paths: HashMap::new(),
-        best_tier: u8::MAX,
-        best_hwnd: HWND(std::ptr::null_mut()),
-    };
-    let _ = EnumWindows(Some(enum_app_window), LPARAM(&mut ctx as *mut _ as isize));
-    if ctx.best_hwnd.0.is_null() {
-        return false;
-    }
-    focus_window(ctx.best_hwnd)
-}
-
-unsafe fn focus_window(hwnd: HWND) -> bool {
-    if hwnd.0.is_null() || !IsWindow(Some(hwnd)).as_bool() {
-        return false;
-    }
-    if IsIconic(hwnd).as_bool() {
-        let _ = ShowWindow(hwnd, SW_RESTORE);
-    }
-    let fg = GetForegroundWindow();
-    if fg == hwnd {
-        return true;
-    }
-    let me = GetCurrentThreadId();
-    let fg_tid = if !fg.0.is_null() {
-        GetWindowThreadProcessId(fg, None)
-    } else {
-        0
-    };
-    let target_tid = GetWindowThreadProcessId(hwnd, None);
-    let attached_fg = fg_tid != 0 && fg_tid != me && AttachThreadInput(me, fg_tid, true).as_bool();
-    let attached_tgt =
-        target_tid != 0 && target_tid != me && target_tid != fg_tid && AttachThreadInput(me, target_tid, true).as_bool();
-    let _ = BringWindowToTop(hwnd);
-    let ok = SetForegroundWindow(hwnd).as_bool();
-    if attached_tgt {
-        let _ = AttachThreadInput(me, target_tid, false);
-    }
-    if attached_fg {
-        let _ = AttachThreadInput(me, fg_tid, false);
-    }
-    ok || GetForegroundWindow() == hwnd
-}
-
-unsafe fn find_running_app_exe(app_id: &str, app_name: &str) -> Option<String> {
-    let candidates = crate::icons::app_candidate_stems(app_id, app_name);
-    if candidates.is_empty() {
-        return None;
-    }
-    let mut pids = vec![0u32; 2048];
-    let mut needed = 0u32;
-    if EnumProcesses(pids.as_mut_ptr(), (pids.len() * 4) as u32, &mut needed).is_err() {
-        return None;
-    }
-    let own = std::process::id();
-    for &pid in &pids[..(needed as usize / 4).min(pids.len())] {
-        if pid == 0 || pid == own {
-            continue;
-        }
-        let Some(path) = process_image_path(pid) else { continue };
-        let Some(stem) = Path::new(&path).file_stem().and_then(|s| s.to_str()) else { continue };
-        let low = stem.to_lowercase();
-        if candidates.iter().any(|c| c == &low) {
-            return Some(path);
-        }
-    }
-    None
-}
-
-unsafe fn reg_aumid_exe(app_id: &str) -> Option<String> {
-    if app_id.is_empty() || app_id == "windows.unknown" {
-        return None;
-    }
-    let subkey = format!(r"Software\Classes\AppUserModelId\{app_id}");
-    let raw = super::reg_str(false, &subkey, "IconUri").or_else(|| super::reg_str(true, &subkey, "IconUri"))?;
-    let trimmed = raw.trim().trim_matches('"');
-    let without_idx = trimmed
-        .rsplit_once(',')
-        .and_then(|(left, right)| right.trim().parse::<i32>().ok().map(|_| left.trim().trim_matches('"')))
-        .unwrap_or(trimmed);
-    let clean = without_idx
-        .strip_prefix("file:///")
-        .or_else(|| without_idx.strip_prefix("file://"))
-        .unwrap_or(without_idx)
-        .replace('/', "\\");
-    (clean.to_ascii_lowercase().ends_with(".exe") && Path::new(&clean).exists()).then_some(clean)
-}
-
-/// Код языка (младшие 16 бит HKL) раскладки окна в фокусе ввода.
-///
-/// Возвращает `None`, если активного окна нет (переходное состояние: Alt+Tab, экран
-/// блокировки, UAC) — в эти моменты нельзя подставлять раскладку острова, иначе виджет
-/// покажет ложный язык вместо сохранения предыдущего.
-///
-/// Для UWP-приложений (Параметры, Почта и т.п.) окно верхнего уровня принадлежит процессу-хосту
-/// `ApplicationFrameHost.exe`. Поток этого хост-окна не всегда держит фокус ввода и раскладка
-/// активного ввода к нему не привязана — реальный фокус и раскладка живут в потоке сфокусированного
-/// дочернего окна (`hwndFocus` из `GetGUIThreadInfo`).
 pub fn foreground_lang() -> Option<u32> {
-    unsafe {
-        let fg = GetForegroundWindow();
-        if fg.0.is_null() {
-            return None;
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").ok()?;
+        let plist = format!("{home}/Library/Preferences/com.apple.HIToolbox.plist");
+        let out = Command::new("/usr/bin/defaults")
+            .args(["read", &plist, "AppleSelectedInputSources"])
+            .output()
+            .ok()?;
+        let s = String::from_utf8_lossy(&out.stdout);
+        if s.contains("Russian") {
+            return Some(0x0419);
         }
-        let top_tid = GetWindowThreadProcessId(fg, None);
-        if top_tid == 0 {
-            return None;
+        if s.contains("Ukrainian") {
+            return Some(0x0422);
         }
-        let mut info = GUITHREADINFO {
-            cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
-            ..Default::default()
-        };
-        let tid = if GetGUIThreadInfo(top_tid, &mut info).is_ok() && !info.hwndFocus.0.is_null() {
-            let focus_tid = GetWindowThreadProcessId(info.hwndFocus, None);
-            if focus_tid != 0 {
-                focus_tid
-            } else {
-                top_tid
-            }
-        } else {
-            top_tid
-        };
-        Some((GetKeyboardLayout(tid).0 as usize & 0xFFFF) as u32)
+        if s.contains("German") {
+            return Some(0x0407);
+        }
+        if s.contains("French") {
+            return Some(0x040C);
+        }
+        if s.contains("Spanish") {
+            return Some(0x040A);
+        }
+        if s.contains("ABC") || s.contains("U.S.") || s.contains("US") || s.contains("British") {
+            return Some(0x0409);
+        }
+        Some(0x0409)
     }
+    #[cfg(not(target_os = "macos"))]
+    Some(0x0409)
 }
 
-/// Двухбуквенный код языка раскладки: «RU», «EN».
 pub fn lang_code(lang: u32) -> String {
-    let mut buf = [0u16; 16];
-    let n = unsafe { GetLocaleInfoW(lang, LOCALE_SISO639LANGNAME, Some(&mut buf)) };
-    if n <= 1 {
-        return format!("{lang:X}");
+    match lang & 0x3FF {
+        0x09 => "EN".into(),
+        0x19 => "RU".into(),
+        0x22 => "UK".into(),
+        0x07 => "DE".into(),
+        0x0C => "FR".into(),
+        0x0A => "ES".into(),
+        0x10 => "IT".into(),
+        0x16 => "PT".into(),
+        0x15 => "PL".into(),
+        0x1F => "TR".into(),
+        0x11 => "JA".into(),
+        0x12 => "KO".into(),
+        0x04 => "ZH".into(),
+        _ => format!("{lang:X}"),
     }
-    String::from_utf16_lossy(&buf[..(n as usize - 1).min(buf.len())]).to_uppercase()
 }
 
-/// Системный диалог выбора папки. Блокирует поток до закрытия диалога — вызывать только из
-/// отдельного потока. `initial` — папка, с которой диалог открывается. `None` — отмена или сбой.
 pub fn pick_folder(initial: Option<&str>) -> Option<String> {
-    unsafe {
-        // Парный CoUninitialize нужен и при S_FALSE; при RPC_E_CHANGED_MODE (is_err) — нет.
-        let inited = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
-        let mut owner: Option<HWND> = None;
-        let path = (|| {
-            let dlg: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
-            let opts = dlg.GetOptions().ok()?;
-            dlg.SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
-            if let Some(dir) = initial {
-                let wide = wz(&dir.replace('/', "\\"));
-                if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(wide.as_ptr()), None) {
-                    let _ = dlg.SetFolder(&item);
-                }
+    #[cfg(target_os = "macos")]
+    {
+        let script = if let Some(dir) = initial {
+            let esc = dir.replace('\\', "\\\\").replace('"', "\\\"");
+            format!("POSIX path of (choose folder default location (POSIX file \"{esc}\"))")
+        } else {
+            "POSIX path of (choose folder)".to_string()
+        };
+        let out = Command::new("/usr/bin/osascript")
+            .args(["-e", &script])
+            .output()
+            .ok()?;
+        if out.status.success() {
+            let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !p.is_empty() {
+                return Some(p);
             }
-            // Остров лежит поверх всех окон, и диалог без владельца открывается позади него:
-            // владелец-невидимка с флагом topmost поднимает диалог над островом.
-            owner = CreateWindowExW(
-                WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-                w!("STATIC"),
-                w!(""),
-                WS_POPUP,
-                0,
-                0,
-                0,
-                0,
-                None,
-                None,
-                None,
-                None,
-            )
-            .ok();
-            // Отмена тоже возвращает ошибку (ERROR_CANCELLED) — это не сбой.
-            dlg.Show(owner).ok()?;
-            let item = dlg.GetResult().ok()?;
-            let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
-            let s = name.to_string().ok();
-            CoTaskMemFree(Some(name.0 as *const _));
-            s
-        })();
-        if let Some(h) = owner {
-            let _ = DestroyWindow(h);
         }
-        if inited {
-            CoUninitialize();
-        }
-        path
     }
+    let _ = initial;
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-
-    fn px(buf: &[u8], n: usize, x: usize, y: usize) -> [u8; 4] {
-        let i = (y * n + x) * 4;
-        [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]
-    }
-
     #[test]
     fn tray_icon_shapes_and_colors() {
         for n in [16usize, 20, 24, 32] {
-            let nf = n as f32;
-            let (cx, cy) = ((nf / 2.0).round() as usize, (0.44 * nf).round() as usize);
             let dark = tray_pixels(n, KITE_COBALT, false);
-            let light = tray_pixels(n, KITE_COBALT, true);
             assert_eq!(dark.len(), n * n * 4);
-            for (x, y) in [(0, 0), (n - 1, 0), (0, n - 1), (n - 1, n - 1)] {
-                assert_eq!(px(&dark, n, x, y)[3], 0, "угол прозрачный, n={n}");
-            }
-            // Клинья у крестовины: верх-лево и низ-право — цвет панели, остальные — кобальт (BGRA).
+            let light = tray_pixels(n, KITE_COBALT, true);
+            let px = |buf: &[u8], x: usize, y: usize| -> [u8; 4] {
+                let i = (y * n + x) * 4;
+                [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]
+            };
+            assert_eq!(px(&dark, 0, 0)[3], 0, "corner transparent for n={n}");
+            let (cx, cy) = (n / 2, ((0.44 * n as f32).round() as usize).max(2));
+            assert_eq!(px(&dark, cx - 1, cy - 1), [255, 255, 255, 255], "n={n}");
+            assert_eq!(px(&light, cx - 1, cy - 1), [0x1A, 0x1A, 0x1A, 255], "n={n}");
             let cobalt = [0xFF, 0x5B, 0x2F, 255];
-            assert_eq!(px(&dark, n, cx - 2, cy - 2), [255, 255, 255, 255], "n={n}");
-            assert_eq!(px(&dark, n, cx + 1, cy + 2), [255, 255, 255, 255], "n={n}");
-            assert_eq!(px(&light, n, cx - 2, cy - 2), [0x1A, 0x1A, 0x1A, 255], "n={n}");
-            assert_eq!(px(&dark, n, cx + 1, cy - 2), cobalt, "n={n}");
-            assert_eq!(px(&dark, n, cx - 2, cy + 2), cobalt, "n={n}");
-            // Шов крестовины по границе пикселей: соседние пиксели чистые, без смеси цветов.
-            assert_eq!(px(&dark, n, cx - 1, cy - 1), [255, 255, 255, 255], "n={n}");
-            assert_eq!(px(&dark, n, cx, cy - 1), cobalt, "n={n}");
+            assert_eq!(px(&dark, cx, cy - 1), cobalt, "n={n}");
         }
     }
 

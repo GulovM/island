@@ -7,7 +7,6 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use windows::core::{w, PCWSTR};
-use windows::Win32::Security::Cryptography::{BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
@@ -70,11 +69,27 @@ fn google_credentials() -> Result<(&'static str, &'static str), OAuthError> {
 }
 
 fn random_bytes(buf: &mut [u8]) -> Result<(), OAuthError> {
-    unsafe {
-        BCryptGenRandom(None, buf, BCRYPT_USE_SYSTEM_PREFERRED_RNG)
-            .ok()
-            .map_err(|e| OAuthError::Http(format!("BCryptGenRandom: {e}")))
+    #[cfg(unix)]
+    {
+        if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+            if f.read_exact(buf).is_ok() {
+                return Ok(());
+            }
+        }
     }
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0x517c_c1b7_2722_0a95)
+        ^ (std::process::id() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mut x = seed;
+    for b in buf.iter_mut() {
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        *b = (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 56) as u8;
+    }
+    Ok(())
 }
 
 pub fn generate_code_verifier() -> Result<String, OAuthError> {

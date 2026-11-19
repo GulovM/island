@@ -497,7 +497,7 @@ impl Live {
         if self.wave_a.target > 0.5 {
             #[cfg(not(test))]
             {
-                let [rl, rr] = unsafe { self.wave_meter.sample() };
+                let [rl, rr] = self.wave_meter.sample();
                 self.feed_wave_peaks(rl, rr, dt);
             }
             #[cfg(test)]

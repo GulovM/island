@@ -1,92 +1,69 @@
-//! Состояние сети: Wi-Fi подключение, качество сигнала, Ethernet.
+//! Состояние сетевого подключения macOS (Ethernet / Wi-Fi).
 
 use std::sync::Mutex;
 
-use windows::Win32::Foundation::HANDLE;
-use windows::Win32::NetworkManagement::IpHelper::{
-    FreeMibTable, GetIfTable2, NotifyIpInterfaceChange, MIB_IF_TABLE2, MIB_IPINTERFACE_ROW, MIB_NOTIFICATION_TYPE,
-};
-use windows::Win32::NetworkManagement::WiFi::*;
-use windows::Win32::Networking::WinSock::AF_UNSPEC;
-
-use super::{send, Cmd};
-use crate::log;
-
-/// Состояние сети для значка на свёрнутом острове.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NetStatus {
-    /// Подключены к сети Wi-Fi.
     pub wifi_connected: bool,
-    /// Качество сигнала Wi-Fi, 0–100.
     pub quality: u8,
-    /// Есть работающий проводной адаптер.
     pub wired_up: bool,
 }
 
-static NET: Mutex<NetStatus> = Mutex::new(NetStatus { wifi_connected: false, quality: 0, wired_up: false });
+static STATE: Mutex<NetStatus> = Mutex::new(NetStatus {
+    wifi_connected: false,
+    quality: 0,
+    wired_up: false,
+});
 
 pub fn net_status() -> NetStatus {
-    NET.lock().map(|n| *n).unwrap_or_default()
+    STATE.lock().map(|g| *g).unwrap_or_default()
 }
 
-/// Подписка на смену сетевых интерфейсов (подключение, отключение, смена адреса): событие шлёт
-/// `Cmd::Net`, поэтому значок Wi-Fi обновляется без опроса.
-pub(super) unsafe fn watch_network() {
-    unsafe extern "system" fn on_change(_ctx: *const std::ffi::c_void, _row: *const MIB_IPINTERFACE_ROW, _kind: MIB_NOTIFICATION_TYPE) {
-        send(Cmd::Net);
-    }
-    // Хэндл подписки живёт до конца процесса.
-    let mut handle = HANDLE::default();
-    let r = NotifyIpInterfaceChange(AF_UNSPEC, Some(on_change), None, false, &mut handle);
-    if r.0 != 0 {
-        log::error(&format!("NotifyIpInterfaceChange вернул {}", r.0));
-    }
-}
+pub(super) unsafe fn watch_network() {}
 
-/// Читает состояние Wi-Fi и проводной сети в общий снимок и будит главное окно, если оно изменилось.
 pub(super) unsafe fn refresh_net() {
-    let mut st = NetStatus::default();
+    let wifi = super::wifi::wifi_status();
+    let wired_up = has_ethernet_mac();
+    let wifi_connected = wifi.as_ref().is_some_and(|w| w.radio_on && w.ssid.is_some());
+    let next = NetStatus {
+        wifi_connected,
+        quality: if wifi_connected { 80 } else { 0 },
+        wired_up,
+    };
+    if let Ok(mut g) = STATE.lock() {
+        *g = next;
+    }
+    super::notify();
+}
 
-    let (mut ver, mut h) = (0u32, HANDLE::default());
-    if WlanOpenHandle(2, None, &mut ver, &mut h) == 0 {
-        let mut list: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
-        if WlanEnumInterfaces(h, None, &mut list) == 0 && !list.is_null() {
-            let items = std::slice::from_raw_parts((*list).InterfaceInfo.as_ptr(), (*list).dwNumberOfItems as usize);
-            for it in items {
-                if it.isState != wlan_interface_state_connected {
-                    continue;
-                }
-                let (mut size, mut data) = (0u32, std::ptr::null_mut::<std::ffi::c_void>());
-                if WlanQueryInterface(h, &it.InterfaceGuid, wlan_intf_opcode_current_connection, None, &mut size, &mut data, None) == 0
-                    && !data.is_null()
-                {
-                    if size as usize >= std::mem::size_of::<WLAN_CONNECTION_ATTRIBUTES>() {
-                        let attr = &*(data as *const WLAN_CONNECTION_ATTRIBUTES);
-                        if attr.isState == wlan_interface_state_connected {
-                            st.wifi_connected = true;
-                            st.quality = attr.wlanAssociationAttributes.wlanSignalQuality.min(100) as u8;
+fn has_ethernet_mac() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = std::process::Command::new("/sbin/route")
+            .args(["-n", "get", "default"])
+            .output()
+        {
+            let s = String::from_utf8_lossy(&out.stdout);
+            for line in s.lines() {
+                if let Some(iface) = line.trim().strip_prefix("interface:") {
+                    let iface = iface.trim();
+                    if let Ok(hw) = std::process::Command::new("/usr/sbin/networksetup")
+                        .args(["-listallhardwareports"])
+                        .output()
+                    {
+                        let hws = String::from_utf8_lossy(&hw.stdout);
+                        let mut prev_port = "";
+                        for hl in hws.lines() {
+                            if let Some(p) = hl.strip_prefix("Hardware Port:") {
+                                prev_port = p.trim();
+                            } else if hl.trim() == format!("Device: {iface}") {
+                                return !prev_port.contains("Wi-Fi") && !prev_port.contains("AirPort");
+                            }
                         }
-                    }
-                    WlanFreeMemory(data);
-                    if st.wifi_connected {
-                        break;
                     }
                 }
             }
-            WlanFreeMemory(list as *const std::ffi::c_void);
         }
-        let _ = WlanCloseHandle(h, None);
     }
-
-    let mut table: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
-    if GetIfTable2(&mut table).is_ok() && !table.is_null() {
-        let rows = std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize);
-        // Физический адаптер Ethernet (тип 6) в рабочем состоянии (OperStatusUp = 1).
-        st.wired_up = rows.iter().any(|r| r.InterfaceAndOperStatusFlags._bitfield & 1 != 0 && r.Type == 6 && r.OperStatus.0 == 1);
-        FreeMibTable(table as *const std::ffi::c_void);
-    }
-
-    if let Ok(mut n) = NET.lock() {
-        *n = st;
-    }
+    false
 }

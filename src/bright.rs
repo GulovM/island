@@ -1,209 +1,100 @@
-//! Яркость экрана: встроенная панель ноутбука (IOCTL к `\\.\LCD`) или внешний монитор по DDC/CI.
+//! Яркость встроенного дисплея Mac через `DisplayServices` (`dlopen`/`dlsym`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-
-use windows::Win32::Devices::Display::{
-    DestroyPhysicalMonitors, GetMonitorBrightness, GetNumberOfPhysicalMonitorsFromHMONITOR,
-    GetPhysicalMonitorsFromHMONITOR, SetMonitorBrightness, PHYSICAL_MONITOR,
-};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, POINT};
-use windows::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTOPRIMARY};
-use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, OPEN_EXISTING,
-};
-use windows::Win32::System::IO::DeviceIoControl;
-use windows::core::w;
-
-const IOCTL_QUERY: u32 = 0x0023_0498;
-const IOCTL_SET: u32 = 0x0023_049C;
 
 static OK: AtomicBool = AtomicBool::new(false);
 
-struct DdcCache {
-    mon: isize,
-    handle: isize,
-    lo: u32,
-    hi: u32,
-}
-
-static DDC_CACHE: Mutex<Option<DdcCache>> = Mutex::new(None);
-
-/// Есть ли у устройства управляемая яркость (проверено при запуске фонового потока).
 pub fn available() -> bool {
     OK.load(Ordering::Relaxed)
 }
 
-/// Определяет, поддерживается ли регулировка; вызывать один раз из фонового потока.
 pub fn probe() {
     OK.store(get().is_some(), Ordering::Relaxed);
 }
 
-/// Текущая яркость, 0..=1.
 pub fn get() -> Option<f32> {
-    unsafe { lcd_get().or_else(|| ddc_get()) }
+    #[cfg(target_os = "macos")]
+    {
+        mac::get()
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
 }
 
-/// Яркость встроенной панели без DDC/CI (быстрый вызов, годится для опроса из главного потока).
-/// У внешнего монитора `None`: DDC слишком медленный для частого чтения.
 pub fn get_panel() -> Option<f32> {
     if !available() {
         return None;
     }
-    unsafe { lcd_get() }
+    get()
 }
 
-/// Устанавливает яркость, 0..=1.
 pub fn set(v: f32) {
-    let pct = (v.clamp(0.0, 1.0) * 100.0).round() as u8;
-    unsafe {
-        if !lcd_set(pct) {
-            ddc_set(pct);
-        }
+    let clamped = v.clamp(0.0, 1.0);
+    #[cfg(target_os = "macos")]
+    mac::set(clamped);
+    #[cfg(not(target_os = "macos"))]
+    let _ = clamped;
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::ffi::{c_char, c_void};
+    use std::sync::OnceLock;
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGMainDisplayID() -> u32;
     }
-}
 
-unsafe fn on_ac() -> bool {
-    crate::sys::battery_status().is_none_or(|b| b.ac_online)
-}
-
-unsafe fn open_lcd() -> Option<windows::Win32::Foundation::HANDLE> {
-    CreateFileW(
-        w!(r"\\.\LCD"),
-        (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        None,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        None,
-    )
-    .ok()
-}
-
-unsafe fn lcd_get() -> Option<f32> {
-    let h = open_lcd()?;
-    let mut out = [0u8; 3];
-    let mut got = 0u32;
-    let ok = DeviceIoControl(
-        h,
-        IOCTL_QUERY,
-        None,
-        0,
-        Some(out.as_mut_ptr().cast()),
-        3,
-        Some(&mut got),
-        None,
-    )
-    .is_ok();
-    let _ = CloseHandle(h);
-    if !ok || got < 3 {
-        return None;
+    extern "C" {
+        fn dlopen(path: *const c_char, mode: i32) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, sym: *const c_char) -> *mut c_void;
     }
-    let pct = if on_ac() { out[1] } else { out[2] };
-    Some(f32::from(pct.min(100)) / 100.0)
-}
 
-unsafe fn lcd_set(pct: u8) -> bool {
-    let Some(h) = open_lcd() else { return false };
-    let policy = if on_ac() { 1u8 } else { 2u8 };
-    let inp = [policy, pct, pct];
-    let mut got = 0u32;
-    let ok = DeviceIoControl(
-        h,
-        IOCTL_SET,
-        Some(inp.as_ptr().cast()),
-        3,
-        None,
-        0,
-        Some(&mut got),
-        None,
-    )
-    .is_ok();
-    let _ = CloseHandle(h);
-    ok
-}
+    type FnGet = unsafe extern "C" fn(u32, *mut f32) -> i32;
+    type FnSet = unsafe extern "C" fn(u32, f32) -> i32;
 
-/// Физические мониторы основного дисплея; освобождать через `DestroyPhysicalMonitors`.
-unsafe fn physical() -> Vec<PHYSICAL_MONITOR> {
-    let mon = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
-    let mut n = 0u32;
-    if GetNumberOfPhysicalMonitorsFromHMONITOR(mon, &mut n).is_err() || n == 0 {
-        return Vec::new();
+    struct Api {
+        get: Option<FnGet>,
+        set: Option<FnSet>,
     }
-    let mut v = vec![PHYSICAL_MONITOR::default(); n as usize];
-    if GetPhysicalMonitorsFromHMONITOR(mon, &mut v).is_err() {
-        return Vec::new();
-    }
-    v
-}
+    unsafe impl Send for Api {}
+    unsafe impl Sync for Api {}
 
-unsafe fn ddc_get() -> Option<f32> {
-    let mons = physical();
-    let mut res = None;
-    for m in &mons {
-        let (mut lo, mut cur, mut hi) = (0u32, 0u32, 0u32);
-        let handle = m.hPhysicalMonitor;
-        if GetMonitorBrightness(handle, &mut lo, &mut cur, &mut hi) != 0 && hi > lo {
-            res = Some((cur.saturating_sub(lo)) as f32 / (hi - lo) as f32);
-            break;
-        }
+    fn api() -> &'static Api {
+        static API: OnceLock<Api> = OnceLock::new();
+        API.get_or_init(|| unsafe {
+            let path = b"/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices\0";
+            let h = dlopen(path.as_ptr() as *const c_char, 1);
+            if h.is_null() {
+                return Api { get: None, set: None };
+            }
+            let g = dlsym(h, c"DisplayServicesGetBrightness".as_ptr());
+            let s = dlsym(h, c"DisplayServicesSetBrightness".as_ptr());
+            Api {
+                get: (!g.is_null()).then(|| std::mem::transmute::<*mut c_void, FnGet>(g)),
+                set: (!s.is_null()).then(|| std::mem::transmute::<*mut c_void, FnSet>(s)),
+            }
+        })
     }
-    if !mons.is_empty() {
-        let _ = DestroyPhysicalMonitors(&mons);
-    }
-    res
-}
 
-unsafe fn ddc_set(pct: u8) {
-    let mon = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY).0 as isize;
-    if let Ok(mut guard) = DDC_CACHE.lock() {
-        if let Some(c) = guard.as_ref() {
-            if c.mon == mon && c.hi > c.lo {
-                let val = c.lo + (f32::from(pct) / 100.0 * (c.hi - c.lo) as f32).round() as u32;
-                let handle = HANDLE(c.handle as *mut _);
-                if SetMonitorBrightness(handle, val) != 0 {
-                    return;
-                }
-                let _ = DestroyPhysicalMonitors(&[PHYSICAL_MONITOR {
-                    hPhysicalMonitor: handle,
-                    szPhysicalMonitorDescription: [0; 128],
-                }]);
-                *guard = None;
+    pub fn get() -> Option<f32> {
+        unsafe {
+            let f = api().get?;
+            let mut val = 0.0f32;
+            if f(CGMainDisplayID(), &mut val) == 0 && (0.0..=1.0).contains(&val) {
+                Some(val)
             } else {
-                let _ = DestroyPhysicalMonitors(&[PHYSICAL_MONITOR {
-                    hPhysicalMonitor: HANDLE(c.handle as *mut _),
-                    szPhysicalMonitorDescription: [0; 128],
-                }]);
-                *guard = None;
+                None
             }
         }
     }
 
-    let mons = physical();
-    let mut cached_idx = None;
-    for (idx, m) in mons.iter().enumerate() {
-        let (mut lo, mut cur, mut hi) = (0u32, 0u32, 0u32);
-        let handle = m.hPhysicalMonitor;
-        if GetMonitorBrightness(handle, &mut lo, &mut cur, &mut hi) != 0 && hi > lo {
-            let val = lo + (f32::from(pct) / 100.0 * (hi - lo) as f32).round() as u32;
-            if SetMonitorBrightness(handle, val) != 0 {
-                if let Ok(mut guard) = DDC_CACHE.lock() {
-                    *guard = Some(DdcCache {
-                        mon,
-                        handle: handle.0 as isize,
-                        lo,
-                        hi,
-                    });
-                    cached_idx = Some(idx);
-                }
+    pub fn set(v: f32) {
+        unsafe {
+            if let Some(f) = api().set {
+                let _ = f(CGMainDisplayID(), v);
             }
-            break;
-        }
-    }
-    for (idx, m) in mons.into_iter().enumerate() {
-        if Some(idx) != cached_idx {
-            let _ = DestroyPhysicalMonitors(&[m]);
         }
     }
 }

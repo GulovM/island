@@ -1,14 +1,12 @@
-//! Фоновый поток для медленных системных вызовов (WinRT, COM): радио Wi-Fi/Bluetooth,
-//! громкость, медиасессия. Главный поток шлёт команды и читает снимок состояния; по готовности
-//! результата окну уходит `WM_APP + 3`. Потока в простое нет: он спит на `recv`.
+//! Фоновый поток для системных вызовов macOS: радио Wi-Fi/Bluetooth, громкость,
+//! медиаплееры и уведомления. Главный поток шлёт команды и читает снимок состояния;
+//! по готовности результата окну уходит `WM_BG`. Поток спит на `recv`.
 
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Mutex, OnceLock};
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
-use windows::Win32::System::Com::{CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
 use crate::log;
@@ -72,7 +70,6 @@ mod net;
 pub mod notif;
 mod volume;
 mod wifi;
-mod winrt;
 
 pub use devices::{list, status, DevItem, ListKind};
 pub use meter::AudioMeter;
@@ -81,12 +78,104 @@ pub use net::{net_status, NetStatus};
 pub use notif::{Access as NotifAccess, SysNotif, ICON_PX as NOTIF_ICON_PX};
 
 use audio_policy::audio_set_default;
-use bluetooth::{bluetooth_devices, bt_any_connected, bt_spawn, ensure_bt_watch};
-use devices::{audio_devices, device, device_name, endpoint, store_list};
+use bluetooth::{bluetooth_devices, bt_any_connected, bt_power_on, bt_spawn, ensure_bt_watch, set_bt_power};
+use devices::{audio_devices, store_list};
 use media::{media_command, read_media_pair, refresh_media};
 use volume::watch_volume;
-use wifi::{watch_wlan, wifi_disconnect, wifi_networks, wifi_spawn, wifi_status};
-use winrt::wait;
+use wifi::{set_wifi_power, watch_wlan, wifi_disconnect, wifi_networks, wifi_spawn, wifi_status};
+
+#[cfg(target_os = "macos")]
+fn osascript(script: &str) -> Option<String> {
+    let out = std::process::Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn osascript(_script: &str) -> Option<String> {
+    None
+}
+
+fn unescape_xml(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+}
+
+/// Извлекает пары `(ключ, значение)` из XML-представления Apple plist.
+pub(super) fn parse_plist_xml_dict(xml: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut cur_key: Option<String> = None;
+    let mut rest = xml;
+
+    while let Some(lt) = rest.find('<') {
+        rest = &rest[lt + 1..];
+        let Some(gt) = rest.find('>') else { break };
+        let tag = &rest[..gt];
+        rest = &rest[gt + 1..];
+
+        let tag_name = tag.split_whitespace().next().unwrap_or("");
+        if tag_name.starts_with('/') || tag_name.starts_with('?') || tag_name.starts_with('!') {
+            continue;
+        }
+        if tag_name == "true/" || tag_name == "false/" {
+            if let Some(k) = cur_key.take() {
+                out.push((k, tag_name.trim_end_matches('/').to_string()));
+            }
+            continue;
+        }
+        if matches!(tag_name, "key" | "string" | "integer" | "real") {
+            let end_tag = format!("</{tag_name}>");
+            if let Some(end) = rest.find(&end_tag) {
+                let text = unescape_xml(rest[..end].trim());
+                rest = &rest[end + end_tag.len()..];
+                if tag_name == "key" {
+                    cur_key = Some(text);
+                } else if let Some(k) = cur_key.take() {
+                    out.push((k, text));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn parse_volume_settings(out: &str) -> (Option<f32>, bool) {
+    let mut vol: Option<f32> = None;
+    let mut muted = false;
+    for part in out.split(',') {
+        let Some((k, v)) = part.trim().split_once(':') else { continue };
+        let key = k.trim();
+        let val = v.trim();
+        if key == "output volume" {
+            if let Ok(n) = val.parse::<f32>() {
+                vol = Some((n / 100.0).clamp(0.0, 1.0));
+            }
+        } else if key == "output muted" {
+            muted = val.eq_ignore_ascii_case("true");
+        }
+    }
+    (vol, muted)
+}
+
+fn read_volume_settings() -> (Option<f32>, bool) {
+    osascript("get volume settings").map(|s| parse_volume_settings(&s)).unwrap_or((None, false))
+}
+
+fn set_volume_scalar(v: f32) {
+    let pct = (v.clamp(0.0, 1.0) * 100.0).round() as u32;
+    let _ = osascript(&format!("set volume output volume {pct}"));
+}
+
+fn set_volume_muted(muted: bool) {
+    let _ = osascript(&format!("set volume output muted {muted}"));
+}
 
 pub enum Cmd {
     /// Обновить выпадающий список устройств.
@@ -108,6 +197,7 @@ pub enum Cmd {
     /// Обновить состояние радиомодулей и Wi-Fi (по событиям или после переключения).
     Radios,
     /// Изменился список подключённых Bluetooth-устройств (из `DeviceWatcher`).
+    #[allow(dead_code)]
     BtConn,
     /// Обновить только медиа: приходит по событиям медиасессии (индикатор в свёрнутой форме).
     Media,
@@ -173,16 +263,14 @@ pub fn start(hwnd: HWND) {
         return;
     }
     let spawned = std::thread::Builder::new().name("island-bg".into()).spawn(move || {
-        let mut radio_access = false;
         let mut pending = PendingRadios::default();
         unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             crate::bright::probe();
             watch_volume();
             net::watch_network();
             watch_wlan();
             notif::init();
-            refresh(true, &mut radio_access, &mut pending);
+            refresh(true, &mut pending);
             refresh_notifs();
             refresh_dnd(&mut pending.dnd);
             net::refresh_net();
@@ -283,16 +371,16 @@ pub fn start(hwnd: HWND) {
                     Cmd::Volume(_) if Some(i) != last_volume => {}
                     Cmd::Brightness(_) if Some(i) != last_bright => {}
                     Cmd::Seek(_) if Some(i) != last_seek => {}
-                    cmd => unsafe { run(cmd, &mut radio_access, &mut pending) },
+                    cmd => unsafe { run(cmd, &mut pending) },
                 }
             }
             if has_fast {
                 notify();
             }
             if needs_refresh {
-                unsafe { refresh(wants_radios, &mut radio_access, &mut pending) };
+                unsafe { refresh(wants_radios, &mut pending) };
             } else if wants_radios {
-                unsafe { refresh_radios(&mut radio_access, &mut pending) };
+                unsafe { refresh_radios(&mut pending) };
             } else if wants_media {
                 unsafe { refresh_media() };
             }
@@ -388,7 +476,7 @@ fn schedule_dnd_recheck() {
     });
 }
 
-unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
+unsafe fn run(cmd: Cmd, pending: &mut PendingRadios) {
     match cmd {
         Cmd::Tick | Cmd::Media | Cmd::Net | Cmd::Radios | Cmd::BtConn | Cmd::NotifRefresh | Cmd::DndRefresh => {}
         Cmd::NotifRequestAccess => {
@@ -422,7 +510,7 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
             store_list(ListKind::Audio, audio_devices());
         }
         Cmd::Wifi(on) => {
-            if set_radio(windows::Devices::Radios::RadioKind::WiFi, on, radio_access) {
+            if set_wifi_power(on) {
                 let until = std::time::Instant::now() + std::time::Duration::from_millis(1500);
                 pending.wifi = Some((on, until));
                 if on {
@@ -434,7 +522,7 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
             }
         }
         Cmd::Bluetooth(on) => {
-            if set_radio(windows::Devices::Radios::RadioKind::Bluetooth, on, radio_access) {
+            if set_bt_power(on) {
                 let until = std::time::Instant::now() + std::time::Duration::from_millis(1500);
                 pending.bluetooth = Some((on, until));
                 if on {
@@ -446,7 +534,7 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
             }
         }
         Cmd::Airplane(on) => {
-            if set_airplane(on, radio_access) {
+            if set_airplane(on) {
                 let until = std::time::Instant::now() + std::time::Duration::from_millis(1500);
                 pending.airplane = Some((on, until));
                 if on {
@@ -463,9 +551,7 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
         }
         Cmd::Volume(v) => {
             let clamped = v.clamp(0.0, 1.0);
-            if let Some(ep) = endpoint() {
-                let _ = ep.SetMasterVolumeLevelScalar(clamped, std::ptr::null());
-            }
+            set_volume_scalar(clamped);
             if let Ok(mut s) = SNAPSHOT.lock() {
                 let mut snap = s.clone().unwrap_or_default();
                 snap.volume = Some(clamped);
@@ -485,9 +571,7 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
             }
         }
         Cmd::Mute(m) => {
-            if let Some(ep) = endpoint() {
-                let _ = ep.SetMute(m, std::ptr::null());
-            }
+            set_volume_muted(m);
             if let Ok(mut s) = SNAPSHOT.lock() {
                 let mut snap = s.clone().unwrap_or_default();
                 snap.muted = m;
@@ -502,136 +586,35 @@ unsafe fn run(cmd: Cmd, radio_access: &mut bool, pending: &mut PendingRadios) {
     }
 }
 
-unsafe fn ensure_radio_access(access: &mut bool) {
-    use windows::Devices::Radios::Radio;
-    if !*access {
-        let _ = wait(Radio::RequestAccessAsync());
-        *access = true;
-    }
-}
+/// Какие радио работали до «режима полёта»: `(wifi, bluetooth)`.
+static BEFORE_AIRPLANE: Mutex<(bool, bool)> = Mutex::new((true, true));
 
-/// Поддерживает подписку `Radio::StateChanged` на текущем списке радиомодулей, чтобы
-/// переключение Wi-Fi / Bluetooth в Windows сразу обновляло снимок.
-unsafe fn ensure_radio_watch(radios: &[windows::Devices::Radios::Radio]) {
-    use windows::Devices::Radios::Radio;
-    use windows::Foundation::TypedEventHandler;
-
-    static WATCHED: Mutex<Vec<(Radio, i64, i32, String)>> = Mutex::new(Vec::new());
-
-    let sig: Vec<(i32, String)> = radios
-        .iter()
-        .map(|r| (r.Kind().ok().map_or(-1, |k| k.0), r.Name().map(|n| n.to_string()).unwrap_or_default()))
-        .collect();
-    let Ok(mut guard) = WATCHED.lock() else { return };
-    let unchanged = guard.len() == sig.len() && guard.iter().zip(&sig).all(|(a, b)| a.2 == b.0 && a.3 == b.1);
-    if unchanged {
-        return;
-    }
-    for (r, tok, _, _) in guard.drain(..) {
-        let _ = r.RemoveStateChanged(tok);
-    }
-    for (r, (kind, name)) in radios.iter().zip(sig) {
-        let handler = TypedEventHandler::new(|_, _| {
-            send(Cmd::Radios);
-            Ok(())
-        });
-        if let Ok(tok) = r.StateChanged(&handler) {
-            guard.push((r.clone(), tok, kind, name));
-        }
-    }
-}
-
-pub(super) unsafe fn set_radio(kind: windows::Devices::Radios::RadioKind, on: bool, access: &mut bool) -> bool {
-    use windows::Devices::Radios::{Radio, RadioAccessStatus, RadioState};
-    ensure_radio_access(access);
-    let Ok(radios) = wait(Radio::GetRadiosAsync()) else { return false };
-    let mut changed = false;
-    for r in radios {
-        if r.Kind().ok() == Some(kind) {
-            let state = if on { RadioState::On } else { RadioState::Off };
-            match wait(r.SetStateAsync(state)) {
-                Ok(RadioAccessStatus::Allowed) => changed = true,
-                Ok(status) => log::error(&format!("переключение радио отклонено: {status:?}")),
-                Err(e) => log::error(&format!("не удалось переключить радио: {e}")),
-            }
-        }
-    }
-    changed
-}
-
-/// Радио, которые были включены до режима полёта (`RadioKind` как число), чтобы вернуть их при выходе.
-static BEFORE_AIRPLANE: Mutex<Vec<i32>> = Mutex::new(Vec::new());
-
-/// Режим полёта: выключает все радио, при выходе включает те, что работали до него (если запомненных
-/// нет, например после перезапуска, — Wi-Fi и Bluetooth).
-pub(super) unsafe fn set_airplane(on: bool, access: &mut bool) -> bool {
-    use windows::Devices::Radios::{Radio, RadioAccessStatus, RadioKind, RadioState};
-    ensure_radio_access(access);
-    let Ok(radios) = wait(Radio::GetRadiosAsync()) else { return false };
+/// Выключает все доступные радио на macOS (`on = true`) или восстанавливает прежнее состояние.
+pub(super) unsafe fn set_airplane(on: bool) -> bool {
+    let cur_wifi = wifi_status().map(|s| s.radio_on).unwrap_or(true);
+    let cur_bt = bt_power_on().unwrap_or(false);
     let mut before = BEFORE_AIRPLANE.lock().unwrap_or_else(|e| e.into_inner());
     if on {
-        before.clear();
-        before.extend(radios.into_iter().filter(|r| r.State().ok() == Some(RadioState::On)).filter_map(|r| r.Kind().ok()).map(|k| k.0));
+        *before = (cur_wifi, cur_bt);
+        let w = set_wifi_power(false);
+        let b = set_bt_power(false);
+        w || b
+    } else {
+        let (want_w, want_b) = *before;
+        let w = want_w && set_wifi_power(true);
+        let b = want_b && set_bt_power(true);
+        w || b
     }
-    let restore = if before.is_empty() { vec![RadioKind::WiFi.0, RadioKind::Bluetooth.0] } else { before.clone() };
-    let Ok(radios) = wait(Radio::GetRadiosAsync()) else { return false };
-    let mut changed = false;
-    for r in radios {
-        let Ok(kind) = r.Kind() else { continue };
-        let state = if on {
-            RadioState::Off
-        } else if restore.contains(&kind.0) {
-            RadioState::On
-        } else {
-            continue;
-        };
-        match wait(r.SetStateAsync(state)) {
-            Ok(RadioAccessStatus::Allowed) => changed = true,
-            Ok(status) => log::error(&format!("режим полёта отклонён: {status:?}")),
-            Err(e) => log::error(&format!("не удалось переключить радио: {e}")),
-        }
-    }
-    if !on {
-        before.clear();
-    }
-    changed
 }
 
-/// Обновляет поля радиомодулей и Wi-Fi в `snap`, опираясь на Win32 WLAN API и (при `query_winrt`)
-/// WinRT `Radio::GetRadiosAsync()`. При сбое WinRT сохраняет прежние значения вместо сброса в `None`.
+/// Обновляет поля радиомодулей, SSID и Bluetooth в `snap`.
 unsafe fn update_radio_fields(
     snap: &mut Snapshot,
     prev: &Snapshot,
-    query_winrt: bool,
-    access: &mut bool,
+    query_radios: bool,
     pending: &mut PendingRadios,
 ) {
-    use windows::Devices::Radios::{Radio, RadioKind, RadioState};
-
-    let mut winrt_wifi = None;
-    let mut winrt_bt = prev.bluetooth;
-    let mut winrt_airplane = prev.airplane;
-
-    if query_winrt {
-        ensure_radio_access(access);
-        if let Ok(coll) = wait(Radio::GetRadiosAsync()) {
-            let radios: Vec<Radio> = coll.into_iter().collect();
-            ensure_radio_watch(&radios);
-            let mut bt = None;
-            let mut air = None;
-            for r in &radios {
-                let on = r.State().ok() == Some(RadioState::On);
-                air = Some(air.unwrap_or(true) & !on);
-                match r.Kind() {
-                    Ok(RadioKind::WiFi) => winrt_wifi = Some(winrt_wifi.unwrap_or(false) | on),
-                    Ok(RadioKind::Bluetooth) => bt = Some(bt.unwrap_or(false) | on),
-                    _ => {}
-                }
-            }
-            winrt_bt = bt;
-            winrt_airplane = air;
-        }
-    }
+    let bt_actual = if query_radios { bt_power_on().or(prev.bluetooth) } else { prev.bluetooth };
 
     let wlan = wifi_status();
     let (raw_wifi, raw_ssid) = match wlan {
@@ -640,31 +623,38 @@ unsafe fn update_radio_fields(
             let wifi_on = if ws.radio_known {
                 ws.radio_on || ssid.is_some()
             } else {
-                ssid.is_some() || winrt_wifi.unwrap_or(prev.wifi.unwrap_or(false))
+                ssid.is_some() || prev.wifi.unwrap_or(false)
             };
             (Some(wifi_on), ssid)
         }
-        None => (winrt_wifi.or(prev.wifi), None),
+        None => (prev.wifi, None),
     };
 
     snap.wifi = PendingRadios::resolve(&mut pending.wifi, raw_wifi);
     snap.ssid = if snap.wifi == Some(false) { None } else { raw_ssid };
-    snap.bluetooth = PendingRadios::resolve(&mut pending.bluetooth, winrt_bt);
+    snap.bluetooth = PendingRadios::resolve(&mut pending.bluetooth, bt_actual);
     if snap.bluetooth == Some(true) {
         ensure_bt_watch();
     }
     snap.bt_connected = snap.bluetooth == Some(true) && bt_any_connected();
-    let resolved_air = PendingRadios::resolve(&mut pending.airplane, winrt_airplane);
+
+    let raw_air = match (snap.wifi, snap.bluetooth) {
+        (Some(w), Some(b)) => Some(!w && !b),
+        (Some(w), None) => Some(!w),
+        (None, Some(b)) => Some(!b),
+        (None, None) => prev.airplane,
+    };
+    let resolved_air = PendingRadios::resolve(&mut pending.airplane, raw_air);
     snap.airplane = match resolved_air {
         Some(true) if snap.wifi == Some(true) || snap.bluetooth == Some(true) => Some(false),
         other => other,
     };
 }
 
-unsafe fn refresh_radios(access: &mut bool, pending: &mut PendingRadios) {
+unsafe fn refresh_radios(pending: &mut PendingRadios) {
     let prev = snapshot();
     let mut snap = prev.clone();
-    update_radio_fields(&mut snap, &prev, true, access, pending);
+    update_radio_fields(&mut snap, &prev, true, pending);
     if let Ok(mut s) = SNAPSHOT.lock() {
         snap.rev = s.as_ref().map_or(0, |p| p.rev) + 1;
         *s = Some(snap);
@@ -712,7 +702,7 @@ unsafe fn refresh_dnd(pending_dnd: &mut Option<(bool, std::time::Instant)>) -> b
     false
 }
 
-unsafe fn refresh(full: bool, access: &mut bool, pending: &mut PendingRadios) {
+unsafe fn refresh(full: bool, pending: &mut PendingRadios) {
     let prev = snapshot();
     let mut snap = Snapshot {
         notifications: prev.notifications.clone(),
@@ -722,19 +712,21 @@ unsafe fn refresh(full: bool, access: &mut bool, pending: &mut PendingRadios) {
         ..Snapshot::default()
     };
 
-    update_radio_fields(&mut snap, &prev, full, access, pending);
+    update_radio_fields(&mut snap, &prev, full, pending);
     snap.brightness = if full || prev.brightness.is_none() && crate::bright::available() {
         crate::bright::get()
     } else {
         prev.brightness
     };
-    if let Some(dev) = device() {
-        snap.audio = device_name(&dev);
-        if let Ok(ep) = dev.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None) {
-            snap.volume = ep.GetMasterVolumeLevelScalar().ok();
-            snap.muted = ep.GetMute().map(|b| b.as_bool()).unwrap_or(false);
-        }
-    }
+    let devs = audio_devices();
+    snap.audio = devs
+        .iter()
+        .find(|d| d.active)
+        .or_else(|| devs.first())
+        .map(|d| d.name.clone());
+    let (vol, muted) = read_volume_settings();
+    snap.volume = vol.or(prev.volume);
+    snap.muted = if vol.is_some() { muted } else { prev.muted };
     (snap.media, snap.live_media) = read_media_pair();
 
     if let Ok(mut s) = SNAPSHOT.lock() {
@@ -769,21 +761,41 @@ mod tests {
         assert!(expired.is_none());
     }
 
+    #[test]
+    fn parse_volume_settings_parses_slider_and_mute() {
+        let (v, m) = parse_volume_settings("output volume:65, input volume:50, alert volume:100, output muted:true");
+        assert!(m);
+        assert!((v.unwrap() - 0.65).abs() < 0.001);
+        let (v2, m2) = parse_volume_settings("output volume:0, output muted:false");
+        assert!(!m2);
+        assert_eq!(v2, Some(0.0));
+    }
+
+    #[test]
+    fn parse_plist_xml_dict_extracts_notification_fields() {
+        let xml = r#"<plist version="1.0"><dict><key>titl</key><string>Alice &amp; Bob</string><key>body</key><string>Hello &lt;Mac&gt;</string></dict></plist>"#;
+        let pairs = parse_plist_xml_dict(xml);
+        assert_eq!(
+            pairs,
+            vec![
+                ("titl".into(), "Alice & Bob".into()),
+                ("body".into(), "Hello <Mac>".into()),
+            ]
+        );
+    }
+
     /// Живая диагностика состояния радио и Wi-Fi (только чтение).
     #[test]
     #[ignore]
     fn live_radio_snapshot() {
-        use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
         unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             let mut snap = Snapshot::default();
             let prev = Snapshot::default();
-            let mut access = false;
             let mut pending = PendingRadios::default();
-            update_radio_fields(&mut snap, &prev, true, &mut access, &mut pending);
+            update_radio_fields(&mut snap, &prev, true, &mut pending);
             println!(
-                "access={} wifi={:?} ssid={:?} bluetooth={:?} airplane={:?}",
-                access, snap.wifi, snap.ssid, snap.bluetooth, snap.airplane
+                "wifi={:?} ssid={:?} bluetooth={:?} airplane={:?}",
+                snap.wifi, snap.ssid, snap.bluetooth, snap.airplane
             );
         }
     }

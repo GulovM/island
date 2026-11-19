@@ -1,4 +1,5 @@
-//! Управление медиасессиями Windows (SMTC): чтение трека, обложки, событий воспроизведения.
+//! Управление медиаплеерами на macOS (Music, Spotify, VLC) через `osascript`:
+//! чтение трека, длительности, позиции, переключения источников и декодирование обложек.
 
 use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
@@ -7,23 +8,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use windows::Foundation::TypedEventHandler;
-use windows::Media::Control::{
-    GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager as Mgr,
-    GlobalSystemMediaTransportControlsSessionMediaProperties,
-    GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
-};
-use windows::Storage::Streams::DataReader;
 use windows::Win32::Graphics::Imaging::*;
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
 
-use super::winrt::{wait, wait_timeout};
 use super::{send, Cmd, SNAPSHOT};
 use crate::log;
 
-/// Таймаут WinRT-вызовов SMTC: при зависшей вкладке браузера не держим фоновый поток по 5 секунд.
-const MEDIA_WAIT_MS: u64 = 1500;
-/// Пауза перед повторной загрузкой обложки, если поток миниатюры завис или не прочитался.
+/// Пауза перед повторной загрузкой обложки, если декодирование не удалось.
 const COVER_FAIL_COOLDOWN: Duration = Duration::from_secs(10);
 
 /// Сторона квадрата обложки, пиксели.
@@ -163,8 +154,6 @@ impl Timeline {
 }
 
 thread_local! {
-    /// Менеджер медиасессий создаётся один раз: его запрос — самая дорогая часть опроса.
-    static MEDIA_MGR: RefCell<Option<Mgr>> = const { RefCell::new(None) };
     /// AUMID и ключ трека последней активно игравшей медиасессии (для сохранения выбора после постановки на паузу).
     static LAST_PLAYING: RefCell<(String, String)> = const { RefCell::new((String::new(), String::new())) };
 }
@@ -231,103 +220,269 @@ fn resolve_current_flags(exact: &[bool], aumids: &[&str], cur_aumid: &str) -> Ve
     aumids.iter().map(|&a| a == cur_aumid).collect()
 }
 
-fn same_session(
-    a: &GlobalSystemMediaTransportControlsSession,
-    b: &GlobalSystemMediaTransportControlsSession,
-) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MediaApp {
+    Music,
+    Spotify,
+    Vlc,
+}
+
+impl MediaApp {
+    fn aumid(self) -> &'static str {
+        match self {
+            Self::Music => "com.apple.Music",
+            Self::Spotify => "com.spotify.client",
+            Self::Vlc => "org.videolan.vlc",
+        }
+    }
+
+    fn proc_name(self) -> &'static str {
+        match self {
+            Self::Music => "Music",
+            Self::Spotify => "Spotify",
+            Self::Vlc => "VLC",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Status {
+    Playing,
+    Paused,
+    Stopped,
+    Closed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MediaSession {
+    app: MediaApp,
+}
+
+fn same_session(a: &MediaSession, b: &MediaSession) -> bool {
     a == b
 }
 
-unsafe fn session_alive(s: &GlobalSystemMediaTransportControlsSession) -> bool {
-    s.GetPlaybackInfo()
-        .and_then(|i| i.PlaybackStatus())
-        .is_ok_and(|st| st != Status::Closed)
+#[cfg(target_os = "macos")]
+fn proc_running(name: &str) -> bool {
+    std::process::Command::new("pgrep")
+        .args(["-x", name])
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
-fn aumid_of(s: &GlobalSystemMediaTransportControlsSession) -> String {
-    s.SourceAppUserModelId()
-        .ok()
-        .map(|h| h.to_string())
-        .unwrap_or_default()
+#[cfg(not(target_os = "macos"))]
+fn proc_running(_name: &str) -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn osascript(script: &str) -> Option<String> {
+    let out = std::process::Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim_end().to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn osascript(_script: &str) -> Option<String> {
+    None
+}
+
+unsafe fn session_alive(s: &MediaSession) -> bool {
+    proc_running(s.app.proc_name())
+}
+
+fn aumid_of(s: &MediaSession) -> String {
+    s.app.aumid().to_string()
 }
 
 /// Сессия, которую есть смысл показывать (есть название или исполнитель), с прочитанными свойствами.
 struct Active {
-    session: GlobalSystemMediaTransportControlsSession,
-    props: GlobalSystemMediaTransportControlsSessionMediaProperties,
+    session: MediaSession,
     title: String,
     artist: String,
     aumid: String,
-    /// Номер среди сессий с тем же AUMID: у браузера их бывает несколько (по одной на вкладку),
-    /// и выбор только по AUMID не дал бы перейти со второй на первую.
     ordinal: usize,
     playing: bool,
     current: bool,
+    pos: f32,
+    dur: f32,
+    can_seek: bool,
+    art_url: Option<String>,
 }
 
-/// Читает список сессий, пересоздавая менеджер, если WinRT/COM-прокси отвалился.
-unsafe fn fetch_sessions() -> Option<(
-    Mgr,
-    Vec<GlobalSystemMediaTransportControlsSession>,
-    Option<GlobalSystemMediaTransportControlsSession>,
-)> {
-    let mut mgr = media_manager()?;
-    let list = match mgr.GetSessions() {
-        Ok(v) => v.into_iter().collect(),
-        Err(e) => {
-            log::error(&format!("Медиа: GetSessions не удался ({e}), пересоздаю менеджер"));
-            reset_media_manager();
-            mgr = media_manager()?;
-            mgr.GetSessions()
-                .ok()
-                .map(|v| v.into_iter().collect())
-                .unwrap_or_default()
+struct QueriedTrack {
+    app: MediaApp,
+    status: Status,
+    title: String,
+    artist: String,
+    pos: f32,
+    dur: f32,
+    can_seek: bool,
+    art_url: Option<String>,
+}
+
+fn parse_status(s: &str) -> Status {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "playing" | "true" => Status::Playing,
+        "paused" => Status::Paused,
+        "stopped" | "false" => Status::Stopped,
+        _ => Status::Paused,
+    }
+}
+
+fn query_app(app: MediaApp) -> Option<QueriedTrack> {
+    if !proc_running(app.proc_name()) {
+        return None;
+    }
+    let script = match app {
+        MediaApp::Music => {
+            r#"tell application "Music"
+                set st to player state as string
+                if st is "stopped" then return "stopped" & (ASCII character 31) & "" & (ASCII character 31) & "" & (ASCII character 31) & "0" & (ASCII character 31) & "0"
+                set t to current track
+                set nm to ""
+                set ar to ""
+                set dr to 0
+                try
+                    set nm to name of t
+                end try
+                try
+                    set ar to artist of t
+                end try
+                try
+                    set dr to duration of t
+                end try
+                set ps to 0
+                try
+                    set ps to player position
+                end try
+                set sep to ASCII character 31
+                return st & sep & nm & sep & ar & sep & (ps as string) & sep & (dr as string)
+            end tell"#
+        }
+        MediaApp::Spotify => {
+            r#"tell application "Spotify"
+                set st to player state as string
+                if st is "stopped" then return "stopped" & (ASCII character 31) & "" & (ASCII character 31) & "" & (ASCII character 31) & "0" & (ASCII character 31) & "0" & (ASCII character 31) & ""
+                set t to current track
+                set nm to ""
+                set ar to ""
+                set dr to 0
+                set au to ""
+                try
+                    set nm to name of t
+                end try
+                try
+                    set ar to artist of t
+                end try
+                try
+                    set dr to duration of t
+                end try
+                try
+                    set au to artwork url of t
+                end try
+                set ps to 0
+                try
+                    set ps to player position
+                end try
+                set sep to ASCII character 31
+                return st & sep & nm & sep & ar & sep & (ps as string) & sep & (dr as string) & sep & au
+            end tell"#
+        }
+        MediaApp::Vlc => {
+            r#"tell application "VLC"
+                set pl to playing
+                set nm to ""
+                try
+                    set nm to name of current item
+                end try
+                set ps to 0
+                try
+                    set ps to current time
+                end try
+                set dr to 0
+                try
+                    set dr to duration of current item
+                end try
+                set sep to ASCII character 31
+                return (pl as string) & sep & nm & sep & "" & sep & (ps as string) & sep & (dr as string)
+            end tell"#
         }
     };
-    let cur = mgr.GetCurrentSession().ok();
-    Some((mgr, list, cur))
+    let raw = osascript(script)?;
+    let parts: Vec<&str> = raw.split('\u{1f}').collect();
+    if parts.len() < 5 {
+        return None;
+    }
+    let status = parse_status(parts[0]);
+    let title = parts[1].trim().to_string();
+    let artist = parts[2].trim().to_string();
+    let pos = parts[3].trim().replace(',', ".").parse::<f32>().unwrap_or(0.0).max(0.0);
+    let raw_dur = parts[4].trim().replace(',', ".").parse::<f32>().unwrap_or(0.0).max(0.0);
+    // Spotify возвращает длительность трека в миллисекундах.
+    let dur = if app == MediaApp::Spotify { raw_dur / 1000.0 } else { raw_dur };
+    let art_url = parts.get(5).map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+    Some(QueriedTrack { app, status, title, artist, pos, dur, can_seek: dur > 0.0, art_url })
 }
 
-/// Все активные сессии с метаданными, в порядке менеджера.
-unsafe fn active_sessions_from(
-    mut list: Vec<GlobalSystemMediaTransportControlsSession>,
-    cur: Option<&GlobalSystemMediaTransportControlsSession>,
-) -> Vec<Active> {
-    let cur_aumid = cur.map(aumid_of).unwrap_or_default();
-    let used_current = list.is_empty() && cur.is_some();
-    if list.is_empty() {
-        if let Some(c) = cur {
-            list.push(c.clone());
+unsafe fn fetch_sessions() -> Option<(Vec<QueriedTrack>, Option<MediaSession>)> {
+    let mut tracks = Vec::new();
+    for app in [MediaApp::Music, MediaApp::Spotify, MediaApp::Vlc] {
+        if let Some(t) = query_app(app) {
+            tracks.push(t);
         }
     }
-    let mut out: Vec<Active> = Vec::with_capacity(list.len());
-    let mut exact: Vec<bool> = Vec::with_capacity(list.len());
-    // Сессии, отброшенные молча, не отличить от «браузер не публикует SMTC» — для журнала
-    // запоминаем и их, и причину (только AUMID и статус, без названий треков).
-    let mut diag: Vec<String> = Vec::with_capacity(list.len());
+    if tracks.is_empty() {
+        return None;
+    }
+    let cur = tracks
+        .iter()
+        .find(|t| t.status == Status::Playing)
+        .or_else(|| tracks.first())
+        .map(|t| MediaSession { app: t.app });
+    Some((tracks, cur))
+}
+
+/// Все активные сессии с метаданными, в порядке опроса плееров.
+unsafe fn active_sessions_from(list: Vec<QueriedTrack>, cur: Option<&MediaSession>) -> Vec<Active> {
+    let cur_aumid = cur.map(aumid_of).unwrap_or_default();
     let total = list.len();
-    for session in list {
+    let mut out: Vec<Active> = Vec::with_capacity(total);
+    let mut exact: Vec<bool> = Vec::with_capacity(total);
+    let mut diag: Vec<String> = Vec::with_capacity(total);
+
+    for t in list {
+        let session = MediaSession { app: t.app };
         let aumid = aumid_of(&session);
-        let status = session.GetPlaybackInfo().ok().and_then(|i| i.PlaybackStatus().ok());
-        if status == Some(Status::Closed) {
+        if t.status == Status::Closed {
             diag.push(diag_entry(&aumid, "closed", "сессия закрыта, отброшена"));
             continue;
         }
-        let Ok(props) = wait_timeout(session.TryGetMediaPropertiesAsync(), MEDIA_WAIT_MS) else {
-            diag.push(diag_entry(&aumid, status_label(status), "ошибка чтения свойств"));
-            continue;
-        };
-        let title = props.Title().map(|t| t.to_string()).unwrap_or_default();
-        let artist = props.Artist().map(|a| a.to_string()).unwrap_or_default();
-        if title.is_empty() && artist.is_empty() {
-            diag.push(diag_entry(&aumid, status_label(status), "пустые метаданные, отброшена"));
+        if t.title.is_empty() && t.artist.is_empty() {
+            diag.push(diag_entry(&aumid, status_label(Some(t.status)), "пустые метаданные, отброшена"));
             continue;
         }
-        diag.push(diag_entry(&aumid, status_label(status), "ok"));
-        let playing = status == Some(Status::Playing);
+        diag.push(diag_entry(&aumid, status_label(Some(t.status)), "ok"));
+        let playing = t.status == Status::Playing;
         let ordinal = out.iter().filter(|a| a.aumid == aumid).count();
         exact.push(cur.is_some_and(|c| same_session(c, &session)));
-        out.push(Active { session, props, title, artist, aumid, ordinal, playing, current: false });
+        out.push(Active {
+            session,
+            title: t.title,
+            artist: t.artist,
+            aumid,
+            ordinal,
+            playing,
+            current: false,
+            pos: t.pos,
+            dur: t.dur,
+            can_seek: t.can_seek,
+            art_url: t.art_url,
+        });
     }
     let flags = {
         let aumids: Vec<&str> = out.iter().map(|a| a.aumid.as_str()).collect();
@@ -336,7 +491,7 @@ unsafe fn active_sessions_from(
     for (a, is_cur) in out.iter_mut().zip(flags) {
         a.current = is_cur;
     }
-    let summary = media_summary(total, used_current, &diag, &cur_aumid);
+    let summary = media_summary(total, false, &diag, &cur_aumid);
     let changed = LAST_MEDIA_SUMMARY.with(|last| summary_changed(&mut last.borrow_mut(), &summary));
     if changed {
         log::info(&summary);
@@ -345,18 +500,16 @@ unsafe fn active_sessions_from(
 }
 
 thread_local! {
-    /// Последняя записанная сводка сессий: пишем в журнал только изменения, чтобы смена трека
-    /// (будит поток часто) не засоряла лог одинаковыми строками.
+    /// Последняя записанная сводка сессий: пишем в журнал только изменения.
     static LAST_MEDIA_SUMMARY: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 fn status_label(s: Option<Status>) -> &'static str {
     match s {
-        Some(x) if x == Status::Playing => "playing",
-        Some(x) if x == Status::Paused => "paused",
-        Some(x) if x == Status::Stopped => "stopped",
-        Some(x) if x == Status::Closed => "closed",
-        Some(_) => "other",
+        Some(Status::Playing) => "playing",
+        Some(Status::Paused) => "paused",
+        Some(Status::Stopped) => "stopped",
+        Some(Status::Closed) => "closed",
         None => "статус неизвестен",
     }
 }
@@ -413,11 +566,10 @@ struct Pin {
 }
 
 thread_local! {
-    /// Весь SMTC живёт в фоновом потоке, поэтому хватает thread_local, как и у `LAST_PLAYING`.
+    /// Закреплённый источник плеера: весь опрос идёт на фоновом потоке, поэтому хватает thread_local.
     static PINNED: RefCell<Option<Pin>> = const { RefCell::new(None) };
-    /// Сессия карточки из последнего чтения: команды плеера идут в неё без повторного
-    /// чтения метаданных всех сессий (при перетаскивании перемотка шлётся каждые 100 мс).
-    static CARD_SESSION: RefCell<Option<GlobalSystemMediaTransportControlsSession>> = const { RefCell::new(None) };
+    /// Сессия карточки из последнего чтения: команды плеера идут прямо в неё.
+    static CARD_SESSION: RefCell<Option<MediaSession>> = const { RefCell::new(None) };
 }
 
 /// Есть ли выбор стрелками. Флаг читает поток интерфейса, поэтому он атомарный, а не `thread_local`:
@@ -479,7 +631,7 @@ fn card_index(active: &[Active], live: Option<usize>) -> Option<usize> {
 /// Перелистывает карточку плеера на соседнюю активную сессию. Воспроизведение не трогает:
 /// свёрнутый остров продолжает показывать то, что реально играет.
 pub(super) unsafe fn cycle_session(delta: isize) {
-    let Some((_, list, cur_s)) = fetch_sessions() else { return };
+    let Some((list, cur_s)) = fetch_sessions() else { return };
     let active = active_sessions_from(list, cur_s.as_ref());
     if active.len() < 2 {
         return;
@@ -547,132 +699,8 @@ fn source_name(aumid: &str) -> String {
     }
 }
 
-/// Менеджер сообщил, что сессии поменялись: подписку на события сессии нужно пересоздать,
-/// даже если у новой сессии тот же AUMID (вкладка браузера, следующий плеер того же приложения).
-static RESUBSCRIBE: AtomicBool = AtomicBool::new(false);
-
-fn media_manager() -> Option<Mgr> {
-    MEDIA_MGR.with(|m| {
-        let mut m = m.borrow_mut();
-        if m.is_none() {
-            match wait(Mgr::RequestAsync()) {
-                Ok(mgr) => {
-                    // События самого менеджера: без них запущенная при свёрнутом острове музыка (сессии не
-                    // было, подписываться не на что) и смена трека другим плеером оставались незамеченными.
-                    let wake = || {
-                        log::info("медиасессии изменились (событие менеджера)");
-                        RESUBSCRIBE.store(true, Ordering::SeqCst);
-                        send(Cmd::Media);
-                    };
-                    let _ = mgr.CurrentSessionChanged(&TypedEventHandler::new(move |_, _| {
-                        wake();
-                        Ok(())
-                    }));
-                    let _ = mgr.SessionsChanged(&TypedEventHandler::new(move |_, _| {
-                        wake();
-                        Ok(())
-                    }));
-                    *m = Some(mgr);
-                }
-                Err(e) => log::error(&format!("Медиа: RequestAsync не удался: {e}")),
-            }
-        }
-        m.clone()
-    })
-}
-
-unsafe fn reset_media_manager() {
-    MEDIA_MGR.with(|m| *m.borrow_mut() = None);
-    CARD_SESSION.with(|c| *c.borrow_mut() = None);
-    SESSION_WATCH.with(|w| {
-        for old in w.borrow_mut().drain(..) {
-            let _ = old.session.RemoveMediaPropertiesChanged(old.prop_token);
-            let _ = old.session.RemovePlaybackInfoChanged(old.info_token);
-            if let Some(t3) = old.timeline_token {
-                let _ = old.session.RemoveTimelinePropertiesChanged(t3);
-            }
-        }
-    });
-    RESUBSCRIBE.store(true, Ordering::SeqCst);
-}
-
-struct SessionWatch {
-    session: GlobalSystemMediaTransportControlsSession,
-    prop_token: i64,
-    info_token: i64,
-    timeline_token: Option<i64>,
-    aumid: String,
-}
-
-thread_local! {
-    /// Подписки на события всех активных медиасессий.
-    static SESSION_WATCH: RefCell<Vec<SessionWatch>> = const { RefCell::new(Vec::new()) };
-}
-
-/// Подписывается на изменения всех активных медиасессий: смена трека, пауза/воспроизведение и перемотка
-/// будят фоновый поток, поэтому опрашивать медиа по таймеру не нужно.
-unsafe fn watch_media_with(
-    sessions_in: &[GlobalSystemMediaTransportControlsSession],
-    cur: Option<&GlobalSystemMediaTransportControlsSession>,
-) {
-    let mut sessions: Vec<GlobalSystemMediaTransportControlsSession> = sessions_in.to_vec();
-    if sessions.is_empty() {
-        if let Some(c) = cur {
-            sessions.push(c.clone());
-        }
-    }
-    let ids: Vec<String> = sessions.iter().map(aumid_of).collect();
-    let resub = RESUBSCRIBE.swap(false, Ordering::SeqCst);
-    SESSION_WATCH.with(|w| {
-        let mut w = w.borrow_mut();
-        let same_set = !resub
-            && w.len() == sessions.len()
-            && w.iter()
-                .zip(sessions.iter().zip(&ids))
-                .all(|(old, (s, id))| &old.aumid == id && same_session(&old.session, s));
-        if same_set {
-            return;
-        }
-        // Пишется только при смене набора/событии менеджера: видно, подписались ли мы на сессию
-        // браузера, когда она появилась.
-        let meta_changed = resub || w.len() != ids.len() || w.iter().zip(&ids).any(|(old, id)| &old.aumid != id);
-        if meta_changed {
-            log::info(&format!("Медиа: подписки пересозданы, сессий {}", sessions.len()));
-        }
-        for old in w.drain(..) {
-            let _ = old.session.RemoveMediaPropertiesChanged(old.prop_token);
-            let _ = old.session.RemovePlaybackInfoChanged(old.info_token);
-            if let Some(t3) = old.timeline_token {
-                let _ = old.session.RemoveTimelinePropertiesChanged(t3);
-            }
-        }
-        for (s, id) in sessions.into_iter().zip(ids) {
-            let t1 = s.MediaPropertiesChanged(&TypedEventHandler::new(|_, _| {
-                send(Cmd::Media);
-                Ok(())
-            }));
-            let t2 = s.PlaybackInfoChanged(&TypedEventHandler::new(|_, _| {
-                send(Cmd::Media);
-                Ok(())
-            }));
-            let t3 = s.TimelinePropertiesChanged(&TypedEventHandler::new(|_, _| {
-                send(Cmd::Media);
-                Ok(())
-            })).ok();
-            if let (Ok(prop_token), Ok(info_token)) = (t1, t2) {
-                w.push(SessionWatch {
-                    session: s,
-                    prop_token,
-                    info_token,
-                    timeline_token: t3,
-                    aumid: id,
-                });
-            }
-        }
-    });
-}
-
-/// Обновляет в снимке только медиа (события сессии), остальное оставляя как есть.
+/// Обновляет в снимке только медиа, остальное оставляя как есть.
+#[allow(dead_code)]
 pub(super) unsafe fn refresh_media() {
     let (media, live_media) = read_media_pair();
     if let Ok(mut s) = SNAPSHOT.lock() {
@@ -691,221 +719,93 @@ enum CmdOutcome {
     Broken,
 }
 
-fn is_timeout(e: &windows::core::Error) -> bool {
-    e.code() == windows::core::HRESULT::from_win32(1460)
-}
-
-unsafe fn refresh_card_session() -> Option<(Mgr, GlobalSystemMediaTransportControlsSession)> {
+unsafe fn refresh_card_session() -> Option<MediaSession> {
     CARD_SESSION.with(|c| *c.borrow_mut() = None);
-    let (mgr, list, cur) = fetch_sessions()?;
+    let (list, cur) = fetch_sessions()?;
     let active = active_sessions_from(list, cur.as_ref());
     let live = live_index(&active);
     let card = card_index(&active, live);
     if let Some(i) = card {
         let s = active[i].session.clone();
         CARD_SESSION.with(|c| *c.borrow_mut() = Some(s.clone()));
-        return Some((mgr, s));
+        return Some(s);
     }
-    let s = cur.filter(|c| session_alive(c))?;
-    Some((mgr, s))
+    cur.filter(|c| session_alive(c))
 }
 
-unsafe fn resolve_command_session(force_refresh: bool) -> Option<(Mgr, GlobalSystemMediaTransportControlsSession)> {
+unsafe fn resolve_command_session(force_refresh: bool) -> Option<MediaSession> {
     if !force_refresh {
         if let Some(s) = CARD_SESSION.with(|c| c.borrow().clone()) {
             if session_alive(&s) {
-                if let Some(mgr) = media_manager() {
-                    return Some((mgr, s));
-                }
+                return Some(s);
             }
         }
     }
     refresh_card_session()
 }
 
-unsafe fn is_current_session(mgr: &Mgr, s: &GlobalSystemMediaTransportControlsSession) -> bool {
-    match mgr.GetCurrentSession() {
-        Ok(cur) => {
-            if same_session(&cur, s) {
-                return true;
-            }
-            let cur_id = aumid_of(&cur);
-            let s_id = aumid_of(s);
-            if cur_id.is_empty() || cur_id != s_id {
-                return false;
-            }
-            // На случай разных COM-обёрток разрешаем AUMID-совпадение, если под этим AUMID ровно одна сессия.
-            mgr.GetSessions()
-                .ok()
-                .map(|v| v.into_iter().filter(|x| aumid_of(x) == s_id).count() <= 1)
-                .unwrap_or(true)
-        }
-        // Если в Windows нет текущей сессии, глобальная медиа-клавиша не перехватит чужой плеер.
-        Err(_) => true,
+unsafe fn execute_session_cmd(s: &MediaSession, cmd: &Cmd) -> CmdOutcome {
+    if !session_alive(s) {
+        return CmdOutcome::Broken;
     }
-}
-
-unsafe fn execute_session_cmd(s: &GlobalSystemMediaTransportControlsSession, cmd: &Cmd) -> CmdOutcome {
-    match cmd {
-        Cmd::PlayPause => {
-            let Ok(info) = s.GetPlaybackInfo() else {
-                return CmdOutcome::Broken;
-            };
-            let status_before = info.PlaybackStatus().ok();
-            if status_before == Some(Status::Closed) {
-                return CmdOutcome::Broken;
-            }
-            let playing = status_before == Some(Status::Playing);
-            let primary = if playing {
-                wait_timeout(s.TryPauseAsync(), MEDIA_WAIT_MS)
-            } else {
-                wait_timeout(s.TryPlayAsync(), MEDIA_WAIT_MS)
-            };
-            log::info(&format!("медиа PlayPause (playing={playing}): {primary:?}"));
-            match primary {
-                Ok(true) => return CmdOutcome::Ok,
-                Ok(false) => {}
-                Err(e) if is_timeout(&e) || !session_alive(s) => return CmdOutcome::Broken,
-                Err(_) => {}
-            }
-            if s.GetPlaybackInfo().ok().and_then(|i| i.PlaybackStatus().ok()) != status_before {
-                return CmdOutcome::Ok;
-            }
-            let toggle = wait_timeout(s.TryTogglePlayPauseAsync(), MEDIA_WAIT_MS);
-            log::info(&format!("медиа TryTogglePlayPause: {toggle:?}"));
-            match toggle {
-                Ok(true) => CmdOutcome::Ok,
-                Ok(false) => {
-                    if s.GetPlaybackInfo().ok().and_then(|i| i.PlaybackStatus().ok()) != status_before {
-                        CmdOutcome::Ok
-                    } else {
-                        CmdOutcome::Rejected
-                    }
-                }
-                Err(e) if is_timeout(&e) || !session_alive(s) => CmdOutcome::Broken,
-                Err(_) => CmdOutcome::Rejected,
-            }
+    let app = s.app;
+    let script = match (app, cmd) {
+        (MediaApp::Music, Cmd::PlayPause) => r#"tell application "Music" to playpause"#.to_string(),
+        (MediaApp::Music, Cmd::Next) => r#"tell application "Music" to next track"#.to_string(),
+        (MediaApp::Music, Cmd::Prev) => r#"tell application "Music" to previous track"#.to_string(),
+        (MediaApp::Music, Cmd::Seek(pos)) if pos.is_finite() => {
+            format!(r#"tell application "Music" to set player position to {:.2}"#, pos.max(0.0))
         }
-        Cmd::Next => {
-            let res = wait_timeout(s.TrySkipNextAsync(), MEDIA_WAIT_MS);
-            log::info(&format!("медиа Next: {res:?}"));
-            match res {
-                Ok(true) => CmdOutcome::Ok,
-                Ok(false) => CmdOutcome::Rejected,
-                Err(_) => CmdOutcome::Broken,
-            }
+        (MediaApp::Spotify, Cmd::PlayPause) => r#"tell application "Spotify" to playpause"#.to_string(),
+        (MediaApp::Spotify, Cmd::Next) => r#"tell application "Spotify" to next track"#.to_string(),
+        (MediaApp::Spotify, Cmd::Prev) => r#"tell application "Spotify" to previous track"#.to_string(),
+        (MediaApp::Spotify, Cmd::Seek(pos)) if pos.is_finite() => {
+            format!(r#"tell application "Spotify" to set player position to {:.2}"#, pos.max(0.0))
         }
-        Cmd::Prev => {
-            let res = wait_timeout(s.TrySkipPreviousAsync(), MEDIA_WAIT_MS);
-            log::info(&format!("медиа Prev: {res:?}"));
-            match res {
-                Ok(true) => CmdOutcome::Ok,
-                Ok(false) => CmdOutcome::Rejected,
-                Err(_) => CmdOutcome::Broken,
-            }
+        (MediaApp::Vlc, Cmd::PlayPause) => r#"tell application "VLC" to play"#.to_string(),
+        (MediaApp::Vlc, Cmd::Next) => r#"tell application "VLC" to next"#.to_string(),
+        (MediaApp::Vlc, Cmd::Prev) => r#"tell application "VLC" to previous"#.to_string(),
+        (MediaApp::Vlc, Cmd::Seek(pos)) if pos.is_finite() => {
+            format!(r#"tell application "VLC" to set current time to {}"#, pos.max(0.0).round() as i64)
         }
-        Cmd::Seek(pos) => seek_session(s, *pos),
-        _ => CmdOutcome::Ok,
+        _ => return CmdOutcome::Ok,
+    };
+    if osascript(&script).is_some() {
+        CmdOutcome::Ok
+    } else {
+        CmdOutcome::Rejected
     }
 }
 
 unsafe fn send_fallback_media_key(cmd: &Cmd) {
-    match cmd {
-        Cmd::PlayPause => media_key(0xB3),
-        Cmd::Next => media_key(0xB0),
-        Cmd::Prev => media_key(0xB1),
-        _ => {}
+    for app in [MediaApp::Music, MediaApp::Spotify, MediaApp::Vlc] {
+        let s = MediaSession { app };
+        if session_alive(&s) && execute_session_cmd(&s, cmd) == CmdOutcome::Ok {
+            break;
+        }
     }
 }
 
 /// Команды плеера идут в сессию карточки — ту, что пользователь видит и выбрал стрелками.
 pub(super) unsafe fn media_command(cmd: Cmd) {
-    let Some((mgr, s)) = resolve_command_session(false) else {
-        if media_manager().and_then(|m| m.GetCurrentSession().ok()).is_none() {
-            send_fallback_media_key(&cmd);
-        }
+    let Some(s) = resolve_command_session(false) else {
+        send_fallback_media_key(&cmd);
         return;
     };
     match execute_session_cmd(&s, &cmd) {
         CmdOutcome::Ok => {}
-        CmdOutcome::Rejected => {
-            if is_current_session(&mgr, &s) {
-                send_fallback_media_key(&cmd);
-            }
-        }
+        CmdOutcome::Rejected => send_fallback_media_key(&cmd),
         CmdOutcome::Broken => {
-            log::info("медиа: сессия не ответила, обновляю выбор");
-            if mgr.GetSessions().is_err() {
-                reset_media_manager();
-            }
-            if let Some((mgr2, s2)) = resolve_command_session(true) {
-                if !same_session(&s2, &s) {
-                    if execute_session_cmd(&s2, &cmd) != CmdOutcome::Ok && is_current_session(&mgr2, &s2) {
-                        send_fallback_media_key(&cmd);
-                    }
+            log::info("медиа: сессия закрыта, обновляю выбор");
+            if let Some(s2) = resolve_command_session(true) {
+                if !same_session(&s2, &s) && execute_session_cmd(&s2, &cmd) == CmdOutcome::Ok {
                     return;
                 }
-                if is_current_session(&mgr2, &s2) {
-                    send_fallback_media_key(&cmd);
-                }
-            } else if media_manager().and_then(|m| m.GetCurrentSession().ok()).is_none() {
-                send_fallback_media_key(&cmd);
             }
+            send_fallback_media_key(&cmd);
         }
     }
-}
-
-/// Нажимает системную медиа-клавишу (VK_MEDIA_NEXT_TRACK 0xB0, PREV_TRACK 0xB1, PLAY_PAUSE 0xB3).
-unsafe fn media_key(vk: u8) {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, VIRTUAL_KEY,
-    };
-    let make = |flags| INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VIRTUAL_KEY(vk as u16),
-                wScan: 0,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    };
-    let inputs = [make(KEYEVENTF_EXTENDEDKEY), make(KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP)];
-    SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
-}
-
-/// Перематывает трек сессии на позицию в секундах от начала.
-/// Флаг `IsPlaybackPositionEnabled` не проверяем: браузеры часто сбрасывают его и обнуляют
-/// таймлайн между опросами, хотя перемотку принимают; неподдерживаемый запрос плеер просто отклонит.
-unsafe fn seek_session(s: &GlobalSystemMediaTransportControlsSession, target_secs: f32) -> CmdOutcome {
-    if !target_secs.is_finite() {
-        return CmdOutcome::Ok;
-    }
-    let Ok(tl) = s.GetTimelineProperties() else {
-        return CmdOutcome::Broken;
-    };
-    let secs = |t: windows::Foundation::TimeSpan| t.Duration as f64 / 1e7;
-    let start = tl.StartTime().map(secs).unwrap_or(0.0);
-    let end = tl.EndTime().map(secs).unwrap_or(0.0);
-    let dur = (end - start).max(0.0) as f32;
-    let clamped = if dur > 0.0 {
-        let min_s = tl.MinSeekTime().map(secs).unwrap_or(start) - start;
-        let max_s = tl.MaxSeekTime().map(secs).unwrap_or(end) - start;
-        let (min_seek, max_seek) = seek_bounds(dur, min_s as f32, max_s as f32);
-        target_secs.clamp(min_seek, max_seek)
-    } else {
-        // Таймлайн сейчас пуст — позиция взята из последнего непустого, который видел интерфейс.
-        target_secs.max(0.0)
-    };
-    let abs_pos = start + clamped as f64;
-    let hns = (abs_pos * 1e7).round() as i64;
-    match wait_timeout(s.TryChangePlaybackPositionAsync(hns), MEDIA_WAIT_MS) {
-        Ok(true) => CmdOutcome::Ok,
-        Ok(false) => CmdOutcome::Rejected,
-        Err(_) => CmdOutcome::Broken,
-    }
+    send(Cmd::Media);
 }
 
 #[derive(Clone)]
@@ -930,15 +830,13 @@ fn store_cover(cache: &mut Vec<(u64, CoverEntry)>, key: u64, entry: CoverEntry) 
     cache.push((key, entry));
 }
 
-/// Обложки последних треков: повторно не декодируем, пока трек тот же. Несколько записей,
-/// потому что карточка и свёрнутый остров могут показывать разные сессии одновременно.
+/// Обложки последних треков: повторно не декодируем, пока трек тот же.
 static COVER: Mutex<Vec<(u64, CoverEntry)>> = Mutex::new(Vec::new());
 const COVER_CACHE: usize = 8;
 
 /// `(сессия карточки плеера, сессия, которая реально играет)`; часто это одна и та же.
 pub(super) unsafe fn read_media_pair() -> (Option<Media>, Option<Media>) {
-    let Some((_, list, cur)) = fetch_sessions() else { return (None, None) };
-    watch_media_with(&list, cur.as_ref());
+    let Some((list, cur)) = fetch_sessions() else { return (None, None) };
     let active = active_sessions_from(list, cur.as_ref());
     let live = live_index(&active);
     let card = card_index(&active, live);
@@ -950,60 +848,13 @@ pub(super) unsafe fn read_media_pair() -> (Option<Media>, Option<Media>) {
 }
 
 unsafe fn build_media(a: &Active, session_count: usize) -> Media {
-    let (s, props) = (&a.session, &a.props);
-    let (title, artist) = (a.title.clone(), a.artist.clone());
-    let playback_info = s.GetPlaybackInfo().ok();
-    let playing = playback_info
-        .as_ref()
-        .and_then(|i| i.PlaybackStatus().ok())
-        == Some(Status::Playing);
-    // Не у всех плееров скорость заполнена: тогда считаем, что она обычная.
-    let rate = playback_info
-        .as_ref()
-        .and_then(|i| i.PlaybackRate().ok())
-        .and_then(|r| r.Value().ok())
-        .map_or(1.0, |r| r.clamp(0.0, 4.0) as f32);
-    let can_seek_ctrl = playback_info
-        .as_ref()
-        .and_then(|i| i.Controls().ok())
-        .and_then(|c| c.IsPlaybackPositionEnabled().ok())
-        .unwrap_or(false);
-    let (mut pos, mut dur) = (0.0f32, 0.0f32);
-    let (mut min_seek, mut max_seek) = (0.0f32, 0.0f32);
-    if let Ok(tl) = s.GetTimelineProperties() {
-        let secs = |t: windows::Foundation::TimeSpan| t.Duration as f64 / 1e7;
-        let start = tl.StartTime().map(secs).unwrap_or(0.0);
-        let end = tl.EndTime().map(secs).unwrap_or(0.0);
-        let mut p = tl.Position().map(secs).unwrap_or(0.0) - start;
-        dur = (end - start).max(0.0) as f32;
-        let min_s = tl.MinSeekTime().map(secs).unwrap_or(start) - start;
-        let max_s = tl.MaxSeekTime().map(secs).unwrap_or(end) - start;
-        let (min_b, max_b) = seek_bounds(dur, min_s as f32, max_s as f32);
-        min_seek = min_b;
-        max_seek = max_b;
-        // Позиция относится к моменту `LastUpdatedTime`, а не к «сейчас»: добавляем прошедшее.
-        if playing {
-            if let Ok(t) = tl.LastUpdatedTime() {
-                // 100-нс интервалы с 1601 года (как FILETIME).
-                const UNIX_OFFSET: f64 = 11_644_473_600.0;
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs_f64())
-                    .unwrap_or(0.0)
-                    + UNIX_OFFSET;
-                let behind = now - t.UniversalTime as f64 / 1e7;
-                if (0.0..43_200.0).contains(&behind) {
-                    p += behind * rate as f64;
-                }
-            }
-        }
-        pos = p as f32;
-    }
-    if dur > 0.0 {
-        pos = pos.min(dur);
-    }
-    // Флагу плеера верим, кроме браузеров: у них известная длительность — достаточный признак.
-    let can_seek = can_seek_ctrl || (dur > 0.0 && is_browser(&a.aumid));
+    let title = a.title.clone();
+    let artist = a.artist.clone();
+    let playing = a.playing;
+    let rate = if playing { 1.0 } else { 0.0 };
+    let (min_seek, max_seek) = seek_bounds(a.dur, 0.0, a.dur);
+    let pos = if a.dur > 0.0 { a.pos.clamp(0.0, a.dur) } else { a.pos.max(0.0) };
+    let can_seek = a.can_seek || (a.dur > 0.0 && is_browser(&a.aumid));
 
     let mut h = DefaultHasher::new();
     (&a.aumid, &title, &artist).hash(&mut h);
@@ -1013,7 +864,7 @@ unsafe fn build_media(a: &Active, session_count: usize) -> Media {
     let art = match cached {
         Some(px) => px,
         None => {
-            let read = read_cover(props).map(Arc::new);
+            let read = read_cover(a).map(Arc::new);
             let entry = match &read {
                 Some(px) => CoverEntry::Ready(px.clone()),
                 None => CoverEntry::Failed(now + COVER_FAIL_COOLDOWN),
@@ -1028,8 +879,8 @@ unsafe fn build_media(a: &Active, session_count: usize) -> Media {
         title,
         artist,
         playing,
-        pos: pos.max(0.0),
-        dur,
+        pos,
+        dur: a.dur,
         at: Instant::now(),
         rate,
         art,
@@ -1042,21 +893,63 @@ unsafe fn build_media(a: &Active, session_count: usize) -> Media {
     }
 }
 
-/// Обложка из миниатюры медиасессии → квадрат `ART`×`ART` (обрезка по центру).
-unsafe fn read_cover(props: &GlobalSystemMediaTransportControlsSessionMediaProperties) -> Option<Vec<u8>> {
-    let stream = wait_timeout(props.Thumbnail().ok()?.OpenReadAsync(), MEDIA_WAIT_MS).ok()?;
-    let size = stream.Size().ok()? as u32;
-    if size == 0 || size > 16 << 20 {
+#[cfg(target_os = "macos")]
+fn fetch_music_artwork_bytes() -> Option<Vec<u8>> {
+    let tmp = format!("/tmp/kite_island_cover_{}.dat", std::process::id());
+    let script = format!(
+        r#"tell application "Music"
+            set rawBytes to raw data of artwork 1 of current track
+            set fp to open for access POSIX file "{tmp}" with write permission
+            set eof fp to 0
+            write rawBytes to fp
+            close access fp
+        end tell"#
+    );
+    let ok = osascript(&script).is_some();
+    let bytes = if ok { std::fs::read(&tmp).ok() } else { None };
+    let _ = std::fs::remove_file(&tmp);
+    bytes.filter(|b| !b.is_empty() && b.len() <= (16 << 20))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn fetch_music_artwork_bytes() -> Option<Vec<u8>> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn fetch_url_bytes(url: &str) -> Option<Vec<u8>> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
         return None;
     }
-    let reader = DataReader::CreateDataReader(&stream).ok()?;
-    wait_timeout(reader.LoadAsync(size), MEDIA_WAIT_MS).ok()?;
-    let mut bytes = vec![0u8; size as usize];
-    reader.ReadBytes(&mut bytes).ok()?;
+    let out = std::process::Command::new("curl")
+        .args(["-fsSL", "--max-time", "3", url])
+        .output()
+        .ok()?;
+    if !out.status.success() || out.stdout.is_empty() || out.stdout.len() > (16 << 20) {
+        return None;
+    }
+    Some(out.stdout)
+}
 
+#[cfg(not(target_os = "macos"))]
+fn fetch_url_bytes(_url: &str) -> Option<Vec<u8>> {
+    None
+}
+
+/// Декодирует обложку трека в квадрат `ART`×`ART` premultiplied BGRA (обрезка по центру).
+unsafe fn read_cover(a: &Active) -> Option<Vec<u8>> {
+    let bytes = match a.session.app {
+        MediaApp::Spotify => fetch_url_bytes(a.art_url.as_deref()?),
+        MediaApp::Music => fetch_music_artwork_bytes(),
+        MediaApp::Vlc => None,
+    }?;
+    decode_cover_bytes(&bytes)
+}
+
+unsafe fn decode_cover_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
     let factory: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).ok()?;
     let ws = factory.CreateStream().ok()?;
-    ws.InitializeFromMemory(&bytes).ok()?;
+    ws.InitializeFromMemory(bytes).ok()?;
     let dec = factory.CreateDecoderFromStream(&ws, std::ptr::null(), WICDecodeMetadataCacheOnDemand).ok()?;
     let frame = dec.GetFrame(0).ok()?;
     let (mut w, mut h) = (0u32, 0u32);

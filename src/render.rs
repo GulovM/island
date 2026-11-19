@@ -89,7 +89,8 @@ impl App {
         let body = self.body_path(g, x0, y0, aw, ah, ear, r_top, r_bot, false)?;
 
         // Мягкая тень под отдельной плавающей капсулой-уведомлением.
-        let detach = (y0 / (live::CAPSULE_TOP_Y * s).max(1.0)).clamp(0.0, 1.0);
+        let cap_y = (self.notch_h() + live::CAPSULE_TOP_Y) * s;
+        let detach = (y0 / cap_y.max(1.0)).clamp(0.0, 1.0);
         if detach > 0.01 && p < 0.05 {
             for (width, alpha) in [(7.0, 0.08), (3.5, 0.16)] {
                 g.brush.SetColor(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: alpha * detach * (1.0 - p) });
@@ -280,17 +281,24 @@ impl App {
             );
             g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
             let cv = Canvas { g, alpha, accent };
-            let r = ui::Rect::new(centre - fw / 2.0, y0 / s, fw, fh);
+            let ny = self.notch_h();
+            let slot_y = match slot {
+                Slot::Face => 0.0,
+                Slot::Toast if self.live.display_toast().is_some_and(|t| t.is_capsule()) => y0 / s,
+                Slot::Mini | Slot::Toast | Slot::Drop => ny,
+            };
+            let r = ui::Rect::new(centre - fw / 2.0, slot_y, fw, fh);
             match slot {
                 Slot::Mini => self.live.draw_mini(ui, &cv, r),
                 Slot::Toast => self.live.draw_toast(ui, &cv, r, cursor),
                 Slot::Face => {
                     let label = self.live.timer().map(|t| t.label());
-                    self.face.draw(
-                        &cv,
-                        r,
-                        label.as_deref().map(|l| (l, self.live.timer_pulse(), self.live.timer_tint())),
-                    );
+                    let timer = label.as_deref().map(|l| (l, self.live.timer_pulse(), self.live.timer_tint()));
+                    if self.has_notch() {
+                        self.face.draw_with_notch(&cv, r, timer, self.notch.0, self.notch.1);
+                    } else {
+                        self.face.draw(&cv, r, timer);
+                    }
                 }
                 Slot::Drop => self.draw_drop_pill(&cv, r),
             }
@@ -312,7 +320,9 @@ impl App {
                 // Скругления тела по краям не задеваем: полоска начинается чуть правее левого угла.
                 let inset = r_bot / s * 0.6;
                 let full = aw / s - 2.0 * inset;
-                cv.rr(ui::Rect::new(x0 / s + inset, y0 / s, full * self.live.timer_frac(), ah / s), ah / s / 2.0, self.live.timer_tint());
+                let ny = self.notch_h();
+                let strip_h = (ah / s - ny).max(1.0);
+                cv.rr(ui::Rect::new(x0 / s + inset, y0 / s + ny, full * self.live.timer_frac(), strip_h), strip_h / 2.0, self.live.timer_tint());
                 g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
                 g.dc.PopAxisAlignedClip();
             }
@@ -323,7 +333,7 @@ impl App {
             let pill_a = self.pill_a.value.clamp(0.0, 1.0) * content_p;
             if self.cfg.glass && pill_a > 0.01 {
                 let (px, pw) = (self.pill_x.value * s, self.pill_w.value.max(1.0) * s);
-                let (py, ph) = (TAB_TOP * s, TAB_H * s);
+                let (py, ph) = (self.tab_top() * s, TAB_H * s);
                 let rr = D2D1_ROUNDED_RECT { rect: D2D_RECT_F { left: px, top: py, right: px + pw, bottom: py + ph }, radiusX: ph / 2.0, radiusY: ph / 2.0 };
 
                 let is_ios = pal.style == theme::PaletteStyle::Ios;
@@ -435,9 +445,10 @@ impl App {
             }
             for (i, (tx, tw)) in rects.iter().enumerate() {
                 let (px, pw) = (tx * s, tw * s);
-                let (py, ph) = (TAB_TOP * s, TAB_H * s);
+                let tab_top = self.tab_top();
+                let (py, ph) = (tab_top * s, TAB_H * s);
                 let active = !self.settings_open && !self.notifications_open && i == self.tab;
-                let hot = cursor.0 >= *tx && cursor.0 <= tx + tw && cursor.1 >= TAB_TOP && cursor.1 <= TAB_TOP + TAB_H;
+                let hot = cursor.0 >= *tx && cursor.0 <= tx + tw && cursor.1 >= tab_top && cursor.1 <= tab_top + TAB_H;
                 let hv = ui.hover_amount(0xF000 + i as u32, hot && self.expanded);
                 if !active && hv > 0.01 {
                     let mut c = ui::fg();
@@ -537,11 +548,13 @@ impl App {
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
             // Со стеклом маска тела нужна всегда (если r > 0), чтобы содержимое не вылезало за
             // скруглённые углы полупрозрачного тела; без стекла — только при большом радиусе (> 16 px).
+            let ny = self.notch_h();
+            let clip_top = y0 + (31.0 + ny) * s;
             let content_clip = D2D_RECT_F {
                 left: x0 + 6.0 * s,
-                top: y0 + 31.0 * s,
+                top: clip_top,
                 right: x0 + aw - 6.0 * s,
-                bottom: (y0 + ah - 4.0 * s).max(y0 + 31.0 * s),
+                bottom: (y0 + ah - 4.0 * s).max(clip_top),
             };
             let mask_r = r_top.max(r_bot);
             let mask = if (self.cfg.glass && mask_r > 0.0) || mask_r > 16.0 * s {
@@ -569,8 +582,8 @@ impl App {
                 }
                 let (w, h) = (self.tab_w_in(tabs, id), tabs.island_size(id).1);
                 let ox = centre - w / 2.0 + dx;
-                g.dc.SetTransform(&ui::matrix(s, ox * s, 0.0));
-                ui.begin_content(ox, interactive);
+                g.dc.SetTransform(&ui::matrix(s, ox * s, ny * s));
+                ui.begin_content_at(ox, ny, interactive);
                 let cv = Canvas { g, alpha, accent };
                 tabs.draw(id, ui, &cv, w, h);
             };
@@ -585,7 +598,7 @@ impl App {
             if self.expanded && drag > 0.01 {
                 g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
                 let cv = Canvas { g, alpha: drag, accent };
-                self.draw_drop_overlay(&cv, ui::Rect::new(x0 / s + 10.0, 34.0, aw / s - 20.0, (ah / s - 44.0).max(20.0)));
+                self.draw_drop_overlay(&cv, ui::Rect::new(x0 / s + 10.0, 34.0 + ny, aw / s - 20.0, (ah / s - 44.0 - ny).max(20.0)));
             }
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
             g.dc.PopAxisAlignedClip();
@@ -617,7 +630,7 @@ impl App {
     /// с главным окном (позиция и размер), ставится сразу за `self.hwnd`.
     /// Старый путь (Windows 10, accent blur-behind): форма вырезается `SetWindowRgn`.
     #[allow(clippy::too_many_arguments)]
-    unsafe fn apply_blur(&self, g: &Gfx, x0: f32, y0: f32, aw: f32, ah: f32, ear: f32, r_top: f32, r_bot: f32, on: bool, dark: bool) {
+    unsafe fn apply_blur(&self, _g: &Gfx, x0: f32, y0: f32, aw: f32, ah: f32, ear: f32, r_top: f32, r_bot: f32, on: bool, dark: bool) {
         if let Some(bd) = &self.backdrop {
             // ---- Новый путь: Composition HostBackdropBrush ----
             // Ключ формы: округлённые параметры контура, чтобы не дёргать WinRT на каждый кадр.
@@ -643,12 +656,7 @@ impl App {
             // Сначала обновляем контур, силу размытия и тень до показа окна, чтобы не мелькала заглушка 1×1.
             if pos_changed || self.glass_shape.get() != shape_key {
                 self.glass_shape.set(shape_key);
-                if let Ok(geo) = self
-                    .body_path(g, x0, y0, aw, ah, ear, r_top, r_bot, false)
-                    .and_then(|p| p.cast::<windows::Win32::Graphics::Direct2D::ID2D1Geometry>())
-                {
-                    let _ = bd.set_shape(&geo, self.win_w as f32, self.win_h as f32);
-                }
+                let _ = bd.set_shape(x0, y0, aw, ah, ear, r_top, r_bot);
             }
 
             let scale = self.scale;

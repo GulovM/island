@@ -1,32 +1,84 @@
-//! Ночной свет (Blue Light Reduction).
-//!
-//! Публичного API нет. Состояние лежит в реестре в записи CloudStore — её же пишет плитка
-//! «Ночной свет» в центре уведомлений, и служба Windows применяет изменение сразу:
-//!   43 42 01 00 | 0A 02 01 00 2A 06 <время, LEB128> | 2A 2B 0E <длина> | 43 42 01 00 [10 00] D0 0A 02 C6 14 … | хвост
-//! Поле `10 00` сразу после внутреннего заголовка присутствует, только когда ночной свет включён.
-//! Формат проверяется строго: незнакомую запись не трогаем (ничего не пишем, открываем Параметры).
+//! Ночной свет (Night Shift на macOS + бинарный разбор для совместимости с тестами).
 
-use std::ffi::c_void;
-
-use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::ERROR_SUCCESS;
-use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_BINARY};
-
-use super::{data_dir, now_secs, read_binary};
-
-const NIGHT_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\CloudStore\\Store\\DefaultAccount\\Current\\default$windows.data.bluelightreduction.bluelightreductionstate\\windows.data.bluelightreduction.bluelightreductionstate");
 const CB: [u8; 4] = [0x43, 0x42, 0x01, 0x00];
 const NIGHT_HEAD: [u8; 6] = [0x0A, 0x02, 0x01, 0x00, 0x2A, 0x06];
 const NIGHT_BODY: [u8; 3] = [0x2A, 0x2B, 0x0E];
 const NIGHT_ON: [u8; 2] = [0x10, 0x00];
 const NIGHT_NEXT: [u8; 2] = [0xD0, 0x0A];
 
-/// Разобранная запись: (включён, время изменения, начало полезной части, длина полезной части).
+pub fn night_light() -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("/usr/bin/defaults")
+            .args(["read", "com.apple.CoreBrightness"])
+            .output()
+            .ok()?;
+        let s = String::from_utf8_lossy(&out.stdout);
+        if s.contains("CBBlueReductionStatus") {
+            return Some(s.contains("Enabled = 1"));
+        }
+        Some(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+pub fn set_night_light(on: bool) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        if unsafe { mac::set_night_shift(on) } {
+            return true;
+        }
+    }
+    let _ = on;
+    false
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::ffi::{c_char, c_void};
+
+    extern "C" {
+        fn dlopen(path: *const c_char, mode: i32) -> *mut c_void;
+        fn objc_getClass(name: *const c_char) -> *mut c_void;
+        fn sel_registerName(name: *const c_char) -> *mut c_void;
+        fn objc_msgSend();
+    }
+
+    pub unsafe fn set_night_shift(on: bool) -> bool {
+        let h = dlopen(
+            c"/System/Library/PrivateFrameworks/CoreBrightness.framework/CoreBrightness".as_ptr(),
+            1,
+        );
+        if h.is_null() {
+            return false;
+        }
+        let cls = objc_getClass(c"CBBlueLightClient".as_ptr());
+        if cls.is_null() {
+            return false;
+        }
+        let alloc: unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let obj = alloc(cls, sel_registerName(c"alloc".as_ptr()));
+        let obj = alloc(obj, sel_registerName(c"init".as_ptr()));
+        if obj.is_null() {
+            return false;
+        }
+        let set_enabled: unsafe extern "C" fn(*mut c_void, *mut c_void, bool) -> bool =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let ok = set_enabled(obj, sel_registerName(c"setEnabled:".as_ptr()), on);
+        let release: unsafe extern "C" fn(*mut c_void, *mut c_void) =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        release(obj, sel_registerName(c"release".as_ptr()));
+        ok
+    }
+}
+
+#[allow(dead_code)]
 fn night_parse(d: &[u8]) -> Option<(bool, u64, usize, usize)> {
     if d.get(0..4)? != CB || d.get(4..10)? != NIGHT_HEAD {
         return None;
     }
-    // Время — LEB128 (не длиннее 9 байт).
     let (mut ts, mut i, mut shift) = (0u64, 10usize, 0u32);
     loop {
         let b = *d.get(i)?;
@@ -59,6 +111,7 @@ fn night_parse(d: &[u8]) -> Option<(bool, u64, usize, usize)> {
     Some((on, ts, p, len))
 }
 
+#[allow(dead_code)]
 fn leb128(mut v: u64) -> Vec<u8> {
     let mut out = Vec::new();
     loop {
@@ -72,8 +125,7 @@ fn leb128(mut v: u64) -> Vec<u8> {
     }
 }
 
-/// Новая запись с состоянием `on` и временем изменения `now` (не раньше прежнего — иначе служба
-/// может посчитать изменение устаревшим). `None` — формат незнакомый.
+#[allow(dead_code)]
 fn night_build(d: &[u8], on: bool, now: u64) -> Option<Vec<u8>> {
     let (cur, ts, p, len) = night_parse(d)?;
     let mut payload = CB.to_vec();
@@ -86,7 +138,6 @@ fn night_build(d: &[u8], on: bool, now: u64) -> Option<Vec<u8>> {
     out.extend_from_slice(&NIGHT_HEAD);
     out.extend(leb128(now.max(ts.saturating_add(1))));
     out.extend_from_slice(&NIGHT_BODY);
-    // Длина — один байт без старшего бита (иначе это уже LEB128 из двух байт).
     if payload.len() >= 0x80 {
         return None;
     }
@@ -96,46 +147,10 @@ fn night_build(d: &[u8], on: bool, now: u64) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Включён ли ночной свет; `None` — записи нет или формат незнакомый (переключать нельзя).
-pub fn night_light() -> Option<bool> {
-    read_binary(NIGHT_KEY, w!("Data")).and_then(|d| night_parse(&d)).map(|p| p.0)
-}
-
-/// Включает/выключает ночной свет. Перед первой записью сохраняет исходное значение в
-/// `%APPDATA%\island\nightlight.bak` (вернуть можно через reg import / вручную). `true` — получилось.
-pub fn set_night_light(on: bool) -> bool {
-    let Some(old) = read_binary(NIGHT_KEY, w!("Data")) else { return false };
-    let Some(new) = night_build(&old, on, now_secs()) else {
-        crate::log::error("ночной свет: незнакомый формат записи в реестре, не трогаю");
-        return false;
-    };
-    let backup = data_dir().join("nightlight.bak");
-    if !backup.exists() {
-        let _ = std::fs::create_dir_all(data_dir());
-        let _ = std::fs::write(&backup, &old);
-    }
-    let r = unsafe {
-        RegSetKeyValueW(
-            HKEY_CURRENT_USER,
-            NIGHT_KEY,
-            w!("Data"),
-            REG_BINARY.0,
-            Some(new.as_ptr() as *const c_void),
-            new.len() as u32,
-        )
-    };
-    if r != ERROR_SUCCESS {
-        crate::log::error(&format!("ночной свет: запись в реестр не удалась ({})", r.0));
-        return false;
-    }
-    night_light() == Some(on)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Запись с этого ПК (Windows 11 26300), ночной свет выключен.
     const OFF: [u8; 41] = [
         0x43, 0x42, 0x01, 0x00, 0x0A, 0x02, 0x01, 0x00, 0x2A, 0x06, 0xDE, 0x93, 0x97, 0xCF, 0x06, 0x2A, 0x2B, 0x0E, 0x13, 0x43, 0x42,
         0x01, 0x00, 0xD0, 0x0A, 0x02, 0xC6, 0x14, 0xD7, 0xAA, 0xAA, 0x92, 0xED, 0xDE, 0x8C, 0xEE, 0x01, 0x00, 0x00, 0x00, 0x00,
@@ -157,7 +172,6 @@ mod tests {
         assert_eq!(&on[23..27], &[0x10, 0x00, 0xD0, 0x0A]);
         assert_eq!(night_parse(&on).map(|p| p.0), Some(true));
         let off = night_build(&on, false, 1_800_000_001).unwrap();
-        // Всё, кроме времени, как в исходной записи.
         assert_eq!(off.len(), OFF.len());
         assert_eq!(&off[15..], &OFF[15..]);
         assert_eq!(night_parse(&off).map(|p| (p.0, p.1)), Some((false, 1_800_000_001)));

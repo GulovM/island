@@ -448,7 +448,7 @@ impl Ui {
         }
 
         if focused {
-            self.ime_pos = Some((origin_x + inner.x + pad_x + caret_x - f.scroll, r.bottom()));
+            self.ime_pos = Some((origin_x + inner.x + pad_x + caret_x - f.scroll, self.origin_y + r.bottom()));
         }
     }
 
