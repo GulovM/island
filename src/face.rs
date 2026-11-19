@@ -250,13 +250,7 @@ impl Face {
             CollapsedIcon::Layout => cv.text_w(&self.lang_text, &cv.g.fonts.body_b),
             CollapsedIcon::Wifi => 11.4,
             CollapsedIcon::Bluetooth => 12.2,
-            CollapsedIcon::Battery => {
-                if self.battery.is_some_and(|b| b.ac_online) {
-                    24.5
-                } else {
-                    17.2
-                }
-            }
+            CollapsedIcon::Battery => 17.2,
         }
     }
 
@@ -410,7 +404,7 @@ impl Face {
 
     /// Значок батареи в свёрнутой чёлке:
     /// - от батареи (`ac_online == false`): нейтрально-серое заполнение;
-    /// - от сети (`ac_online == true`): зелёное заполнение + молния справа от контакта.
+    /// - от сети (`ac_online == true`): зелёное заполнение.
     unsafe fn battery(&self, cv: &Canvas, x: f32, cy: f32) {
         let body = Rect::new(x, cy - 4.3, 15.0, 8.6);
         let nub = Rect::new(body.right() + 0.7, cy - 1.7, 1.4, 3.4);
@@ -437,11 +431,6 @@ impl Face {
         };
         if fill_w > 0.0 {
             cv.rr(Rect::new(inner.x, inner.y, fill_w, inner.h), 1.0, fill_col);
-        }
-
-        if b.ac_online {
-            let bx = body.right() + 2.2;
-            cv.symbol(icon::BOLT, Rect::new(bx - 1.5, cy - 5.5, 11.0, 11.0), 11.0, green);
         }
     }
 }
