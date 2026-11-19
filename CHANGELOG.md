@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+## [1.9.1] — 2026-11-19
+
+### RU
+
+- Поля ввода: добавлена навигация по словам через `Ctrl+←` / `Ctrl+→` (и выделение по словам через `Ctrl+Shift+←` / `Ctrl+Shift+→`) во всех текстовых полях; в полях пароля курсор переходит в начало или конец без раскрытия границ слов.
+- Виджет «Задачи»: недобавленный черновик новой задачи (текст и выбранная важность) теперь сохраняется при сворачивании острова, а само поле задач не мешает автосворачиванию острова при уводе курсора и корректно сворачивается при потере фокуса кликом в другое окно (`WM_KILLFOCUS`).
+- Настройки → Уведомления: предупреждение «Требуется перезагрузка» под «Всплывающие уведомления» теперь показывается только когда опция изменена относительно состояния при старте сеанса Windows, пропадает при возврате к исходному значению до перезагрузки и автоматически сбрасывается после перезагрузки или завершения работы ОС.
+- Вкладка «Управление»: стартовая раскладка при первой установке расширена до 9×4 без пустого места справа, не затрагивая уже сохранённые пользовательские раскладки.
+- Свёрнутый остров: убран значок молнии у иконки батареи при питании от сети.
+
+### EN
+
+- Text fields: added word-by-word cursor navigation via `Ctrl+←` / `Ctrl+→` (and word selection via `Ctrl+Shift+←` / `Ctrl+Shift+→`) across all text input fields; password fields jump directly to start/end without revealing word boundaries.
+- Tasks widget: unsaved new-task drafts (text and chosen priority) now persist when the island collapses, while the tasks field no longer blocks auto-collapse on cursor leave and collapses reliably when clicking into another window (`WM_KILLFOCUS`).
+- Settings → Notifications: the "Restart required" hint under "Popup notifications" now appears only when the setting differs from its initial state in the current Windows session, clears if toggled back before rebooting, and resets automatically after a restart or shutdown.
+- Controls tab: expanded the default layout for fresh installs to 9×4 without trailing empty space, while preserving existing user layouts.
+- Collapsed island: removed the lightning bolt indicator from the battery icon when plugged in.
+
 ## [1.9.0] — 2026-11-18
 
 ### RU
