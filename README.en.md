@@ -47,7 +47,7 @@ To exit the app: right-click the tray icon → "Exit".
   toasts, while app notifications and calendar reminders pop up in a capsule below the notch. Clicking a popup
   notification opens or focuses the sending app (raising messengers/social apps from tray) and marks it as read;
   right-clicking dismisses the capsule.
-- **Main tabs:** Controls (Wi-Fi, airplane mode, Bluetooth, Do Not Disturb from the widget tray, audio volume & output device, night light, dark theme, energy saver, battery, media player), Today (clock with 6 faces, weather, calendar with custom events, repeats, reminders, two-way sync with Google Calendar and iCloud plus ICS links, timer and Pomodoro mode with focus/break cycles, tasks with priority levels and sorting),
+- **Main tabs:** Controls (Wi-Fi, airplane mode, Bluetooth, Do Not Disturb from the widget tray, audio volume & output device, night light, dark theme, energy saver, battery, media player), Today (clock with 6 faces, weather, calendar with custom events, repeats, reminders, two-way sync with Google Calendar and iCloud plus ICS links, timer and Pomodoro mode with focus/break cycles, tasks with priority levels, sorting, and draft preservation when the island closes),
   Stats (CPU, GPU, memory, disks, uptime, network, and speed test), Clipboard (Quick Access and clipboard history), Apps (app launcher and quick links),
   Wallpaper (wallpaper switcher), Power (lock, sleep, restart, shut down).
 - **Notifications:** the **bell** icon next to the gear opens the Windows Notification Center (`UserNotificationListener`)
@@ -79,7 +79,8 @@ To exit the app: right-click the tray icon → "Exit".
   the island stays open until your cursor enters and leaves it; pressing the same hotkey again, pressing `Esc` (or
   exiting grid edit mode), or clicking into another window collapses the island and restores focus to the previous
   window. In the expanded island, `←` / `→` arrow keys cycle through tabs (and return from Settings or Notifications
-  back to the current tab).
+  back to the current tab), and text input fields support `Ctrl+←` / `Ctrl+→` (plus `Shift` to select) for word-by-word
+  cursor navigation.
 - Right-clicking the expanded island toggles "strip" mode: over maximized windows, the island collapses to a thin line.
 - In fullscreen games (DirectX), the island hides automatically.
 
