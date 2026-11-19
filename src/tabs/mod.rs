@@ -752,8 +752,8 @@ mod tests {
         let tabs = Tabs::default();
 
         // Вкладки с сеткой: из формулы cols*56-8+2*PAD и TOP+rows*56-8+PAD по окну сетки.
-        // Окно по умолчанию — все виджеты в сетке 6×4 (Controls), 10×4 (Today) и 12×4 (Stats, с карточкой батареи).
-        assert_eq!(tabs.island_size(CONTROLS), (356.0, 268.0));
+        // Окно по умолчанию — все виджеты в сетке 9×4 (Controls), 10×4 (Today) и 10×4 (Stats).
+        assert_eq!(tabs.island_size(CONTROLS), (524.0, 268.0));
         assert_eq!(tabs.island_size(TODAY), (580.0, 268.0));
         assert_eq!(tabs.island_size(STATS), (580.0, 268.0));
 
@@ -768,11 +768,12 @@ mod tests {
     #[test]
     fn test_all_widget_sizes_are_standard() {
         for tab in [CONTROLS, TODAY, STATS] {
-            for s in spec_of(tab).specs {
+            let resolved = layout::resolve_full(spec_of(tab), 8);
+            for (i, s) in spec_of(tab).specs.iter().enumerate() {
                 for z in s.sizes {
                     assert!(z.is_standard(), "{}: нестандартный размер {}×{}", s.key, z.w, z.h);
                 }
-                assert!(s.size < s.sizes.len(), "{}: размер по умолчанию вне списка", s.key);
+                assert!(s.size < resolved.specs[i].sizes.len(), "{}: размер по умолчанию вне списка", s.key);
             }
         }
     }

@@ -30,11 +30,11 @@ const DARK: usize = 4;
 const VOLUME: usize = 5;
 const BRIGHTNESS: usize = 6;
 const MEDIA: usize = 7;
-const AIRPLANE: usize = 8;
-const SAVER: usize = 9;
+const DND: usize = 8;
+const AIRPLANE: usize = 9;
+const SAVER: usize = 10;
 /// Перенесена со «Статистики»: там широкая карточка раздвигала сетку до 12 колонок.
-const BATTERY: usize = 10;
-const DND: usize = 11;
+const BATTERY: usize = 11;
 
 /// Высота выпадающего списка устройств.
 const LIST_H: f32 = 116.0;
@@ -42,16 +42,17 @@ const LIST_H: f32 = 116.0;
 /// Плитки: значок (1×1), компактная и широкие плитки с подписью.
 static TILE: [Size; 4] = [sz(1, 1), sz(2, 1), sz(3, 1), sz(4, 1)];
 /// Ползунки: длина произвольная — лёжа от 2 ячеек до ширины острова, стоя от 2 ячеек до высоты
-/// сетки (ширина — одна ячейка). По умолчанию лёжа 3×1 (второй размер списка).
+/// сетки (ширина — одна ячейка). По умолчанию лёжа 4×1 (третий размер раскрытого списка).
 static SLIDER: [Size; 2] = [sz(WIDE + 2, 1), sz(1, TALL + 2)];
 /// Плеер: высота 2 ячейки (или полоса в один ряд), ширина произвольная — от 3 (4 у полосы) ячеек
-/// до ширины острова. По умолчанию 3×2 (первый размер списка).
+/// до ширины острова. По умолчанию 5×2 (третий размер раскрытого списка).
 static PLAYER: [Size; 2] = [sz(WIDE + 3, 2), sz(WIDE + 4, 1)];
 /// Батарея: 1×1 (кольцо 48×48) и 2×1 (карточка 104×48 со значком батареи).
 static BATTERY_SIZES: [Size; 2] = [sz(1, 1), sz(2, 1)];
 
-/// Сетка вкладки: до 10 колонок и 6 рядов крупных ячеек (шаг CELL=56, зазор GAP=8; рядов до 5 — под список устройств). По умолчанию в первом
-/// ряду три плитки по 2 ячейки, во втором — две по 3, ниже плеер 3×2 и два ползунка 3×1 рядом с ним.
+/// Сетка вкладки: до 10 колонок и 6 рядов крупных ячеек (шаг CELL=56, зазор GAP=8; рядов до 5 — под список устройств). По умолчанию сетка 9×4:
+/// в первом ряду три плитки по 3 ячейки (Wi-Fi, Bluetooth, Аудио), во втором — три по 3 (Ночной свет, Тёмная тема, Не беспокоить),
+/// ниже плеер 5×2 и два ползунка 4×1 рядом с ним.
 ///
 /// Статический `min_rows = 1` задаёт компактный размер при скрытых виджетах или пустой вкладке.
 /// Выпадающий список устройств LIST_H = 116 px запрашивает место динамически через `overlay_rows`.
@@ -61,18 +62,18 @@ pub static SPEC: TabSpec = TabSpec {
     min_cols: 2,
     min_rows: 1,
     specs: &[
-        Spec { key: "wifi", title: "Wi-Fi", sizes: &TILE, size: 1, col: 0, row: 0 },
-        Spec { key: "bluetooth", title: "Bluetooth", sizes: &TILE, size: 1, col: 2, row: 0 },
-        Spec { key: "audio", title: "Аудио", sizes: &TILE, size: 1, col: 4, row: 0 },
+        Spec { key: "wifi", title: "Wi-Fi", sizes: &TILE, size: 2, col: 0, row: 0 },
+        Spec { key: "bluetooth", title: "Bluetooth", sizes: &TILE, size: 2, col: 3, row: 0 },
+        Spec { key: "audio", title: "Аудио", sizes: &TILE, size: 2, col: 6, row: 0 },
         Spec { key: "night", title: "Ночной свет", sizes: &TILE, size: 2, col: 0, row: 1 },
         Spec { key: "dark", title: "Тёмная тема", sizes: &TILE, size: 2, col: 3, row: 1 },
-        Spec { key: "volume", title: "Громкость", sizes: &SLIDER, size: 1, col: 3, row: 2 },
-        Spec { key: "brightness", title: "Яркость", sizes: &SLIDER, size: 1, col: 3, row: 3 },
-        Spec { key: "media", title: "Плеер", sizes: &PLAYER, size: 0, col: 0, row: 2 },
+        Spec { key: "volume", title: "Громкость", sizes: &SLIDER, size: 2, col: 5, row: 2 },
+        Spec { key: "brightness", title: "Яркость", sizes: &SLIDER, size: 2, col: 5, row: 3 },
+        Spec { key: "media", title: "Плеер", sizes: &PLAYER, size: 2, col: 0, row: 2 },
+        Spec { key: "dnd", title: "Не беспокоить", sizes: &TILE, size: 2, col: 6, row: 1 },
         Spec { key: "airplane", title: "Режим полёта", sizes: &TILE, size: 1, col: 0, row: HIDDEN },
         Spec { key: "saver", title: "Энергосбережение", sizes: &TILE, size: 1, col: 0, row: HIDDEN },
         Spec { key: "battery", title: "Батарея", sizes: &BATTERY_SIZES, size: 0, col: 0, row: HIDDEN },
-        Spec { key: "dnd", title: "Не беспокоить", sizes: &TILE, size: 1, col: 0, row: HIDDEN },
     ],
 };
 
@@ -222,7 +223,7 @@ impl Controls {
     /// Считается строго по дискретным координатам раскладки сетки во избежание дрожания.
     pub fn tiles_low(grid: &Grid) -> f32 {
         let mut max_r = 0u8;
-        for &idx in &[WIFI, BLUETOOTH, AUDIO, NIGHT, DARK] {
+        for &idx in &[WIFI, BLUETOOTH, AUDIO, NIGHT, DARK, DND] {
             if let Some(e) = grid.layout().entry(idx) {
                 if !e.hidden {
                     let sz = SPEC.specs[idx].sizes[e.size];
@@ -1155,7 +1156,7 @@ mod tests {
         let spec = crate::tabs::layout::resolve_full(&SPEC, 8);
         let lay = Layout::default_for(spec);
         let p = lay.pack(spec, 0);
-        assert_eq!(p.len(), 8);
+        assert_eq!(p.len(), 9);
 
         // Проверяем отсутствие пересечений
         for (i, a) in p.iter().enumerate() {
@@ -1166,10 +1167,10 @@ mod tests {
             }
         }
 
-        // Проверяем размеры плитки: 2 ячейки = 104 px ширина, 1 ячейка = 48 px высота
+        // Проверяем размеры плитки: 3 ячейки = 160 px ширина, 1 ячейка = 48 px высота
         let wifi = lay.entry(WIFI).unwrap();
         let wifi_sz = SPEC.specs[WIFI].sizes[wifi.size];
-        assert_eq!(wifi_sz.pixel_w(), 104.0);
+        assert_eq!(wifi_sz.pixel_w(), 160.0);
         assert_eq!(wifi_sz.pixel_h(), 48.0);
 
         // Проверяем выпадающий список устройств: LIST_H=116 px
@@ -1285,7 +1286,7 @@ mod tests {
         let dnd_spec = &SPEC.specs[DND];
         assert_eq!(dnd_spec.key, "dnd");
         assert_eq!(dnd_spec.sizes, &TILE);
-        assert_eq!(dnd_spec.size, 1);
+        assert_eq!(dnd_spec.size, 2);
 
         let mut c = Controls::default();
         c.sync_from(bg::Snapshot { rev: 1, dnd_active: false, ..Default::default() });

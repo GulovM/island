@@ -1611,7 +1611,7 @@ mod tests {
         // не может растолкать соседей и остаётся где был.
         let base = Layout::default_for(C).entries;
         let win = fit_window(&base, C, 0, C.min_cols, C.min_rows);
-        let r = resolve_drop(win, C, 0, &base, 0, 1, (1, 0)).unwrap();
+        let r = resolve_drop(win, C, 0, &base, 0, base[0].size, (1, 0)).unwrap();
         assert_eq!(pos(&r, 0), (0, 0));
         assert_eq!(r.pushed, 0);
         assert_eq!(r.entries, base);
@@ -1623,8 +1623,8 @@ mod tests {
         let base = Layout::default_for(C).entries;
         let win = fit_window(&base, C, 0, C.min_cols, C.min_rows);
         // Wi-Fi прямо над Bluetooth: меняются местами
-        let r = resolve_drop(win, C, 0, &base, 0, 1, (2, 0)).unwrap();
-        assert_eq!(pos(&r, 0), (2, 0));
+        let r = resolve_drop(win, C, 0, &base, 0, base[0].size, (3, 0)).unwrap();
+        assert_eq!(pos(&r, 0), (3, 0));
         assert_eq!(pos(&r, 1), (0, 0));
         assert_eq!(r.pushed, 1);
         check(win, C, 0, &base, 0, &r);
@@ -1634,12 +1634,10 @@ mod tests {
     fn drop_big_widget_reflows_neighbours() {
         let C = real(&crate::tabs::controls::SPEC);
         let base = Layout::default_for(C).entries;
-        let win = fit_window(&base, C, 0, C.min_cols, C.min_rows);
-        // Плеер 3×2 наверх: плитки и ползунки уезжают вниз, в окно 6×4 влезают все
+        let win = Window { c0: 0, r0: 0, c1: C.cols, r1: C.rows };
+        // Плеер 3×2 наверх: плитки и ползунки уезжают вниз, в сетку 10×6 влезают все
         let media = 7;
-        let size = base[media].size;
-        let r = resolve_drop(win, C, 0, &base, media, size, (0, 0)).unwrap();
-        // Окно занято целиком, и самая дешёвая расстановка ставит плеер не выше второго ряда
+        let r = resolve_drop(win, C, 0, &base, media, 0, (0, 0)).unwrap();
         assert_eq!(pos(&r, media).0, 0);
         assert!(pos(&r, media).1 <= 1);
         assert!(r.pushed > 0);
@@ -1670,12 +1668,13 @@ mod tests {
         let C = real(&crate::tabs::controls::SPEC);
         let base = Layout::default_for(C).entries;
         let win = fit_window(&base, C, 0, C.min_cols, C.min_rows);
-        let first = resolve_drop(win, C, 0, &base, 0, 1, (2, 0));
-        let _ = resolve_drop(win, C, 0, &base, 0, 1, (4, 1));
-        let _ = resolve_drop(win, C, 0, &base, 0, 1, (0, 3));
-        assert_eq!(resolve_drop(win, C, 0, &base, 0, 1, (2, 0)), first);
+        let s = base[0].size;
+        let first = resolve_drop(win, C, 0, &base, 0, s, (3, 0));
+        let _ = resolve_drop(win, C, 0, &base, 0, s, (4, 1));
+        let _ = resolve_drop(win, C, 0, &base, 0, s, (0, 3));
+        assert_eq!(resolve_drop(win, C, 0, &base, 0, s, (3, 0)), first);
         // Обратно в исходную ячейку — исходная раскладка
-        let home = resolve_drop(win, C, 0, &base, 0, 1, (0, 0)).unwrap();
+        let home = resolve_drop(win, C, 0, &base, 0, s, (0, 0)).unwrap();
         assert_eq!(home.entries, base);
         assert_eq!(home.pushed, 0);
     }
@@ -1802,10 +1801,10 @@ mod tests {
         // Окно занято целиком; спрячем плеер, чтобы соседям было куда уйти
         lay.hide(7);
         let before = lay.clone();
-        // Wi-Fi 8×3 → 12×3 растёт на месте: Bluetooth и Аудио расталкиваются, Wi-Fi не переезжает
+        // Wi-Fi 3×1 → 4×1 растёт на месте: Bluetooth и Аудио расталкиваются, Wi-Fi не переезжает
         assert!(lay.cycle_size_in_window(win, C, 0, 0));
         let wifi = lay.entry(0).unwrap();
-        assert_eq!((wifi.size, wifi.col, wifi.row), (2, 0, 0));
+        assert_eq!((wifi.size, wifi.col, wifi.row), (3, 0, 0));
         assert_ne!(lay, before);
         assert!(no_overlap(&lay.pack(C, 0)));
     }
