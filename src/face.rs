@@ -519,24 +519,24 @@ mod tests {
             assert!(time_right < wifi_left, "Время ({time_right}) наезжает на Wi-Fi ({wifi_left})");
 
             // Проверяем размеры отдельной капли таймера в DirectWrite: для 25:00 она имеет вид
-            // вытянутой пилюли под более крупный шрифт, а для 1:02:05 дополнительно расширяется.
-            let (_, drop_h, drop_fs) = crate::live::timer_drop_box(24.0, 0.0);
+            // приплюснутой вытянутой пилюли под более крупный шрифт, а для 1:02:05 дополнительно расширяется.
+            let (_, _, drop_fs) = crate::live::timer_drop_box(24.0, 0.0);
             let drop_fmt = fonts.display(drop_fs, weight::EMPHASIZED, Align::Center);
             let l_mm = fonts.layout("25:00", &drop_fmt, 200.0, 40.0).expect("layout failed");
             let mut m_mm = DWRITE_TEXT_METRICS::default();
             l_mm.GetMetrics(&mut m_mm).unwrap();
-            let (w_mm, h_mm, _) = crate::live::timer_drop_box(drop_h, m_mm.widthIncludingTrailingWhitespace.ceil());
+            let (w_mm, h_mm, _) = crate::live::timer_drop_box(24.0, m_mm.widthIncludingTrailingWhitespace.ceil());
             assert!(
-                w_mm > h_mm && w_mm >= m_mm.widthIncludingTrailingWhitespace + 12.0 && h_mm == 24.0,
-                "25:00 должен помещаться в вытянутую пилюлю с запасом (w={w_mm}, tw={})",
+                w_mm > h_mm * 2.0 && w_mm >= m_mm.widthIncludingTrailingWhitespace + 12.0 && (h_mm - 18.0).abs() < 1e-4,
+                "25:00 должен помещаться в приплюснутую пилюлю с запасом (w={w_mm}, h={h_mm}, tw={})",
                 m_mm.widthIncludingTrailingWhitespace
             );
 
             let l_hh = fonts.layout("1:02:05", &drop_fmt, 200.0, 40.0).expect("layout failed");
             let mut m_hh = DWRITE_TEXT_METRICS::default();
             l_hh.GetMetrics(&mut m_hh).unwrap();
-            let (w_hh, h_hh, _) = crate::live::timer_drop_box(drop_h, m_hh.widthIncludingTrailingWhitespace.ceil());
-            assert!(w_hh > w_mm && h_hh == 24.0 && w_hh >= m_hh.widthIncludingTrailingWhitespace + 12.0);
+            let (w_hh, h_hh, _) = crate::live::timer_drop_box(24.0, m_hh.widthIncludingTrailingWhitespace.ceil());
+            assert!(w_hh > w_mm && (h_hh - 18.0).abs() < 1e-4 && w_hh >= m_hh.widthIncludingTrailingWhitespace + 12.0);
         }
     }
 

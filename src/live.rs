@@ -140,12 +140,13 @@ fn eval_keyframes(u: f32, keys: &[(f32, f32)]) -> f32 {
 }
 
 /// Габариты капли `(w, h, font_size)` в логических пикселях по высоте чёлки и ширине текста.
-/// Капля имеет вытянутую форму пилюли, чтобы вместить более крупный шрифт времени (`~9.8pt` при `h = 24`),
-/// а для часовых форматов (`1:02:05`) дополнительно расширяется по тексту.
+/// Капля чуть приплюснута по высоте (`~75 %` от чёлки, `18 px` при `h = 24`) и вытянута в пилюлю,
+/// чтобы стоять ровно по вертикальной середине чёлки с крупным отсчётом (`~9.8pt`) и расширяться под часы (`1:02:05`).
 pub fn timer_drop_box(collapsed_h: f32, text_w: f32) -> (f32, f32, f32) {
-    let h = collapsed_h.max(20.0);
-    let font_size = (h * 0.41).clamp(8.0, 14.0);
-    let w = (h * 1.60).max(text_w + 14.0);
+    let base_h = collapsed_h.max(16.0);
+    let h = (base_h * 0.75).clamp(15.0, (base_h - 3.0).max(15.0));
+    let font_size = (base_h * 0.41).clamp(8.5, 14.0).min(h * 0.56);
+    let w = (base_h * 1.67).max(text_w + 15.0);
     (w, h, font_size)
 }
 
@@ -1343,16 +1344,20 @@ mod tests {
 
     #[test]
     fn timer_drop_box_is_wider_pill_for_mm_ss_and_hours() {
-        let (_, _, fs) = timer_drop_box(24.0, 0.0);
+        let (_, h0, fs) = timer_drop_box(24.0, 0.0);
+        assert_eq!(h0, 18.0);
         let tw_short = approx_timer_text_w("25:00", fs);
         let (w_short, h_short, _) = timer_drop_box(24.0, tw_short);
-        assert!(w_short > h_short && w_short >= 38.0, "капля должна быть вытянутой пилюлей: {w_short}×{h_short}");
-        assert_eq!(h_short, 24.0);
+        assert!(w_short > h_short * 2.0 && w_short >= 40.0, "капля должна быть приплюснутой пилюлей: {w_short}×{h_short}");
+        assert_eq!(h_short, 18.0);
         assert!((fs - 9.84).abs() < 0.05);
+
+        let r = timer_drop_rect((490.0, 0.0, 24.0, 8.0, 8.0), w_short, h_short, 1.0, 1.0, 1.0);
+        assert!((r.cy() - 12.0).abs() < 1e-4 && (r.y - (24.0 - r.bottom())).abs() < 1e-4, "капля должна стоять по вертикальной середине чёлки: {r:?}");
 
         let tw_long = approx_timer_text_w("1:02:05", fs);
         let (w_long, h_long, _) = timer_drop_box(24.0, tw_long);
-        assert!(w_long > w_short && w_long >= tw_long + 14.0 && h_long == 24.0);
+        assert!(w_long > w_short && w_long >= tw_long + 15.0 && h_long == 18.0);
 
         // На оранжевом фоне (обычный таймер) и коралловом (Pomodoro) текст всегда белый.
         assert_eq!(TimerKind::Timer.on_fill(status_orange()), WHITE);

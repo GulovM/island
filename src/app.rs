@@ -1217,6 +1217,11 @@ mod tests {
         let notch_px = app.notch_hit_rect();
         let drop_px = app.timer_drop_hit_rect_px().expect("хитбокс капли должен существовать");
         assert!(drop_px.0 > notch_px.2, "между чёлкой и каплей должен сохраняться зазор: {notch_px:?} vs {drop_px:?}");
+        assert!(
+            drop_px.3 - drop_px.1 < notch_px.3 - notch_px.1
+                && ((drop_px.1 + drop_px.3) - (notch_px.1 + notch_px.3)).abs() <= 1,
+            "капля должна быть чуть приплюснута и выровнена по вертикальной середине чёлки: {notch_px:?} vs {drop_px:?}"
+        );
         let cx = (drop_px.0 + drop_px.2) / 2;
         let cy = (drop_px.1 + drop_px.3) / 2;
         assert!(app.hits_timer_drop(cx, cy));
