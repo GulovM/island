@@ -56,7 +56,7 @@ const SUN_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.96, g: 0.75, b: 0.19, a: 1.0
 const CLOCK: usize = 0;
 const WEATHER: usize = 1;
 const WEEK: usize = 2;
-const TIMER: usize = 3;
+pub(in crate::tabs) const TIMER: usize = 3;
 const TODO: usize = 4;
 
 /// Месячный календарь раскрывается поверх сетки: минимальная ширина и высота.

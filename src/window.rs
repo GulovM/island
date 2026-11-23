@@ -133,13 +133,9 @@ impl App {
         (self.tab_w(id) * self.scale, self.tab_h(id) * self.scale)
     }
 
-    /// Размер свёрнутой капсулы: расширяется на ширину плашки активного таймера,
-    /// только когда рядом с ней рисуются часы.
+    /// Размер свёрнутой капсулы (без расширения под таймер — он рисуется отдельной каплей).
     pub(crate) fn idle_pill_size(&self) -> (f32, f32) {
-        let (w, h) = self.collapsed();
-        let timer = !self.expanded && !self.stripped() && !self.hidden && self.live.timer().is_some();
-        let extra = if timer && self.face.timer_needs_slot() { face::TIMER_SLOT_W } else { 0.0 };
-        (w + extra, h)
+        self.collapsed()
     }
 
     fn toast_size(&self) -> (f32, f32) {
@@ -402,6 +398,7 @@ impl App {
         self.win_x = rc.left + ((rc.right - rc.left) - cw) / 2;
         self.win_y = rc.top;
         self.rgn = (-1, -1, -1, -1);
+        self.rgn_drop = None;
         self.place_window(false);
         if resized || snap {
             self.retarget();
@@ -492,9 +489,72 @@ impl App {
 
     // ---------- Область острова: регион окна, наведение, окружение ----------
 
-    /// Область, которую остров занимает или займёт к концу анимации: (left, top, right, bottom)
-    /// в пикселях окна. Это и регион окна, и граница «мышь на острове».
-    pub(crate) fn hit_rect(&self) -> (i32, i32, i32, i32) {
+    pub(crate) fn timer_drop_font_size(&self) -> f32 {
+        live::timer_drop_box(self.collapsed().1, 0.0).2
+    }
+
+    pub(crate) fn timer_drop_text_w(&self, label: &str, font_size: f32) -> f32 {
+        if let Some(g) = &self.gfx {
+            // SAFETY: DirectWrite-фабрика и шрифты живут в `Gfx` в том же потоке UI.
+            unsafe {
+                let fmt = g.fonts.display(font_size, ui::weight::EMPHASIZED, ui::Align::Center);
+                if let Some(l) = g.fonts.layout(label, &fmt, 200.0, 40.0) {
+                    let mut m = windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_METRICS::default();
+                    if l.GetMetrics(&mut m).is_ok() {
+                        return m.widthIncludingTrailingWhitespace.ceil();
+                    }
+                }
+            }
+        }
+        live::approx_timer_text_w(label, font_size)
+    }
+
+    /// Логический прямоугольник отдельной капли таймера (с текущим сдвигом и деформацией) и её кадр.
+    pub(crate) fn timer_drop_geom(&self) -> Option<(ui::Rect, live::TimerDropFrame)> {
+        let frame = self.live.timer_drop_frame()?;
+        let anchor = self.live.timer_drop_anchor()?;
+        let fs = self.timer_drop_font_size();
+        let tw = self.timer_drop_text_w(self.live.timer_drop_label(), fs);
+        let (drop_w, drop_h, _) = live::timer_drop_box(self.collapsed().1, tw);
+        let r = live::timer_drop_rect(anchor, drop_w, drop_h, frame.pos, frame.sx, frame.sy);
+        Some((r, frame))
+    }
+
+    /// Прямоугольник клика/региона для капли таймера в физических пикселях окна.
+    pub(crate) fn timer_drop_hit_rect_px(&self) -> Option<(i32, i32, i32, i32)> {
+        let (r, _) = self.timer_drop_geom()?;
+        let pad = 1.0;
+        let s = self.scale;
+        let l = ((r.x - pad) * s).floor().max(0.0) as i32;
+        let t = ((r.y - pad) * s).floor().max(0.0) as i32;
+        let rr = ((r.right() + pad) * s).ceil().min(self.win_w as f32) as i32;
+        let b = ((r.bottom() + pad) * s).ceil().min(self.win_h as f32) as i32;
+        (rr > l && b > t).then_some((l, t, rr, b))
+    }
+
+    /// Клик попал в отдельную каплю таймера (когда остров свёрнут).
+    pub(crate) fn hits_timer_drop(&self, px: i32, py: i32) -> bool {
+        if self.expanded || self.hidden || self.stripped() || !self.live.timer_drop_clickable() {
+            return false;
+        }
+        self.timer_drop_hit_rect_px()
+            .is_some_and(|(l, t, r, b)| px >= l && px < r && py >= t && py < b)
+    }
+
+    /// Курсор сейчас находится над отдельной каплей таймера (свёрнутое состояние).
+    pub(crate) unsafe fn cursor_in_timer_drop(&self) -> bool {
+        if self.expanded || self.hidden || self.stripped() || !self.live.timer_drop_clickable() {
+            return false;
+        }
+        let mut p = POINT::default();
+        if GetCursorPos(&mut p).is_err() {
+            return false;
+        }
+        self.hits_timer_drop(p.x - self.win_x, p.y - self.win_y)
+    }
+
+    /// Прямоугольник основного тела острова (без отдельной капли таймера) в пикселях окна.
+    pub(crate) fn notch_hit_rect(&self) -> (i32, i32, i32, i32) {
         let win_w = self.win_w as f32;
         let (tw, th) = self.target_size();
         let (cw, ch) = self.body_size();
@@ -514,17 +574,35 @@ impl App {
         } else {
             0.0
         };
-        let ears = cur_ear
-            .max(if target_y0 == 0.0 { EAR * self.scale } else { 0.0 })
-            .max(wave_ears);
+        let base_ears = cur_ear.max(if target_y0 == 0.0 { EAR * self.scale } else { 0.0 });
+        let left_ears = base_ears.max(wave_ears);
+        // Когда справа вынесена капля таймера, правые волны гасятся, чтобы зазор между чёлкой
+        // и каплей не перехватывал клики и не сливался с телом.
+        let right_ears = if self.live.timer_drop_visible() {
+            base_ears
+        } else {
+            left_ears
+        };
         // Допуск нужен только раскрытому острову, чтобы край не «дрожал»; свёрнутый — без запаса.
         let slop = if self.expanded { HIT_SLOP * self.scale } else { 0.0 };
         (
-            (l - ears - slop).floor().max(0.0) as i32,
+            (l - left_ears - slop).floor().max(0.0) as i32,
             t.floor().max(0.0) as i32,
-            (r + ears + slop).ceil().min(win_w) as i32,
+            (r + right_ears + slop).ceil().min(win_w) as i32,
             (b + slop).ceil().min(self.win_h as f32) as i32,
         )
+    }
+
+    /// Область, которую остров занимает или займёт к концу анимации: (left, top, right, bottom)
+    /// в пикселях окна. Это и регион окна, и граница «мышь на острове».
+    pub(crate) fn hit_rect(&self) -> (i32, i32, i32, i32) {
+        let mut rect = self.notch_hit_rect();
+        if !self.expanded {
+            if let Some(dr) = self.timer_drop_hit_rect_px() {
+                rect = (rect.0.min(dr.0), rect.1.min(dr.1), rect.2.max(dr.2), rect.3.max(dr.3));
+            }
+        }
+        rect
     }
 
     /// Обрезает окно регионом по области острова: всё остальное окно не существует для мыши,
@@ -532,10 +610,11 @@ impl App {
     /// мышь только окнам того же потока, поэтому для чужих процессов не работает.)
     pub(crate) unsafe fn apply_region(&mut self) {
         let mut rect = self.hit_rect();
+        let body_moving = self.expanded || self.open.value > 0.005 || !self.body.settled() || !self.capsule.settled();
         // Регион меняется сразу, а кадр в swap chain и подложка блюра доходят до экрана на пару кадров
-        // позже. Пока остров сжимается, берём объединение с последними кадрами: иначе регион обрезает
+        // позже. Пока тело острова сжимается, берём объединение с последними кадрами: иначе регион обрезает
         // ещё большое тело прямоугольником, а подложка блюра торчит вокруг как отдельная плита.
-        if self.animating() {
+        if self.animating() && body_moving {
             for &(l, t, r, b) in &self.rgn_hist {
                 rect = (rect.0.min(l), rect.1.min(t), rect.2.max(r), rect.3.max(b));
             }
@@ -546,13 +625,35 @@ impl App {
         } else {
             self.rgn_hist.clear();
         }
-        if rect == self.rgn {
+        let notch = self.notch_hit_rect();
+        let drop_rect = if !self.expanded && self.rgn_hist.is_empty() {
+            self.timer_drop_hit_rect_px().filter(|dr| dr.0 > notch.2)
+        } else {
+            None
+        };
+        if rect == self.rgn && drop_rect == self.rgn_drop {
             return;
         }
         self.rgn = rect;
-        let rgn = CreateRectRgn(rect.0, rect.1, rect.2, rect.3);
-        // Система забирает регион себе, удалять его не нужно.
-        SetWindowRgn(self.hwnd, Some(rgn), false);
+        self.rgn_drop = drop_rect;
+        let rgn = if let Some(dr) = drop_rect {
+            let base = CreateRectRgn(notch.0, notch.1, notch.2, notch.3);
+            let drop = CreateRectRgn(dr.0, dr.1, dr.2, dr.3);
+            let _ = windows::Win32::Graphics::Gdi::CombineRgn(
+                Some(base),
+                Some(base),
+                Some(drop),
+                windows::Win32::Graphics::Gdi::RGN_OR,
+            );
+            let _ = windows::Win32::Graphics::Gdi::DeleteObject(drop.into());
+            base
+        } else {
+            CreateRectRgn(rect.0, rect.1, rect.2, rect.3)
+        };
+        // Система забирает регион себе; при отказе освобождаем дескриптор сами.
+        if SetWindowRgn(self.hwnd, Some(rgn), false) == 0 {
+            let _ = windows::Win32::Graphics::Gdi::DeleteObject(rgn.into());
+        }
     }
 
     pub(crate) unsafe fn cursor_inside(&self) -> bool {
@@ -560,9 +661,17 @@ impl App {
         if GetCursorPos(&mut p).is_err() {
             return true;
         }
-        let (l, t, r, b) = self.hit_rect();
         let (x, y) = (p.x - self.win_x, p.y - self.win_y);
-        x >= l && x < r && y >= t && y < b
+        if self.expanded {
+            let (l, t, r, b) = self.hit_rect();
+            return x >= l && x < r && y >= t && y < b;
+        }
+        let (l, t, r, b) = self.notch_hit_rect();
+        let in_notch = x >= l && x < r && y >= t && y < b;
+        let in_drop = self
+            .timer_drop_hit_rect_px()
+            .is_some_and(|(dl, dt, dr, db)| x >= dl && x < dr && y >= dt && y < db);
+        in_notch || in_drop
     }
 
     pub(crate) unsafe fn arm_leave(&mut self) {
@@ -629,12 +738,21 @@ impl App {
         } else {
             self.disarm_leave();
         }
+        if !self.expanded {
+            self.live.set_timer_drop_hover(self.cursor_in_timer_drop());
+        }
     }
 
     /// Движение мыши: раскрывает остров; у раскрытого нужен кадр для hover-анимаций.
     pub(crate) unsafe fn on_move(&mut self) -> bool {
         if self.hidden {
             return false;
+        }
+        // Над отдельной каплей таймера остров не раскрывается по наведению:
+        // нужно нажать по ней, чтобы открыть вкладку с таймером (кадр — на подсветку).
+        if !self.expanded && self.cursor_in_timer_drop() {
+            self.live.set_timer_drop_hover(true);
+            return true;
         }
         // Над уведомлением (таймер, событие, всплывающее уведомление) остров не раскрывается:
         // нужно успеть нажать × или открыть приложение (кадр — на подсветку).
@@ -810,10 +928,9 @@ impl App {
             }
         }
         // Раскладка клавиатуры окна в фокусе: событий об её смене нет, проверяем вместе с окружением.
-        // Опрашиваем, когда остров свёрнут, не полоска, не скрыт игрой, показ лица разрешён (или активен таймер)
-        // и хотя бы в одном слоте выбрана раскладка.
+        // Опрашиваем, когда остров свёрнут, не полоска, не скрыт игрой и показ лица разрешён.
         if self.face.uses_layout()
-            && should_poll_lang(self.expanded, self.hidden, self.stripped(), self.cfg.idle_face, self.live.timer().is_some())
+            && should_poll_lang(self.expanded, self.hidden, self.stripped(), self.cfg.idle_face)
             && self.face.poll_lang()
         {
             self.trigger_peek();
@@ -1115,11 +1232,11 @@ pub(crate) fn is_fullscreen_game(
 }
 
 /// Нужно ли опрашивать раскладку клавиатуры окна в фокусе:
-/// только когда остров свёрнут, не скрыт полноэкранной игрой, не является полоской,
-/// и показ лица либо включён в настройках, либо оправдан активным таймером Today.
+/// только когда остров свёрнут, не скрыт полноэкранной игрой, не является полоской
+/// и показ лица включён в настройках.
 #[inline]
-pub(crate) fn should_poll_lang(expanded: bool, hidden: bool, stripped: bool, idle_face: bool, timer_active: bool) -> bool {
-    !expanded && !hidden && !stripped && (idle_face || timer_active)
+pub(crate) fn should_poll_lang(expanded: bool, hidden: bool, stripped: bool, idle_face: bool) -> bool {
+    !expanded && !hidden && !stripped && idle_face
 }
 
 /// Определяет, нужно ли прятать остров при нажатии PrtSc / Win+Shift+S.
@@ -1134,27 +1251,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn poll_lang_gated_by_idle_face_and_timer() {
-        // При idle_face = false и без активного таймера опрос раскладки заблокирован (не тратит CPU)
-        assert!(!should_poll_lang(false, false, false, false, false));
-
-        // Если активен таймер Today, опрос разрешён даже при idle_face = false
-        assert!(should_poll_lang(false, false, false, false, true));
+    fn poll_lang_gated_by_idle_face() {
+        // При idle_face = false опрос раскладки заблокирован (не тратит CPU)
+        assert!(!should_poll_lang(false, false, false, false));
 
         // Если idle_face включён, опрос разрешён на свёрнутом острове (не полоска)
-        assert!(should_poll_lang(false, false, false, true, false));
+        assert!(should_poll_lang(false, false, false, true));
 
-        // В режиме полоски (stripped == true) опрос всегда запрещён независимо от остальных параметров
-        assert!(!should_poll_lang(false, false, true, true, false));
-        assert!(!should_poll_lang(false, false, true, false, true));
-        assert!(!should_poll_lang(false, false, true, true, true));
-        assert!(!should_poll_lang(false, false, true, false, false));
+        // В режиме полоски (stripped == true) опрос всегда запрещён
+        assert!(!should_poll_lang(false, false, true, true));
+        assert!(!should_poll_lang(false, false, true, false));
 
         // На развёрнутом или скрытом игрой острове опрос всегда запрещён
-        assert!(!should_poll_lang(true, false, false, true, true));
-        assert!(!should_poll_lang(false, true, false, true, true));
-        assert!(!should_poll_lang(true, true, false, true, true));
-        assert!(!should_poll_lang(true, true, true, true, true));
+        assert!(!should_poll_lang(true, false, false, true));
+        assert!(!should_poll_lang(false, true, false, true));
+        assert!(!should_poll_lang(true, true, false, true));
+        assert!(!should_poll_lang(true, true, true, true));
     }
 
     #[test]

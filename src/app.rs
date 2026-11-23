@@ -83,6 +83,8 @@ pub struct App {
     pub(crate) trim_pending: bool,
     /// Последний применённый регион окна: (left, top, right, bottom) в пикселях окна.
     pub(crate) rgn: (i32, i32, i32, i32),
+    /// Отдельный регион кликабельной капли таймера, если она отделена от чёлки зазором.
+    pub(crate) rgn_drop: Option<(i32, i32, i32, i32)>,
     /// Области последних кадров анимации: регион окна не сжимается быстрее, чем обновляется картинка.
     pub(crate) rgn_hist: Vec<(i32, i32, i32, i32)>,
     /// Позиция выбранной вкладки в `order`.
@@ -269,6 +271,7 @@ impl App {
                 leave_hold: None,
                 trim_pending: true,
                 rgn: (-1, -1, -1, -1),
+                rgn_drop: None,
                 rgn_hist: Vec::new(),
                 tab: initial_tab,
                 settings_open: false,
@@ -620,6 +623,7 @@ impl App {
         self.retarget();
         self.body.snap();
         self.rgn = (-1, -1, -1, -1);
+        self.rgn_drop = None;
         self.apply_region();
         self.rebuild_hot();
     }
@@ -655,19 +659,52 @@ impl App {
         } else {
             0.0
         };
-        // Часы, раскладка, Wi-Fi и таймер — только когда свёрнутому острову больше нечего показывать.
+        // Часы, раскладка и значки — только когда лицо включено и свёрнутому острову больше нечего показывать.
         let idle = form == live::Form::Idle && !self.expanded && !self.stripped() && !self.hidden;
         self.live.set_wave_active(self.collapsed_wave_on());
-        self.face.set_visible(idle, self.live.timer().is_some());
+        self.face.set_visible(idle);
+        self.sync_timer_drop();
         self.apply_peek_targets();
     }
 
-    /// Подходит ли текущее состояние острова для peek лица (свёрнут, играет музыка в мини-плеере,
-    /// и лицо включено в настройках либо активен таймер Today).
+    /// Нужна ли сейчас отдельная капля таймера справа от чёлки.
+    pub(crate) fn timer_drop_active(&self) -> bool {
+        !self.expanded
+            && !self.hidden
+            && !self.stripped()
+            && self.live.timer().is_some()
+            && matches!(self.live_form(), live::Form::Idle | live::Form::Mini)
+    }
+
+    /// Синхронизирует целевое состояние и якорь отдельной капли таймера с текущим состоянием тела.
+    pub(crate) fn sync_timer_drop(&mut self) {
+        let show = self.timer_drop_active() && self.open.value < 0.12;
+        if show {
+            let (x0, y0, aw, ah, ear, _, r_bot) = self.body_geometry();
+            let s = self.scale.max(0.01);
+            self.live.latch_timer_drop_anchor(((x0 + aw) / s, y0 / s, ah / s, ear / s, r_bot / s));
+        }
+        self.live.set_timer_drop(show, self.expanded);
+    }
+
+    /// Клик по отдельной капле таймера: раскрывает остров прямо на вкладку с таймером.
+    pub(crate) unsafe fn open_timer_tab(&mut self) {
+        self.hover_suppress_until = None;
+        if let Some(pos) = self.tabs.timer_tab_pos(&self.order) {
+            if pos != self.tab || self.settings_open || self.notifications_open {
+                self.switch_tab(pos);
+                self.tab_t.snap();
+                self.tab_prev = None;
+            }
+        }
+        self.disarm_leave();
+        self.set_expanded(true);
+    }
+
+    /// Подходит ли текущее состояние острова для peek лица (свёрнут, играет музыка в мини-плеере
+    /// и лицо включено в настройках).
     pub(crate) fn can_peek(&self) -> bool {
-        self.live_form() == live::Form::Mini
-            && self.live.playing()
-            && (self.cfg.idle_face || self.live.timer().is_some())
+        self.live_form() == live::Form::Mini && self.live.playing() && self.cfg.idle_face
     }
 
     /// Выставляет целевые альфы и обновляет данные лица при входе или продолжении peek.
@@ -791,6 +828,7 @@ impl App {
         }
         self.ui.step(dt);
         self.tabs.step(dt);
+        self.sync_timer_drop();
         self.live.step(dt);
         self.face.step(dt);
         self.step_peek(dt);
@@ -903,6 +941,7 @@ mod tests {
                 leave_hold: None,
                 trim_pending: false,
                 rgn: (0, 0, 0, 0),
+                rgn_drop: None,
                 rgn_hist: Vec::new(),
                 tab: 0,
                 settings_open: false,
@@ -1025,8 +1064,8 @@ mod tests {
         assert_eq!(app.live_form(), live::Form::Idle);
         assert!(app.collapsed_wave_on());
 
-        // При выключенном лице активный таймер встаёт по центру без расширения острова,
-        // но сама плашка таймера на лице видна.
+        // Таймер теперь рисуется отдельной каплей справа от чёлки: сама чёлка не расширяется,
+        // а лицо при выключенном `idle_face` остаётся скрытым.
         app.live.set_timer(Some(live::TimerView {
             frac: 0.5,
             secs: 60,
@@ -1036,52 +1075,60 @@ mod tests {
         }));
         app.retarget();
         assert_eq!(app.idle_pill_size().0, base_w);
-        assert!(app.face.visible());
+        assert!(!app.face.visible());
+        assert!(app.timer_drop_active());
 
-        // При включённом лице и часах ширина увеличивается на TIMER_SLOT_W;
-        // отключение часов возвращает базовую ширину, повторное включение снова добавляет слот.
+        // При включённом лице и часах ширина чёлки также остаётся базовой, а капля активна.
         app.cfg.idle_face = true;
         app.face.set_enabled(true);
         app.face.set_show_time(true);
         app.retarget();
-        assert_eq!(app.idle_pill_size().0, base_w + face::TIMER_SLOT_W);
+        assert_eq!(app.idle_pill_size().0, base_w);
+        assert!(app.face.visible());
+        assert!(app.timer_drop_active());
         app.face.set_show_time(false);
         app.retarget();
         assert_eq!(app.idle_pill_size().0, base_w);
         app.face.set_show_time(true);
         app.retarget();
-        assert_eq!(app.idle_pill_size().0, base_w + face::TIMER_SLOT_W);
+        assert_eq!(app.idle_pill_size().0, base_w);
 
         app.cfg.idle_face = false;
         app.face.set_enabled(false);
         app.retarget();
 
-        // В режиме полоски боковые волны отключаются и гаснут
+        // В режиме полоски боковые волны и капля таймера отключаются и гаснут
         app.cfg.always_strip = true;
         app.retarget();
         assert!(!app.collapsed_wave_on());
+        assert!(!app.timer_drop_active());
         while app.live.animating() {
             app.live.step(0.05);
         }
         assert!(app.live.wave_alpha() < 0.01);
+        assert!(!app.live.timer_drop_visible());
 
-        // В обычной чёлке волны возвращаются, а при разворачивании острова — снова гаснут
+        // В обычной чёлке волны и капля возвращаются, а при разворачивании острова — снова гаснут
         app.cfg.always_strip = false;
         app.retarget();
         assert!(app.collapsed_wave_on());
+        assert!(app.timer_drop_active());
         while app.live.animating() {
             app.live.step(0.05);
         }
         assert!(app.live.wave_alpha() > 0.99);
+        assert!(app.live.timer_drop_visible());
 
         app.expanded = true;
         app.retarget();
         assert!(!app.collapsed_wave_on());
+        assert!(!app.timer_drop_active());
         assert!(!app.face.visible());
         while app.live.animating() {
             app.live.step(0.05);
         }
         assert!(app.live.wave_alpha() < 0.01);
+        assert!(!app.live.timer_drop_visible());
     }
 
     fn playing_snapshot() -> bg::Snapshot {
@@ -1110,7 +1157,7 @@ mod tests {
     }
 
     #[test]
-    fn test_can_peek_idle_face_and_timer() {
+    fn test_can_peek_idle_face_only() {
         let mut cfg = Config::default();
         cfg.idle_face = false;
         let mut app = App::for_test(cfg);
@@ -1121,9 +1168,9 @@ mod tests {
 
         assert!(!app.cfg.idle_face);
         assert!(app.live.timer().is_none());
-        assert!(!app.can_peek(), "при выключенном лице и без таймера peek запрещён");
+        assert!(!app.can_peek(), "при выключенном лице peek запрещён");
         assert!(
-            !crate::window::should_poll_lang(app.expanded, app.hidden, app.stripped(), app.cfg.idle_face, app.live.timer().is_some()),
+            !crate::window::should_poll_lang(app.expanded, app.hidden, app.stripped(), app.cfg.idle_face),
             "опрос раскладки заблокирован и не триггерит лишний repaint"
         );
 
@@ -1134,7 +1181,8 @@ mod tests {
             next_ms: 1000,
             kind: live::TimerKind::Timer,
         }));
-        assert!(app.can_peek(), "активный таймер разрешает peek лица");
+        assert!(!app.can_peek(), "таймер виден на отдельной капле и не включает peek пустого лица");
+        assert!(app.timer_drop_active(), "капля таймера активна даже в мини-плеере");
 
         app.live.set_timer(None);
         app.cfg.idle_face = true;
@@ -1142,6 +1190,71 @@ mod tests {
 
         app.expanded = true;
         assert!(!app.can_peek(), "на развёрнутом острове peek запрещён");
+    }
+
+    #[test]
+    fn test_click_timer_drop_opens_today_tab() {
+        let mut app = App::for_test(Config::default());
+        app.win_w = 800;
+        app.win_h = 530;
+        app.tab_widths = vec![60.0; tabs::CUSTOM_BASE];
+        app.order = vec![tabs::CONTROLS, tabs::TODAY, tabs::STATS];
+        app.tab = 0; // открыта была вкладка Controls
+        app.settings_open = true;
+        app.live.set_timer(Some(live::TimerView {
+            frac: 0.5,
+            secs: 1500,
+            paused: false,
+            next_ms: 1000,
+            kind: live::TimerKind::PomoWork,
+        }));
+        app.retarget();
+        for _ in 0..80 {
+            app.step(1.0 / 60.0);
+        }
+        assert!(app.live.timer_drop_clickable());
+        assert_eq!(app.live.timer_drop_tint(), ui::status_pomodoro());
+        let notch_px = app.notch_hit_rect();
+        let drop_px = app.timer_drop_hit_rect_px().expect("хитбокс капли должен существовать");
+        assert!(drop_px.0 > notch_px.2, "между чёлкой и каплей должен сохраняться зазор: {notch_px:?} vs {drop_px:?}");
+        let cx = (drop_px.0 + drop_px.2) / 2;
+        let cy = (drop_px.1 + drop_px.3) / 2;
+        assert!(app.hits_timer_drop(cx, cy));
+        // Пустой зазор между чёлкой и каплей не перехватывается.
+        assert!(!app.hits_timer_drop((notch_px.2 + drop_px.0) / 2, cy));
+
+        unsafe {
+            app.open_timer_tab();
+        }
+        assert!(app.expanded);
+        assert!(!app.settings_open);
+        assert_eq!(app.normal_id(), tabs::TODAY);
+    }
+
+    #[test]
+    fn test_timer_drop_preserves_all_timer_colors_and_pause() {
+        let mut app = App::for_test(Config::default());
+        app.win_w = 800;
+        app.win_h = 530;
+
+        for (kind, paused, want_tint, want_alpha) in [
+            (live::TimerKind::Timer, false, ui::status_orange(), 1.0),
+            (live::TimerKind::PomoWork, false, ui::status_pomodoro(), 1.0),
+            (live::TimerKind::PomoBreak, false, ui::status_green(), 1.0),
+            (live::TimerKind::PomoBreak, true, ui::status_green(), live::TIMER_PAUSED_ALPHA),
+        ] {
+            app.live.set_timer(Some(live::TimerView {
+                frac: 0.5,
+                secs: 300,
+                paused,
+                next_ms: 1000,
+                kind,
+            }));
+            app.retarget();
+            assert!(app.timer_drop_active());
+            assert_eq!(app.live.timer_drop_tint(), want_tint);
+            assert_eq!(app.live.timer_drop_alpha(), want_alpha);
+        }
     }
 
     #[test]

@@ -611,6 +611,35 @@ impl Tabs {
         self.today.view()
     }
 
+    /// Позиция видимой вкладки в `order`, на которой находится виджет таймера
+    /// (сначала встроенная вкладка Today, иначе собственная вкладка с `today.timer`,
+    /// иначе Today как запасной вариант, если он не скрыт).
+    pub fn timer_tab_pos(&self, order: &[usize]) -> Option<usize> {
+        let today_pos = order.iter().position(|&t| t == TODAY);
+        let today_has_timer = self.grids[TODAY]
+            .layout()
+            .entries
+            .get(today::TIMER)
+            .is_some_and(|e| !e.hidden);
+        if today_has_timer {
+            if let Some(pos) = today_pos {
+                return Some(pos);
+            }
+        }
+        let cat = custom::catalog();
+        for (pos, &tab) in order.iter().enumerate() {
+            let Some(k) = tab.checked_sub(CUSTOM_BASE) else { continue };
+            let Some(grid) = self.custom.get(k) else { continue };
+            let has_timer = grid.layout().entries.iter().any(|e| {
+                !e.hidden && cat.map.get(e.idx) == Some(&(custom::Owner::Today, today::TIMER))
+            });
+            if has_timer {
+                return Some(pos);
+            }
+        }
+        today_pos
+    }
+
     /// Таймер дошёл до нуля (для уведомления в свёрнутой форме).
     pub fn take_timer_fired(&mut self) -> bool {
         self.today.take_fired()

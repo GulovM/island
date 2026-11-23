@@ -11,7 +11,7 @@ use crate::anim::{Spring, FADE_SPRING};
 use crate::bg::{self, Media, Snapshot, NOTIF_ICON_PX};
 use crate::tabs::notifications::PopupNotice;
 use crate::ui::{
-    collapsed_chip_bg, collapsed_dim, collapsed_txt, icon, status_green, status_orange,
+    collapsed_chip_bg, collapsed_dim, collapsed_txt, icon, on_color, status_green, status_orange,
     status_pomodoro, status_red, Canvas, Rect, Ui, WHITE,
 };
 
@@ -44,6 +44,16 @@ impl TimerKind {
             Self::PomoBreak => status_green(),
         }
     }
+
+    /// Цвет текста и иконок поверх заливки таймера: на оранжевом и коралловом белый
+    /// читается лучше; на светло-зелёном подбирается контрастный цвет через `on_color`.
+    #[inline]
+    pub fn on_fill(self, fill: D2D1_COLOR_F) -> D2D1_COLOR_F {
+        match self {
+            Self::Timer | Self::PomoWork => WHITE,
+            Self::PomoBreak => on_color(fill),
+        }
+    }
 }
 
 /// Что свёрнутый остров знает о запущенном (или стоящем на паузе) таймере вкладки Today.
@@ -72,7 +82,287 @@ impl TimerView {
 }
 
 /// Прозрачность активного таймера на паузе: слегка притухает вместо мигания.
-const TIMER_PAUSED_ALPHA: f32 = 0.45;
+pub const TIMER_PAUSED_ALPHA: f32 = 0.45;
+
+/// Длительность появления капли таймера (согласовано с макетом: 57,5 % от 2 с ≈ 1,05 с).
+const DROP_ENTRY_SECS: f32 = 1.05;
+/// Длительность плавного возврата капли в чёлку (сброс таймера, появление тоста).
+const DROP_EXIT_SECS: f32 = 0.28;
+/// Быстрое втягивание капли при раскрытии острова.
+const DROP_FAST_EXIT_SECS: f32 = 0.16;
+/// Дополнительный зазор между «ушком» чёлки и левым краем капли (логические пиксели).
+const DROP_GAP_EXTRA: f32 = 8.0;
+
+/// Вычисленные параметры кадра для отдельной капли таймера и её жидкой перемычки.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TimerDropFrame {
+    /// Нормализованное положение по X (`0` — у края чёлки, `1` — целевая позиция, >1 — лёгкий перелёт).
+    pub pos: f32,
+    /// Горизонтальное растяжение/сжатие капли (squash & stretch).
+    pub sx: f32,
+    /// Вертикальное растяжение/сжатие капли.
+    pub sy: f32,
+    /// Толщина перешейка перемычки (0..0.72).
+    pub bridge_y: f32,
+    /// Прозрачность жидкой перемычки (0..1).
+    pub bridge_a: f32,
+    /// Прозрачность текста обратного отсчёта внутри капли (0..1).
+    pub text_a: f32,
+    /// Подсветка при наведении курсора (0..1).
+    pub hover: f32,
+    /// Общая видимость (0..1), гаснет только у самого `u == 0`.
+    pub vis: f32,
+}
+
+/// Якорная геометрия чёлки в логических пикселях:
+/// `(notch_r, notch_y, notch_h, ear, r_bot)`.
+pub type DropAnchor = (f32, f32, f32, f32, f32);
+
+/// Кусочно-гладкая (smoothstep) интерполяция по ключевым кадрам `(u, val)` на отрезке `0..=1`.
+fn eval_keyframes(u: f32, keys: &[(f32, f32)]) -> f32 {
+    if u <= keys[0].0 {
+        return keys[0].1;
+    }
+    let last = keys[keys.len() - 1];
+    if u >= last.0 {
+        return last.1;
+    }
+    for w in keys.windows(2) {
+        let (t0, v0) = w[0];
+        let (t1, v1) = w[1];
+        if u <= t1 {
+            let f = ((u - t0) / (t1 - t0).max(1e-5)).clamp(0.0, 1.0);
+            let s = f * f * (3.0 - 2.0 * f);
+            return v0 + (v1 - v0) * s;
+        }
+    }
+    last.1
+}
+
+/// Габариты капли `(w, h, font_size)` в логических пикселях по высоте чёлки и ширине текста.
+/// Капля имеет вытянутую форму пилюли, чтобы вместить более крупный шрифт времени (`~9.8pt` при `h = 24`),
+/// а для часовых форматов (`1:02:05`) дополнительно расширяется по тексту.
+pub fn timer_drop_box(collapsed_h: f32, text_w: f32) -> (f32, f32, f32) {
+    let h = collapsed_h.max(20.0);
+    let font_size = (h * 0.41).clamp(8.0, 14.0);
+    let w = (h * 1.60).max(text_w + 14.0);
+    (w, h, font_size)
+}
+
+/// Грубая оценка ширины текста без DirectWrite (резервный путь для headless-тестов).
+pub fn approx_timer_text_w(label: &str, font_size: f32) -> f32 {
+    let units: f32 = label.chars().map(|c| if c == ':' { 0.26 } else { 0.51 }).sum();
+    (units * font_size).ceil()
+}
+
+/// Центр `(cx, cy)` капли таймера в логических пикселях окна.
+pub fn timer_drop_center(anchor: DropAnchor, drop_w: f32, pos: f32) -> (f32, f32) {
+    let (notch_r, notch_y, notch_h, ear, _) = anchor;
+    let gap = (ear + DROP_GAP_EXTRA).max(12.0);
+    let target_cx = notch_r + gap + drop_w * 0.5;
+    let start_cx = notch_r - drop_w * 0.18;
+    let cx = start_cx + (target_cx - start_cx) * pos;
+    let cy = notch_y + notch_h * 0.5;
+    (cx, cy)
+}
+
+/// Текущий прямоугольник капли в логических пикселях с учётом её сдвига и масштаба.
+pub fn timer_drop_rect(anchor: DropAnchor, drop_w: f32, drop_h: f32, pos: f32, sx: f32, sy: f32) -> Rect {
+    let (cx, cy) = timer_drop_center(anchor, drop_w, pos);
+    let w = (drop_w * sx).max(1.0);
+    let h = (drop_h * sy).max(1.0);
+    Rect::new(cx - w * 0.5, cy - h * 0.5, w, h)
+}
+
+/// Состояние и анимация отделяющейся от чёлки капли активного таймера.
+pub struct TimerDrop {
+    active: bool,
+    fast_hide: bool,
+    retract_clean: bool,
+    u: f32,
+    hover: Spring,
+    shown_label: String,
+    shown_kind: TimerKind,
+    shown_paused: bool,
+    anchor: Option<DropAnchor>,
+}
+
+impl TimerDrop {
+    pub fn new() -> Self {
+        Self {
+            active: false,
+            fast_hide: false,
+            retract_clean: false,
+            u: 0.0,
+            hover: Spring::unit(0.0, 520.0, 38.0),
+            shown_label: String::new(),
+            shown_kind: TimerKind::Timer,
+            shown_paused: false,
+            anchor: None,
+        }
+    }
+
+    pub fn sync_timer(&mut self, t: Option<&TimerView>) {
+        if let Some(tv) = t {
+            self.shown_label = tv.label();
+            self.shown_kind = tv.kind;
+            self.shown_paused = tv.paused;
+        }
+    }
+
+    pub fn set_active(&mut self, active: bool, fast_hide: bool) {
+        if self.active == active {
+            if !active {
+                self.fast_hide |= fast_hide;
+            }
+            return;
+        }
+        self.active = active;
+        if active {
+            self.fast_hide = false;
+            self.retract_clean = false;
+        } else {
+            self.fast_hide = fast_hide;
+            self.retract_clean = self.u >= 0.95;
+            self.hover.target = 0.0;
+        }
+    }
+
+    pub fn set_hover(&mut self, hovered: bool) -> bool {
+        let target = if hovered && self.clickable() { 1.0 } else { 0.0 };
+        if (self.hover.target - target).abs() > 0.01 {
+            self.hover.target = target;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn latch_anchor(&mut self, anchor: DropAnchor) {
+        self.anchor = Some(anchor);
+    }
+
+    pub fn anchor(&self) -> Option<DropAnchor> {
+        self.anchor
+    }
+
+    pub fn label(&self) -> &str {
+        &self.shown_label
+    }
+
+    pub fn kind(&self) -> TimerKind {
+        self.shown_kind
+    }
+
+    pub fn paused(&self) -> bool {
+        self.shown_paused
+    }
+
+    pub fn visible(&self) -> bool {
+        self.u > 0.004 && !self.shown_label.is_empty() && self.anchor.is_some()
+    }
+
+    pub fn clickable(&self) -> bool {
+        self.active && self.u > 0.25 && !self.shown_label.is_empty() && self.anchor.is_some()
+    }
+
+    pub fn animating(&self) -> bool {
+        let target = if self.active { 1.0 } else { 0.0 };
+        (self.u - target).abs() > 1e-4 || !self.hover.settled()
+    }
+
+    pub fn step(&mut self, dt: f32) {
+        let scale = if crate::theme::reduced_motion() { 8.0 } else { 1.0 };
+        if self.active {
+            if self.u < 1.0 {
+                self.u = (self.u + (dt * scale) / DROP_ENTRY_SECS).min(1.0);
+            }
+        } else if self.u > 0.0 {
+            let secs = if self.fast_hide { DROP_FAST_EXIT_SECS } else { DROP_EXIT_SECS };
+            self.u = (self.u - (dt * scale) / secs).max(0.0);
+            if self.u == 0.0 {
+                self.retract_clean = false;
+                self.fast_hide = false;
+            }
+        }
+        self.hover.step(dt);
+        if self.hover.settled() {
+            self.hover.snap();
+        }
+    }
+
+    pub fn frame(&self) -> Option<TimerDropFrame> {
+        if !self.visible() {
+            return None;
+        }
+        let u = self.u.clamp(0.0, 1.0);
+        let vis = (u / 0.08).clamp(0.0, 1.0);
+        let hover = self.hover.value.clamp(0.0, 1.0);
+
+        if !self.active && self.retract_clean {
+            let s = u * u * (3.0 - 2.0 * u);
+            let sx = 0.20 + 0.80 * u.sqrt();
+            let sy = 0.10 + 0.90 * u * u;
+            let bridge_env = (1.0 - (u - 0.35).abs() / 0.32).clamp(0.0, 1.0);
+            let bridge_y = 0.55 * bridge_env;
+            let bridge_a = (1.0 - (u - 0.35).abs() / 0.28).clamp(0.0, 1.0);
+            let text_a = ((u - 0.55) / 0.35).clamp(0.0, 1.0);
+            return Some(TimerDropFrame { pos: s, sx, sy, bridge_y, bridge_a, text_a, hover, vis });
+        }
+
+        const K: f32 = 1.0 / 0.575;
+        const POS_KEYS: [(f32, f32); 6] = [
+            (0.0, 0.0),
+            (0.075 * K, 0.042),
+            (0.21 * K, 0.438),
+            (0.36 * K, 0.938),
+            (0.45 * K, 1.042),
+            (1.0, 1.0),
+        ];
+        const SX_KEYS: [(f32, f32); 6] = [
+            (0.0, 0.05),
+            (0.075 * K, 0.32),
+            (0.21 * K, 1.12),
+            (0.36 * K, 0.91),
+            (0.45 * K, 1.035),
+            (1.0, 1.0),
+        ];
+        const SY_KEYS: [(f32, f32); 6] = [
+            (0.0, 0.05),
+            (0.075 * K, 0.55),
+            (0.21 * K, 0.73),
+            (0.36 * K, 1.08),
+            (0.45 * K, 0.97),
+            (1.0, 1.0),
+        ];
+        const BRIDGE_Y_KEYS: [(f32, f32); 5] = [
+            (0.0, 0.60),
+            (0.10 * K, 0.72),
+            (0.21 * K, 0.45),
+            (0.30 * K, 0.035),
+            (0.325 * K, 0.0),
+        ];
+        const BRIDGE_A_KEYS: [(f32, f32); 5] = [
+            (0.0, 0.0),
+            (0.06 * K, 0.0),
+            (0.10 * K, 1.0),
+            (0.265 * K, 1.0),
+            (0.325 * K, 0.0),
+        ];
+        const TEXT_A_KEYS: [(f32, f32); 3] = [(0.0, 0.0), (0.29 * K, 0.0), (0.45 * K, 1.0)];
+
+        Some(TimerDropFrame {
+            pos: eval_keyframes(u, &POS_KEYS),
+            sx: eval_keyframes(u, &SX_KEYS),
+            sy: eval_keyframes(u, &SY_KEYS),
+            bridge_y: eval_keyframes(u, &BRIDGE_Y_KEYS),
+            bridge_a: eval_keyframes(u, &BRIDGE_A_KEYS),
+            text_a: eval_keyframes(u, &TEXT_A_KEYS),
+            hover,
+            vis,
+        })
+    }
+}
 
 /// Какую форму принимает свёрнутый остров.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,6 +476,8 @@ pub struct Live {
     /// Таймер Today для свёрнутой формы и плавная доля полоски.
     timer: Option<TimerView>,
     timer_frac: Spring,
+    /// Отделяющаяся капля активного таймера справа от чёлки.
+    timer_drop: TimerDrop,
 }
 
 impl Live {
@@ -214,6 +506,7 @@ impl Live {
             brightness: None,
             timer: None,
             timer_frac: Spring::unit(1.0, 160.0, 22.0),
+            timer_drop: TimerDrop::new(),
         };
         // Начальное состояние питания запоминаем без уведомления.
         l.power_event();
@@ -255,8 +548,57 @@ impl Live {
                 self.timer_frac.snap();
             }
         }
+        self.timer_drop.sync_timer(t.as_ref());
         self.timer = t;
         (changed, appeared)
+    }
+
+    pub fn set_timer_drop(&mut self, active: bool, fast_hide: bool) {
+        self.timer_drop.set_active(active, fast_hide);
+    }
+
+    pub fn set_timer_drop_hover(&mut self, hovered: bool) -> bool {
+        self.timer_drop.set_hover(hovered)
+    }
+
+    pub fn latch_timer_drop_anchor(&mut self, anchor: DropAnchor) {
+        self.timer_drop.latch_anchor(anchor);
+    }
+
+    pub fn timer_drop_anchor(&self) -> Option<DropAnchor> {
+        self.timer_drop.anchor()
+    }
+
+    pub fn timer_drop_visible(&self) -> bool {
+        self.timer_drop.visible()
+    }
+
+    pub fn timer_drop_clickable(&self) -> bool {
+        self.timer_drop.clickable()
+    }
+
+    pub fn timer_drop_frame(&self) -> Option<TimerDropFrame> {
+        self.timer_drop.frame()
+    }
+
+    pub fn timer_drop_label(&self) -> &str {
+        self.timer_drop.label()
+    }
+
+    pub fn timer_drop_tint(&self) -> D2D1_COLOR_F {
+        self.timer_drop.kind().tint()
+    }
+
+    pub fn timer_drop_kind(&self) -> TimerKind {
+        self.timer_drop.kind()
+    }
+
+    pub fn timer_drop_alpha(&self) -> f32 {
+        if self.timer_drop.paused() { TIMER_PAUSED_ALPHA } else { 1.0 }
+    }
+
+    pub fn timer_drop_paused(&self) -> bool {
+        self.timer_drop.paused()
     }
 
     /// Цвет активного таймера (или фазы Pomodoro) для свёрнутого острова.
@@ -488,6 +830,7 @@ impl Live {
         self.wave_a.step(dt);
         self.toast_a.step(dt);
         self.timer_frac.step(dt);
+        self.timer_drop.step(dt);
         if self.wave_a.target > 0.5 {
             #[cfg(not(test))]
             {
@@ -531,6 +874,7 @@ impl Live {
 
     pub fn animating(&self) -> bool {
         !(self.mini_a.settled() && self.wave_a.settled() && self.toast_a.settled() && self.timer_frac.settled())
+            || self.timer_drop.animating()
     }
 
     /// Тонкая линия таймера под прогрессом трека в мини-плеере.
@@ -946,5 +1290,72 @@ mod tests {
 
         l.set_timer(Some(running));
         assert_eq!(l.timer_alpha(), 1.0);
+    }
+
+    #[test]
+    fn timer_drop_emerge_bridge_squash_and_retract() {
+        let mut l = Live::new(true, true);
+        l.latch_timer_drop_anchor((490.0, 0.0, 24.0, 8.0, 8.0));
+        let tv = TimerView { frac: 0.9, secs: 1500, paused: false, next_ms: 1000, kind: TimerKind::PomoWork };
+        l.set_timer(Some(tv));
+        l.set_timer_drop(true, false);
+
+        assert!(l.animating());
+        assert!(!l.timer_drop_visible());
+
+        // В первой трети вылета появляется жидкая перемычка и капля вытягивается по X.
+        for _ in 0..18 {
+            l.step(1.0 / 60.0);
+        }
+        let mid = l.timer_drop_frame().expect("капля должна быть видна в полёте");
+        assert!(mid.bridge_a > 0.5, "перемычка должна быть видна: {}", mid.bridge_a);
+        assert!(mid.sx > mid.sy, "при вылете капля вытянута по X: sx={}, sy={}", mid.sx, mid.sy);
+        assert_eq!(mid.text_a, 0.0, "текст проявляется позже, когда капля округлилась");
+
+        // К концу входа перемычка исчезает, текст проявляется, анимация успокаивается (0% CPU).
+        for _ in 0..60 {
+            l.step(1.0 / 60.0);
+        }
+        assert!(!l.animating());
+        let done = l.timer_drop_frame().unwrap();
+        assert!((done.pos - 1.0).abs() < 1e-4);
+        assert!((done.sx - 1.0).abs() < 1e-4);
+        assert!((done.sy - 1.0).abs() < 1e-4);
+        assert_eq!(done.bridge_a, 0.0);
+        assert!((done.text_a - 1.0).abs() < 1e-4);
+        assert_eq!(l.timer_drop_tint(), status_pomodoro());
+        assert_eq!(l.timer_drop_label(), "25:00");
+
+        // При сбросе таймера капля сохраняет прошлую метку и цвет на время втягивания.
+        l.set_timer(None);
+        l.set_timer_drop(false, false);
+        l.step(1.0 / 60.0);
+        assert!(l.timer_drop_visible());
+        assert_eq!(l.timer_drop_label(), "25:00");
+        assert_eq!(l.timer_drop_tint(), status_pomodoro());
+
+        for _ in 0..30 {
+            l.step(1.0 / 60.0);
+        }
+        assert!(!l.timer_drop_visible());
+        assert!(!l.animating());
+    }
+
+    #[test]
+    fn timer_drop_box_is_wider_pill_for_mm_ss_and_hours() {
+        let (_, _, fs) = timer_drop_box(24.0, 0.0);
+        let tw_short = approx_timer_text_w("25:00", fs);
+        let (w_short, h_short, _) = timer_drop_box(24.0, tw_short);
+        assert!(w_short > h_short && w_short >= 38.0, "капля должна быть вытянутой пилюлей: {w_short}×{h_short}");
+        assert_eq!(h_short, 24.0);
+        assert!((fs - 9.84).abs() < 0.05);
+
+        let tw_long = approx_timer_text_w("1:02:05", fs);
+        let (w_long, h_long, _) = timer_drop_box(24.0, tw_long);
+        assert!(w_long > w_short && w_long >= tw_long + 14.0 && h_long == 24.0);
+
+        // На оранжевом фоне (обычный таймер) и коралловом (Pomodoro) текст всегда белый.
+        assert_eq!(TimerKind::Timer.on_fill(status_orange()), WHITE);
+        assert_eq!(TimerKind::PomoWork.on_fill(status_pomodoro()), WHITE);
     }
 }

@@ -8,8 +8,8 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows::Win32::Graphics::Direct2D::D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
 
 use crate::ui::{
-    chip_bg, dim, fg, hairline, icon, mix, on_color, press_scale, readable, status_green,
-    status_orange, status_pomodoro, track, txt, Align, Canvas, Corner, Nav, Rect, Submit, Ui,
+    chip_bg, dim, fg, hairline, icon, mix, press_scale, readable, status_green,
+    status_pomodoro, track, txt, Align, Canvas, Corner, Nav, Rect, Submit, Ui,
 };
 
 const PRESETS: [u32; 5] = [1, 5, 10, 15, 20];
@@ -515,14 +515,18 @@ impl Today {
         self.deadline.is_none() && self.pomo_cycle == 1 && !self.pomo_is_break && self.left == self.total
     }
 
-    fn active_tint(&self) -> D2D1_COLOR_F {
+    fn active_kind(&self) -> crate::live::TimerKind {
         if !self.pomodoro {
-            status_orange()
+            crate::live::TimerKind::Timer
         } else if self.pomo_is_break {
-            status_green()
+            crate::live::TimerKind::PomoBreak
         } else {
-            status_pomodoro()
+            crate::live::TimerKind::PomoWork
         }
+    }
+
+    fn active_tint(&self) -> D2D1_COLOR_F {
+        self.active_kind().tint()
     }
 
     /// Состояние таймера для свёрнутого острова: идёт или стоит на паузе после старта.
@@ -827,7 +831,7 @@ impl Today {
             crate::i18n::pick("Старт", "Start")
         };
         let reset_tip = crate::i18n::pick("Сброс", "Reset");
-        let run_fg = on_color(tint);
+        let run_fg = self.active_kind().on_fill(tint);
 
         if size == 0 || tm.h < 65.0 {
             // 4x1 (216x48): кольцо с колокольчиком звука внутри, время, компактная плашка режима/этапа, сброс и пуск/пауза.
@@ -1410,5 +1414,14 @@ mod tests {
         assert!(t.deadline.is_none());
         assert_eq!(t.left, Duration::from_secs(240));
         assert!(t.view().is_some());
+    }
+
+    #[test]
+    fn orange_timer_button_uses_white_foreground() {
+        let mut t = Today::default();
+        t.pomodoro = false;
+        let kind = t.active_kind();
+        assert_eq!(kind, crate::live::TimerKind::Timer);
+        assert_eq!(kind.on_fill(t.active_tint()), crate::ui::WHITE);
     }
 }

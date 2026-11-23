@@ -42,7 +42,8 @@ impl App {
             Ev::Move => self.on_move(),
             Ev::MouseLeft => {
                 self.hover_suppress_until = None;
-                let redraw = !self.expanded && self.live.is_notice();
+                let drop_hover_changed = !self.expanded && self.live.set_timer_drop_hover(false);
+                let redraw = (!self.expanded && self.live.is_notice()) || drop_hover_changed;
                 self.check_hover();
                 redraw
             }
@@ -55,6 +56,10 @@ impl App {
                 }
                 if self.hits_toast_notice(x, y) {
                     self.notice_pressed = true;
+                    return true;
+                }
+                if !self.expanded && self.hits_timer_drop(x, y) {
+                    self.open_timer_tab();
                     return true;
                 }
                 let switched = self.click(x, y);

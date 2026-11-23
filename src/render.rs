@@ -97,11 +97,13 @@ impl App {
             }
         }
 
+        let drop_vis = self.live.timer_drop_frame().map_or(0.0, |f| f.vis);
+
         // Мягкое свечение цвета активного таймера/фазы вокруг свёрнутого острова
-        // (работает одинаково в стиле Windows и macOS).
+        // (подавляется, пока активна отдельная капля таймера справа от чёлки).
         if self.live.timer().is_some() {
             let op_frac = timer_glow_opacity(pal.style, material, self.cfg.glass, opacity);
-            let glow_a = op_frac * self.live.timer_alpha() * (1.0 - open).max(0.0);
+            let glow_a = op_frac * self.live.timer_alpha() * (1.0 - open).max(0.0) * (1.0 - drop_vis).max(0.0);
             if glow_a > 0.005 {
                 let mut c = self.live.timer_tint();
                 for (width, alpha) in [(8.0, 0.07), (5.0, 0.14), (2.5, 0.28), (1.2, 0.55)] {
@@ -116,9 +118,13 @@ impl App {
         let wave_vis = (1.0 - open).max(0.0) * k * (1.0 - detach).clamp(0.0, 1.0);
         if wave_vis > 0.004 && !self.expanded && !self.stripped() && !self.hidden {
             if let Some((wa, lvl, flux, phase)) = self.live.wave_state() {
-                self.draw_edge_waves(g, &pal, x0, y0, aw, ah, ear, r_bot, s, wa * wave_vis, lvl, flux, phase)?;
+                self.draw_edge_waves(g, &pal, x0, y0, aw, ah, ear, r_bot, s, wa * wave_vis, (1.0 - drop_vis).clamp(0.0, 1.0), lvl, flux, phase)?;
             }
         }
+
+        // Отделяющаяся капля активного таймера справа от чёлки (рисуется до сплошного чёрного тела,
+        // чтобы в начале вылета её левый край выходил из-под точного контура чёлки).
+        self.draw_timer_drop(g, &body, y0, ah, s, p)?;
 
         g.brush.SetColor(&D2D1_COLOR_F {
             r: layers.tint_color[0],
@@ -284,14 +290,7 @@ impl App {
             match slot {
                 Slot::Mini => self.live.draw_mini(ui, &cv, r),
                 Slot::Toast => self.live.draw_toast(ui, &cv, r, cursor),
-                Slot::Face => {
-                    let label = self.live.timer().map(|t| t.label());
-                    self.face.draw(
-                        &cv,
-                        r,
-                        label.as_deref().map(|l| (l, self.live.timer_alpha(), self.live.timer_tint())),
-                    );
-                }
+                Slot::Face => self.face.draw(&cv, r),
                 Slot::Drop => self.draw_drop_pill(&cv, r),
             }
             g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
@@ -838,6 +837,7 @@ impl App {
         r_bot: f32,
         s: f32,
         vis: f32,
+        right_mul: f32,
         lvl: [f32; 2],
         flux: [f32; 2],
         phase: f32,
@@ -848,13 +848,17 @@ impl App {
         let round_style: Option<ID2D1StrokeStyle> = g.round.cast().ok();
         let sides = [(0usize, -1.0f32), (1usize, 1.0f32)];
         for (ch, dir) in sides {
+            let side_vis = if dir > 0.0 { vis * right_mul } else { vis };
+            if side_vis <= 0.004 {
+                continue;
+            }
             let energy = (0.72 * lvl[ch] + 0.35 * flux[ch]).clamp(0.0, 1.0);
 
             // Внутренний слой: мягкая цветная подсветка от самой кромки чёлки до первого гребня.
             let pts0 = edge_wave_points(x0, y0, aw, ah, ear, r_bot, s, dir, 0, lvl[ch], flux[ch], phase);
             if let Ok(fill_geo) = wave_fill_path(g, x0, y0, aw, ah, ear, r_bot, s, dir, &pts0) {
                 let mut fill_col = pal.accent;
-                fill_col.a = (0.11 + 0.24 * energy) * vis;
+                fill_col.a = (0.11 + 0.24 * energy) * side_vis;
                 g.brush.SetColor(&fill_col);
                 g.dc.FillGeometry(&fill_geo, &g.brush, None);
             }
@@ -867,11 +871,11 @@ impl App {
                     edge_wave_points(x0, y0, aw, ah, ear, r_bot, s, dir, layer, lvl[ch], flux[ch], phase)
                 };
                 let (width, core_a, glow_a, hi_k) = match layer {
-                    0 => (1.55 * s, (0.32 + 0.56 * energy) * vis, (0.10 + 0.16 * energy) * vis, 0.18 * energy + 0.22 * flux[ch]),
-                    1 => (1.20 * s, (0.14 + 0.52 * lvl[ch] + 0.24 * flux[ch]) * vis, 0.10 * energy * vis, 0.24 * flux[ch]),
+                    0 => (1.55 * s, (0.32 + 0.56 * energy) * side_vis, (0.10 + 0.16 * energy) * side_vis, 0.18 * energy + 0.22 * flux[ch]),
+                    1 => (1.20 * s, (0.14 + 0.52 * lvl[ch] + 0.24 * flux[ch]) * side_vis, 0.10 * energy * side_vis, 0.24 * flux[ch]),
                     _ => {
                         let outer_k = ((lvl[ch] + flux[ch] * 0.6 - 0.10) / 0.90).clamp(0.0, 1.0);
-                        (0.95 * s, 0.50 * outer_k * vis, 0.0, 0.12 * flux[ch])
+                        (0.95 * s, 0.50 * outer_k * side_vis, 0.0, 0.12 * flux[ch])
                     }
                 };
                 if core_a <= 0.01 {
@@ -889,6 +893,129 @@ impl App {
                 g.brush.SetColor(&cc);
                 g.dc.DrawGeometry(&stroke_geo, &g.brush, width, round_style.as_ref());
             }
+        }
+        Ok(())
+    }
+
+    /// Рисует отделяющуюся справа от чёлки каплю таймера с жидкой перемычкой,
+    /// squash & stretch, точными цветами фазы таймера и обратным отсчётом внутри.
+    unsafe fn draw_timer_drop(
+        &self,
+        g: &Gfx,
+        body: &ID2D1PathGeometry1,
+        y0: f32,
+        ah: f32,
+        s: f32,
+        p: f32,
+    ) -> Result<()> {
+        let Some((r, frame)) = self.timer_drop_geom() else {
+            return Ok(());
+        };
+        let Some(anchor) = self.live.timer_drop_anchor() else {
+            return Ok(());
+        };
+        let (notch_r, notch_y, notch_h, a_ear, a_r_bot) = anchor;
+        let vis = frame.vis * (1.0 - p * 4.0).clamp(0.0, 1.0);
+        if vis <= 0.005 {
+            return Ok(());
+        }
+
+        let tint = self.live.timer_drop_tint();
+        let paused_k = self.live.timer_drop_alpha();
+        let black = D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
+        let mut fill = ui::mix(black, tint, paused_k);
+        fill = ui::mix(fill, ui::WHITE, 0.10 * frame.hover);
+        let mut text_col = self.live.timer_drop_kind().on_fill(fill);
+        if self.live.timer_drop_paused() {
+            text_col.a *= 0.80;
+        }
+
+        // При полупрозрачном стекле (p > 0 во время раскрытия) исключаем тело острова маской,
+        // чтобы втягивающаяся капля не просвечивала сквозь стекло.
+        let mask_layer = if p > 0.001 {
+            let bounds = D2D_RECT_F {
+                left: (notch_r - 20.0).min(r.x - 4.0) * s,
+                top: (r.y - 4.0).min(y0 / s - 2.0) * s,
+                right: (r.right() + 6.0) * s,
+                bottom: (r.bottom() + 4.0).max((y0 + ah) / s + 2.0) * s,
+            };
+            if let Some(mask) = exclude_body_mask(g, body, bounds) {
+                let params = D2D1_LAYER_PARAMETERS1 {
+                    contentBounds: bounds,
+                    geometricMask: std::mem::ManuallyDrop::new(Some(mask)),
+                    maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                    maskTransform: ui::matrix(1.0, 0.0, 0.0),
+                    opacity: 1.0,
+                    opacityBrush: std::mem::ManuallyDrop::new(None),
+                    layerOptions: D2D1_LAYER_OPTIONS1_NONE,
+                };
+                g.dc.PushLayer(&params, None);
+                Some(params)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
+
+        let cx = r.cx();
+        let cy = r.cy();
+        let rx = r.w * 0.5;
+        let ry = r.h * 0.5;
+        if frame.bridge_a > 0.01 && frame.bridge_y > 0.005 && cx + rx > notch_r + 0.5 {
+            if let Ok(bridge_geo) = timer_bridge_path(
+                g, notch_r, notch_y, notch_h, a_ear, a_r_bot, s, cx, cy, rx, ry, frame.bridge_y,
+            ) {
+                let mut bc = fill;
+                bc.a *= frame.bridge_a * vis;
+                g.brush.SetColor(&bc);
+                g.dc.FillGeometry(&bridge_geo, &g.brush, None);
+            }
+        }
+
+        let hover_scale = 1.0 + 0.04 * frame.hover;
+        let hw = rx * hover_scale * s;
+        let hh = ry * hover_scale * s;
+        let rad = hh.min(hw);
+        let rr = D2D1_ROUNDED_RECT {
+            rect: D2D_RECT_F {
+                left: cx * s - hw,
+                top: cy * s - hh,
+                right: cx * s + hw,
+                bottom: cy * s + hh,
+            },
+            radiusX: rad,
+            radiusY: rad,
+        };
+        let mut dc = fill;
+        dc.a *= vis;
+        g.brush.SetColor(&dc);
+        g.dc.FillRoundedRectangle(&rr, &g.brush);
+
+        let text_a = frame.text_a * vis;
+        if text_a > 0.01 {
+            let fs = self.timer_drop_font_size();
+            g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
+            let cv = Canvas { g, alpha: text_a, accent: self.accent() };
+            let box_w = r.w.max(20.0);
+            cv.digits(
+                self.live.timer_drop_label(),
+                cx - box_w * 0.5,
+                box_w,
+                cy,
+                fs,
+                ui::weight::EMPHASIZED,
+                ui::Align::Center,
+                text_col,
+            );
+        }
+
+        g.dc.SetTransform(&ui::matrix(1.0, 0.0, 0.0));
+        if let Some(params) = mask_layer {
+            g.dc.PopLayer();
+            drop(std::mem::ManuallyDrop::into_inner(params.geometricMask));
         }
         Ok(())
     }
@@ -1071,6 +1198,92 @@ unsafe fn pill_shadow_mask(g: &Gfx, pill: &D2D1_ROUNDED_RECT, outer: &D2D1_ROUND
         .ok()?;
     sink.Close().ok()?;
     mask.cast().ok()
+}
+
+/// Маска области `bounds` за вычетом основного тела острова `body`.
+unsafe fn exclude_body_mask(g: &Gfx, body: &ID2D1PathGeometry1, bounds: D2D_RECT_F) -> Option<ID2D1Geometry> {
+    let outer_geo = g.d2d.CreateRectangleGeometry(&bounds).ok()?;
+    let mask = g.d2d.CreatePathGeometry().ok()?;
+    let sink = mask.Open().ok()?;
+    outer_geo
+        .CombineWithGeometry(body, D2D1_COMBINE_MODE_EXCLUDE, None, D2D1_DEFAULT_FLATTENING_TOLERANCE, &sink)
+        .ok()?;
+    sink.Close().ok()?;
+    mask.cast().ok()
+}
+
+/// Строит плавную вогнутую жидкую перемычку от правой кромки чёлки до вылетающей капли.
+#[allow(clippy::too_many_arguments)]
+unsafe fn timer_bridge_path(
+    g: &Gfx,
+    notch_r: f32,
+    notch_y: f32,
+    notch_h: f32,
+    ear: f32,
+    r_bot: f32,
+    s: f32,
+    cx: f32,
+    cy: f32,
+    rx: f32,
+    ry: f32,
+    bridge_y: f32,
+) -> Result<ID2D1PathGeometry1> {
+    let dummy_w = 40.0 * s;
+    let dummy_x0 = notch_r * s - dummy_w;
+    let edge_x = |y_l: f32| {
+        notch_side_x((y_l - notch_y) * s, dummy_x0, dummy_w, notch_h * s, ear * s, r_bot * s, 1.0) / s
+    };
+
+    let h_left = (ry.max(ry * 0.65 + 3.0) * (0.48 + 0.52 * bridge_y)).min(notch_h * 0.44);
+    let y_tl = (cy - h_left).max(notch_y + 0.8);
+    let y_bl = (cy + h_left).min(notch_y + notch_h - 0.8);
+    let x_tl = edge_x(y_tl) - 1.5;
+    let x_mid_wall = edge_x(cy);
+    let x_bl = edge_x(y_bl) - 1.5;
+
+    let x_right = cx.max(x_tl.max(x_bl) + 2.0);
+    let x_mid = (0.5 * (x_mid_wall + (cx - rx * 0.5))).clamp(x_tl.max(x_bl) + 0.8, x_right - 0.8);
+
+    let h_right = (ry * (0.40 + 0.60 * bridge_y)).min(ry * 0.90).max(0.8);
+    let h_neck = (ry * 0.68 * bridge_y).min(h_left).min(h_right).max(0.25);
+
+    let y_nt = cy - h_neck;
+    let y_nb = cy + h_neck;
+    let y_rt = cy - h_right;
+    let y_rb = cy + h_right;
+
+    let dx1_t = (x_mid - x_tl).max(0.5);
+    let dx1_b = (x_mid - x_bl).max(0.5);
+    let dx2 = (x_right - x_mid).max(0.5);
+
+    let geo = g.d2d.CreatePathGeometry()?;
+    let sink = geo.Open()?;
+    sink.BeginFigure(d2d_pt(x_tl * s, y_tl * s), D2D1_FIGURE_BEGIN_FILLED);
+    sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+        point1: d2d_pt((x_tl + dx1_t * 0.15) * s, (y_tl + (y_nt - y_tl) * 0.72) * s),
+        point2: d2d_pt((x_mid - dx1_t * 0.45) * s, y_nt * s),
+        point3: d2d_pt(x_mid * s, y_nt * s),
+    });
+    sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+        point1: d2d_pt((x_mid + dx2 * 0.45) * s, y_nt * s),
+        point2: d2d_pt((x_right - dx2 * 0.25) * s, y_rt * s),
+        point3: d2d_pt(x_right * s, y_rt * s),
+    });
+    sink.AddLine(d2d_pt(x_right * s, y_rb * s));
+    sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+        point1: d2d_pt((x_right - dx2 * 0.25) * s, y_rb * s),
+        point2: d2d_pt((x_mid + dx2 * 0.45) * s, y_nb * s),
+        point3: d2d_pt(x_mid * s, y_nb * s),
+    });
+    sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+        point1: d2d_pt((x_mid - dx1_b * 0.45) * s, y_nb * s),
+        point2: d2d_pt((x_bl + dx1_b * 0.15) * s, (y_bl + (y_nb - y_bl) * 0.72) * s),
+        point3: d2d_pt(x_bl * s, y_bl * s),
+    });
+    sink.AddLine(d2d_pt((x_mid_wall - 1.5) * s, cy * s));
+    sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+    sink.Close()?;
+    Ok(geo)
 }
 
 #[cfg(test)]

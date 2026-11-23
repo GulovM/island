@@ -11,10 +11,8 @@ use crate::anim::{Spring, FADE_SPRING};
 use crate::bg::{self, NetStatus, Snapshot};
 use crate::config::CollapsedIcon;
 use crate::sys::{battery_status, BatteryStatus};
-use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, icon, on_color, weight, Align, Canvas, Rect, BLUE};
+use crate::ui::{collapsed_dim, collapsed_track, collapsed_txt, icon, weight, Align, Canvas, Rect, BLUE};
 
-/// Дополнительная ширина свёрнутой чёлки под плашку активного таймера (логические пиксели).
-pub const TIMER_SLOT_W: f32 = 44.0;
 /// Кегль времени в свёрнутой чёлке: на 2 px крупнее боковых значков (9 px).
 pub const TIME_SIZE: f32 = 11.0;
 
@@ -104,13 +102,6 @@ impl Face {
         self.show_time = on;
     }
 
-    /// Нужна ли свёрнутому острову дополнительная ширина под плашку таймера:
-    /// только когда рядом с ней рисуются часы. Без часов или при выключенном «лице»
-    /// плашка встаёт по центру на место часов, и расширять остров не нужно.
-    pub fn timer_needs_slot(&self) -> bool {
-        self.enabled && self.show_time
-    }
-
     pub fn set_slots(&mut self, left: CollapsedIcon, right: CollapsedIcon) {
         self.left = left;
         self.right = right;
@@ -120,10 +111,9 @@ impl Face {
         self.left == CollapsedIcon::Layout || self.right == CollapsedIcon::Layout
     }
 
-    /// Нужно ли показывать лицо (остров свёрнут, ничто не закрывает).
-    /// `timer` — на острове есть таймер: плашка показывается, даже если лицо выключено в настройках.
-    pub fn set_visible(&mut self, v: bool, timer: bool) {
-        self.visible = v && (self.enabled || timer);
+    /// Нужно ли показывать лицо (остров свёрнут, ничто не закрывает и лицо включено в настройках).
+    pub fn set_visible(&mut self, v: bool) {
+        self.visible = v && self.enabled;
         self.alpha.target = if self.visible { 1.0 } else { 0.0 };
     }
 
@@ -286,25 +276,9 @@ impl Face {
         }
     }
 
-    /// Рисует плашку остатка таймера с цветом активного таймера/фазы и контрастным текстом.
-    unsafe fn draw_timer_pill(cv: &Canvas, pill_r: Rect, label: &str, pulse: f32, tint: D2D1_COLOR_F) {
-        let t = Canvas { g: cv.g, alpha: cv.alpha * pulse, accent: cv.accent };
-        t.rr(pill_r, pill_r.h / 2.0, tint);
-        t.text(label, pill_r, &cv.g.fonts.small_c, on_color(tint));
-    }
-
-    /// Рисует лицо внутри свёрнутого острова `r` (логические пиксели).
-    /// При активном таймере отображаются левый значок, время, плашка остатка таймера и правый значок.
-    /// Если `self.enabled == false`, рисуется только `timer`.
-    pub unsafe fn draw(&self, cv: &Canvas, r: Rect, timer: Option<(&str, f32, D2D1_COLOR_F)>) {
-        let f = &cv.g.fonts;
-        let pill_h = 14.0;
+    /// Рисует лицо внутри свёрнутого острова `r` (логические пиксели): левый значок, время по центру, правый значок.
+    pub unsafe fn draw(&self, cv: &Canvas, r: Rect) {
         if !self.enabled {
-            if let Some((label, pulse, tint)) = timer {
-                let pill_w = cv.text_w(label, &f.small_c) + 8.0;
-                let pill_r = Rect::new(r.cx() - pill_w / 2.0, r.cy() - pill_h / 2.0, pill_w, pill_h);
-                Self::draw_timer_pill(cv, pill_r, label, pulse, tint);
-            }
             return;
         }
 
@@ -312,33 +286,8 @@ impl Face {
         let left_w = self.slot_w(cv, self.left);
         let right_w = self.slot_w(cv, self.right);
         self.draw_slot(cv, self.left, r.x + pad, left_w, r);
-        match (self.show_time, timer) {
-            (true, None) => {
-                cv.digits(&self.time, r.x, r.w, r.cy(), TIME_SIZE, weight::EMPHASIZED, Align::Center, collapsed_txt());
-            }
-            (false, None) => {}
-            (true, Some((label, pulse, tint))) => {
-                let time_w = cv.digits_w(&self.time, TIME_SIZE, weight::EMPHASIZED);
-                let pill_w = cv.text_w(label, &f.small_c) + 8.0;
-                let available = (r.right() - pad - right_w) - (r.x + pad);
-                let gap = (available - (left_w + time_w + pill_w)) / 3.0;
-
-                let mut x = r.x + pad + left_w + gap;
-                cv.digits(&self.time, x, time_w + 1.0, r.cy(), TIME_SIZE, weight::EMPHASIZED, Align::Leading, collapsed_txt());
-                x += time_w + gap;
-
-                let pill_r = Rect::new(x, r.cy() - pill_h / 2.0, pill_w, pill_h);
-                Self::draw_timer_pill(cv, pill_r, label, pulse, tint);
-            }
-            (false, Some((label, pulse, tint))) => {
-                let pill_w = cv.text_w(label, &f.small_c) + 8.0;
-                let avail_l = r.x + pad + left_w;
-                let avail_r = r.right() - pad - right_w;
-                let pill_x = ((avail_l + avail_r) / 2.0 - pill_w / 2.0).max(avail_l);
-
-                let pill_r = Rect::new(pill_x, r.cy() - pill_h / 2.0, pill_w, pill_h);
-                Self::draw_timer_pill(cv, pill_r, label, pulse, tint);
-            }
+        if self.show_time {
+            cv.digits(&self.time, r.x, r.w, r.cy(), TIME_SIZE, weight::EMPHASIZED, Align::Center, collapsed_txt());
         }
         self.draw_slot(cv, self.right, r.right() - pad - right_w, right_w, r);
     }
@@ -476,22 +425,20 @@ mod tests {
     #[test]
     fn hidden_face_fades_out() {
         let mut f = Face::new(true, true, CollapsedIcon::Layout, CollapsedIcon::Wifi);
-        f.set_visible(true, false);
+        f.set_visible(true);
         for _ in 0..120 {
             f.step(1.0 / 60.0);
         }
         assert!((f.alpha() - 1.0).abs() < 0.01 && !f.animating());
-        f.set_visible(false, false);
+        f.set_visible(false);
         for _ in 0..120 {
             f.step(1.0 / 60.0);
         }
         assert_eq!(f.alpha(), 0.0);
-        // Выключенное в настройках лицо не показывается, кроме случая, когда на острове идёт таймер.
+        // Выключенное в настройках лицо не показывается (таймер теперь рисуется отдельной каплей).
         let mut off = Face::new(false, true, CollapsedIcon::Layout, CollapsedIcon::Wifi);
-        off.set_visible(true, false);
+        off.set_visible(true);
         assert!(!off.visible());
-        off.set_visible(true, true);
-        assert!(off.visible());
     }
 
     #[test]
@@ -552,51 +499,44 @@ mod tests {
             assert!((fonts.body_c.GetFontSize() - 9.0).abs() < 1e-4);
             assert!((TIME_SIZE - (fonts.body_b.GetFontSize() + 2.0)).abs() < 1e-4);
 
-            // Проверяем 4-элементную компоновку свёрнутого острова: раскладка, время, плашка таймера, Wi-Fi
+            // Проверяем 3-элементную компоновку свёрнутого острова: раскладка, время по центру, Wi-Fi.
             let r_w = 180.0f32;
             let pad = (r_w * 0.09).clamp(8.0, 16.0); // 16.0
             let lang_w = m_ukr.widthIncludingTrailingWhitespace;
 
-            // Время часов ("14:05") в крупном формате TIME_SIZE (11pt)
-            let time_fmt = fonts.display(TIME_SIZE, weight::EMPHASIZED, Align::Leading);
+            let time_fmt = fonts.display(TIME_SIZE, weight::EMPHASIZED, Align::Center);
             let layout_time = fonts.layout("14:05", &time_fmt, 100.0, 20.0).expect("layout failed");
             let mut m_time = DWRITE_TEXT_METRICS::default();
             layout_time.GetMetrics(&mut m_time).unwrap();
             let time_w = m_time.widthIncludingTrailingWhitespace.ceil();
 
-            // Wi-Fi: визуальная ширина иконки 11.4px, край дуги радиусом 7.2px со штрихом 1.2px под 45°
-            let wifi_w = 11.4f32;
-            let wifi_cx = r_w - pad - 5.5;
+            let wifi_cx = r_w - pad - 5.7;
             let wifi_left = wifi_cx - 5.7;
+            let lang_right = pad + lang_w;
+            let time_left = (r_w - time_w) / 2.0;
+            let time_right = (r_w + time_w) / 2.0;
+            assert!(lang_right < time_left, "Время ({time_left}) наезжает на раскладку ({lang_right})");
+            assert!(time_right < wifi_left, "Время ({time_right}) наезжает на Wi-Fi ({wifi_left})");
 
-            // Метки таймера от коротких ("0:05") до длинных ("9:59:59")
-            for label in &["0:05", "14:05", "1:02:05", "9:59:59"] {
-                let layout_timer = fonts.layout(label, &fonts.small_c, 100.0, 20.0).expect("layout failed");
-                let mut m_timer = DWRITE_TEXT_METRICS::default();
-                layout_timer.GetMetrics(&mut m_timer).unwrap();
-                let timer_w = m_timer.widthIncludingTrailingWhitespace + 8.0;
+            // Проверяем размеры отдельной капли таймера в DirectWrite: для 25:00 она имеет вид
+            // вытянутой пилюли под более крупный шрифт, а для 1:02:05 дополнительно расширяется.
+            let (_, drop_h, drop_fs) = crate::live::timer_drop_box(24.0, 0.0);
+            let drop_fmt = fonts.display(drop_fs, weight::EMPHASIZED, Align::Center);
+            let l_mm = fonts.layout("25:00", &drop_fmt, 200.0, 40.0).expect("layout failed");
+            let mut m_mm = DWRITE_TEXT_METRICS::default();
+            l_mm.GetMetrics(&mut m_mm).unwrap();
+            let (w_mm, h_mm, _) = crate::live::timer_drop_box(drop_h, m_mm.widthIncludingTrailingWhitespace.ceil());
+            assert!(
+                w_mm > h_mm && w_mm >= m_mm.widthIncludingTrailingWhitespace + 12.0 && h_mm == 24.0,
+                "25:00 должен помещаться в вытянутую пилюлю с запасом (w={w_mm}, tw={})",
+                m_mm.widthIncludingTrailingWhitespace
+            );
 
-                let available = (r_w - pad - wifi_w) - pad;
-                let gap = (available - (lang_w + time_w + timer_w)) / 3.0;
-
-                let lang_right = pad + lang_w;
-                let time_left = lang_right + gap;
-                let time_right = time_left + time_w;
-                let timer_left = time_right + gap;
-                let timer_right = timer_left + timer_w;
-
-                assert!(lang_right < time_left, "Время ({time_left}) наезжает на раскладку ({lang_right})");
-                assert!(time_right < timer_left, "Плашка таймера ({timer_left}) наезжает на часы ({time_right})");
-                assert!(timer_right < wifi_left, "Плашка таймера ({timer_right}) наезжает на Wi-Fi ({wifi_left}) для метки {label}");
-
-                // Проверяем равенство трёх зазоров между соседними элементами с допуском 0.5px
-                let gap1 = time_left - lang_right;
-                let gap2 = timer_left - time_right;
-                let gap3 = wifi_left - timer_right;
-                assert!((gap1 - gap2).abs() < 0.5, "Зазоры 1 и 2 не равны: {gap1} vs {gap2} для метки {label}");
-                assert!((gap2 - gap3).abs() < 0.5, "Зазоры 2 и 3 не равны: {gap2} vs {gap3} для метки {label}");
-                assert!((gap1 - gap3).abs() < 0.5, "Зазоры 1 и 3 не равны: {gap1} vs {gap3} для метки {label}");
-            }
+            let l_hh = fonts.layout("1:02:05", &drop_fmt, 200.0, 40.0).expect("layout failed");
+            let mut m_hh = DWRITE_TEXT_METRICS::default();
+            l_hh.GetMetrics(&mut m_hh).unwrap();
+            let (w_hh, h_hh, _) = crate::live::timer_drop_box(drop_h, m_hh.widthIncludingTrailingWhitespace.ceil());
+            assert!(w_hh > w_mm && h_hh == 24.0 && w_hh >= m_hh.widthIncludingTrailingWhitespace + 12.0);
         }
     }
 
