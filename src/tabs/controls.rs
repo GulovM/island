@@ -203,8 +203,8 @@ pub struct Controls {
     media: Option<Media>,
     /// Защита от возврата ползунка трека назад сразу после перемотки.
     seek_hold: Option<Instant>,
-    /// Время последней отправки Cmd::Seek во время перетаскивания (для троттлинга).
-    last_seek_send: Option<Instant>,
+    /// Ключ трека, на котором началось перетаскивание ползунка (отменяет перемотку при смене трека).
+    seek_drag_key: Option<u64>,
     ssid: Option<String>,
     audio: Option<String>,
     /// Раскрытый выпадающий список (занимает место громкости и плеера).
@@ -238,7 +238,7 @@ impl Controls {
         self.saver = sys::energy_saver();
         self.battery.poll();
         self.seek_hold = None;
-        self.last_seek_send = None;
+        self.seek_drag_key = None;
         self.list_t.0.target = 0.0;
         self.list_t.0.snap();
         bg::send(Cmd::Refresh);
@@ -254,7 +254,7 @@ impl Controls {
         self.list_t.0.snap();
         self.join = None;
         self.seek_hold = None;
-        self.last_seek_send = None;
+        self.seek_drag_key = None;
         // При следующем показе батарея 2×2 снова заполняется с нуля до текущего заряда.
         self.battery.level.value = 0.0;
     }
@@ -997,30 +997,62 @@ impl Controls {
         let bar_w = (right_rect.x - 5.0 - bar_x).max(10.0);
         let bar_r = Rect::new(bar_x, py - 1.0, bar_w, 2.0);
 
-        cv.text(&format_time(tl.pos), left_rect, &f.small, dim());
-        cv.text(&format_time(tl.dur), right_rect, &f.small_r, dim());
+        let display_pos = self.draw_seek_bar(ui, cv, id(CONTROLS, 23), bar_r, tl);
 
-        self.draw_seek_bar(ui, cv, id(CONTROLS, 23), bar_r, tl);
+        cv.text(&format_time(display_pos), left_rect, &f.small, dim());
+        cv.text(&format_time(tl.dur), right_rect, &f.small_r, dim());
     }
 
-    fn apply_seek(&mut self, target_pos: f32, force: bool) {
+    fn apply_seek(&mut self, target_pos: f32) {
         if let Some(m) = &mut self.media {
             m.pos = target_pos;
             m.at = Instant::now();
         }
         self.seek_hold = Some(Instant::now() + HOLD);
-        let now = Instant::now();
-        let should_send = force
-            || self
-                .last_seek_send
-                .is_none_or(|t| now.duration_since(t) >= Duration::from_millis(100));
-        if should_send {
-            self.last_seek_send = Some(now);
-            bg::send(Cmd::Seek(target_pos));
-        }
+        bg::send(Cmd::Seek(target_pos));
     }
 
-    /// Интерактивный прогресс-бар: клик, перетаскивание ползунка, колесо мыши над дорожкой.
+    /// Обрабатывает взаимодействие с прогресс-баром: при перетаскивании обновляет только
+    /// предпросмотр позиции, а команду перемотки возвращает после отпускания ползунка.
+    fn step_seek_bar(&mut self, ui: &mut Ui, id: u32, bar: Rect, tl: Timeline) -> (f32, Option<f32>, bool) {
+        let hit = Rect::new(bar.x, bar.cy() - 7.0, bar.w, 14.0);
+        let (hover, _) = ui.click_area(id, hit);
+        let dragging = ui.is_dragging(id);
+        let drag_released = ui.is_drag_released(id);
+        let current_key = self.media.as_ref().map(|m| m.key);
+
+        if dragging {
+            if self.seek_drag_key.is_none() {
+                self.seek_drag_key = current_key;
+            }
+            if self.seek_drag_key == current_key {
+                let target = tl.seek_to(ui.pointer().0, bar.x, bar.w);
+                return (target, None, true);
+            }
+            return (tl.pos, None, false);
+        }
+
+        if drag_released {
+            let same_track = self.seek_drag_key.take().is_none_or(|k| Some(k) == current_key);
+            if same_track {
+                let target = tl.seek_to(ui.pointer().0, bar.x, bar.w);
+                return (target, Some(target), false);
+            }
+            return (tl.pos, None, false);
+        }
+
+        self.seek_drag_key = None;
+        if hover && ui.wheel.abs() > 0.01 {
+            let delta = ui.wheel.signum() * 10.0;
+            let target = tl.relative(delta);
+            return (target, Some(target), false);
+        }
+
+        (tl.pos, None, false)
+    }
+
+    /// Интерактивный прогресс-бар: клик, перетаскивание ползунка (применение при отпускании),
+    /// колесо мыши над дорожкой. Возвращает отображаемую позицию трека в секундах.
     unsafe fn draw_seek_bar(
         &mut self,
         ui: &mut Ui,
@@ -1028,35 +1060,21 @@ impl Controls {
         id: u32,
         bar: Rect,
         tl: Timeline,
-    ) {
+    ) -> f32 {
         if !tl.can_seek || tl.dur <= 0.0 {
+            self.seek_drag_key = None;
             // Сессия не поддерживает перемотку — безопасная деградация в статический прогресс-бар.
             cv.progress(bar, tl.frac(), if tl.dur > 0.0 { slider_fill(cv.accent) } else { dim() });
-            return;
+            return tl.pos;
         }
 
-        let hit = Rect::new(bar.x, bar.cy() - 7.0, bar.w, 14.0);
-        let (hover, clicked) = ui.click_area(id, hit);
-        let dragging = ui.is_dragging(id);
-        let drag_released = ui.is_drag_released(id);
+        let (display_pos, commit_pos, active_drag) = self.step_seek_bar(ui, id, bar, tl);
+        if let Some(target) = commit_pos {
+            self.apply_seek(target);
+        }
+
         let hv = ui.hover_of(id);
-
-        let mut frac = tl.frac();
-        if dragging || clicked || drag_released {
-            let target = tl.seek_to(ui.pointer().0, bar.x, bar.w);
-            let force = clicked || drag_released;
-            self.apply_seek(target, force);
-            if tl.dur > 0.0 {
-                frac = (target / tl.dur).clamp(0.0, 1.0);
-            }
-        } else if hover && ui.wheel.abs() > 0.01 {
-            let delta = ui.wheel.signum() * 10.0;
-            let target = tl.relative(delta);
-            self.apply_seek(target, true);
-            if tl.dur > 0.0 {
-                frac = (target / tl.dur).clamp(0.0, 1.0);
-            }
-        }
+        let frac = (display_pos / tl.dur).clamp(0.0, 1.0);
 
         let h = 2.0 + 1.0 * hv;
         let track_rect = Rect::new(bar.x, bar.cy() - h / 2.0, bar.w, h);
@@ -1066,7 +1084,7 @@ impl Controls {
         let fill_rect = Rect::new(bar.x, bar.cy() - h / 2.0, fw, h);
         cv.rr(fill_rect, h / 2.0, slider_fill(cv.accent));
 
-        let active = hv.max(if dragging { 1.0 } else { 0.0 });
+        let active = hv.max(if active_drag { 1.0 } else { 0.0 });
         if active > 0.01 {
             let thumb_r = 3.2 + 1.6 * active;
             let thumb_x = (bar.x + bar.w * frac).clamp(bar.x, bar.right());
@@ -1075,6 +1093,8 @@ impl Controls {
                 cv.circle(thumb_x, bar.cy(), thumb_r * 0.4, WHITE);
             }
         }
+
+        display_pos
     }
 }
 
@@ -1358,5 +1378,111 @@ mod tests {
         c.sync_from(bg::Snapshot { rev: 3, dnd_active: true, ..Default::default() });
         assert!(c.dnd);
         assert!(c.dnd_hold.is_none());
+    }
+
+    fn test_media(key: u64, pos: f32) -> Media {
+        Media {
+            title: "Track".into(),
+            artist: "Artist".into(),
+            playing: true,
+            pos,
+            dur: 100.0,
+            at: Instant::now(),
+            rate: 0.0,
+            art: None,
+            key,
+            can_seek: true,
+            min_seek: 0.0,
+            max_seek: 100.0,
+            source_name: "Player".into(),
+            session_count: 1,
+        }
+    }
+
+    #[test]
+    fn seek_bar_commits_only_on_release() {
+        let mut c = Controls::default();
+        c.media = Some(test_media(1, 20.0));
+        let bar = Rect::new(100.0, 50.0, 200.0, 2.0);
+        let seek_id = id(CONTROLS, 23);
+        let mut ui = Ui::default();
+
+        // Нажатие на 25% дорожки: только предпросмотр, команда перемотки ещё не отправляется.
+        ui.begin_frame((150.0, 51.0), true);
+        ui.begin_content(0.0, true);
+        ui.pressed = true;
+        ui.down = true;
+        let tl = c.media.as_ref().unwrap().timeline();
+        let (disp, commit, dragging) = c.step_seek_bar(&mut ui, seek_id, bar, tl);
+        assert_eq!(disp, 25.0);
+        assert_eq!(commit, None);
+        assert!(dragging);
+        assert_eq!(c.media.as_ref().unwrap().pos, 20.0);
+        assert!(c.seek_hold.is_none());
+        ui.end_frame();
+
+        // Перетаскивание вперёд на 80% — всё ещё без перемотки.
+        ui.begin_frame((260.0, 51.0), true);
+        ui.begin_content(0.0, true);
+        let tl = c.media.as_ref().unwrap().timeline();
+        let (disp, commit, dragging) = c.step_seek_bar(&mut ui, seek_id, bar, tl);
+        assert_eq!(disp, 80.0);
+        assert_eq!(commit, None);
+        assert!(dragging);
+        assert_eq!(c.media.as_ref().unwrap().pos, 20.0);
+        ui.end_frame();
+
+        // Перетаскивание назад на 40% (даже при уходе курсора за пределы полосы по Y) — без перемотки.
+        ui.begin_frame((180.0, 10.0), true);
+        ui.begin_content(0.0, true);
+        let tl = c.media.as_ref().unwrap().timeline();
+        let (disp, commit, dragging) = c.step_seek_bar(&mut ui, seek_id, bar, tl);
+        assert_eq!(disp, 40.0);
+        assert_eq!(commit, None);
+        assert!(dragging);
+        ui.end_frame();
+
+        // Отпускание кнопки (за пределами области полосы) — фиксируем конечное значение 40.0.
+        ui.begin_frame((180.0, 10.0), true);
+        ui.begin_content(0.0, true);
+        ui.down = false;
+        ui.released = true;
+        let tl = c.media.as_ref().unwrap().timeline();
+        let (disp, commit, dragging) = c.step_seek_bar(&mut ui, seek_id, bar, tl);
+        assert_eq!(disp, 40.0);
+        assert_eq!(commit, Some(40.0));
+        assert!(!dragging);
+        ui.end_frame();
+    }
+
+    #[test]
+    fn seek_bar_cancels_commit_if_track_changes_mid_drag() {
+        let mut c = Controls::default();
+        c.media = Some(test_media(1, 20.0));
+        let bar = Rect::new(100.0, 50.0, 200.0, 2.0);
+        let seek_id = id(CONTROLS, 23);
+        let mut ui = Ui::default();
+
+        ui.begin_frame((150.0, 51.0), true);
+        ui.begin_content(0.0, true);
+        ui.pressed = true;
+        ui.down = true;
+        let tl = c.media.as_ref().unwrap().timeline();
+        let (_, commit, _) = c.step_seek_bar(&mut ui, seek_id, bar, tl);
+        assert_eq!(commit, None);
+        ui.end_frame();
+
+        // Пока пользователь держал ползунок, переключился трек.
+        c.media = Some(test_media(2, 0.0));
+
+        ui.begin_frame((250.0, 51.0), true);
+        ui.begin_content(0.0, true);
+        ui.down = false;
+        ui.released = true;
+        let tl = c.media.as_ref().unwrap().timeline();
+        let (disp, commit, _) = c.step_seek_bar(&mut ui, seek_id, bar, tl);
+        assert_eq!(disp, 0.0);
+        assert_eq!(commit, None);
+        ui.end_frame();
     }
 }
