@@ -4,6 +4,28 @@
 
 ## [Unreleased]
 
+### RU
+
+- Игры в borderless fullscreen: остров теперь скрывается не только в эксклюзивном D3D, но и в полноэкранном режиме без рамок (`QUNS_BUSY`), не реагируя на обычные приложения, терминалы и оверлеи переключения задач.
+- Свёрнутый остров с таймером: ширина капсулы теперь подстраивается под настройку «Время на свёрнутом острове» и не оставляет лишнего места при скрытых часах.
+- Свёрнутый остров с таймером: при скрытии и повторном включении часов раскладка корректно сдвигается и возвращает плашку таймера на место рядом со временем.
+- Вкладка «Управление» → Wi-Fi: при объединении дубликатов сети запись с сохранённым профилем теперь всегда имеет приоритет над записью без профиля, чтобы не запрашивать пароль повторно.
+- Вкладка «Управление» → Bluetooth: в список сопряжённых устройств добавлены BLE-устройства, а для не-аудио устройств показана подсказка о подключении через Параметры.
+- Таймер на паузе: вместо мигания цвет таймера слегка притухает как на свёрнутом острове, так и в режиме полоски, без лишних пробуждений на отрисовку кадров.
+- Вкладка «Управление»: выпадающий список Wi-Fi, Bluetooth и аудио привязывается к вызвавшему виджету (раскрывается под ним или над ним, если виджет внизу, без удлинения острова и скрытия источника), подстраивается под размер острова с прокруткой; адаптирована и форма пароля.
+- Вкладка «Управление» → Энергосбережение: переключение теперь работает и при питании от сети (AC), а также на ПК без батареи в Windows 11 24H2+, сохраняя и восстанавливая оба порога (AC и DC).
+
+### EN
+
+- Borderless fullscreen games: the island now hides not only for exclusive D3D, but also for borderless fullscreen games (`QUNS_BUSY`), while still ignoring regular apps, terminals, and task-switcher overlays.
+- Collapsed island timer: pill width now follows the "Show time on collapsed island" setting instead of reserving an extra slot when the clock is hidden.
+- Collapsed island timer: hiding and re-enabling the clock properly re-layouts the time and timer pill side by side.
+- Controls → Wi-Fi: when deduplicating scan entries for the same SSID, a saved profile now always takes precedence over an unsaved entry so known networks do not prompt for a password again.
+- Controls → Bluetooth: paired BLE devices are now included alongside classic devices, and non-audio devices display a clearer hint to connect via Windows Settings.
+- Paused timer: dims slightly instead of blinking in both collapsed and strip modes, eliminating timer frame wakeups while paused.
+- Controls tab: the Wi-Fi/Bluetooth/audio dropdown anchors to its triggering widget (opening below or above when at the bottom without elongating the island or hiding the widget) and adapts its size with scrolling alongside the Wi-Fi password form.
+- Controls → Energy Saver: toggling now updates both AC and DC thresholds so it works on AC power and on desktop PCs without a battery on Windows 11 24H2+.
+
 ## [1.9.1] — 2026-11-19
 
 ### RU

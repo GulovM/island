@@ -185,6 +185,7 @@ const TABLE: &[(&str, &str)] = &[
     ("Не удалось подключить (устройство рядом и включено?)", "Couldn't connect (is the device nearby and on?)"),
     ("Не удалось отключить", "Couldn't disconnect"),
     ("Сопряжено • нажмите, чтобы подключить", "Paired • click to connect"),
+    ("Сопряжено • подключение в Параметрах", "Paired • connect in Settings"),
     ("Сопряжено", "Paired"),
     // Живые уведомления
     ("Таймер завершён", "Timer finished"),

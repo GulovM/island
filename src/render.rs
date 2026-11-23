@@ -101,7 +101,7 @@ impl App {
         // (работает одинаково в стиле Windows и macOS).
         if self.live.timer().is_some() {
             let op_frac = timer_glow_opacity(pal.style, material, self.cfg.glass, opacity);
-            let glow_a = op_frac * self.live.timer_pulse() * (1.0 - open).max(0.0);
+            let glow_a = op_frac * self.live.timer_alpha() * (1.0 - open).max(0.0);
             if glow_a > 0.005 {
                 let mut c = self.live.timer_tint();
                 for (width, alpha) in [(8.0, 0.07), (5.0, 0.14), (2.5, 0.28), (1.2, 0.55)] {
@@ -289,7 +289,7 @@ impl App {
                     self.face.draw(
                         &cv,
                         r,
-                        label.as_deref().map(|l| (l, self.live.timer_pulse(), self.live.timer_tint())),
+                        label.as_deref().map(|l| (l, self.live.timer_alpha(), self.live.timer_tint())),
                     );
                 }
                 Slot::Drop => self.draw_drop_pill(&cv, r),
@@ -298,7 +298,7 @@ impl App {
             g.dc.PopAxisAlignedClip();
         }
 
-        // Остров-полоска: таймер — убывающая полоска внутри неё (на паузе мигает).
+        // Остров-полоска: таймер — убывающая полоска внутри неё (на паузе притухает).
         if self.live.timer().is_some() && self.stripped() {
             let a = thin * live_open;
             if a > 0.01 {
@@ -308,7 +308,7 @@ impl App {
                     D2D1_ANTIALIAS_MODE_ALIASED,
                 );
                 g.dc.SetTransform(&ui::matrix(s, 0.0, 0.0));
-                let cv = Canvas { g, alpha: a * self.live.timer_pulse(), accent };
+                let cv = Canvas { g, alpha: a * self.live.timer_alpha(), accent };
                 // Скругления тела по краям не задеваем: полоска начинается чуть правее левого угла.
                 let inset = r_bot / s * 0.6;
                 let full = aw / s - 2.0 * inset;

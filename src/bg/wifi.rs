@@ -85,13 +85,7 @@ pub(super) unsafe fn wifi_networks(scan: bool) -> Vec<DevItem> {
                     join_params(n.dot11DefaultAuthAlgorithm.0, n.dot11DefaultCipherAlgorithm.0, n.bSecurityEnabled.as_bool())
                 };
                 let item = DevItem { id: if saved { profile } else { String::new() }, name: ssid, sub, active: connected, extra };
-                if let Some(old) = out.iter_mut().find(|(_, d)| d.name == item.name) {
-                    if n.wlanSignalQuality > old.0 || connected {
-                        *old = (n.wlanSignalQuality, item);
-                    }
-                } else {
-                    out.push((n.wlanSignalQuality, item));
-                }
+                merge_network(&mut out, n.wlanSignalQuality, item);
             }
             WlanFreeMemory(list as *const std::ffi::c_void);
         }
@@ -99,6 +93,25 @@ pub(super) unsafe fn wifi_networks(scan: bool) -> Vec<DevItem> {
         out.into_iter().map(|(_, d)| d).collect::<Vec<_>>()
     })
     .unwrap_or_default()
+}
+
+#[inline]
+fn net_rank(active: bool, has_profile: bool, quality: u32) -> (bool, bool, u32) {
+    (active, has_profile, quality)
+}
+
+/// Объединяет дубликаты одного SSID из `WlanGetAvailableNetworkList`:
+/// подключённая запись важнее остальных, сохранённый профиль побеждает запись без профиля,
+/// а при равном статусе остаётся лучший сигнал; для сортировки берётся максимальный сигнал.
+fn merge_network(out: &mut Vec<(u32, DevItem)>, q: u32, item: DevItem) {
+    if let Some((old_q, old)) = out.iter_mut().find(|(_, d)| d.name == item.name) {
+        if net_rank(item.active, !item.id.is_empty(), q) > net_rank(old.active, !old.id.is_empty(), *old_q) {
+            *old = item;
+        }
+        *old_q = (*old_q).max(q);
+    } else {
+        out.push((q, item));
+    }
 }
 
 /// Параметры профиля для сети без профиля по алгоритмам из списка сетей (DOT11_AUTH_ALGORITHM,
@@ -432,5 +445,42 @@ mod tests {
 
         rs.PhyRadioState[0].dot11HardwareRadioState = dot11_radio_state_on;
         assert_eq!(phy_radio_on(&rs), (true, true));
+    }
+
+    #[test]
+    fn merge_network_prefers_saved_profile_and_connected() {
+        let item = |id: &str, active: bool| DevItem {
+            id: id.into(),
+            name: "HomeWiFi".into(),
+            sub: String::new(),
+            active,
+            extra: if id.is_empty() { "WPA2PSK|AES".into() } else { String::new() },
+        };
+
+        // Запись с сохранённым профилем побеждает запись без профиля при равном и даже более высоком сигнале.
+        let mut out = Vec::new();
+        merge_network(&mut out, 80, item("", false));
+        merge_network(&mut out, 80, item("HomeWiFi", false));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].1.id, "HomeWiFi");
+        assert_eq!(out[0].0, 80);
+
+        let mut out = Vec::new();
+        merge_network(&mut out, 95, item("", false));
+        merge_network(&mut out, 60, item("HomeWiFi", false));
+        assert_eq!(out[0].1.id, "HomeWiFi");
+        assert_eq!(out[0].0, 95);
+
+        // И наоборот: более сильная запись без профиля не перезаписывает сохранённый профиль.
+        let mut out = Vec::new();
+        merge_network(&mut out, 60, item("HomeWiFi", false));
+        merge_network(&mut out, 95, item("", false));
+        assert_eq!(out[0].1.id, "HomeWiFi");
+        assert_eq!(out[0].0, 95);
+
+        // Активное подключение побеждает любые неактивные записи.
+        merge_network(&mut out, 50, item("HomeWiFi", true));
+        assert!(out[0].1.active);
+        assert_eq!(out[0].0, 95);
     }
 }

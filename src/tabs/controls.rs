@@ -36,8 +36,11 @@ const SAVER: usize = 9;
 const BATTERY: usize = 10;
 const DND: usize = 11;
 
-/// Высота выпадающего списка устройств.
+/// Высота формы ввода пароля и минимально желаемая высота при расширении очень низкого острова.
 const LIST_H: f32 = 116.0;
+/// Минимальная высота адаптируемого списка устройств (шапка + строка + полоса прокрутки),
+/// при которой остров не удлиняется ради оверлея.
+const MIN_LIST_H: f32 = 48.0;
 
 /// Плитки: значок (1×1), компактная и широкие плитки с подписью.
 static TILE: [Size; 4] = [sz(1, 1), sz(2, 1), sz(3, 1), sz(4, 1)];
@@ -76,16 +79,17 @@ pub static SPEC: TabSpec = TabSpec {
     ],
 };
 
-/// Вычисляет число рядов сетки, необходимое для выпадающего списка устройств.
-/// Динамический расчёт overlay_rows:
-/// Список устройств LIST_H = 116 px открывается под плитками (низ на `low` px от верха окна).
-/// С учётом зазоров GAP между плитками и списком и запаса GAP до нижнего края окна:
-/// ceil((low + GAP + LIST_H + GAP) / CELL).
-/// Для плиток по умолчанию в 2 ряда (низ row 2 -> low = 104 px):
-/// (104 + 8 + 116 + 8) / 56 = 236 / 56 = 4.21 -> 5 рядов.
+/// Вычисляет дополнительное число рядов сетки для выпадающего списка устройств.
+/// Если над или под виджетом-источником уже помещается хотя бы `min_h` px (с зазором `GAP`),
+/// остров не удлиняется (`0`). Иначе расширяется под список высотой не меньше `LIST_H`.
 #[inline]
-pub fn controls_overlay_rows(low: f32) -> u8 {
-    let needed = low + GAP + LIST_H + GAP;
+pub fn controls_overlay_rows(base_h: f32, anchor_top: f32, anchor_bot: f32, min_h: f32) -> u8 {
+    let space_above = (anchor_top - GAP).max(0.0);
+    let space_below = (base_h - (anchor_bot + GAP)).max(0.0);
+    if space_above >= min_h || space_below >= min_h {
+        return 0;
+    }
+    let needed = anchor_bot + 2.0 * GAP + min_h.max(LIST_H);
     (needed / CELL).ceil().max(0.0) as u8
 }
 
@@ -193,6 +197,7 @@ pub struct Controls {
     wifi_hold: Option<(bool, Instant)>,
     bt_hold: Option<(bool, Instant)>,
     airplane_hold: Option<(bool, Instant)>,
+    saver_hold: Option<(bool, Instant)>,
     dnd_hold: Option<(bool, Instant)>,
     rev: u64,
     media: Option<Media>,
@@ -218,23 +223,12 @@ pub struct Controls {
 }
 
 impl Controls {
-    /// Расстояние от верха содержимого до низа видимых плиток (в логических пикселях).
-    /// Считается строго по дискретным координатам раскладки сетки во избежание дрожания.
-    pub fn tiles_low(grid: &Grid) -> f32 {
-        let mut max_r = 0u8;
-        for &idx in &[WIFI, BLUETOOTH, AUDIO, NIGHT, DARK] {
-            if let Some(e) = grid.layout().entry(idx) {
-                if !e.hidden {
-                    let sz = SPEC.specs[idx].sizes[e.size];
-                    max_r = max_r.max(e.row + sz.h);
-                }
-            }
-        }
-        let r_rel = max_r.saturating_sub(grid.window().r0);
-        if r_rel > 0 {
-            r_rel as f32 * super::layout::CELL - super::layout::GAP
-        } else {
-            0.0
+    #[inline]
+    fn list_widget(kind: ListKind) -> usize {
+        match kind {
+            ListKind::Wifi => WIFI,
+            ListKind::Bluetooth => BLUETOOTH,
+            ListKind::Audio => AUDIO,
         }
     }
 
@@ -295,8 +289,20 @@ impl Controls {
         self.night = night;
         // Энергосбережение тоже переключается из Windows; чтение состояния питания дешёвое.
         let saver = sys::energy_saver();
-        let saver_changed = saver != self.saver;
-        self.saver = saver;
+        let saver_changed = if let Some((expected, until)) = self.saver_hold {
+            if saver == Some(expected) || Instant::now() >= until {
+                self.saver_hold = None;
+                let changed = saver != self.saver;
+                self.saver = saver;
+                changed
+            } else {
+                false
+            }
+        } else {
+            let changed = saver != self.saver;
+            self.saver = saver;
+            changed
+        };
         // Заряд и подключение питания: тот же дешёвый вызов GetSystemPowerStatus.
         let battery_changed = self.battery.poll();
         if let Some(kind) = self.open {
@@ -386,19 +392,21 @@ impl Controls {
     /// Рисует вкладку: виджеты по сетке, а поверх них — выпадающий список устройств. `h` — высота
     /// панели (с полосой правки).
     pub unsafe fn draw(&mut self, ui: &mut Ui, cv: &Canvas, grid: &mut Grid, w: f32, h: f32) {
-        let (rows, low) = self.prepare(grid);
+        let rows = self.prepare(grid);
         grid.set_overlay_rows(rows);
+        let anchor = self.anchor(grid);
         let area = grid.area(w, h);
         let skip = [BRIGHTNESS, SAVER, BATTERY].iter().filter(|&&i| self.unavailable(i)).fold(0u32, |m, &i| m | 1 << i);
         // Виджеты под списком гаснут и не принимают нажатий (иначе они перехватят их у строк списка).
-        let cover = self.cover(area, low);
+        let cover = self.cover(area, w, anchor);
         grid.draw(ui, cv, area, skip, |ui, cv, it| self.widget(ui, cv, it, cover));
-        self.overlay(ui, cv, area, low);
+        self.overlay(ui, cv, area, w, anchor);
     }
 
-    /// Состояние списка устройств на кадр: сколько рядов сетки он требует и где низ плиток (`low`).
+    /// Состояние списка устройств на кадр: сколько рядов сетки он дополнительно требует,
+    /// если не помещается ни над виджетом-источником, ни под ним.
     /// Нужно и вкладке Controls, и собственным вкладкам, на которых лежат её плитки.
-    pub fn prepare(&mut self, grid: &Grid) -> (u8, f32) {
+    pub fn prepare(&mut self, grid: &Grid) -> u8 {
         if let Some(kind) = self.open {
             self.shown = Some(kind);
         }
@@ -406,14 +414,26 @@ impl Controls {
         if self.open.is_none() && self.list_t.0.settled() {
             self.shown = None;
         }
-        let low = Self::tiles_low(grid);
         let list_active = self.open.is_some() || (self.shown.is_some() && self.list_t.0.value > 0.0);
-        (if list_active { controls_overlay_rows(low) } else { 0 }, low)
+        if !list_active {
+            return 0;
+        }
+        let base_win = grid.base_window();
+        let Some((a_top, a_bot)) = self.shown.and_then(|k| grid.entry_y_span(Self::list_widget(k), base_win)) else {
+            return 0;
+        };
+        let min_h = if self.join.is_some() { LIST_H } else { MIN_LIST_H };
+        controls_overlay_rows(base_win.content_h(), a_top, a_bot, min_h)
+    }
+
+    /// Вертикальные границы виджета-источника текущего списка относительно `grid.window()`.
+    pub fn anchor(&self, grid: &Grid) -> Option<(f32, f32)> {
+        self.shown.and_then(|k| grid.entry_y_span(Self::list_widget(k), grid.window()))
     }
 
     /// Область, которую закрывает список; `None`, пока он не открыт.
-    pub fn cover(&self, area: Rect, low: f32) -> Option<Rect> {
-        (self.list_t.0.value > 0.004).then(|| self.list_rect(area, low))
+    pub fn cover(&self, area: Rect, w: f32, anchor: Option<(f32, f32)>) -> Option<Rect> {
+        (self.list_t.0.value > 0.004).then(|| self.list_rect(area, w, anchor).0)
     }
 
     /// Насколько проявлено то, что под списком (1 — список закрыт).
@@ -422,22 +442,41 @@ impl Controls {
     }
 
     /// Рисует поверх сетки выпадающий список устройств.
-    pub unsafe fn finish(&mut self, ui: &mut Ui, cv: &Canvas, area: Rect, low: f32) {
-        self.overlay(ui, cv, area, low);
+    pub unsafe fn finish(&mut self, ui: &mut Ui, cv: &Canvas, area: Rect, w: f32, anchor: Option<(f32, f32)>) {
+        self.overlay(ui, cv, area, w, anchor);
     }
 
-    /// Где лежит список устройств: сразу под самой нижней плиткой (а если места не хватает —
-    /// прижат к низу области).
-    fn list_rect(&self, area: Rect, low: f32) -> Rect {
-        let y = (area.y + low + GAP).min(area.bottom() - LIST_H).max(area.y);
-        Rect::new(area.x, y, area.w, LIST_H)
+    /// Положение и размер списка устройств `(rect, placed_above)` с привязкой к виджету-источнику:
+    /// растягивается по ширине раскрытой панели (не уже сетки) и открывается под виджетом,
+    /// если снизу не меньше места, чем сверху (включая равное место посередине), либо над виджетом,
+    /// если виджет внизу — не перекрывая его и не удлиняя остров без необходимости.
+    fn list_rect(&self, area: Rect, w: f32, anchor: Option<(f32, f32)>) -> (Rect, bool) {
+        let x = area.x.min(super::PAD);
+        let width = (w - 2.0 * x).max(area.w);
+        if let Some((a_top, a_bot)) = anchor {
+            let top_abs = area.y + a_top;
+            let bot_abs = area.y + a_bot;
+            let space_below = (area.bottom() - (bot_abs + GAP)).max(0.0);
+            let space_above = ((top_abs - GAP) - area.y).max(0.0);
+            if space_below >= space_above {
+                (Rect::new(x, bot_abs + GAP, width, space_below), false)
+            } else {
+                (Rect::new(x, area.y, width, space_above), true)
+            }
+        } else {
+            (Rect::new(x, area.y, width, area.h), false)
+        }
     }
 
-    unsafe fn overlay(&mut self, ui: &mut Ui, cv: &Canvas, area: Rect, low: f32) {
+    unsafe fn overlay(&mut self, ui: &mut Ui, cv: &Canvas, area: Rect, w: f32, anchor: Option<(f32, f32)>) {
         let t = self.list_t.0.value.clamp(0.0, 1.0);
         let Some(kind) = self.shown.filter(|_| t > 0.01) else { return };
-        let mut r = self.list_rect(area, low);
-        r.y += (1.0 - t) * 6.0;
+        let (mut r, above) = self.list_rect(area, w, anchor);
+        if above {
+            r.y += (1.0 - t) * 6.0;
+        } else {
+            r.y -= (1.0 - t) * 6.0;
+        }
         let ocv = Canvas { g: cv.g, alpha: cv.alpha * t, accent: cv.accent };
         // Закрывающийся список уже не принимает нажатий.
         let prev = if self.open.is_none() { Some(ui.mute()) } else { None };
@@ -538,6 +577,7 @@ impl Controls {
                 if hit.toggled {
                     // Запись схемы питания не в потоке интерфейса; состояние подхватит `poll`.
                     self.saver = Some(on);
+                    self.saver_hold = Some((on, Instant::now() + RADIO_HOLD));
                     std::thread::spawn(move || {
                         if !sys::set_energy_saver(on) {
                             crate::log::error("не удалось переключить энергосбережение");
@@ -682,9 +722,10 @@ impl Controls {
             ListKind::Bluetooth => ("BLUETOOTH", icon::BLUETOOTH, "ms-settings:bluetooth", "Нет сопряжённых устройств"),
             ListKind::Audio => ("УСТРОЙСТВА ВЫВОДА", icon::VOLUME, "ms-settings:sound", "Устройства не найдены"),
         };
+        let title_w = (r.w - 100.0).max(40.0);
         match bg::status(kind) {
-            Some(st) => cv.text(&st, Rect::new(r.x + 11.0, r.y + 3.0, r.w - 100.0, 16.0), &f.small_b, cv.accent),
-            None => cv.text(title, Rect::new(r.x + 11.0, r.y + 3.0, 180.0, 16.0), &f.caps, dim()),
+            Some(st) => cv.text(&st, Rect::new(r.x + 11.0, r.y + 3.0, title_w, 16.0), &f.small_b, cv.accent),
+            None => cv.text(title, Rect::new(r.x + 11.0, r.y + 3.0, title_w, 16.0), &f.caps, dim()),
         }
         let link = Rect::new(r.right() - 82.0, r.y + 3.0, 74.0, 16.0);
         let (_, open_settings) = ui.click_area(id(CONTROLS, 40), link);
@@ -699,7 +740,7 @@ impl Controls {
             return;
         }
 
-        let view = Rect::new(r.x + 5.0, r.y + 21.0, r.w - 10.0, r.h - 25.0);
+        let view = Rect::new(r.x + 5.0, r.y + 21.0, (r.w - 10.0).max(0.0), (r.h - 25.0).max(0.0));
         let items = self.list.clone();
         let sid = id(CONTROLS, 41);
         let off = ui.scroll_begin(cv, sid, view, items.len() as f32 * ROW);
@@ -727,8 +768,14 @@ impl Controls {
             }
         }
         ui.scroll_end(cv, sid);
-        if items.is_empty() {
-            cv.text(empty, Rect::new(r.x + 11.0, r.y + 30.0, r.w - 22.0, 18.0), &f.small, dim());
+        if items.is_empty() && view.h > 4.0 {
+            let empty_r = Rect::new(
+                r.x + 11.0,
+                view.y + ((view.h - 18.0) / 2.0).max(0.0),
+                (r.w - 22.0).max(20.0),
+                18.0_f32.min(view.h),
+            );
+            cv.text(empty, empty_r, &f.small, dim());
         }
         if let Some(i) = chosen {
             let it = &items[i];
@@ -785,7 +832,7 @@ impl Controls {
         cv.text(&net.name, Rect::new(r.x + 30.0, r.y + 22.0, r.w - 40.0, 16.0), &f.body, txt());
         ui.text_field_ex(cv, field, Rect::new(r.x + 8.0, r.y + 43.0, r.w - 16.0, 26.0), "Пароль сети", icon::LOCK, Submit::Keep);
         let mut go = ui.take_submitted(field);
-        let bw = 92.0;
+        let bw = ((r.w - 30.0) / 2.0).clamp(60.0, 92.0);
         let by = r.bottom() - 32.0;
         if ui.solid_button(cv, id(CONTROLS, 51), Rect::new(r.right() - 8.0 - bw, by, bw, 24.0), "Подключить", cv.accent, ink(), 8.0) {
             go = Some(ui.field_text(field));
@@ -795,7 +842,7 @@ impl Controls {
             ui.blur();
             return;
         }
-        let hint = Rect::new(r.x + 11.0, by + 4.0, 160.0, 16.0);
+        let hint_w = r.w - 2.0 * bw - 36.0;
         match go {
             // У WPA пароль 8–63 символа: короче система всё равно не примет.
             Some(key) if key.chars().count() < 8 => {
@@ -812,8 +859,11 @@ impl Controls {
             }
             None => {}
         }
-        let (msg, color) = if self.short_key { ("Нужно не меньше 8 символов", cv.accent) } else { ("Enter — подключить", dim()) };
-        cv.text(msg, hint, &f.small, color);
+        if hint_w >= 110.0 {
+            let hint = Rect::new(r.x + 11.0, by + 4.0, hint_w, 16.0);
+            let (msg, color) = if self.short_key { ("Нужно не меньше 8 символов", cv.accent) } else { ("Enter — подключить", dim()) };
+            cv.text(msg, hint, &f.small, color);
+        }
     }
 
     /// Круглая кнопка плеера. `true` — нажата.
@@ -1172,44 +1222,50 @@ mod tests {
         assert_eq!(wifi_sz.pixel_w(), 104.0);
         assert_eq!(wifi_sz.pixel_h(), 48.0);
 
-        // Проверяем выпадающий список устройств: LIST_H=116 px
-        // Низ самой нижней плитки (Night/Dark): row 1 + h 1 = row 2 -> y = 2 * 56 - 8 = 104 px.
-        // y + GAP = 104.0 + 8.0 = 112.0 px (от верха содержимого).
-        // Низ списка: 112 + 116 = 228 px.
-        // При overlay_rows = 5 высота содержимого: 5 * 56 - 8 = 272 px (228 <= 272).
-        let low_tiles = 2.0 * CELL - GAP;
-        let list_top = low_tiles + GAP;
-        let list_bottom = list_top + LIST_H;
-        let area_h = 5.0 * CELL - GAP;
-        assert!(
-            list_bottom <= area_h,
-            "список устройств не помещается: bottom {} > area_h {}",
-            list_bottom,
-            area_h
-        );
-        assert_eq!(controls_overlay_rows(low_tiles), 5);
+        // Проверяем выпадающий список для плитки в верхнем ряду (row 0 -> 0..48 px) на 4-рядной сетке (base_h = 216 px):
+        // места снизу (216 - 56 = 160 px) достаточно без удлинения острова.
+        let base_h = 4.0 * CELL - GAP;
+        assert_eq!(controls_overlay_rows(base_h, 0.0, CELL - GAP, MIN_LIST_H), 0);
+        assert_eq!(controls_overlay_rows(base_h, 0.0, CELL - GAP, LIST_H), 0);
     }
 
     #[test]
-    fn test_controls_overlay_rows_and_tiles_low() {
-        // По умолчанию: Night/Dark заканчиваются на row 2 -> low = 2*56 - 8 = 104 px
-        assert_eq!(controls_overlay_rows(104.0), 5);
+    fn test_controls_overlay_rows_for_all_positions() {
+        // 4-рядная сетка (216 px): сверху или снизу хватает места без расширения острова.
+        assert_eq!(controls_overlay_rows(216.0, 0.0, 48.0, MIN_LIST_H), 0);
+        assert_eq!(controls_overlay_rows(216.0, 168.0, 216.0, MIN_LIST_H), 0);
+        // 3-рядная сетка (160 px), виджет посередине (row 1 -> 56..104 px): сверху и снизу по 48 px.
+        assert_eq!(controls_overlay_rows(160.0, 56.0, 104.0, MIN_LIST_H), 0);
+        // Однорядная сетка (48 px): места нет ни сверху, ни снизу — остров расширяется под LIST_H.
+        assert_eq!(controls_overlay_rows(48.0, 0.0, 48.0, MIN_LIST_H), 4);
+    }
 
-        // Только 1 ряд плиток: row 1 -> low = 1*56 - 8 = 48 px
-        assert_eq!(controls_overlay_rows(48.0), 4);
+    #[test]
+    fn list_rect_adapts_to_widget_anchor_and_island_size() {
+        let ctrl = Controls::default();
+        // Виджет сверху (row 0 на 4-рядной сетке): список открывается под ним до низа области.
+        let area4 = Rect::new(100.0, 38.0, 104.0, 216.0);
+        let (r, above) = ctrl.list_rect(area4, 400.0, Some((0.0, 48.0)));
+        assert!(!above);
+        assert_eq!(r.x, crate::tabs::PAD);
+        assert_eq!(r.w, 400.0 - 2.0 * crate::tabs::PAD);
+        assert_eq!(r.y, area4.y + 56.0);
+        assert_eq!(r.bottom(), area4.bottom());
 
-        // Без плиток (все скрыты): low = 0 px
-        assert_eq!(controls_overlay_rows(0.0), 3);
+        // Виджет в самом низу (row 3 на 4-рядной сетке): список открывается над ним и не закрывает его.
+        let (r, above) = ctrl.list_rect(area4, 400.0, Some((168.0, 216.0)));
+        assert!(above);
+        assert_eq!(r.y, area4.y);
+        assert_eq!(r.bottom(), area4.y + 160.0);
+        assert!(!r.intersects(&Rect::new(area4.x, area4.y + 168.0, area4.w, 48.0)));
 
-        // Три ряда плиток: low = 3*56 - 8 = 160 px -> 6 рядов (больше, чем в сетке: список прижмётся к низу)
-        assert_eq!(controls_overlay_rows(160.0), 6);
-
-        // Проверяем tiles_low на сетке по умолчанию
-        let mut grid = Grid::default();
-        grid.configure(CONTROLS, &SPEC, "");
-        let low = Controls::tiles_low(&grid);
-        assert_eq!(low, 104.0);
-        assert_eq!(controls_overlay_rows(low), 5);
+        // Виджет посередине 3-рядной сетки (равное место сверху и снизу — по 48 px): открывается снизу в адаптированном размере.
+        let area3 = Rect::new(100.0, 38.0, 104.0, 160.0);
+        let (r, above) = ctrl.list_rect(area3, 400.0, Some((56.0, 104.0)));
+        assert!(!above);
+        assert_eq!(r.y, area3.y + 112.0);
+        assert_eq!(r.h, 48.0);
+        assert_eq!(r.bottom(), area3.bottom());
     }
 
     #[test]

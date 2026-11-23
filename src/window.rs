@@ -133,11 +133,12 @@ impl App {
         (self.tab_w(id) * self.scale, self.tab_h(id) * self.scale)
     }
 
-    /// Размер свёрнутой капсулы: расширяется на ширину плашки активного таймера.
+    /// Размер свёрнутой капсулы: расширяется на ширину плашки активного таймера,
+    /// только когда рядом с ней рисуются часы.
     pub(crate) fn idle_pill_size(&self) -> (f32, f32) {
         let (w, h) = self.collapsed();
         let timer = !self.expanded && !self.stripped() && !self.hidden && self.live.timer().is_some();
-        let extra = if timer { face::TIMER_SLOT_W } else { 0.0 };
+        let extra = if timer && self.face.timer_needs_slot() { face::TIMER_SLOT_W } else { 0.0 };
         (w + extra, h)
     }
 
@@ -671,8 +672,8 @@ impl App {
     /// Развёрнутость определяется самым верхним реальным окном монитора острова, а не окном
     /// в фокусе: после сворачивания фокус может уйти на панель задач или рабочий стол,
     /// и по нему состояние не восстановить.
-    /// Скрытие острова разрешено только для эксклюзивных D3D-игр; обычные приложения и браузеры
-    /// в F11 или развёрнутом виде остров не прячут.
+    /// Скрытие острова разрешено для эксклюзивных D3D-игр и игр в borderless fullscreen (QUNS_BUSY);
+    /// обычные приложения и браузеры в F11 или развёрнутом виде остров не прячут.
     pub(crate) unsafe fn probe(&self) -> Option<(bool, bool)> {
         let quns = SHQueryUserNotificationState().ok().map(|s| s.0 as u32);
         let mon = if !self.mon.0.is_null() {
@@ -1049,13 +1050,23 @@ pub(crate) fn is_known_non_game_class(class: &str) -> bool {
         | "mpv"
         | "vlc"
         | "MediaPlayerClassicW"
+        | "PotPlayer"
+        | "PotPlayer64"
+        // Терминалы
+        | "CASCADIA_HOSTING_WINDOW_CLASS"
+        | "ConsoleWindowClass"
+        // Системные оверлеи переключения задач (Alt-Tab / Task View)
+        | "XamlExplorerHostIslandWindow"
+        | "MultitaskingViewFrame"
+        | "TaskSwitcherWnd"
+        | "ForegroundStaging"
     )
 }
 
 /// Чистая логика определения полноэкранной игры: проверяет, нужно ли скрывать остров (`SW_HIDE`).
 ///
-/// Остров скрывается ТОЛЬКО при эксклюзивном Direct3D полноэкранном режиме (QUNS_RUNNING_D3D_FULL_SCREEN = 3)
-/// для настоящего игрового окна на том же мониторе.
+/// Остров скрывается при эксклюзивном Direct3D полноэкранном режиме (`QUNS_RUNNING_D3D_FULL_SCREEN = 3`)
+/// и в borderless fullscreen (`QUNS_BUSY = 2`) для настоящего игрового окна на том же мониторе.
 /// Обычные приложения, развёрнутые на весь экран, браузеры в F11, плееры и презентации остров не скрывают.
 pub(crate) fn is_fullscreen_game(
     quns_state: Option<u32>,
@@ -1065,11 +1076,13 @@ pub(crate) fn is_fullscreen_game(
     fg_has_caption: bool,
     fg_class: &str,
 ) -> bool {
-    // Скрываемся ТОЛЬКО при Direct3D эксклюзивном полноэкранном режиме (QUNS_RUNNING_D3D_FULL_SCREEN = 3).
-    // Состояния вроде QUNS_BUSY (2), QUNS_PRESENTATION_MODE (4), QUNS_ACCEPTS_NOTIFICATIONS (5)
-    // не являются эксклюзивной игрой и не должны прятать остров.
+    // Скрываемся при эксклюзивном Direct3D полноэкранном режиме (QUNS_RUNNING_D3D_FULL_SCREEN = 3)
+    // и при полноэкранном режиме без рамок — borderless fullscreen (QUNS_BUSY = 2).
+    // Состояния вроде QUNS_PRESENTATION_MODE (4), QUNS_ACCEPTS_NOTIFICATIONS (5)
+    // не являются игрой и не должны прятать остров.
+    const QUNS_BUSY: u32 = 2;
     const QUNS_D3D_FULL_SCREEN: u32 = 3;
-    if quns_state != Some(QUNS_D3D_FULL_SCREEN) {
+    if !matches!(quns_state, Some(QUNS_BUSY) | Some(QUNS_D3D_FULL_SCREEN)) {
         return false;
     }
 
@@ -1145,14 +1158,23 @@ mod tests {
     }
 
     #[test]
-    fn quns_non_d3d_states_do_not_hide_island() {
-        // Никакие другие состояния (включая QUNS_BUSY и презентации) не должны скрывать остров.
-        for state in [None, Some(1), Some(2), Some(4), Some(5), Some(6), Some(7)] {
+    fn quns_non_game_states_do_not_hide_island() {
+        // Состояния вроде презентаций и обычного рабочего стола не должны скрывать остров.
+        for state in [None, Some(1), Some(4), Some(5), Some(6), Some(7)] {
             assert!(
                 !is_fullscreen_game(state, true, true, false, false, "UnrealWindow"),
                 "state {state:?} should not hide island"
             );
         }
+    }
+
+    #[test]
+    fn borderless_fullscreen_game_hides_island() {
+        const QUNS_BUSY: Option<u32> = Some(2);
+        assert!(is_fullscreen_game(QUNS_BUSY, true, true, false, false, "UnrealWindow"));
+        assert!(!is_fullscreen_game(QUNS_BUSY, true, true, false, false, "Chrome_WidgetWin_1"));
+        assert!(!is_fullscreen_game(QUNS_BUSY, true, true, true, false, "UnrealWindow"));
+        assert!(!is_fullscreen_game(QUNS_BUSY, true, true, false, true, "UnrealWindow"));
     }
 
     #[test]
@@ -1206,6 +1228,14 @@ mod tests {
             "mpv",
             "vlc",
             "MediaPlayerClassicW",
+            "PotPlayer",
+            "PotPlayer64",
+            "CASCADIA_HOSTING_WINDOW_CLASS",
+            "ConsoleWindowClass",
+            "XamlExplorerHostIslandWindow",
+            "MultitaskingViewFrame",
+            "TaskSwitcherWnd",
+            "ForegroundStaging",
             "Qt5QWindowIcon",
         ] {
             assert!(

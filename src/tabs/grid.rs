@@ -294,6 +294,25 @@ impl Grid {
         self.window
     }
 
+    /// Естественное окно сетки без учёта динамически запрошенного места под оверлей (`overlay_rows`).
+    #[inline]
+    pub fn base_window(&self) -> Window {
+        layout::fit_window(&self.lay.entries, self.spec, self.last_skip, self.min_cols, self.spec.min_rows)
+    }
+
+    /// Вертикальные границы виджета `idx` (`(top, bottom)` в логических пикселях относительно
+    /// верхнего края `win`). `None`, если виджет скрыт или отсутствует.
+    pub fn entry_y_span(&self, idx: usize, win: Window) -> Option<(f32, f32)> {
+        let e = self.lay.entry(idx)?;
+        if e.hidden {
+            return None;
+        }
+        let sz = self.spec.specs.get(idx)?.sizes.get(e.size)?;
+        let top = e.row.saturating_sub(win.r0) as f32 * CELL;
+        let bot = top + sz.h as f32 * CELL - super::layout::GAP;
+        Some((top, bot))
+    }
+
     /// Область под виджеты в слое `w`×`h`: по центру, потому что остров одного размера на всех вкладках
     /// и бывает больше окна сетки (ряд вкладок шире сетки, у вкладки сетка ограничена максимумом колонок,
     /// а вкладке с малым содержимым достаётся высота самой большой). `h` включает полосу правки.

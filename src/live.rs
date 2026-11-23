@@ -3,7 +3,7 @@
 //! (таймер, громкость, зарядка). Никаких своих таймеров в простое: данные приходят событиями
 //! (медиасессия, громкость, питание).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
@@ -71,8 +71,8 @@ impl TimerView {
     }
 }
 
-/// Период мигания полоски на паузе: не быстрее раза в 2 секунды.
-const PULSE_SECS: f32 = 2.4;
+/// Прозрачность активного таймера на паузе: слегка притухает вместо мигания.
+const TIMER_PAUSED_ALPHA: f32 = 0.45;
 
 /// Какую форму принимает свёрнутый остров.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,8 +186,6 @@ pub struct Live {
     /// Таймер Today для свёрнутой формы и плавная доля полоски.
     timer: Option<TimerView>,
     timer_frac: Spring,
-    /// Начало отсчёта анимации.
-    t0: Instant,
 }
 
 impl Live {
@@ -216,7 +214,6 @@ impl Live {
             brightness: None,
             timer: None,
             timer_frac: Spring::unit(1.0, 160.0, 22.0),
-            t0: Instant::now(),
         };
         // Начальное состояние питания запоминаем без уведомления.
         l.power_event();
@@ -273,13 +270,10 @@ impl Live {
         self.timer_frac.value.clamp(0.0, 1.0)
     }
 
-    /// Прозрачность полоски таймера: на паузе плавно мигает, иначе 1.
-    pub fn timer_pulse(&self) -> f32 {
+    /// Прозрачность индикатора таймера: на паузе притухает вместо мигания, иначе 1.
+    pub fn timer_alpha(&self) -> f32 {
         match self.timer {
-            Some(t) if t.paused => {
-                let k = 0.5 + 0.5 * (self.t0.elapsed().as_secs_f32() * std::f32::consts::TAU / PULSE_SECS).sin();
-                0.3 + 0.7 * k
-            }
+            Some(t) if t.paused => TIMER_PAUSED_ALPHA,
             _ => 1.0,
         }
     }
@@ -544,7 +538,7 @@ impl Live {
         if self.timer.is_none() {
             return;
         }
-        let line = Canvas { g: cv.g, alpha: cv.alpha * self.timer_pulse(), accent: cv.accent };
+        let line = Canvas { g: cv.g, alpha: cv.alpha * self.timer_alpha(), accent: cv.accent };
         let track_r = Rect::new(r.x + 14.0, r.bottom() - 3.0, r.w - 28.0, 1.5);
         line.rr(Rect::new(track_r.x, track_r.y, track_r.w * self.timer_frac(), track_r.h), 0.75, self.timer_tint());
     }
@@ -934,5 +928,23 @@ mod tests {
         let (changed, appeared) = l.set_timer(Some(std_timer));
         assert!(changed && !appeared);
         assert_eq!(l.timer_tint(), status_orange());
+    }
+
+    #[test]
+    fn paused_timer_dims_instead_of_blinking() {
+        let mut l = Live::new(true, true);
+        assert_eq!(l.timer_alpha(), 1.0);
+
+        let running = TimerView { frac: 0.5, secs: 60, paused: false, next_ms: 1000, kind: TimerKind::Timer };
+        l.set_timer(Some(running));
+        assert_eq!(l.timer_alpha(), 1.0);
+
+        let paused = TimerView { paused: true, ..running };
+        let (changed, appeared) = l.set_timer(Some(paused));
+        assert!(changed && !appeared);
+        assert_eq!(l.timer_alpha(), TIMER_PAUSED_ALPHA);
+
+        l.set_timer(Some(running));
+        assert_eq!(l.timer_alpha(), 1.0);
     }
 }

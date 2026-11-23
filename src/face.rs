@@ -104,6 +104,13 @@ impl Face {
         self.show_time = on;
     }
 
+    /// Нужна ли свёрнутому острову дополнительная ширина под плашку таймера:
+    /// только когда рядом с ней рисуются часы. Без часов или при выключенном «лице»
+    /// плашка встаёт по центру на место часов, и расширять остров не нужно.
+    pub fn timer_needs_slot(&self) -> bool {
+        self.enabled && self.show_time
+    }
+
     pub fn set_slots(&mut self, left: CollapsedIcon, right: CollapsedIcon) {
         self.left = left;
         self.right = right;

@@ -493,16 +493,14 @@ impl App {
         }
         dirty |= timer_changed && !self.expanded;
 
-        // Тик нужен, только пока на острове видны боковые волны, играющий мини-плеер или таймер:
-        // ~30 fps для волн и прогресса плеера, ~15 fps для мигания паузы, иначе — раз в секунду по смене цифры.
+        // Тик нужен, только пока на острове видны боковые волны, играющий мини-плеер или идущий таймер:
+        // ~30 fps для волн и прогресса плеера, иначе — раз в секунду по смене цифры (на паузе тик не нужен).
         let timer_shown = !self.expanded && !self.hidden && self.live.timer().is_some();
         let wave_shown = self.collapsed_wave_on();
         let mini_shown = self.live_form() == live::Form::Mini && self.live.playing();
         let tick = if wave_shown || mini_shown {
             LiveTick::Wave
-        } else if timer_shown && self.live.timer().is_some_and(|t| t.paused) {
-            LiveTick::Frames
-        } else if timer_shown {
+        } else if timer_shown && self.live.timer().is_some_and(|t| !t.paused) {
             LiveTick::Seconds
         } else {
             LiveTick::Off
@@ -512,9 +510,6 @@ impl App {
             match tick {
                 LiveTick::Wave => {
                     SetTimer(Some(self.hwnd), LIVE_TIMER, WAVE_TICK_MS, None);
-                }
-                LiveTick::Frames => {
-                    SetTimer(Some(self.hwnd), LIVE_TIMER, LIVE_TICK_MS, None);
                 }
                 LiveTick::Seconds => {
                     SetTimer(Some(self.hwnd), LIVE_TIMER, self.live.timer().map_or(1000, |t| t.next_ms), None);

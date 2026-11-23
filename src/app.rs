@@ -8,8 +8,6 @@ use super::*;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum LiveTick {
     Off,
-    /// ~15 кадров в секунду: мигание паузы таймера.
-    Frames,
     /// ~30 кадров в секунду: боковые волны под системный звук на обычной свёрнутой чёлке.
     Wave,
     /// Раз в секунду, по смене цифры таймера.
@@ -1027,7 +1025,8 @@ mod tests {
         assert_eq!(app.live_form(), live::Form::Idle);
         assert!(app.collapsed_wave_on());
 
-        // При активном таймере добавляется только TIMER_SLOT_W, лицо показывает плашку таймера
+        // При выключенном лице активный таймер встаёт по центру без расширения острова,
+        // но сама плашка таймера на лице видна.
         app.live.set_timer(Some(live::TimerView {
             frac: 0.5,
             secs: 60,
@@ -1036,8 +1035,26 @@ mod tests {
             kind: live::TimerKind::Timer,
         }));
         app.retarget();
-        assert_eq!(app.idle_pill_size().0, base_w + face::TIMER_SLOT_W);
+        assert_eq!(app.idle_pill_size().0, base_w);
         assert!(app.face.visible());
+
+        // При включённом лице и часах ширина увеличивается на TIMER_SLOT_W;
+        // отключение часов возвращает базовую ширину, повторное включение снова добавляет слот.
+        app.cfg.idle_face = true;
+        app.face.set_enabled(true);
+        app.face.set_show_time(true);
+        app.retarget();
+        assert_eq!(app.idle_pill_size().0, base_w + face::TIMER_SLOT_W);
+        app.face.set_show_time(false);
+        app.retarget();
+        assert_eq!(app.idle_pill_size().0, base_w);
+        app.face.set_show_time(true);
+        app.retarget();
+        assert_eq!(app.idle_pill_size().0, base_w + face::TIMER_SLOT_W);
+
+        app.cfg.idle_face = false;
+        app.face.set_enabled(false);
+        app.retarget();
 
         // В режиме полоски боковые волны отключаются и гаснут
         app.cfg.always_strip = true;

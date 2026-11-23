@@ -132,9 +132,8 @@ pub(crate) const ALARM_TIMER: usize = 6;
 pub(crate) const TOAST_TIMER: usize = 8;
 /// Идентификатор фокуса ввода, когда клавиатура у острова только ради уведомления о таймере (Esc его закрывает).
 pub(crate) const NOTICE_FOCUS: u32 = 0xFFFF_FF00;
-/// Кадры анимации пульсации паузы таймера (~15 fps) и аудиоволн (~30 fps) на обычной свёрнутой чёлке.
+/// Кадры анимации аудиоволн (~30 fps) на обычной свёрнутой чёлке.
 pub(crate) const LIVE_TIMER: usize = 9;
-pub(crate) const LIVE_TICK_MS: u32 = 66;
 pub(crate) const WAVE_TICK_MS: u32 = 33;
 /// Смена минуты для часов на свёрнутом острове: срабатывает раз в минуту и только пока они видны.
 pub(crate) const FACE_TIMER: usize = 10;

@@ -167,13 +167,13 @@ pub(super) unsafe fn audio_devices() -> Vec<DevItem> {
     }
     // Отключённые Bluetooth-наушники и колонки: клик подключает и делает основными.
     let eps = bluetooth::audio_endpoints();
-    for (_, name, container) in bluetooth::paired_cached() {
-        let mine: Vec<&bluetooth::AudioEp> = eps.iter().filter(|e| e.container == container).collect();
-        if container.is_empty() || mine.is_empty() || mine.iter().any(|e| e.active) {
+    for p in bluetooth::paired_cached() {
+        let mine: Vec<&bluetooth::AudioEp> = eps.iter().filter(|e| e.container == p.container).collect();
+        if p.container.is_empty() || mine.is_empty() || mine.iter().any(|e| e.active) {
             continue;
         }
         let id = mine[0].endpoint.clone();
-        out.push(DevItem { id, name, sub: "Bluetooth • не подключено".into(), active: false, extra: container });
+        out.push(DevItem { id, name: p.name, sub: "Bluetooth • не подключено".into(), active: false, extra: p.container });
     }
     out
 }

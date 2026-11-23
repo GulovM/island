@@ -410,10 +410,11 @@ impl Tabs {
             // Недоступными бывают только виджеты «Управления» (яркость, энергосбережение, батарея).
             .filter(|(_, m)| m.0 == custom::Owner::Controls && controls.unavailable(m.1))
             .fold(0u32, |mask, (j, _)| mask | 1 << j);
-        let (c_rows, low) = controls.prepare(grid);
+        let c_rows = controls.prepare(grid);
         grid.set_overlay_rows(c_rows.max(today.prepare()));
+        let c_anchor = controls.anchor(grid);
         let area = grid.area(w, h);
-        let c_cover = controls.cover(area, low);
+        let c_cover = controls.cover(area, w, c_anchor);
         let t_cover = today.cover(area);
         let (c_vis, t_vis) = (controls.cover_visible(), today.cover_visible());
         grid.draw(ui, cv, area, skip, |ui, cv, it| {
@@ -443,7 +444,7 @@ impl Tabs {
             }
         });
         if c_rows > 0 || controls.cover_visible() < 1.0 {
-            controls.finish(ui, cv, area, low);
+            controls.finish(ui, cv, area, w, c_anchor);
         }
         if today.cover_visible() < 1.0 || t_cover.is_some() {
             today.finish(ui, cv, area, w, h);

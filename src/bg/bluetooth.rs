@@ -93,24 +93,27 @@ pub(super) unsafe fn audio_endpoints() -> Vec<AudioEp> {
     out
 }
 
-/// Сопряжённое Bluetooth-устройство: (id WinRT, имя, ContainerId).
-pub(super) type Paired = (String, String, String);
+/// Сопряжённое Bluetooth-устройство (классическое или BLE).
+#[derive(Clone)]
+pub(super) struct Paired {
+    pub id: String,
+    pub name: String,
+    pub container: String,
+    pub le: bool,
+}
 
 /// Последний список сопряжённых устройств: список звука берёт его отсюда, чтобы не перечислять
 /// Bluetooth каждую секунду.
 static PAIRED: Mutex<Option<(Vec<Paired>, Instant)>> = Mutex::new(None);
 
-unsafe fn paired_bt() -> Vec<Paired> {
+unsafe fn query_paired(sel: &windows::core::HSTRING, le: bool, out: &mut Vec<Paired>) {
     use windows::core::{Interface, HSTRING};
-    use windows::Devices::Bluetooth::BluetoothDevice;
     use windows::Devices::Enumeration::DeviceInformation;
     use windows::Foundation::IReference;
-    let mut out = Vec::new();
-    let Ok(sel) = BluetoothDevice::GetDeviceSelectorFromPairingState(true) else { return out };
     const CONTAINER: &str = "System.Devices.Aep.ContainerId";
     let props = windows_collections::IIterable::<HSTRING>::from(vec![HSTRING::from(CONTAINER)]);
-    let Ok(coll) = wait(DeviceInformation::FindAllAsyncAqsFilterAndAdditionalProperties(&sel, &props)) else {
-        return out;
+    let Ok(coll) = wait(DeviceInformation::FindAllAsyncAqsFilterAndAdditionalProperties(sel, &props)) else {
+        return;
     };
     for info in coll {
         let container = info
@@ -121,9 +124,30 @@ unsafe fn paired_bt() -> Vec<Paired> {
             .map(|g| guid_str(&g))
             .unwrap_or_default();
         let (Ok(name), Ok(id)) = (info.Name(), info.Id()) else { continue };
-        if !name.is_empty() {
-            out.push((id.to_string(), name.to_string(), container));
+        let name = name.to_string();
+        if name.is_empty() {
+            continue;
         }
+        // Двухрежимные устройства попадают и в классический, и в BLE-список — не дублируем.
+        if le
+            && out.iter().any(|p| {
+                (!container.is_empty() && p.container == container) || p.name.eq_ignore_ascii_case(&name)
+            })
+        {
+            continue;
+        }
+        out.push(Paired { id: id.to_string(), name, container, le });
+    }
+}
+
+unsafe fn paired_bt() -> Vec<Paired> {
+    use windows::Devices::Bluetooth::{BluetoothDevice, BluetoothLEDevice};
+    let mut out = Vec::new();
+    if let Ok(sel) = BluetoothDevice::GetDeviceSelectorFromPairingState(true) {
+        query_paired(&sel, false, &mut out);
+    }
+    if let Ok(sel) = BluetoothLEDevice::GetDeviceSelectorFromPairingState(true) {
+        query_paired(&sel, true, &mut out);
     }
     if let Ok(mut p) = PAIRED.lock() {
         *p = Some((out.clone(), Instant::now()));
@@ -229,26 +253,34 @@ pub(super) fn bt_spawn(container: String, connect: bool) {
     }
 }
 
-/// Сопряжённые Bluetooth-устройства (классические); у подключённых `active`. Наушникам и
-/// колонкам (у их ContainerId есть конечная точка звука) `extra` = ContainerId: их можно
-/// подключать и отключать из острова.
+/// Сопряжённые Bluetooth-устройства (классические и BLE); у подключённых `active`.
+/// Наушникам и колонкам (у их ContainerId есть конечная точка звука) `extra` = ContainerId:
+/// их можно подключать и отключать из острова.
 pub(super) unsafe fn bluetooth_devices() -> Vec<DevItem> {
-    use windows::Devices::Bluetooth::{BluetoothConnectionStatus, BluetoothDevice};
+    use windows::Devices::Bluetooth::{BluetoothConnectionStatus, BluetoothDevice, BluetoothLEDevice};
     let audio: Vec<String> = audio_endpoints().into_iter().map(|e| e.container).collect();
     let mut out = Vec::new();
-    for (id, name, container) in paired_bt() {
-        let container = if audio.contains(&container) { container } else { String::new() };
-        let connected = wait(BluetoothDevice::FromIdAsync(&windows::core::HSTRING::from(id.as_str())))
-            .and_then(|d| d.ConnectionStatus())
-            .map(|s| s == BluetoothConnectionStatus::Connected)
-            .unwrap_or(false);
+    for p in paired_bt() {
+        let container = if audio.contains(&p.container) { p.container } else { String::new() };
+        let id_hs = windows::core::HSTRING::from(p.id.as_str());
+        let connected = if p.le {
+            wait(BluetoothLEDevice::FromIdAsync(&id_hs))
+                .and_then(|d| d.ConnectionStatus())
+                .map(|s| s == BluetoothConnectionStatus::Connected)
+                .unwrap_or(false)
+        } else {
+            wait(BluetoothDevice::FromIdAsync(&id_hs))
+                .and_then(|d| d.ConnectionStatus())
+                .map(|s| s == BluetoothConnectionStatus::Connected)
+                .unwrap_or(false)
+        };
         let sub = match (connected, container.is_empty()) {
             (true, _) => "Подключено",
             (false, false) => "Сопряжено • нажмите, чтобы подключить",
-            (false, true) => "Сопряжено",
+            (false, true) => "Сопряжено • подключение в Параметрах",
         }
         .to_string();
-        out.push(DevItem { id, name, sub, active: connected, extra: container });
+        out.push(DevItem { id: p.id, name: p.name, sub, active: connected, extra: container });
     }
     out.sort_by_key(|d| (std::cmp::Reverse(d.active), d.name.to_lowercase()));
     out
