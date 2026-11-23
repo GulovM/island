@@ -39,15 +39,16 @@ To exit the app: right-click the tray icon → "Exit".
 - **Hover the cursor at the top edge of the screen** — the island expands; move the cursor away — it collapses.
 - The collapsed island shows configurable side icons (by default, keyboard layout on the left and Wi-Fi on the right;
   you can pick layout, Wi-Fi / airplane mode, Bluetooth, battery, or none) and the center clock (which can be hidden
-  in Settings → System while keeping side icons; when a timer or Pomodoro is running, a countdown pill appears with
-  phase color coding: orange for standard timer, red for focus, green for break). When music is playing, the notch
-  turns into a **mini-player** (album art, track title, artist, track progress, and timer bar, periodically and on
-  layout switch peeking the clock/icons; can be turned off in Settings → System to keep the regular notch), while
-  live WASAPI stereo audio waves animate along the left and right edges. Volume, timer, and charging show brief
-  toasts, while app notifications and calendar reminders pop up in a capsule below the notch. Clicking a popup
-  notification opens or focuses the sending app (raising messengers/social apps from tray) and marks it as read;
-  right-clicking dismisses the capsule.
-- **Main tabs:** Controls (Wi-Fi, airplane mode, Bluetooth, Do Not Disturb from the widget tray, audio volume & output device, night light, dark theme, energy saver, battery, media player), Today (clock with 6 faces, weather, calendar with custom events, repeats, reminders, two-way sync with Google Calendar and iCloud plus ICS links, timer and Pomodoro mode with focus/break cycles, tasks with priority levels, sorting, and draft preservation when the island closes),
+  in Settings → System while keeping side icons). When a timer or Pomodoro is running or paused, a separate countdown
+  pill droplet detaches to the right of the notch with a liquid bridge and phase color coding (orange for standard
+  timer, coral-red for focus, green for break; dims when paused; clicking the droplet expands directly onto the timer
+  tab). When music is playing, the notch turns into a **mini-player** (album art, track title, artist, track progress,
+  and timer bar, periodically and on layout switch peeking the clock/icons; can be turned off in Settings → System to
+  keep the regular notch), while live WASAPI stereo audio waves animate along the left and right edges. Volume, timer,
+  and charging show brief toasts, while app notifications and calendar reminders pop up in a capsule below the notch.
+  Clicking a popup notification opens or focuses the sending app (raising messengers/social apps from tray) and marks
+  it as read; right-clicking dismisses the capsule.
+- **Main tabs:** Controls (Wi-Fi prioritizing saved profiles, airplane mode, Bluetooth with BLE support, Do Not Disturb from the widget tray, audio volume & output device, night light, dark theme, AC/DC energy saver, battery, media player with release-on-drop seek), Today (clock with 6 faces, weather, calendar with custom events, repeats, reminders, two-way sync with Google Calendar and iCloud plus ICS links, timer and Pomodoro mode with focus/break cycles, tasks with priority levels, sorting, and draft preservation when the island closes),
   Stats (CPU, GPU, memory, disks, uptime, network, and speed test), Clipboard (Quick Access and clipboard history), Apps (app launcher and quick links),
   Wallpaper (wallpaper switcher), Power (lock, sleep, restart, shut down).
 - **Notifications:** the **bell** icon next to the gear opens the Windows Notification Center (`UserNotificationListener`)
@@ -82,7 +83,7 @@ To exit the app: right-click the tray icon → "Exit".
   back to the current tab), and text input fields support `Ctrl+←` / `Ctrl+→` (plus `Shift` to select) for word-by-word
   cursor navigation.
 - Right-clicking the expanded island toggles "strip" mode: over maximized windows, the island collapses to a thin line.
-- In fullscreen games (DirectX), the island hides automatically.
+- In fullscreen games (exclusive DirectX and borderless fullscreen), the island hides automatically.
 
 ## Glass Effect (iOS 26 Liquid Glass)
 
